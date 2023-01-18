@@ -1,0 +1,33 @@
+name: CI in self host (Rust compiler supporting verification)
+
+on:
+  push:
+    branches: [ "pg-isolated" ]
+  pull_request:
+    branches: [ "pg-isolated" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+
+    runs-on: [self-hosted, linux, x64]
+
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: true
+    - name: Setup rust env
+      run: |
+        rustc --version
+    - name: Verfify && build
+      run: |
+        cd source
+        Z3_PATH=/root/snp/verismo/verus/source/z3 VERIFIER_PATH=/root/snp/verismo/verus/source/target/debug/rust_verify RUST_DIR=/root/snp/verismo/verus/rust ../scripts/cargo_verify.sh monitor_mod
+    - name: Verfify && build (using z3-4.11.2)
+      run: |
+        source scripts/env.sh
+        cd source
+        Z3_PATH=/usr/bin/z3 VERIFIER_PATH=/root/snp/verismo/verus/source/target/debug/rust_verify RUST_DIR=/root/snp/verismo/verus/rust ../scripts/cargo_verify.sh monitor_mod
+        cd ..

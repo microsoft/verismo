@@ -1,0 +1,8 @@
+indent_style = "Block"
+reorder_imports = true
+imports_granularity = "Module"
+group_imports = "StdExternalCrate"
+reorder_impl_items = true
+#max_width = 300
+#fn_single_line=true
+#use_small_heuristics="max"

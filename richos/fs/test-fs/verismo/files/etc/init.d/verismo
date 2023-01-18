@@ -1,0 +1,24 @@
+#!/sbin/openrc-run
+
+description="load verismo"
+
+start() {
+    insmod /verismo.ko
+}
+
+# stop function will be executed on shutdown
+stop() {
+    echo "exit"
+}
+
+case "$1" in
+  start)
+    start
+  ;;
+  stop)
+    stop
+  ;;
+  *)
+    echo "invalid argument"
+    exit 1
+esac

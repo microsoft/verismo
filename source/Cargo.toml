@@ -1,0 +1,18 @@
+[workspace]
+members = [
+    "monitor",
+    "monitor_mod",
+    "verismo_macro",
+    "vstd"
+]
+
+# the profile used for `cargo build`
+[profile.dev]
+panic = "abort" # disable stack unwinding on panic
+incremental = true
+
+# the profile used for `cargo build --release`
+[profile.release]
+panic = "abort" # disable stack unwinding on panic
+incremental = true
+debug = false
