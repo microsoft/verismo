@@ -481,7 +481,7 @@ impl Visitor {
         //       z = tmp_z;
         //   }
 
-        let mut stmts: Vec<Stmt> = Vec::new();
+        let stmts: Vec<Stmt> = Vec::new();
         if local.tracked.is_some() || local.ghost.is_some() {
             self.inside_ghost += 1;
         }
@@ -505,7 +505,7 @@ impl Visitor {
             return (false, vec![]);
         }
 
-        let span = local.span();
+        let _span = local.span();
         // Make proof block that will be subsequently visited with inside_ghost > 0
         /*let mk_proof_block = |block: Block| {
             let expr_block = syn_verus::ExprBlock { attrs: vec![], label: None, block };
@@ -1259,7 +1259,7 @@ impl VisitMut for Visitor {
                             )),
                             attrs: vec![],
                         });
-                        let ident = Ident::new(lit.suffix(), lit.span());
+                        let _ident = Ident::new(lit.suffix(), lit.span());
 
                         *expr = quote_verbatim! {span, attrs => #tmp};
                     } else {

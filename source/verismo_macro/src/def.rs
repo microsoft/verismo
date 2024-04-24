@@ -4,8 +4,7 @@ use syn_verus::punctuated::Punctuated;
 use syn_verus::spanned::Spanned;
 use syn_verus::{
     AngleBracketedGenericArguments, DataStruct, Field, GenericArgument, GenericParam, Generics,
-    Ident, Lit, LitInt, Path, PathArguments, PathSegment, TraitBound, TraitBoundModifier, Type,
-    TypeGenerics, TypeParamBound, TypePath, Visibility,
+    Ident, Lit, LitInt, Path, PathArguments, PathSegment, TraitBound, TraitBoundModifier, Type, TypeParamBound, TypePath, Visibility,
 };
 
 pub fn get_closed_or_open(s: &DataStruct) -> TokenStream {
