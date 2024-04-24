@@ -77,7 +77,7 @@ impl GuestPTRam {
             reveal(GuestPTRam::inv_for_identity_map_ok);
             self.lemma_map_entry_any_sysmap(memid, gvn, PTLevel::L0, sysmap);
         }
-        reveal(MemMap::<GuestVir, GuestPhy>::is_identity_map);
+        reveal(MemMap::<_, _>::is_identity_map);
     }
 
     #[verifier(external_body)]

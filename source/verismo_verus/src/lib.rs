@@ -3,6 +3,7 @@
 #![feature(proc_macro_tracked_env)]
 #![feature(proc_macro_quote)]
 #![feature(proc_macro_expand)]
+#![allow(unused)]
 
 //mod atomic_ghost;
 //mod fndecl;
