@@ -2146,7 +2146,6 @@ pub(crate) fn rewrite_expr(
     stream: proc_macro::TokenStream,
     for_non_secret: bool,
 ) -> proc_macro::TokenStream {
-    use quote::ToTokens;
     let stream = rejoin_tokens(stream);
     let mut expr: Expr = parse_macro_input!(stream as Expr);
     let mut new_stream = TokenStream::new();

@@ -1,7 +1,7 @@
 use proc_macro::TokenStream;
 use quote::quote;
 use syn_verus::{
-    parse_macro_input, Attribute, Data, DeriveInput, Expr, Fields, Ident, Meta, NestedMeta, Type,
+    parse_macro_input, Data, DeriveInput, Expr, Fields, Ident, Type,
 };
 
 struct ParsedArgs {
@@ -153,15 +153,3 @@ pub fn gen_shared_globals(input: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
-fn get_type_from_attr(attr: &Attribute) -> Option<syn_verus::Ident> {
-    if attr.path.is_ident("tname") {
-        if let Ok(Meta::List(meta_list)) = attr.parse_meta() {
-            for nested_meta in meta_list.nested {
-                if let NestedMeta::Meta(Meta::Path(path)) = nested_meta {
-                    return Some(path.get_ident().unwrap().clone());
-                }
-            }
-        }
-    }
-    None
-}

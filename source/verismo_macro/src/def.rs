@@ -212,12 +212,6 @@ pub fn field_name_ty(field: &Field, i: usize, span: Span) -> (proc_macro2::Token
     (field_name, field.ty.clone())
 }
 
-pub fn had_name(field: &Field) -> bool {
-    match &field.ident {
-        Some(_name) => true,
-        None => false,
-    }
-}
 
 pub fn get_field(fname: &proc_macro2::TokenStream, span: Span) -> Ident {
     let getter_ident = Ident::new(&format!("spec_{}", fname.to_string()), span);

@@ -8,7 +8,6 @@ mod enum_int;
 mod exec_struct;
 mod getter;
 mod global;
-mod mem;
 mod new;
 //mod op;
 mod property;

@@ -1,6 +1,5 @@
 use proc_macro;
 use quote::quote;
-use syn_verus::spanned::Spanned;
 use syn_verus::{parse_macro_input, Data, DeriveInput, Ident};
 
 use crate::def::{
