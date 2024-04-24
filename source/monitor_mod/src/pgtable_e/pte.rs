@@ -10,7 +10,6 @@ use crate::*;
 
 crate::macro_const_int! {
     #[macro_export]
-    #[verifier::publish]
     pub const L4_MAX_ADDR: usize = 0x1000_0000_0000_0000usize;
 }
 

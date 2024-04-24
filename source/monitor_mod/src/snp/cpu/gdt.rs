@@ -4,16 +4,15 @@ use crate::registers::*;
 
 verus! {
 
-#[verifier::publish]
+
 pub const GDT_KERNEL_CS: usize = 1;
 
-#[verifier::publish]
+
 pub const GDT_KERNEL_DS: usize = 3;
 
-#[verifier::publish]
+
 pub const GDTR_LIMIT: u32 = 0xffff_ffff;
 
-#[verifier::publish]
 pub const GDTR_BASE: u64 = 0;
 
 } // verus!

@@ -2,7 +2,6 @@ use super::*;
 
 verus! {
 
-#[verifier::publish]
 pub const INVALID_ADDR: usize = VM_MEM_SIZE + 1;
 
 pub open spec fn spec_pa_to_va(pa: int) -> int {

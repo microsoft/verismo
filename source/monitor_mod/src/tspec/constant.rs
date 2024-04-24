@@ -70,6 +70,5 @@ macro_rules! macro_def {
 //#[allow(unused_variables)]
 crate::macro_const_int! {
     #[macro_export]
-    #[verifier::publish]
     pub const MAX_CPU_NUM: u64 = 128u64;
 }

@@ -8,22 +8,22 @@ use crate::snp::SnpCoreConsole;
 
 verus! {
 
-#[verifier::publish]
+
 pub const E820_TYPE_RAM: u32 = 1;
 
-#[verifier::publish]
+
 pub const E820_TYPE_RSVD: u32 = 2;
 
-#[verifier::publish]
+
 pub const E820_TYPE_ACPI: u32 = 3;
 
-#[verifier::publish]
+
 pub const E820_TYPE_READONLY: u32 = 3;
 
-#[verifier::publish]
+
 pub const E820_MAX_LEN: usize = 128;
 
-#[verifier::publish]
+
 pub const VERISMO_DYNAMIC_MEM_MAX: usize = 0x10000;
 
 pub type E820Table = Array<E820Entry, E820_MAX_LEN>;

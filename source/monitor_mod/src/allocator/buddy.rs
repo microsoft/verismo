@@ -8,10 +8,8 @@ use crate::ptr::*;
 
 crate::macro_const! {
     #[macro_export]
-    #[verifier::publish]
     pub const MIN_ADDR_ALIGN: usize = 8usize;
     #[macro_export]
-    #[verifier::publish]
     pub const ORDER: usize = 32usize;
     pub const ORDER_USIZE: usize = ORDER!() as usize;
     //ORDER as usize;

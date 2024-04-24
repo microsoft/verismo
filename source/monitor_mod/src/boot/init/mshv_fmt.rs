@@ -4,8 +4,6 @@ use super::*;
 use crate::arch::addr_s::VM_MEM_SIZE;
 use crate::boot::init::e820_init::*;
 
-#[verifier::publish]
-pub const ZERO: usize = 0;
 verus! {
 
 pub closed spec fn get_hv_mem_count_ensures(arr: Seq<HyperVMemMapEntry>, ret: nat) -> bool {

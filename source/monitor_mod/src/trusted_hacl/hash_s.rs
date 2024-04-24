@@ -6,7 +6,6 @@ verismo! {
 
 verus! {
 
-#[verifier(publish)]
 pub const SHA512_LEN: usize = { 512 / 8 };
 
 pub open spec fn spec_cal_sha512(input: SecSeqByte) -> SHA512Type;

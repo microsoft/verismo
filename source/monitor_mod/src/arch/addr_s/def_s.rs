@@ -76,22 +76,16 @@ pub type SPMem = SpecMem<SysPhy>;
 //#[allow(unused_variables)]
 crate::macro_const_int! {
     #[macro_export]
-    #[verifier::publish]
     pub const PAGE_SHIFT: usize = 12usize;
     #[macro_export]
-    #[verifier::publish]
     pub const PAGE_SIZE: usize = 0x1000usize;
     #[macro_export]
-    #[verifier::publish]
     pub const PAGE_2M_SIZE: usize = 0x200000usize;
     #[macro_export]
-    #[verifier::publish]
     pub const VM_MEM_SIZE: usize = 0x10_0000_0000_0000usize;
     #[macro_export]
-    #[verifier::publish]
     pub const VM_PAGE_NUM: usize = 0x100_0000_0000usize;
     #[macro_export]
-    #[verifier::publish]
     pub const BLOCK_SIZE: usize = 1usize;
 }
 

@@ -80,7 +80,7 @@ crate::macro_const! {
     #[macro_export]
     pub const L0_PGSIZE: u64 = BIT64!(12);
     #[macro_export]
-    #[verifier::publish]
+
     pub const PT_ENTRY_NUM: u64 = BIT64!(9);
 }
 

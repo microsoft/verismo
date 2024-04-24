@@ -151,7 +151,7 @@ pub const SM_TERM_PERMS: u64 = 0x10;
 
 } // verus!
 macro_const! {
-#[verifier::publish]
+
 pub const SUBCODE_OFFSET: u64 = 0x8u64;
 }
 

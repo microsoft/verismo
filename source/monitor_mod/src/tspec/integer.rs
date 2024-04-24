@@ -180,7 +180,6 @@ impl_cmp_with_basics! {int, nat, u8, u16, u32, u64, usize}
 impl_spec_eq_with_basics! {int, nat, u8, u16, u32, u64, usize}
 
 crate::macro_const! {
-    #[verifier::publish]
     #[macro_export]
     pub const MAXU64: u64  = 0xffff_ffff_ffff_ffffu64;
 }

@@ -22,10 +22,10 @@ pub open spec fn spec_is_default_pages_const_to_vmpl(
             && page_perms[i]@.bytes().is_constant_to(vmpl)
 }
 
-#[verifier::publish]
+
 pub const RICHOS_VMPL: u8 = 1;
 
-#[verifier::publish]
+
 pub const VERISMO_RSVD_MEM: usize = 0x100000;
 
 } // verus!

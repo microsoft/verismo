@@ -14,7 +14,6 @@ pub type IndexType = usize;
 
 crate::macro_const_int! {
     #[macro_export]
-    #[verifier::publish]
     pub const U32_MAX: u32 = 0xffff_ffff;//4294967295u32;
 }
 

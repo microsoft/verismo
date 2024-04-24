@@ -12,22 +12,16 @@ pub const RMP_4K: u64 = 0;
 /// 1
 pub const RMP_2M: u64 = 1;
 
-#[verifier::publish]
 pub const RMP_READ: u8 = 1;
 
-#[verifier::publish]
 pub const RMP_WRITE: u8 = 2;
 
-#[verifier::publish]
 pub const RMP_USER_EXE: u8 = 4;
 
-#[verifier::publish]
 pub const RMP_KERN_EXE: u8 = 8;
 
-#[verifier::publish]
 pub const RMP_NO_WRITE: u8 = RMP_READ | RMP_USER_EXE | RMP_KERN_EXE;
 
-#[verifier::publish]
 pub const RMP_RWX: u8 = RMP_NO_WRITE | RMP_WRITE;
 
 } // verus!
