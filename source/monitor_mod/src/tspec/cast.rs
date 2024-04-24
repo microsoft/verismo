@@ -29,16 +29,14 @@ impl<T2, T1: VTypeCast<T2>> SpecInto<T2> for T1 {
 }
 
 #[verifier(external_body)]
-#[verifier(broadcast_forall)]
-pub proof fn axiom_cast_to_seq_unique<T: VTypeCast<SecSeqByte>>(val: T)
+pub broadcast proof fn axiom_cast_to_seq_unique<T: VTypeCast<SecSeqByte>>(val: T)
     ensures
         val === VTypeCast::<SecSeqByte>::vspec_cast_to(val).vspec_cast_to(),
 {
 }
 
 #[verifier(external_body)]
-#[verifier(broadcast_forall)]
-proof fn axiom_into_conversion_bytes<T1: VTypeCast<SecSeqByte> + IsConstant>(b: SecSeqByte)
+broadcast prooffn axiom_into_conversion_bytes<T1: VTypeCast<SecSeqByte> + IsConstant>(b: SecSeqByte)
     ensures
         VTypeCast::<T1>::vspec_cast_to(b).vspec_cast_to() =~~= b,
 {

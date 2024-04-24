@@ -107,9 +107,8 @@ impl RmpAttr {
 impl SwSnpMemAttr {
     pub spec fn pte(&self) -> PTAttr;
 
-    #[verifier(broadcast_forall)]
     #[verifier(external_body)]
-    pub proof fn axiom_pte(&self)
+    pub broadcast proof fn axiom_pte(&self)
         ensures
             self.pte.len() == 1 ==> #[trigger] self.pte() === self.pte.last(),
     {

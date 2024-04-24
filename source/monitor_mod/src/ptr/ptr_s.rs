@@ -12,8 +12,7 @@ pub open spec fn inv_snp_value<T: IsConstant + WellFormed>(snp: SwSnpMemAttr, va
 
 impl<V: IsConstant + WellFormed + SpecSize> SnpPPtr<V> {
     #[verifier(external_body)]
-    #[verifier(broadcast_forall)]
-    pub proof fn axiom_id_equal(&self, other: Self)
+    pub broadcast proof fn axiom_id_equal(&self, other: Self)
         ensures
             (self.id() == other.id()) == (*self === other),
     {

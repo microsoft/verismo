@@ -13,7 +13,10 @@ all: $(IMAGE)
 
 build: ${target}
 
-${target}: source/Cargo.toml source/monitor_mod/src/*.rs source/monitor_mod/src/*/*.rs source/monitor_mod/src/*/*/*.rs
+verify:
+	cd source/monitor && cargo build
+
+${target}:
 	cd source/monitor && cargo build --features noverify
 
 ${IGVM}: ${target}

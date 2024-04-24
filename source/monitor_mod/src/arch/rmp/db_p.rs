@@ -52,8 +52,7 @@ pub proof fn rmp_lemma_model_eq_inv(rmp: &RmpMap, other: &RmpMap, memid: MemID)
 }
 
 #[verifier(external_body)]
-#[verifier(broadcast_forall)]
-pub proof fn rmp_contains_all(rmp: &RmpMap, spn: SPN)
+pub broadcast proof fn rmp_contains_all(rmp: &RmpMap, spn: SPN)
     ensures
         rmp.dom().contains(spn),
 {

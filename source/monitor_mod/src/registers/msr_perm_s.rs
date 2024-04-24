@@ -51,8 +51,7 @@ impl RegisterPerm {
     }
 
     #[verifier(external_body)]
-    #[verifier(broadcast_forall)]
-    pub proof fn axiom_eq<T>(x: Self, y: Self)
+    pub broadcast proof fn axiom_eq<T>(x: Self, y: Self)
         requires
             x.view::<T>() === y.view::<T>(),
         ensures
@@ -77,8 +76,7 @@ impl RegisterPerm {
     }
 
     #[verifier(external_body)]
-    #[verifier(broadcast_forall)]
-    pub proof fn axiom_wf<T: WellFormed + IsConstant>(&self)
+    pub broadcast proof fn axiom_wf<T: WellFormed + IsConstant>(&self)
         ensures
             self.wf() == self.view::<T>().wf(),
     {

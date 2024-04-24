@@ -23,8 +23,7 @@ impl<VT: AddrType, PT: AddrType> MemMap<VT, PT> {
     }
 
     #[verifier(external_body)]
-    #[verifier(broadcast_forall)]
-    pub proof fn axiom_is_valid(&self)
+    pub broadcast proof fn axiom_is_valid(&self)
         ensures
             self.is_valid(),
     {

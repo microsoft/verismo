@@ -110,8 +110,7 @@ pub open spec fn rmp_perm_is_valid(p: RmpPerm) -> bool {
 }
 
 #[verifier(external_body)]
-#[verifier(broadcast_forall)]
-pub proof fn rmp_perm_track_dom(p: RmpPerm, vmpl: VMPL)
+pub broadcast proof fn rmp_perm_track_dom(p: RmpPerm, vmpl: VMPL)
     ensures
         p.dom().contains(vmpl),
 {

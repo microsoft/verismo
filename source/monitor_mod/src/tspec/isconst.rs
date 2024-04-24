@@ -23,8 +23,7 @@ pub proof fn axiom_default_const<T: SpecDefault + IsConstant>()
 }
 
 #[verifier(external_body)]
-#[verifier(broadcast_forall)]
-pub proof fn axiom_const_forall<T: IsConstant>(v: T)
+pub broadcast proof fn axiom_const_forall<T: IsConstant>(v: T)
     ensures
         #[trigger] v.is_constant() == v.is_constant_to(1) && v.is_constant_to(2)
             && v.is_constant_to(3) && v.is_constant_to(4),

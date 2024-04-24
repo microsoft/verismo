@@ -13,7 +13,7 @@ impl RawMemPerms {
         // BUG: verus does not support
         // private element in broadcast forall even in private proof
         #[verifier(external_body)]
-        #[verifier(broadcast_forall)]
+        broadcast
         proof fn axiom_map_ext_equal_deep(self, other: Self)
         ensures
             #[trigger](self =~~= other) == (self.perms =~~= other.perms)

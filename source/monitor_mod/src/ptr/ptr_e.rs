@@ -57,7 +57,7 @@ impl<V: IsConstant + WellFormed + SpecSize> SnpPPtr<V> {
         ensures
             ret === self.not_null(),
     {
-        self.uptr.check_valid_addr(size_of::<V>()) && self.to_usize() >= 0
+        self.uptr.check_valid_addr(size_of::<V>())
     }
 }
 

@@ -8,6 +8,7 @@
 #![allow(incomplete_features)]
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
+#![allow(non_upper_case_globals)]
 #![feature(never_type)]
 #![feature(new_uninit)]
 #![feature(core_intrinsics)]

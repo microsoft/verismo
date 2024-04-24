@@ -8,7 +8,6 @@ macro_rules! define_dummy_holder_axiom {
     () => {
         verus!{
         #[verifier(external_body)]
-        //#[verifier(broadcast_forall)]
         pub broadcast proof fn axiom_equal(left: Self, right: Self)
         ensures
             (left.value() == right.value()) == #[trigger](left =~= right),
@@ -16,7 +15,6 @@ macro_rules! define_dummy_holder_axiom {
         {}
 
         #[verifier(external_body)]
-        //#[verifier(broadcast_forall)]
         pub broadcast proof fn axiom_addr_type_dummy_holder(&self)
         ensures
             self.dummy === arbitrary(),
@@ -280,8 +278,7 @@ impl<T> IntOrd for SpecAddr<T> {
 
 impl<T> SpecMem<T> {
     #[verifier(external_body)]
-    #[verifier(broadcast_forall)]
-    pub proof fn axiom_inv(&self)
+    pub broadcast proof fn axiom_inv(&self)
         ensures
             (self.offset() + self.len()) <= PAGE_SIZE!(),
             self.offset() < PAGE_SIZE!(),

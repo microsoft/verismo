@@ -11,8 +11,7 @@ pub struct FMap<K, V> {
 
 impl<K, V> FMap<K, V> {
     #[verifier(external_body)]
-    #[verifier(broadcast_forall)]
-    pub proof fn axiom_inv(&self, id: K)
+    pub broadcast proof fn axiom_inv(&self, id: K)
         ensures
             (#[trigger] self.spec_map()[id]) === self.spec_map()[id],
             #[trigger] self.spec_map().dom().contains(id),
@@ -25,8 +24,7 @@ impl<K, V> FMap<K, V> {
     }
 
     #[verifier(external_body)]
-    #[verifier(broadcast_forall)]
-    pub proof fn axiom_equal(&self, other: Self)
+    pub broadcast proof fn axiom_equal(&self, other: Self)
         ensures
             #[trigger] (*self =~~= other) == equal(*self, other),
             #[trigger] self.spec_map() =~~= (other.spec_map()) == equal(*self, other),

@@ -53,16 +53,14 @@ impl Archx64Op {
 
 impl Archx64 {
     #[verifier(external_body)]
-    #[verifier(broadcast_forall)]
-    pub proof fn axiom_reg_dom(&self, cpumemid: CpuMemID)
+    pub broadcast proof fn axiom_reg_dom(&self, cpumemid: CpuMemID)
         ensures
             self.spec_regdb().dom().contains(cpumemid),
     {
     }
 
     #[verifier(external_body)]
-    #[verifier(broadcast_forall)]
-    pub proof fn axiom_entities_dom(&self, memid: MemID)
+    pub broadcast proof fn axiom_entities_dom(&self, memid: MemID)
         ensures
             self.spec_entities().dom().contains(memid),
     {

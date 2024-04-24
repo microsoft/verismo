@@ -67,8 +67,7 @@ impl ExecStruct for bool {
 }
 
 #[verifier(external_body)]
-#[verifier(broadcast_forall)]
-pub proof fn axiom_max_count_size_rel<T>()
+pub broadcast proof fn axiom_max_count_size_rel<T>()
     ensures
         spec_nat_pow2(spec_size::<T>()) / 2 < (#[trigger] spec_max_count::<T>()) <= spec_nat_pow2(
             (spec_size::<T>()) * 8,
@@ -77,8 +76,7 @@ pub proof fn axiom_max_count_size_rel<T>()
 }
 
 #[verifier(external_body)]
-#[verifier(broadcast_forall)]
-pub proof fn axiom_set_full_max_count_rel<T>()
+pub broadcast proof fn axiom_set_full_max_count_rel<T>()
     ensures
         Set::<T>::full().len() == #[trigger] spec_max_count::<T>(),
 {
@@ -86,8 +84,7 @@ pub proof fn axiom_set_full_max_count_rel<T>()
 
 // All executable types should have a size and its set should be finite.
 /*#[verifier(external_body)]
-    #[verifier(broadcast_forall)]
-    pub proof fn axiom_exe_set_finite<T>(s: Set<T>)
+    pub broadcast proof fn axiom_exe_set_finite<T>(s: Set<T>)
     ensures
         s.finite()
     {}*/
@@ -95,16 +92,14 @@ pub proof fn axiom_set_full_max_count_rel<T>()
 // Size is undef for types without VTypeCast
 // Size == spec_size_def if it has VTypeCast
 #[verifier(external_body)]
-#[verifier(broadcast_forall)]
-pub proof fn axiom_size_from_cast_bytes<T: SpecSize>()
+pub broadcast proof fn axiom_size_from_cast_bytes<T: SpecSize>()
     ensures
         (#[trigger] spec_size::<T>()) == T::spec_size_def(),
 {
 }
 
 #[verifier(external_body)]
-#[verifier(broadcast_forall)]
-pub proof fn axiom_size_from_cast_bytes_def<T: SpecSize + VTypeCast<Seq<u8>>>(val: T)
+pub broadcast proof fn axiom_size_from_cast_bytes_def<T: SpecSize + VTypeCast<Seq<u8>>>(val: T)
     ensures
         T::spec_size_def() == VTypeCast::<Seq<u8>>::vspec_cast_to(val).len(),
 {

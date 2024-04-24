@@ -42,8 +42,7 @@ impl<T: VTypeCast<SecSeqByte>> ToSecSeq for T {
 }
 
 #[verifier(external_body)]
-#[verifier(broadcast_forall)]
-pub proof fn axiom_size_from_cast_secbytes_def<T: SpecSize + VTypeCast<SecSeqByte>>(val: T)
+pub broadcast proof fn axiom_size_from_cast_secbytes_def<T: SpecSize + VTypeCast<SecSeqByte>>(val: T)
     ensures
         T::spec_size_def() == VTypeCast::<SecSeqByte>::vspec_cast_to(val).len(),
 {

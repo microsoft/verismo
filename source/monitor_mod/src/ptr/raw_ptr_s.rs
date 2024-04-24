@@ -19,8 +19,7 @@ impl SnpPointsToRaw {
 
 impl SnpPointsToBytes {
     #[verifier(external_body)]
-    #[verifier(broadcast_forall)]
-    proof fn axiom_map_ext_equal(self, other: Self)
+    broadcast proof fn axiom_map_ext_equal(self, other: Self)
         ensures
             #[trigger] (self =~= other) == (self.bytes() =~~= other.bytes() && self.snp()
                 === other.snp() && self.range() === other.range()),
@@ -28,8 +27,7 @@ impl SnpPointsToBytes {
     }
 
     #[verifier(external_body)]
-    #[verifier(broadcast_forall)]
-    proof fn axiom_map_ext_equal_deep(self, other: Self)
+    broadcast proof fn axiom_map_ext_equal_deep(self, other: Self)
         ensures
             #[trigger] (self =~~= other) == (self.bytes() =~~= other.bytes() && self.snp
                 === other.snp && self.range() === other.range()),

@@ -89,8 +89,7 @@ pub fn gen_shared_globals(input: TokenStream) -> TokenStream {
                     }
 
                     #[verifier(external_body)]
-                    #[verifier(broadcast_forall)]
-                    pub proof fn #axiom_func_name()
+                    pub broadcast proof fn #axiom_func_name()
                     ensures
                         g_range(#name::#variant_name).1 == spec_size::<#type_ident>(),
                         builtin::equal(#spec_fn().ptr_range(), #memrange_fn()),
@@ -136,8 +135,7 @@ pub fn gen_shared_globals(input: TokenStream) -> TokenStream {
         }
         verus!{
         #[verifier(external_body)]
-        #[verifier(broadcast_forall)]
-        pub proof fn axiom_global_auto()
+        pub broadcast proof fn axiom_global_auto()
         ensures
             forall |v1: #name, v2: #name|
                 builtin::imply(!builtin::equal(v1, v2),

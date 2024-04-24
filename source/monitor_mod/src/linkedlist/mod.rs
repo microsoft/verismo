@@ -223,8 +223,7 @@ verus! {
 
 impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte> {
     #[verifier(external_body)]
-    #[verifier(broadcast_forall)]
-    pub proof fn axiom_default()
+    pub broadcast proof fn axiom_default()
         ensures
             (#[trigger] Self::spec_default()).is_constant(),
             Self::spec_default()@.len() == 0,

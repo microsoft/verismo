@@ -45,8 +45,7 @@ pub fn parse_global(
                     {Self::raw_vmem(spec_cast_integer::<_, int>(#unique_id), #non_zero)}
                     pub spec fn #ident() -> crate::verismo::data::VData<#ty>;
                     #[verifier(external_body)]
-                    #[verifier(broadcast_forall)]
-                    pub proof fn #axiom_ident()
+                    pub broadcast proof fn #axiom_ident()
                     ensures
                         builtin::equal(#[trigger] #gspec::#ident().spec_vmem(),  #[trigger] #gspec::#addr_ident())
                     {}

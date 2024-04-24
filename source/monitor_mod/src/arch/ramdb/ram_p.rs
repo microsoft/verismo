@@ -11,16 +11,14 @@ verus! {
 
 impl RamDB {
     #[verifier(external_body)]
-    #[verifier(broadcast_forall)]
-    pub proof fn axiom_ram_len1(&self)
+    pub broadcast proof fn axiom_ram_len1(&self)
         ensures
             #[trigger] self.data.len() == VM_MEM_SIZE!(),
     {
     }
 
     #[verifier(external_body)]
-    #[verifier(broadcast_forall)]
-    pub proof fn axiom_ram_len2(&self, spa: SPA)
+    pub broadcast proof fn axiom_ram_len2(&self, spa: SPA)
         ensures
             #[trigger] spa.as_int() < #[trigger] self.data.len(),
     {

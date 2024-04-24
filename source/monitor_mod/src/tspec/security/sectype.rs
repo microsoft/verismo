@@ -100,16 +100,14 @@ impl<T, M> SecType<T, M> {
     }
 
     #[verifier(external_body)]
-    #[verifier(broadcast_forall)]
-    pub proof fn axiom_spec_new(val: SpecSecType<T, M>)
+    pub broadcast proof fn axiom_spec_new(val: SpecSecType<T, M>)
         ensures
             (#[trigger] Self::spec_new(val))@ === val,
     {
     }
 
     #[verifier(external_body)]
-    #[verifier(broadcast_forall)]
-    pub proof fn axiom_ext_equal(val: SecType<T, M>, val2: SecType<T, M>)
+    pub broadcast proof fn axiom_ext_equal(val: SecType<T, M>, val2: SecType<T, M>)
         ensures
             (val@ === val2@) == (val === val2),
     {
