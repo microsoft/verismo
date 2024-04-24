@@ -90,8 +90,7 @@ macro_rules! impl_ordint_for_basic {
 */
 macro_rules! impl_cmp_with_basic {
     ($basict: ty, $($fname: ident),* $(,)?) => {
-        paste::paste! {
-                                                                verus! {
+        paste::paste! {verus! {
         impl<T: IntOrd> VSpecOrd<$basict> for T {
             $(
             #[verifier(inline)]
@@ -101,7 +100,7 @@ macro_rules! impl_cmp_with_basic {
             )*
         }
         }
-                                                            }
+}
     };
 }
 
@@ -145,7 +144,7 @@ macro_rules! impl_cmp_with_basics {
 macro_rules! impl_cmp_with_as_int {
     ($($fname: ident),* $(,)?) => {
         paste::paste! {
-                                                                verus! {
+                                                                                        verus! {
         impl<T: IntOrd, T2: IntOrd> VSpecOrd<T2> for T {
             $(
             #[verifier(inline)]
@@ -161,7 +160,7 @@ macro_rules! impl_cmp_with_as_int {
             }
         }
         }
-                                                            }
+                                                                                    }
     };
 }
 
