@@ -12,3 +12,6 @@
 [submodule "snplinux"]
 	path = richos/snplinux
 	url = https://github.com/MSRSSP/snplinux
+[submodule "tools/verusfmt"]
+	path = tools/verusfmt
+	url = https://github.com/verus-lang/verusfmt.git

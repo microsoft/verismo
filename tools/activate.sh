@@ -12,8 +12,8 @@ TOOLS_DIR=$SCRIPT_DIR
 
 echo "submodule init"
 (
-  git submodule update $TOOLS_DIR/verus
-  git submodule update $TOOLS_DIR/../deps/hacl-packages
+  git submodule update --init $TOOLS_DIR/verus
+  git submodule update --init $TOOLS_DIR/../deps/hacl-packages
 )
 echo "init vstd"
 (
@@ -30,7 +30,7 @@ echo "building verus-rustc."
 
 echo "building verus (slow)..."
 (
-  cd "$TOOLS_DIR/verus/source" && source ../tools/activate && vargo build --release || exit 1
+  cd "$TOOLS_DIR/verus/source" && tools/get-z3.sh && source ../tools/activate && vargo build --release || exit 1
 )
 
 
