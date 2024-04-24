@@ -1,30 +1,31 @@
 use super::*;
 verus! {
-    pub trait SpecDefault {
-        spec fn spec_default() -> Self where Self: core::marker::Sized;
-    }
 
-    pub open spec fn spec_default_<T: SpecDefault>() -> T {
-        <T as SpecDefault>::spec_default()
-    }
+pub trait SpecDefault {
+    spec fn spec_default() -> Self where Self: core::marker::Sized;
+}
 
-    impl SpecDefault for () {
-        open spec fn spec_default() -> Self;
-    }
+pub open spec fn spec_default_<T: SpecDefault>() -> T {
+    <T as SpecDefault>::spec_default()
+}
 
-    impl<T> SpecDefault for Ghost<T> {
-        open spec fn spec_default() -> Self {
-            arbitrary()
-        }
-    }
+impl SpecDefault for () {
+    open spec fn spec_default() -> Self;
+}
 
-    impl<T> SpecDefault for Tracked<T> {
-        open spec fn spec_default() -> Self {
-            arbitrary()
-        }
+impl<T> SpecDefault for Ghost<T> {
+    open spec fn spec_default() -> Self {
+        arbitrary()
     }
 }
 
+impl<T> SpecDefault for Tracked<T> {
+    open spec fn spec_default() -> Self {
+        arbitrary()
+    }
+}
+
+} // verus!
 macro_rules! impl_typecast_to_bytes_traits {
     ($($baset: ty),*$(,)*) => {
         $(verus!{
@@ -33,7 +34,8 @@ macro_rules! impl_typecast_to_bytes_traits {
                     0 as $baset
                 }
             }
-        })*
+        }
+)*
     }
 }
 

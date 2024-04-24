@@ -1,6 +1,7 @@
 use super::*;
 
 verus! {
+
 impl<V: IsConstant + WellFormed + SpecSize> WellFormed for SnpPointsToData<V> {
     open spec fn wf(&self) -> bool {
         &&& self.snp.wf()
@@ -38,8 +39,8 @@ impl<V: IsConstant + WellFormed + SpecSize> SnpPointsToData<V> {
     /// If snp.is_vmpl0_private() ==> value() represents the content in mem.
     /// If !snp.is_vmpl0_private() ==> value() is not usable.
     pub open spec fn value(&self) -> Option<V>
-    recommends
-        self.hw_snp().is_vmpl0_private(),
+        recommends
+            self.hw_snp().is_vmpl0_private(),
     {
         self.value
     }
@@ -83,7 +84,6 @@ impl<V: IsConstant + WellFormed + SpecSize> SnpPointsToData<V> {
         &&& self.value().is_Some()
     }
 
-
     // wf_pte cannot use SnpPPtr::replace or put.
     pub open spec fn is_wf_pte(&self, ptr: int) -> bool {
         &&& self.snp.wf()
@@ -114,4 +114,5 @@ impl<V: IsConstant + WellFormed + SpecSize> SnpPointsToData<V> {
         self.snp().ensures_read(self.value(), val)
     }
 }
-}
+
+} // verus!

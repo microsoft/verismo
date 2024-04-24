@@ -1,12 +1,13 @@
 use super::*;
 use crate::tspec::*;
 
-verus!{
+verus! {
+
 #[is_variant]
 pub enum MemError<Param> {
-    Others(Param),       // vaddr, memid
-    NoRam(Param),        // vaddr, memid
-    NotValidated(Param), // Failed validation check
+    Others(Param),  // vaddr, memid
+    NoRam(Param),  // vaddr, memid
+    NotValidated(Param),  // Failed validation check
     NestedPF(Param),
     PageFault(Param),
     RmpOp(RmpFault, Param),
@@ -51,4 +52,5 @@ impl<Param> MemError<Param> {
         }
     }
 }
-}
+
+} // verus!

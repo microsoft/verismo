@@ -19,39 +19,39 @@ verismo_simple! {
 }
 
 verus! {
-    impl<T: IsConstant + WellFormed + SpecSize> SnpPPtrWithPerm<T> {
-        pub open spec fn wf(&self) -> bool {
-            &&& self.perm@@.wf_at(self.ptr.id())
-            &&& self.ptr.not_null()
-        }
-    }
 
-    impl<V: IsConstant + WellFormed + SpecSize> core::marker::Copy for SnpPPtr<V> {
-    }
-
-    impl<V: IsConstant + WellFormed + SpecSize> Clone for SnpPPtr<V> {
-        #[verifier(external_body)]
-        fn clone(&self) -> (ret: Self)
-        ensures *self === ret
-        {
-            SnpPPtr {
-                uptr: self.uptr,
-                dummy: self.dummy,
-            }
-        }
-    }
-
-    impl<V: IsConstant + WellFormed + SpecSize> SnpPPtr<V> {
-        pub open spec fn id(&self) -> int {
-            self.uptr as int
-        }
-
-        pub open spec fn range_id(&self) -> (int, nat) {
-            (self.id(), spec_size::<V>())
-        }
+impl<T: IsConstant + WellFormed + SpecSize> SnpPPtrWithPerm<T> {
+    pub open spec fn wf(&self) -> bool {
+        &&& self.perm@@.wf_at(self.ptr.id())
+        &&& self.ptr.not_null()
     }
 }
 
+impl<V: IsConstant + WellFormed + SpecSize> core::marker::Copy for SnpPPtr<V> {
+
+}
+
+impl<V: IsConstant + WellFormed + SpecSize> Clone for SnpPPtr<V> {
+    #[verifier(external_body)]
+    fn clone(&self) -> (ret: Self)
+        ensures
+            *self === ret,
+    {
+        SnpPPtr { uptr: self.uptr, dummy: self.dummy }
+    }
+}
+
+impl<V: IsConstant + WellFormed + SpecSize> SnpPPtr<V> {
+    pub open spec fn id(&self) -> int {
+        self.uptr as int
+    }
+
+    pub open spec fn range_id(&self) -> (int, nat) {
+        (self.id(), spec_size::<V>())
+    }
+}
+
+} // verus!
 verismo_simple! {
     #[verifier(external_body)]
     #[verifier::reject_recursive_types_in_ground_variants(V)]
@@ -84,7 +84,9 @@ verismo_simple! {
 }
 
 verus! {
-    impl<T: IsConstant + WellFormed + SpecSize> SnpPointsTo<T> {
-        pub open spec fn view(&self) -> SnpPointsToData<T>;
-    }
+
+impl<T: IsConstant + WellFormed + SpecSize> SnpPointsTo<T> {
+    pub open spec fn view(&self) -> SnpPointsToData<T>;
 }
+
+} // verus!

@@ -7,19 +7,19 @@ impl Model1Eq for VRamDB {
     open spec fn model1_eq(&self, other: &Self, memid: MemID) -> bool {
         let rmp = other.spec_rmp();
         let vmpl = memid.to_vmpl();
-        &&& (forall |spa: SPA|
-                (rmp.dom().contains(#[trigger]spa.to_page()) &&
-                rmp[spa.to_page()].view().spec_validated() &&
-                (vmpl >= VMPL::VMPL0 ||
-                    !rmp[spa.to_page()].view().check_vmpl(VMPL::VMPL0, Perm::Write)) &&
-                (vmpl >= VMPL::VMPL1 ||
-                    !rmp[spa.to_page()].view().check_vmpl(VMPL::VMPL1, Perm::Write)) &&
-                (vmpl >= VMPL::VMPL2 ||
-                    !rmp[spa.to_page()].view().check_vmpl(VMPL::VMPL2, Perm::Write)) &&
-                (vmpl >= VMPL::VMPL3 ||
-                    !rmp[spa.to_page()].view().check_vmpl(VMPL::VMPL3, Perm::Write))) ==>
-                (#[trigger]self.spec_sram().spec_data()[spa.value()] ===
-                #[trigger]other.spec_sram().spec_data()[spa.value()]))
+        &&& (forall|spa: SPA|
+            (rmp.dom().contains(#[trigger] spa.to_page())
+                && rmp[spa.to_page()].view().spec_validated() && (vmpl >= VMPL::VMPL0
+                || !rmp[spa.to_page()].view().check_vmpl(VMPL::VMPL0, Perm::Write)) && (vmpl
+                >= VMPL::VMPL1 || !rmp[spa.to_page()].view().check_vmpl(VMPL::VMPL1, Perm::Write))
+                && (vmpl >= VMPL::VMPL2 || !rmp[spa.to_page()].view().check_vmpl(
+                VMPL::VMPL2,
+                Perm::Write,
+            )) && (vmpl >= VMPL::VMPL3 || !rmp[spa.to_page()].view().check_vmpl(
+                VMPL::VMPL3,
+                Perm::Write,
+            ))) ==> (#[trigger] self.spec_sram().spec_data()[spa.value()]
+                === #[trigger] other.spec_sram().spec_data()[spa.value()]))
         &&& rmp_model_eq(&self.spec_rmp(), &other.spec_rmp())
         &&& (other.spec_sram().inv() ==> self.spec_sram().inv())
     }
@@ -27,11 +27,11 @@ impl Model1Eq for VRamDB {
 
 impl Model2Eq for VRamDB {
     open spec fn model2_eq(&self, other: &Self) -> bool {
-        &&& (forall |spa: SPA|
-            (self.spec_rmp()[spa.to_page()].view().spec_validated() &&
-            other.spec_rmp()[spa.to_page()].view().spec_validated())  ==>
-            (self.spec_sram().spec_data()[#[trigger]spa.value()] ===
-            other.spec_sram().spec_data()[spa.value()]))
+        &&& (forall|spa: SPA|
+            (self.spec_rmp()[spa.to_page()].view().spec_validated()
+                && other.spec_rmp()[spa.to_page()].view().spec_validated()) ==> (
+            self.spec_sram().spec_data()[#[trigger] spa.value()]
+                === other.spec_sram().spec_data()[spa.value()]))
         &&& rmp_model_eq(&self.spec_rmp(), &other.spec_rmp())
         &&& (other.spec_sram().inv() ==> self.spec_sram().inv())
     }
@@ -39,8 +39,12 @@ impl Model2Eq for VRamDB {
 
 impl VRamDB {
     // write_requires_nosysma
-    pub open spec fn pte_write_requires_nosysmap(&self, gpmem_id: GPAMemID, enc: bool, data: ByteStream) -> bool
-    {
+    pub open spec fn pte_write_requires_nosysmap(
+        &self,
+        gpmem_id: GPAMemID,
+        enc: bool,
+        data: ByteStream,
+    ) -> bool {
         let gpmem = gpmem_id.range;
         let memid = gpmem_id.memid;
         let old_pte: Option<GuestPTEntry> = self.get_enc_data_ok(gpmem_id);
@@ -48,10 +52,11 @@ impl VRamDB {
         let target_gpn = new_pte@.spec_ppn();
         let ptesize = spec_size::<GuestPTEntry>() as int;
         // If it is the PTE and the target gpn need c bit
-        let is_last_entry = new_pte@.is_present() ||
-        memtype(memid, gpmem.to_page()).get_PTE_0().is_L0();
-        let need_c_bit = (memtype(memid, target_gpn).need_c_bit() &&
-                    is_last_entry);
+        let is_last_entry = new_pte@.is_present() || memtype(
+            memid,
+            gpmem.to_page(),
+        ).get_PTE_0().is_L0();
+        let need_c_bit = (memtype(memid, target_gpn).need_c_bit() && is_last_entry);
         &&& if old_pte.is_Some() && gpmem.len() > 0 {
             let old_pte = old_pte.get_Some_0();
             &&& enc
@@ -65,12 +70,18 @@ impl VRamDB {
         }
     }
 
-    pub open spec fn gpwrite_requires(&self, memid: MemID, range: GPMem, enc: bool, data: ByteStream) -> bool{
+    pub open spec fn gpwrite_requires(
+        &self,
+        memid: MemID,
+        range: GPMem,
+        enc: bool,
+        data: ByteStream,
+    ) -> bool {
         let memty = memtype(memid, range.to_page());
         if memty.need_c_bit() {
             &&& enc
             &&& if memty.is_PTE() {
-                self.pte_write_requires_nosysmap(AddrMemID{range, memid}, true, data)
+                self.pte_write_requires_nosysmap(AddrMemID { range, memid }, true, data)
             } else {
                 true
             }
@@ -78,30 +89,24 @@ impl VRamDB {
             true
         }
     }
+
     /// Restrict VMPL0's bahavior.
     /// For memory read/write,
     ///     if the memory range is private for VMPL0, enc = true
     /// For RMP change, restrict the pvalidate and rmpadjust ops.
-    pub open spec fn gpmemop_requires(&self, op: MemOp<GuestPhy>, sysmap: SysMap) -> bool
-    {
-        let AddrMemID{range: addr, memid}  = op.to_addr_memid();
+    pub open spec fn gpmemop_requires(&self, op: MemOp<GuestPhy>, sysmap: SysMap) -> bool {
+        let AddrMemID { range: addr, memid } = op.to_addr_memid();
         match op {
-            MemOp::Read(AddrMemID{range: addr, memid}, enc) => {
+            MemOp::Read(AddrMemID { range: addr, memid }, enc) => {
                 if memtype(memid, addr.to_page()).need_c_bit() {
                     enc
                 } else {
                     true
                 }
             },
-            MemOp::Write(gpmem_id, enc, data) => {
-                self.gpwrite_requires(memid, addr, enc, data)
-            },
-            MemOp::RmpOp(rmpop) => {
-                rmpop.gp_op_requires(&self.spec_rmp())
-            }
-            _ => {
-                true
-            }
+            MemOp::Write(gpmem_id, enc, data) => { self.gpwrite_requires(memid, addr, enc, data) },
+            MemOp::RmpOp(rmpop) => { rmpop.gp_op_requires(&self.spec_rmp()) },
+            _ => { true },
         }
     }
 
@@ -118,19 +123,48 @@ impl VRamDB {
         rmp_inv_memid_int(&self.spec_rmp(), memid)
     }
 
-    pub open spec fn write_read_requires_inner(&self, memid: MemID, enc: bool, gpa: GPMem, rgpa: GPMem, sysmap: SysMap) -> bool
-    {
-        let use_asid = if enc { memid.to_asid() } else { ASID_FOR_HV!() };
+    pub open spec fn write_read_requires_inner(
+        &self,
+        memid: MemID,
+        enc: bool,
+        gpa: GPMem,
+        rgpa: GPMem,
+        sysmap: SysMap,
+    ) -> bool {
+        let use_asid = if enc {
+            memid.to_asid()
+        } else {
+            ASID_FOR_HV!()
+        };
         let spa = sysmap.translate_addr_seq(gpa);
         let rspa = sysmap.translate_addr_seq(rgpa);
-        let rmpcheck_w = rmp_check_access(&self.spec_rmp(), memid, enc, gpa, Perm::Write, spa.to_page());
-        let rmpcheck_r = rmp_check_access(&self.spec_rmp(), memid, enc, gpa, Perm::Read, rspa.to_page());
+        let rmpcheck_w = rmp_check_access(
+            &self.spec_rmp(),
+            memid,
+            enc,
+            gpa,
+            Perm::Write,
+            spa.to_page(),
+        );
+        let rmpcheck_r = rmp_check_access(
+            &self.spec_rmp(),
+            memid,
+            enc,
+            gpa,
+            Perm::Read,
+            rspa.to_page(),
+        );
         ||| rmpcheck_w.is_Error()
         ||| rmpcheck_r.is_Error()
         ||| self.spec_sram().disjoint_write_read_requires(use_asid, spa, rspa)
     }
 
-    pub open spec fn get<T: VTypeCast<Seq<u8>>>(&self, gpmem_id: GPAMemID, enc: bool, sysmap: SysMap) -> T {
+    pub open spec fn get<T: VTypeCast<Seq<u8>>>(
+        &self,
+        gpmem_id: GPAMemID,
+        enc: bool,
+        sysmap: SysMap,
+    ) -> T {
         stream_to_data(self.get_bytes(gpmem_id, enc, sysmap))
     }
 
@@ -156,7 +190,9 @@ impl VRamDB {
         }
     }
 
-    pub open spec fn get_enc_data_ok<T: VTypeCast<Seq<u8>>>(&self, gpmem_id: GPAMemID) -> Option<T> {
+    pub open spec fn get_enc_data_ok<T: VTypeCast<Seq<u8>>>(&self, gpmem_id: GPAMemID) -> Option<
+        T,
+    > {
         let bytes = self.get_enc_bytes_ok(gpmem_id);
         if bytes.is_Some() {
             Option::Some(stream_to_data(bytes.get_Some_0()))
@@ -165,9 +201,15 @@ impl VRamDB {
         }
     }
 
-    pub open spec fn get_byte(&self, memid: MemID, gpa: GPA, enc: bool, sysmap: SysMap) -> Option<Byte> {
+    pub open spec fn get_byte(&self, memid: MemID, gpa: GPA, enc: bool, sysmap: SysMap) -> Option<
+        Byte,
+    > {
         let spa = sysmap.translate_addr(gpa);
-        let use_asid = if enc { memid.to_asid() } else { ASID_FOR_HV!() };
+        let use_asid = if enc {
+            memid.to_asid()
+        } else {
+            ASID_FOR_HV!()
+        };
         if spa.is_Some() {
             Option::Some(self.sram.read_one_byte(use_asid, spa.get_Some_0()))
         } else {
@@ -199,8 +241,11 @@ impl VRamDB {
         let rmp = self.rmp;
         let asid = memid.to_asid();
         let spn = sysmap.translate(gpa.to_page());
-        let use_asid = if enc { asid } else { ASID_FOR_HV!() };
-
+        let use_asid = if enc {
+            asid
+        } else {
+            ASID_FOR_HV!()
+        };
         if spn.is_Some() {
             let rmpcheck = rmp_check_access(&rmp, memid, enc, gpa, Perm::Read, spn.get_Some_0());
             if rmpcheck.is_Ok() {
@@ -224,12 +269,10 @@ impl VRamDB {
         }
     }
 
-    pub open spec fn op_read(
-        &self,
-        gpmem_id: GPAMemID,
-        enc: bool,
-        sysmap: SysMap,
-    ) -> ResultWithErr<Self, MemError<()>> {
+    pub open spec fn op_read(&self, gpmem_id: GPAMemID, enc: bool, sysmap: SysMap) -> ResultWithErr<
+        Self,
+        MemError<()>,
+    > {
         recommends(gpmem_id.memid.is_Guest());
         match self.read_bytes(gpmem_id, enc, sysmap) {
             ResultOrErr::Ok(_) => ResultWithErr::Ok(*self),
@@ -244,8 +287,8 @@ impl VRamDB {
         data: ByteStream,
         sysmap: SysMap,
     ) -> ResultWithErr<Self, MemError<()>>
-    recommends
-        gpa_id.memid.is_Guest(),
+        recommends
+            gpa_id.memid.is_Guest(),
     {
         let gpa = gpa_id.addr;
         let gpmem = gpa.to_mem(data.len());
@@ -254,17 +297,16 @@ impl VRamDB {
         let asid = memid.to_asid();
         let spn = sysmap.translate(gpa.to_page());
         let spa_seq = sysmap.translate_addr_seq(gpmem);
-        let use_asid = if enc { asid } else { ASID_FOR_HV!() };
-
+        let use_asid = if enc {
+            asid
+        } else {
+            ASID_FOR_HV!()
+        };
         if spa_seq.is_valid() {
             let spn = spn.get_Some_0();
             let rmpcheck = rmp_check_access(&rmp, memid, enc, gpmem, Perm::Write, spn);
             if rmpcheck.is_Ok() {
-                let new = self.spec_set_sram(self.spec_sram().write_raw(
-                    use_asid,
-                    spa_seq,
-                    data,
-                ));
+                let new = self.spec_set_sram(self.spec_sram().write_raw(use_asid, spa_seq, data));
                 ResultWithErr::Ok(new)
             } else {
                 ResultWithErr::Error(*self, rmpcheck.get_Error_0().with_param(()))
@@ -274,11 +316,10 @@ impl VRamDB {
         }
     }
 
-    pub open spec fn rmp_op(
-        &self,
-        sysmap: SysMap,
-        rmpop: RmpOp<GuestPhy>,
-    ) -> ResultWithErr<Self, MemError<RmpOp<GuestPhy>>> {
+    pub open spec fn rmp_op(&self, sysmap: SysMap, rmpop: RmpOp<GuestPhy>) -> ResultWithErr<
+        Self,
+        MemError<RmpOp<GuestPhy>>,
+    > {
         let spn = sysmap.translate(rmpop.get_gpn());
         if spn.is_Some() {
             let spn = spn.get_Some_0();
@@ -293,23 +334,26 @@ impl VRamDB {
     }
 
     #[verifier(opaque)]
-    pub open spec fn op(&self, sysmap: SysMap, memop: MemOp<GuestPhy>) -> ResultWithErr<Self, MemError<MemOp<GuestPhy>>> {
+    pub open spec fn op(&self, sysmap: SysMap, memop: MemOp<GuestPhy>) -> ResultWithErr<
+        Self,
+        MemError<MemOp<GuestPhy>>,
+    > {
         match memop {
             MemOp::RmpOp(rmpop) => {
                 let ret = self.rmp_op(sysmap, rmpop);
                 ret.replace_err(ret.to_err().with_param(memop))
-            }
+            },
             MemOp::Read(gpmem_id, enc) => {
                 let ret = self.op_read(gpmem_id, enc, sysmap);
                 ret.replace_err(ret.to_err().with_param(memop))
-            }
+            },
             MemOp::Write(gpa_id, enc, data) => {
                 let ret = self.op_write(gpa_id, enc, data, sysmap);
                 ret.replace_err(ret.to_err().with_param(memop))
-            }
-            _ => {ResultWithErr::Ok(*self)}
+            },
+            _ => { ResultWithErr::Ok(*self) },
         }
-
     }
 }
-}
+
+} // verus!

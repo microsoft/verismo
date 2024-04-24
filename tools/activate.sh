@@ -13,6 +13,8 @@ TOOLS_DIR=$SCRIPT_DIR
 echo "submodule init"
 (
   git submodule update --init $TOOLS_DIR/verus
+  git submodule update --init $TOOLS_DIR/verusfmt
+  git submodule update --init $TOOLS_DIR/igvm
   git submodule update --init $TOOLS_DIR/../deps/hacl-packages
 )
 echo "init vstd"
@@ -33,6 +35,10 @@ echo "building verus (slow)..."
   cd "$TOOLS_DIR/verus/source" && tools/get-z3.sh && source ../tools/activate && vargo build --release || exit 1
 )
 
+echo "building verusfmt."
+(
+    cd "$TOOLS_DIR/verusfmt" || exit 1
+    cargo build --release || exit 1
+) || return 1
 
-
-export PATH="$SCRIPT_DIR/vargo/target/release:$PATH"
+export PATH="$SCRIPT_DIR/vargo/target/release:$TOOLS_DIR/verusfmt/target/release:$PATH"

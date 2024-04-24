@@ -2,8 +2,9 @@ use super::*;
 use crate::tspec::*;
 
 verus! {
-    #[inline]
-    pub fn page_align_up(value: usize_t) -> (ret: usize_t)
+
+#[inline]
+pub fn page_align_up(value: usize_t) -> (ret: usize_t)
     requires
         value <= VM_MEM_SIZE,
         value.is_constant(),
@@ -13,14 +14,14 @@ verus! {
         value as int <= ret as int,
         (ret as int) < (value as int) + PAGE_SIZE!(),
         ret.is_constant() == value.is_constant(),
-    {
-        proof {
-            bit_shl64_pow2_auto();
-        }
-        align_up_by(value as u64, PAGE_SIZE as u64) as usize
+{
+    proof {
+        bit_shl64_pow2_auto();
     }
+    align_up_by(value as u64, PAGE_SIZE as u64) as usize
 }
 
+} // verus!
 verismo_simple! {
     #[inline]
     pub fn page_align_down(value: usize_s) -> (ret: usize_s)

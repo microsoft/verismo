@@ -2,28 +2,29 @@ use super::align_s::*;
 use super::*;
 
 verus! {
-    pub fn align_up_by(val: u64, align: u64) -> (ret: u64)
-        requires
-            spec_bit64_is_pow_of_2(align as int),
-            val + align <= MAXU64!(),
-        ensures
-            (ret as int) % (align as int) == 0,
-            ret as int == spec_align_up(val as int, align as int),
-            spec_is_align_up_by_int(val as int, align as int, ret as int),
-    {
-        proof{
-            proof_align_up(val as nat, align as nat);
-            proof_align_is_aligned(val as int, align as int);
-        }
-        let mask = align - 1;
-        if val & mask == 0 {
-            val
-        } else {
-            (val | mask) + 1
-        }
+
+pub fn align_up_by(val: u64, align: u64) -> (ret: u64)
+    requires
+        spec_bit64_is_pow_of_2(align as int),
+        val + align <= MAXU64!(),
+    ensures
+        (ret as int) % (align as int) == 0,
+        ret as int == spec_align_up(val as int, align as int),
+        spec_is_align_up_by_int(val as int, align as int, ret as int),
+{
+    proof {
+        proof_align_up(val as nat, align as nat);
+        proof_align_is_aligned(val as int, align as int);
+    }
+    let mask = align - 1;
+    if val & mask == 0 {
+        val
+    } else {
+        (val | mask) + 1
     }
 }
 
+} // verus!
 verismo_simple! {
     pub fn align_down_by(val: u64, align: u64) -> (ret: u64)
         requires

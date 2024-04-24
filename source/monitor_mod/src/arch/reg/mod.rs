@@ -2,7 +2,8 @@ use verismo_macro::*;
 
 use crate::tspec::*;
 
-verus!{
+verus! {
+
 #[is_variant]
 pub enum RegName {
     // register fields
@@ -40,10 +41,10 @@ pub enum RflagBit {
     TF = 8,  // Trap flag
     IF = 9,  // Interrupt enable flag
     DF = 10,
-    ID = 21, // Able to use CPUID
-}
+    ID = 21,  // Able to use CPUID
 }
 
+} // verus!
 crate::macro_const! {
     pub const MSR_GHCB_BASE: u32 = 0xc0010130u32;
     pub const MSR_GS_BASE: u32 = 0xc0000101u32;
@@ -53,13 +54,15 @@ crate::macro_const! {
 
 impl RegName {
     verus! {
-        pub open spec fn spec_is_shared(&self) -> bool {
-            match *self {
-                RegName::MSR(regval) if regval == MSR_GHCB_BASE => true,
-                _ => false,
-            }
-        }
+
+pub open spec fn spec_is_shared(&self) -> bool {
+    match *self {
+        RegName::MSR(regval) if regval == MSR_GHCB_BASE => true,
+        _ => false,
     }
+}
+
+} // verus!
 }
 
 pub type RegValType = u64;
@@ -67,9 +70,11 @@ pub type RegValType = u64;
 pub type RegDB = FMap<RegName, RegValType>;
 
 verus! {
+
 impl RegDB {
     pub open spec fn reg_inv(&self) -> bool {
         &&& self[RegName::Cpl] == 0
     }
 }
-}
+
+} // verus!

@@ -42,34 +42,32 @@ verismo_simple! {
 }
 
 verus! {
-    impl SnpSecretsPageLayout {
-        pub closed spec fn closed_wf_mastersecret(&self) -> bool {
-            &&& self.vmpck0@.is_fullsecret()
-            &&& self.vmpck1@.is_constant_to(1)
-            &&& self.vmpck1@.is_fullsecret_to(2)
-            &&& self.vmpck1@.is_fullsecret_to(3)
-            &&& self.vmpck1@.is_fullsecret_to(4)
 
-            &&& self.vmpck2@.is_constant_to(2)
-            &&& self.vmpck2@.is_fullsecret_to(1)
-            &&& self.vmpck2@.is_fullsecret_to(3)
-            &&& self.vmpck2@.is_fullsecret_to(4)
+impl SnpSecretsPageLayout {
+    pub closed spec fn closed_wf_mastersecret(&self) -> bool {
+        &&& self.vmpck0@.is_fullsecret()
+        &&& self.vmpck1@.is_constant_to(1)
+        &&& self.vmpck1@.is_fullsecret_to(2)
+        &&& self.vmpck1@.is_fullsecret_to(3)
+        &&& self.vmpck1@.is_fullsecret_to(4)
+        &&& self.vmpck2@.is_constant_to(2)
+        &&& self.vmpck2@.is_fullsecret_to(1)
+        &&& self.vmpck2@.is_fullsecret_to(3)
+        &&& self.vmpck2@.is_fullsecret_to(4)
+        &&& self.vmpck3@.is_constant_to(3)
+        &&& self.vmpck3@.is_fullsecret_to(1)
+        &&& self.vmpck3@.is_fullsecret_to(2)
+        &&& self.vmpck3@.is_fullsecret_to(4)
+        &&& self.os_area.is_constant()
+    }
 
-            &&& self.vmpck3@.is_constant_to(3)
-            &&& self.vmpck3@.is_fullsecret_to(1)
-            &&& self.vmpck3@.is_fullsecret_to(2)
-            &&& self.vmpck3@.is_fullsecret_to(4)
-
-            &&& self.os_area.is_constant()
-        }
-
-        pub open spec fn wf_mastersecret(&self) -> bool {
-            &&& self.wf()
-            &&& self.closed_wf_mastersecret()
-        }
+    pub open spec fn wf_mastersecret(&self) -> bool {
+        &&& self.wf()
+        &&& self.closed_wf_mastersecret()
     }
 }
 
+} // verus!
 verismo_simple! {
 impl SnpGuestChannel {
     pub fn new(handle: GhcbHandle, Tracked(cs): Tracked<&mut SnpCoreSharedMem>) -> (ret: (SnpGuestChannel, GhcbHandle))
@@ -100,6 +98,7 @@ impl SnpGuestChannel {
 }
 
 verus! {
+
 pub struct FillSecretForVMPL<'a> {
     pub master_secret: &'a SnpSecretsPageLayout,
     pub vmpl: u8,
@@ -109,14 +108,19 @@ pub struct FillSecretForVMPLOut;
 
 impl<'a, 'b> MutFnTrait<'a, FillSecretForVMPL<'b>, FillSecretForVMPLOut> for SnpSecretsPageLayout {
     open spec fn spec_update_requires(&self, params: FillSecretForVMPL<'b>) -> bool {
-        let FillSecretForVMPL{master_secret, vmpl} = params;
+        let FillSecretForVMPL { master_secret, vmpl } = params;
         &&& master_secret.wf_mastersecret()
         &&& self.is_constant()
         &&& 0 < vmpl < 4
     }
 
-    open spec fn spec_update(&self, prev: &Self, params: FillSecretForVMPL<'b>, ret: FillSecretForVMPLOut) -> bool {
-        let FillSecretForVMPL{master_secret, vmpl} = params;
+    open spec fn spec_update(
+        &self,
+        prev: &Self,
+        params: FillSecretForVMPL<'b>,
+        ret: FillSecretForVMPLOut,
+    ) -> bool {
+        let FillSecretForVMPL { master_secret, vmpl } = params;
         &&& if vmpl == 1 {
             self.spec_vmpck1() === master_secret.spec_vmpck1()
         } else if vmpl == 2 {
@@ -129,12 +133,10 @@ impl<'a, 'b> MutFnTrait<'a, FillSecretForVMPL<'b>, FillSecretForVMPLOut> for Snp
         &&& self.is_constant_to(vmpl as nat)
     }
 
-    fn box_update(&'a mut self, params: FillSecretForVMPL<'b>) -> (ret: FillSecretForVMPLOut)
-    {
-        let FillSecretForVMPL{master_secret, vmpl} = params;
-
+    fn box_update(&'a mut self, params: FillSecretForVMPL<'b>) -> (ret: FillSecretForVMPLOut) {
+        let FillSecretForVMPL { master_secret, vmpl } = params;
         assert(self.is_constant());
-        assert(self.is_constant_to(vmpl as nat)); // proof required
+        assert(self.is_constant_to(vmpl as nat));  // proof required
         if vmpl == 1 {
             self.vmpck1 = master_secret.vmpck1.clone();
         } else if vmpl == 2 {
@@ -145,15 +147,17 @@ impl<'a, 'b> MutFnTrait<'a, FillSecretForVMPL<'b>, FillSecretForVMPLOut> for Snp
         FillSecretForVMPLOut
     }
 }
-}
 
+} // verus!
 verus! {
+
 proof fn proof_msg_hdr_size()
-ensures
-    spec_size::<SnpGuestMsgHdr>() == 0x60
-{}
+    ensures
+        spec_size::<SnpGuestMsgHdr>() == 0x60,
+{
 }
 
+} // verus!
 verismo_simple! {
 pub fn enc_dec(
     enc: bool,
@@ -281,21 +285,22 @@ ensures
 }
 
 verus! {
-    pub fn enc_payload(
-        secret: &SnpSecretsPageLayout,
-        version: u8,
-        msg_no: u64,
-        msg_type: u8,
-        payload_addr: usize,
-        len: u16,
-        Tracked(payload_perm): Tracked<SnpPointsToRaw>,
-        Tracked(cs) : Tracked<&mut SnpCoreSharedMem>
-    ) -> (ret: (Result<VBox<SnpGuestMsg>, u8>, Tracked<SnpPointsToRaw>))
+
+pub fn enc_payload(
+    secret: &SnpSecretsPageLayout,
+    version: u8,
+    msg_no: u64,
+    msg_type: u8,
+    payload_addr: usize,
+    len: u16,
+    Tracked(payload_perm): Tracked<SnpPointsToRaw>,
+    Tracked(cs): Tracked<&mut SnpCoreSharedMem>,
+) -> (ret: (Result<VBox<SnpGuestMsg>, u8>, Tracked<SnpPointsToRaw>))
     requires
         old(cs).inv(),
         len <= MAX_SNP_MSG_SZ,
         secret.wf_mastersecret(),
-        payload_perm@.wf_default((payload_addr as int, len as nat))
+        payload_perm@.wf_default((payload_addr as int, len as nat)),
     ensures
         cs.inv(),
         ret.0.is_Ok() ==> ret.0.get_Ok_0().wf(),
@@ -303,38 +308,46 @@ verus! {
         ret.0.is_Ok() ==> ret.0.get_Ok_0().snp() === SwSnpMemAttr::spec_default(),
         payload_perm == ret.1@,
         cs.only_lock_reg_coremode_updated(*old(cs), set![], set![spec_ALLOCATOR_lockid()]),
-    {
-
-        let mut msg: VBox<SnpGuestMsg> = VBox::new_uninit(Tracked(cs));
-        let mut snphdr: SnpGuestMsgHdr = msg.copy_snphdr();
-        snphdr.algo = SNP_AEAD_AES_256_GCM.into();
-        snphdr.hdr_version = MSG_HDR_VER.into();
-        snphdr.hdr_sz = sizeof::<SnpGuestMsgHdr>().into();
-        snphdr.msg_type = msg_type.into();
-        snphdr.msg_version = version.into();
-        snphdr.msg_seqno = msg_no.into();
-        snphdr.msg_vmpck = VERISMO_VMPCK_ID.into();
-        snphdr.msg_sz = len.into();
-        assert(snphdr.is_constant());
-        msg.set_snphdr(snphdr);
-        let (msg, Tracked(payload_perm)) = enc_dec_payload(true, &secret.vmpck0, msg, msg_no.into(), payload_addr, Tracked(payload_perm));
-        (Ok(msg), Tracked(payload_perm))
-    }
+{
+    let mut msg: VBox<SnpGuestMsg> = VBox::new_uninit(Tracked(cs));
+    let mut snphdr: SnpGuestMsgHdr = msg.copy_snphdr();
+    snphdr.algo = SNP_AEAD_AES_256_GCM.into();
+    snphdr.hdr_version = MSG_HDR_VER.into();
+    snphdr.hdr_sz = sizeof::<SnpGuestMsgHdr>().into();
+    snphdr.msg_type = msg_type.into();
+    snphdr.msg_version = version.into();
+    snphdr.msg_seqno = msg_no.into();
+    snphdr.msg_vmpck = VERISMO_VMPCK_ID.into();
+    snphdr.msg_sz = len.into();
+    assert(snphdr.is_constant());
+    msg.set_snphdr(snphdr);
+    let (msg, Tracked(payload_perm)) = enc_dec_payload(
+        true,
+        &secret.vmpck0,
+        msg,
+        msg_no.into(),
+        payload_addr,
+        Tracked(payload_perm),
+    );
+    (Ok(msg), Tracked(payload_perm))
 }
 
+} // verus!
 verus! {
-pub fn cal2_sha512(input1: &SHA512Type, input2: &SHA512Type) -> (ret: SHA512Type)
-ensures
-    ret === spec_cal_sha512((input1@ + input2@).vspec_cast_to()),
-{
-    let mut tmp_buf: Array<u8_s, {SHA512_LEN * 2}> = Default::default();
-    let mut i = 0;
 
+pub const SHA512_LEN2: usize = SHA512_LEN * 2;
+
+pub fn cal2_sha512(input1: &SHA512Type, input2: &SHA512Type) -> (ret: SHA512Type)
+    ensures
+        ret === spec_cal_sha512((input1@ + input2@).vspec_cast_to()),
+{
+    let mut tmp_buf: Array<u8_s, SHA512_LEN2> = Default::default();
+    let mut i = 0;
     while i < SHA512_LEN
-    invariant
-        0 <= i <= SHA512_LEN,
-        forall |k: int| 0 <= k < i ==> tmp_buf[k] == input1[k],
-        forall |k: int| 0 <= k < i ==> tmp_buf[k + SHA512_LEN] == input2[k],
+        invariant
+            0 <= i <= SHA512_LEN,
+            forall|k: int| 0 <= k < i ==> tmp_buf[k] == input1[k],
+            forall|k: int| 0 <= k < i ==> tmp_buf[k + SHA512_LEN] == input2[k],
     {
         tmp_buf.set2(i, *(input1.index2(i)));
         tmp_buf.set2(i + SHA512_LEN, *(input2.index2(i)));
@@ -344,25 +357,28 @@ ensures
     cal_sha512(&tmp_buf)
 }
 
-pub fn cal_sha512<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>>(buf: &T) -> (ret: SHA512Type)
-ensures
-    ret === spec_cal_sha512(buf.vspec_cast_to()),
+pub fn cal_sha512<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>>(buf: &T) -> (ret:
+    SHA512Type)
+    ensures
+        ret === spec_cal_sha512(buf.vspec_cast_to()),
 {
     let mut ret: SHA512Type = Default::default();
     trusted_cal_sha512(buf, &mut ret);
     ret
 }
-}
+
+} // verus!
 verus! {
-    impl SnpGuestChannel {
-        pub fn attest(
-            self,
-            ghcb: GhcbHandle,
-            secret: &SnpSecretsPageLayout,
-            user_data: Array<u8_s, 64>,
-            result: VBox<OnePage>,
-            Tracked(cs): Tracked<&mut SnpCoreSharedMem>,
-        ) -> (ret: (VBox<OnePage>, Self, GhcbHandle))
+
+impl SnpGuestChannel {
+    pub fn attest(
+        self,
+        ghcb: GhcbHandle,
+        secret: &SnpSecretsPageLayout,
+        user_data: Array<u8_s, USER_DATA_LEN>,
+        result: VBox<OnePage>,
+        Tracked(cs): Tracked<&mut SnpCoreSharedMem>,
+    ) -> (ret: (VBox<OnePage>, Self, GhcbHandle))
         requires
             secret.wf_mastersecret(),
             result.wf(),
@@ -380,85 +396,111 @@ verus! {
             ret.1.only_val_updated(self),
             ret.2.ghcb_wf(),
             ret.2.only_val_updated(ghcb),
-        {
-            proof {
-                assert(set![spec_ALLOCATOR_lockid()].union(set![spec_ALLOCATOR_lockid()]) =~~= set![spec_ALLOCATOR_lockid()]);
-            }
-            let mut req = self.req;
-            let prev_msg_no: u64 = secret.os_area.msg_seqno_0.into();
-            if prev_msg_no == MAXU64 {
-                new_strlit("msg_no is too large for vmpl communication. Please reset secret\n.").leak_debug();
-                vc_terminate(SM_TERM_UNSUPPORTED, Tracked(&mut cs.snpcore));
-            }
-            let msg_no = (prev_msg_no + 1) as u64;
-            let version = 1;
-            let report_req = SnpReportReq{
-                user_data,
-                vmpl: 0,
-                reserved: Array::new(0),
-            };
-            let ghost cs1 = *cs;
-            let payload = VBox::<SnpReportReq>::new(report_req, Tracked(cs));
-            let (payload_ptr, Tracked(payload_perm)) = payload.into_raw();
-            let payload_addr = payload_ptr.to_usize();
-            let ghost cs2 = *cs;
-            let (encrypted, Tracked(payload_perm)) = enc_payload(
-                secret,
-                version,
-                msg_no,
-                SNP_GUEST_MSG_TYPE_REQ,
-                payload_addr,
-                size_of::<SnpReportReq>() as u16,
-                Tracked(payload_perm.tracked_into_raw()),
-                Tracked(cs));
-            let payload = VBox::<SnpReportReq>::from_raw(payload_addr, Tracked(payload_perm.tracked_into()));
-
-            if let Ok(encrypted) = encrypted {
-                req = req.set(encrypted);
-            } else {
-                vc_terminate(SM_EVERCRYPT_EXIT, Tracked(&mut cs.snpcore));
-            }
-            let req_gpa = req.get_const_addr() as u64;
-            let resp_gpa = self.resp.get_const_addr() as u64;
-
-            let ghost cs3 = *cs;
-            let ghcb = ghcb.ghcb_guest_request(req_gpa, resp_gpa, Tracked(cs));
-
-            // Create a copy of private reponse message for verification.
-            // This is necessary to avoid attacker skip the checking.
-            let ghost cs4 = *cs;
-            let mut private_resp = VBox::<SnpGuestMsg>::new_uninit(Tracked(cs));
-            let (presp_ptr, Tracked(mut presp_perm)) = private_resp.into_raw();
-            let (resp_ptr, Tracked(resp_perm)) = self.resp.into_raw();
-            let tracked resp_perm = resp_perm.tracked_into_raw();
-            let tracked mut presp_perm = presp_perm.tracked_into_raw();
-            mem_copy(
-                resp_ptr.to_usize(), presp_ptr.to_usize(), size_of::<SnpGuestMsg>(),
-                Tracked(&resp_perm), Tracked(&mut presp_perm),
+    {
+        proof {
+            assert(set![spec_ALLOCATOR_lockid()].union(set![spec_ALLOCATOR_lockid()])
+                =~~= set![spec_ALLOCATOR_lockid()]);
+        }
+        let mut req = self.req;
+        let prev_msg_no: u64 = secret.os_area.msg_seqno_0.into();
+        if prev_msg_no == MAXU64 {
+            new_strlit(
+                "msg_no is too large for vmpl communication. Please reset secret\n.",
+            ).leak_debug();
+            vc_terminate(SM_TERM_UNSUPPORTED, Tracked(&mut cs.snpcore));
+        }
+        let msg_no = (prev_msg_no + 1) as u64;
+        let version = 1;
+        let report_req = SnpReportReq { user_data, vmpl: 0, reserved: Array::new(0) };
+        let ghost cs1 = *cs;
+        let payload = VBox::<SnpReportReq>::new(report_req, Tracked(cs));
+        let (payload_ptr, Tracked(payload_perm)) = payload.into_raw();
+        let payload_addr = payload_ptr.to_usize();
+        let ghost cs2 = *cs;
+        let (encrypted, Tracked(payload_perm)) = enc_payload(
+            secret,
+            version,
+            msg_no,
+            SNP_GUEST_MSG_TYPE_REQ,
+            payload_addr,
+            size_of::<SnpReportReq>() as u16,
+            Tracked(payload_perm.tracked_into_raw()),
+            Tracked(cs),
+        );
+        let payload = VBox::<SnpReportReq>::from_raw(
+            payload_addr,
+            Tracked(payload_perm.tracked_into()),
+        );
+        if let Ok(encrypted) = encrypted {
+            req = req.set(encrypted);
+        } else {
+            vc_terminate(SM_EVERCRYPT_EXIT, Tracked(&mut cs.snpcore));
+        }
+        let req_gpa = req.get_const_addr() as u64;
+        let resp_gpa = self.resp.get_const_addr() as u64;
+        let ghost cs3 = *cs;
+        let ghcb = ghcb.ghcb_guest_request(req_gpa, resp_gpa, Tracked(cs));
+        // Create a copy of private reponse message for verification.
+        // This is necessary to avoid attacker skip the checking.
+        let ghost cs4 = *cs;
+        let mut private_resp = VBox::<SnpGuestMsg>::new_uninit(Tracked(cs));
+        let (presp_ptr, Tracked(mut presp_perm)) = private_resp.into_raw();
+        let (resp_ptr, Tracked(resp_perm)) = self.resp.into_raw();
+        let tracked resp_perm = resp_perm.tracked_into_raw();
+        let tracked mut presp_perm = presp_perm.tracked_into_raw();
+        mem_copy(
+            resp_ptr.to_usize(),
+            presp_ptr.to_usize(),
+            size_of::<SnpGuestMsg>(),
+            Tracked(&resp_perm),
+            Tracked(&mut presp_perm),
+        );
+        private_resp = VBox::from_raw(presp_ptr.to_usize(), Tracked(presp_perm.tracked_into()));
+        let resp = VBox::from_raw(resp_ptr.to_usize(), Tracked(resp_perm.tracked_into()));
+        let (rc, result, _) = verify_and_dec_payload(
+            &secret.vmpck0,
+            private_resp,
+            msg_no,
+            version,
+            SNP_GUEST_MSG_TYPE_RESP,
+            result,
+        );
+        if rc > 0 {
+            vc_terminate(SM_EVERCRYPT_EXIT, Tracked(&mut cs.snpcore));
+        }
+        proof {
+            cs1.lemma_update_prop(
+                cs2,
+                cs3,
+                set![],
+                set![spec_ALLOCATOR_lockid()],
+                set![],
+                set![spec_ALLOCATOR_lockid()],
             );
-            private_resp = VBox::from_raw(presp_ptr.to_usize(), Tracked(presp_perm.tracked_into()));
-            let resp = VBox::from_raw(resp_ptr.to_usize(), Tracked(resp_perm.tracked_into()));
-
-            let (rc, result, _) = verify_and_dec_payload(
-                &secret.vmpck0,
-                private_resp,
-                msg_no, version,
-                SNP_GUEST_MSG_TYPE_RESP,
-                result);
-            if rc > 0 {
-                vc_terminate(SM_EVERCRYPT_EXIT, Tracked(&mut cs.snpcore));
-            }
-            proof{
-                cs1.lemma_update_prop(cs2, cs3, set![], set![spec_ALLOCATOR_lockid()], set![], set![spec_ALLOCATOR_lockid()]);
-                cs1.lemma_update_prop(cs3, cs4, set![], set![spec_ALLOCATOR_lockid()], set![], set![spec_ALLOCATOR_lockid()]);
-                cs1.lemma_update_prop(cs4, *cs, set![], set![spec_ALLOCATOR_lockid()], set![], set![spec_ALLOCATOR_lockid()]);
-            }
-            (result, SnpGuestChannel{req, resp}, ghcb)
-    }
+            cs1.lemma_update_prop(
+                cs3,
+                cs4,
+                set![],
+                set![spec_ALLOCATOR_lockid()],
+                set![],
+                set![spec_ALLOCATOR_lockid()],
+            );
+            cs1.lemma_update_prop(
+                cs4,
+                *cs,
+                set![],
+                set![spec_ALLOCATOR_lockid()],
+                set![],
+                set![spec_ALLOCATOR_lockid()],
+            );
+        }
+        (result, SnpGuestChannel { req, resp }, ghcb)
     }
 }
 
+} // verus!
 verus! {
+
 fn verify_and_dec_payload<T: IsConstant + SpecSize + WellFormed + VTypeCast<SecSeqByte>>(
     key: &AESKey256,
     msg: VBox<SnpGuestMsg>,
@@ -467,19 +509,19 @@ fn verify_and_dec_payload<T: IsConstant + SpecSize + WellFormed + VTypeCast<SecS
     msg_type: u8,
     result: VBox<T>,
 ) -> (ret: (u8, VBox<T>, VBox<SnpGuestMsg>))
-requires
-    old_msg_no < 0xffff_ffff_ffff_ffff,
-    msg.snp() == SwSnpMemAttr::spec_default(),
-    msg.wf(),
-    msg@.is_constant(),
-    key@.is_fullsecret(),
-    result.wf(),
-    result.snp() == SwSnpMemAttr::spec_default(),
-ensures
-    ret.1.wf(),
-    ret.2.wf(),
-    ret.1.only_val_updated(result),
-    ret.2.only_val_updated(msg),
+    requires
+        old_msg_no < 0xffff_ffff_ffff_ffff,
+        msg.snp() == SwSnpMemAttr::spec_default(),
+        msg.wf(),
+        msg@.is_constant(),
+        key@.is_fullsecret(),
+        result.wf(),
+        result.snp() == SwSnpMemAttr::spec_default(),
+    ensures
+        ret.1.wf(),
+        ret.2.wf(),
+        ret.1.only_val_updated(result),
+        ret.2.only_val_updated(msg),
 {
     let expected_msg_no = old_msg_no + 1;
     let hdr = msg.borrow().snphdr;
@@ -488,29 +530,36 @@ ensures
     if msg_no != expected_msg_no {
         ((new_strlit("wrong seq number"), msg_no), expected_msg_no).leak_debug();
         return (SNP_ERR_REQ_RESP_MSG, result, msg);
-    }
+    }  /* Verify response message type and version number. */
 
-    /* Verify response message type and version number. */
-    if (msg_type != hdr.msg_type.reveal_value() )
-        || (hdr.msg_version.reveal_value() != version)
-    {
+    if (msg_type != hdr.msg_type.reveal_value()) || (hdr.msg_version.reveal_value() != version) {
         new_strlit("wrong msg type").leak_debug();
         return (SNP_ERR_REQ_RESP_MSG, result, msg);
     }
-
     let msg_sz: usize = hdr.msg_sz.into();
-    if msg_sz == 0 || msg_sz > (MAX_SNP_MSG_SZ as usize) || msg_sz >= size_of::<T>()  {
+    if msg_sz == 0 || msg_sz > (MAX_SNP_MSG_SZ as usize) || msg_sz >= size_of::<T>() {
         new_strlit("wrong msg size").leak_debug();
         return (SNP_ERR_REQ_RESP_MSG, result, msg);
     }
-
     let decrypted_addr = result.get_const_addr();
     let (decrypted_ptr, Tracked(decrypted_perm)) = result.into_raw();
     let tracked mut decrypted_perm = decrypted_perm.tracked_into_raw();
-    let tracked (payload_perm, right_perm) = decrypted_perm.trusted_split(msg@.snphdr.spec_msg_sz().vspec_cast_to());
+    let tracked (payload_perm, right_perm) = decrypted_perm.trusted_split(
+        msg@.snphdr.spec_msg_sz().vspec_cast_to(),
+    );
     /* Decrypt the payload */
-    let (msg, Tracked(payload_perm)) = enc_dec_payload(false, key, msg, msg_no.into(), decrypted_addr, Tracked(payload_perm));
-    proof{decrypted_perm  = payload_perm.trusted_join(right_perm);}
+    let (msg, Tracked(payload_perm)) = enc_dec_payload(
+        false,
+        key,
+        msg,
+        msg_no.into(),
+        decrypted_addr,
+        Tracked(payload_perm),
+    );
+    proof {
+        decrypted_perm = payload_perm.trusted_join(right_perm);
+    }
     (0, VBox::from_raw(decrypted_addr, Tracked(decrypted_perm.tracked_into())), msg)
 }
-}
+
+} // verus!

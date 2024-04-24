@@ -8,6 +8,7 @@ use crate::snp::SnpCoreSharedMem;
 use crate::*;
 
 verus! {
+
 pub type PageTable = Array<u64_s, 512>;
 
 pub const PAT_RESET_VAL: u64 = 0x7040600070406;
@@ -47,19 +48,22 @@ pub struct SpecPTE {
 // Private perms to prevent
 pub struct PtePerm {
     pub lvl: nat,
-    pub val: PTE, // current lvl, entry value
+    pub val: PTE,  // current lvl, entry value
     pub range: (int, nat),
-    pub perm: Option<SnpPointsTo<PageTable>>, // memory perms for next table
+    pub perm: Option<SnpPointsTo<PageTable>>,  // memory perms for next table
 }
 
 pub type PtePerms = Map<(nat, int), PtePerm>;
-}
 
+} // verus!
 verus! {
+
 pub closed spec fn static_cr3_value() -> int;
+
 pub open spec fn top_lvl_idx() -> (nat, int) {
     (PAGE_TABLE_LEVELS as nat, 0)
 }
+
 pub trait PtePermsTrait {
     spec fn pte(&self, vaddr: int) -> Option<PtePerm>;
 
@@ -71,8 +75,8 @@ pub trait PtePermsTrait {
 
     spec fn entry(&self, vaddr: int, lvl: nat) -> Option<PtePerm>;
 }
-}
 
+} // verus!
 verismo_simple! {
 pub struct TrackedPTEPerms {
     pub perms: Tracked<PtePerms>

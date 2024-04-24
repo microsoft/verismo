@@ -1,6 +1,7 @@
 use super::*;
 
 verus! {
+
 pub ghost struct RegisterPermValue<T> {
     // Identifier
     pub cpu: nat,
@@ -19,6 +20,7 @@ impl<T> RegisterPermValue<T> {
         self.value
     }
 }
+
 impl<T: WellFormed + IsConstant> RegisterPermValue<T> {
     pub open spec fn spec_write_value(self, prev: Self, val: T) -> bool {
         &&& prev.cpu == self.cpu
@@ -51,15 +53,19 @@ impl RegisterPerm {
     #[verifier(external_body)]
     #[verifier(broadcast_forall)]
     pub proof fn axiom_eq<T>(x: Self, y: Self)
-    requires
-        x.view::<T>() === y.view::<T>(),
-    ensures
-        x === y
-    {}
+        requires
+            x.view::<T>() === y.view::<T>(),
+        ensures
+            x === y,
+    {
+    }
 
     pub spec fn cpu(&self) -> nat;
+
     pub spec fn id(&self) -> RegName;
+
     pub spec fn shared(&self) -> bool;
+
     pub spec fn val<T>(&self) -> T where T: core::marker::Sized;
 
     pub spec fn wf(&self) -> bool;
@@ -73,9 +79,10 @@ impl RegisterPerm {
     #[verifier(external_body)]
     #[verifier(broadcast_forall)]
     pub proof fn axiom_wf<T: WellFormed + IsConstant>(&self)
-    ensures
-        self.wf() == self.view::<T>().wf()
-    {}
+        ensures
+            self.wf() == self.view::<T>().wf(),
+    {
+    }
 
     pub open spec fn is_ghcb(&self) -> bool {
         let ghcb_perm_view: RegisterPermValue<u64> = self@;
@@ -85,4 +92,5 @@ impl RegisterPerm {
         &&& ghcb_perm_view.shared()
     }
 }
-}
+
+} // verus!

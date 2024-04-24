@@ -7,7 +7,8 @@ use crate::arch::tlb::TLB;
 use crate::arch::vram::VRamDB;
 use crate::tspec::*;
 
-verus!{
+verus! {
+
 #[derive(SpecGetter, SpecSetter)]
 pub struct MemDB {
     pub vram: VRamDB,
@@ -15,4 +16,5 @@ pub struct MemDB {
     pub sysmap: Map<MemID, SysMap>,
     pub tlb: TLB,
 }
-}
+
+} // verus!

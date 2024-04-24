@@ -1,7 +1,7 @@
 mod def;
 mod def_e;
-pub use def_e::*;
 pub use def::*;
+pub use def_e::*;
 
 mod entry_p;
 mod entry_s;

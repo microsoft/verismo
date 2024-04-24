@@ -9,29 +9,37 @@ use vops::VEq;
 mod p {
     use super::*;
     verus! {
-        // assert by cannot exist with broadcast forall with trait bound.
-        pub proof fn proof_test1(v1: u64, v2: u64)
-        requires
-            v1 < 10,
-            v2 < 10
-        ensures
-            v1 * v2 < 100,
-        {
-            assert(v1 * v2 < 100) by(nonlinear_arith)
-            requires v1 < 10, v2 < 10;
-        }
 
-        pub proof fn proof_test_bits2(v1: u64, v2: u64)
+// assert by cannot exist with broadcast forall with trait bound.
+pub proof fn proof_test1(v1: u64, v2: u64)
+    requires
+        v1 < 10,
+        v2 < 10,
+    ensures
+        v1 * v2 < 100,
+{
+    assert(v1 * v2 < 100) by (nonlinear_arith)
         requires
             v1 < 10,
-            v2 < 10
-        ensures
-            v1 & v2 < 10,
-        {
-            assert(v1 & v2 < 10) by(bit_vector)
-            requires v1 < 10, v2 < 10;
-        }
-    }
+            v2 < 10,
+    ;
+}
+
+pub proof fn proof_test_bits2(v1: u64, v2: u64)
+    requires
+        v1 < 10,
+        v2 < 10,
+    ensures
+        v1 & v2 < 10,
+{
+    assert(v1 & v2 < 10) by (bit_vector)
+        requires
+            v1 < 10,
+            v2 < 10,
+    ;
+}
+
+} // verus!
 }
 
 verismo! {

@@ -1,7 +1,8 @@
 use super::*;
 use crate::*;
 
-verus!{
+verus! {
+
 #[is_variant]
 pub enum MemID {
     Guest(nat, VMPL),
@@ -63,4 +64,5 @@ impl MemID {
     }
 }
 }
-}
+
+} // verus!

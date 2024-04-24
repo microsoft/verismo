@@ -1,6 +1,7 @@
 use super::*;
 
 verus! {
+
 pub trait VSpecOrd<Rhs> {
     spec fn spec_lt(self, rhs: Rhs) -> bool where Self: core::marker::Sized;
 
@@ -86,4 +87,5 @@ impl VSpecEq<bool> for bool {
         self == rhs
     }
 }
-}
+
+} // verus!

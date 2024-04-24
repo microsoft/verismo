@@ -1,12 +1,14 @@
 use super::*;
 
 verus! {
+
 #[verifier::publish]
 pub const INVALID_ADDR: usize = VM_MEM_SIZE + 1;
 
 pub open spec fn spec_pa_to_va(pa: int) -> int {
     pa
 }
+
 pub open spec fn spec_va_to_pa(pa: int) -> int {
     pa
 }
@@ -14,11 +16,12 @@ pub open spec fn spec_va_to_pa(pa: int) -> int {
 pub open spec fn spec_pn_to_vn(pn: int) -> int {
     pn
 }
+
 pub open spec fn spec_vn_to_pn(vn: int) -> int {
     vn
 }
-}
 
+} // verus!
 verismo_simple! {
 pub trait SpecAddrTrait {
     spec fn spec_valid_addr_with(&self, size: nat) -> bool;
@@ -258,11 +261,13 @@ macro_rules! impl_page_safe_interface {
 }
 
 verus! {
+
 impl SpecPageTrait for int {
     open spec fn spec_valid_pn_with(&self, size: nat) -> bool {
         &&& 0 <= *self as int + (size as int) <= VM_PAGE_NUM
         &&& 0 <= *self as int <= VM_PAGE_NUM
     }
+
     open spec fn to_addr(&self) -> int {
         *self * (PAGE_SIZE!())
     }
@@ -282,8 +287,8 @@ impl SpecAddrTrait for int {
         *self === self.to_page().to_addr()
     }
 }
-}
 
+} // verus!
 impl_addr_interface! {u64_t}
 impl_page_interface! {u64_t}
 impl_addr_interface! {usize_t}

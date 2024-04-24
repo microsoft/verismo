@@ -7,14 +7,19 @@ use crate::registers::SnpCore;
 use crate::snp::SnpCoreConsole;
 
 verus! {
+
 #[verifier::publish]
 pub const E820_TYPE_RAM: u32 = 1;
+
 #[verifier::publish]
 pub const E820_TYPE_RSVD: u32 = 2;
+
 #[verifier::publish]
 pub const E820_TYPE_ACPI: u32 = 3;
+
 #[verifier::publish]
 pub const E820_TYPE_READONLY: u32 = 3;
+
 #[verifier::publish]
 pub const E820_MAX_LEN: usize = 128;
 
@@ -22,8 +27,8 @@ pub const E820_MAX_LEN: usize = 128;
 pub const VERISMO_DYNAMIC_MEM_MAX: usize = 0x10000;
 
 pub type E820Table = Array<E820Entry, E820_MAX_LEN>;
-}
 
+} // verus!
 verismo_simple! {
 #[repr(C, packed)]
 #[derive(VClone, Copy)]
@@ -35,29 +40,25 @@ pub struct E820Entry {
 }
 
 verus! {
+
 impl VPrint for E820Entry {
     #[verifier(inline)]
-    open spec fn early_print_requires(&self) -> bool
-    {
+    open spec fn early_print_requires(&self) -> bool {
         self.is_constant()
     }
 
-    fn early_print2(&self, Tracked(snpcore): Tracked<&mut crate::registers::SnpCore>, Tracked(console): Tracked<SnpPointsToRaw>) -> (newconsole: Tracked<SnpPointsToRaw>)
-    {
-        proof {
-            reveal_strlit("E820Entry{");
-        }
+    fn early_print2(
+        &self,
+        Tracked(snpcore): Tracked<&mut crate::registers::SnpCore>,
+        Tracked(console): Tracked<SnpPointsToRaw>,
+    ) -> (newconsole: Tracked<SnpPointsToRaw>) {
         let addr = self.addr;
         let size = self.size;
         let memty = self.memty;
-        let Tracked(console) = new_strlit("E820Entry{").early_print2(Tracked(snpcore), Tracked(console));
-        let Tracked(console) = ((addr, size), memty).early_print2(Tracked(snpcore), Tracked(console));
-        proof {
-            reveal_strlit("}");
-        }
-        new_strlit("}").early_print2(Tracked(snpcore), Tracked(console))
+        ((addr, size), memty).early_print2(Tracked(snpcore), Tracked(console))
     }
 }
+
 impl MemRangeInterface for E820Entry {
     #[verifier(inline)]
     open spec fn self_wf(&self) -> bool {
@@ -69,7 +70,8 @@ impl MemRangeInterface for E820Entry {
         r.self_wf()
     }
 
-    proof fn proof_constant_real_wf(r: (usize_s, usize_s)) {}
+    proof fn proof_constant_real_wf(r: (usize_s, usize_s)) {
+    }
 
     open spec fn spec_real_range(&self) -> (usize_s, usize_s) {
         (self.addr.vspec_cast_to(), self.size.vspec_cast_to())
@@ -81,18 +83,14 @@ impl MemRangeInterface for E820Entry {
     }
 
     open spec fn spec_set_range(self, r: (usize_s, usize_s)) -> Self {
-        E820Entry {
-            addr: r.0.vspec_cast_to(),
-            size: r.1.vspec_cast_to(),
-            memty: self.memty,
-        }
+        E820Entry { addr: r.0.vspec_cast_to(), size: r.1.vspec_cast_to(), memty: self.memty }
     }
 
-    fn update_range(&mut self, r: (usize_s, usize_s)){
+    fn update_range(&mut self, r: (usize_s, usize_s)) {
         let ghost oldself = *self;
         self.addr = r.0.into();
         self.size = r.1.into();
-        proof{
+        proof {
             proof_sectype_cast_eq::<usize, u64, ()>(r.0);
             proof_sectype_cast_eq::<usize, u64, ()>(r.1);
             assert(oldself.spec_set_range(r) === E820Entry {
@@ -114,8 +112,8 @@ impl MemRangeInterface for E820Entry {
         VM_MEM_SIZE.into()
     }
 }
-}
 
+} // verus!
 verismo_simple! {
 impl E820Entry {
     #[verifier(inline)]

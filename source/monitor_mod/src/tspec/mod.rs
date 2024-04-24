@@ -53,15 +53,16 @@ pub use vstd::view::*;
 pub use wellformed::*;
 
 verus! {
+
 // const
 #[verifier(inline)]
 pub open spec fn spec_unused<T>() -> T {
     arbitrary()
 }
 
-
-}
+} // verus!
 verus! {
+
 #[is_variant]
 pub enum ResultOrErr<RetValue, ErrorID> {
     Ok(RetValue),
@@ -76,16 +77,17 @@ impl<RetValue, ErrorID> ResultOrErr<RetValue, ErrorID> {
         }
     }
 
-    pub  open spec fn to_result(&self) -> RetValue {
+    pub open spec fn to_result(&self) -> RetValue {
         match self {
             ResultOrErr::Ok(ret) => *ret,
             ResultOrErr::Error(ret) => spec_unused(),
         }
     }
 }
-}
 
+} // verus!
 verus! {
+
 #[is_variant]
 pub enum ResultWithErr<RetValue, ErrorID> {
     Ok(RetValue),
@@ -130,4 +132,5 @@ impl<RetValue, ErrorID> ResultWithErr<RetValue, ErrorID> {
         }
     }
 }
-}
+
+} // verus!

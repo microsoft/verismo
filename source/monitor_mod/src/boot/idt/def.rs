@@ -2,11 +2,17 @@ use super::*;
 use crate::debug::VPrint;
 
 verus! {
-const IDT_MAX_ENTRIES: usize_t = 256usize as usize_t;
-pub const ENTRY_OPTION_MIN: u16_t = 0b1110_0000_0000;
-pub const ENTRY_MIN_PRE: u16_t = 0b1000_1110_0000_0000;
-}
 
+pub const IDT_MAX_ENTRIES: usize_t = 256usize as usize_t;
+
+pub const ENTRY_OPTION_MIN: u16_t = 0xe00;
+
+// 0b1110_0000_0000;
+pub const ENTRY_MIN_PRE: u16_t = 0x8e00;
+
+//0b1000_1110_0000_0000;
+
+} // verus!
 verismo_simple! {
 #[repr(C, align(1))]
 #[derive(VPrint)]
@@ -33,10 +39,11 @@ pub struct IDTEntry {
     pub reserved: u32,
 }
 
-verus!{
-pub type InterruptDescriptorTable = Array<IDTEntry, IDT_MAX_ENTRIES>;
-}
+verus! {
 
+pub type InterruptDescriptorTable = Array<IDTEntry, IDT_MAX_ENTRIES>;
+
+} // verus!
 verismo_simple!{
     #[repr(C, packed)]
     #[derive(VDefault)]

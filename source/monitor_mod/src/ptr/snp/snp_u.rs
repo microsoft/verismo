@@ -9,6 +9,7 @@ use crate::arch::x64::*;
 use crate::registers::SnpCore;
 
 verus! {
+
 #[repr(C, align(1))]
 #[vbit_struct(RmpAttr, u64)]
 pub struct RmpAttrSpec {
@@ -29,21 +30,13 @@ pub ghost struct PTAttr {
 
 impl PTAttr {
     pub open spec fn code() -> Self {
-        PTAttr {
-            encrypted: true,
-            w: false,
-            x: true,
-        }
+        PTAttr { encrypted: true, w: false, x: true }
     }
 }
 
 impl SpecDefault for PTAttr {
     open spec fn spec_default() -> Self {
-        PTAttr {
-            encrypted: true,
-            w: true,
-            x: false,
-        }
+        PTAttr { encrypted: true, w: true, x: false }
     }
 }
 
@@ -54,8 +47,8 @@ pub ghost struct SwSnpMemAttr {
     pub rmp: RmpEntry,
     // PTE related
     pub guestmap: Map<int, int>,
-    pub sysmap: Map<int, int>, // unused in SW state
-    pub rmpmap: Map<int, int>, // SPA -> GPA
+    pub sysmap: Map<int, int>,  // unused in SW state
+    pub rmpmap: Map<int, int>,  // SPA -> GPA
     // When there are more than one pte in the queue,
     // we do not guarantee the actual pte used by the perm token.
     pub pte: Seq<PTAttr>,
@@ -63,42 +56,51 @@ pub ghost struct SwSnpMemAttr {
 }
 
 pub type HwSnpMemAttr = SwSnpMemAttr;
+
 impl RmpAttrSpec {
-    pub open spec fn perms(&self) -> PagePerm
-    {
+    pub open spec fn perms(&self) -> PagePerm {
         PagePerm::from_int(self.spec_perms() as int)
     }
 
-    pub open spec fn is_vmsa(&self) -> bool
-    {
+    pub open spec fn is_vmsa(&self) -> bool {
         self.spec_vmsa() == 1
     }
 
     pub open spec fn vmpl(&self) -> VMPL
-    recommends
-        self.valid_vmpl()
+        recommends
+            self.valid_vmpl(),
     {
         VMPL::from_int(self.spec_vmpl() as int)
     }
 
-    pub open spec fn valid_vmpl(&self) -> bool
-    {
+    pub open spec fn valid_vmpl(&self) -> bool {
         VMPL::spec_from_int(self.spec_vmpl() as int).is_Some()
     }
 
-    pub open spec fn from(vmpl: VMPL, vmsa: bool, perms: u8) -> Self
-    {
-        RmpAttrSpec::empty().spec_set_vmpl(vmpl.as_int() as u64).spec_set_vmsa(if vmsa {1} else {0}).spec_set_perms(perms as u64)
+    pub open spec fn from(vmpl: VMPL, vmsa: bool, perms: u8) -> Self {
+        RmpAttrSpec::empty().spec_set_vmpl(vmpl.as_int() as u64).spec_set_vmsa(
+            if vmsa {
+                1
+            } else {
+                0
+            },
+        ).spec_set_perms(perms as u64)
     }
 }
 
 impl RmpAttr {
     pub fn from(vmpl: VMPL, vmsa: bool, perms: u8) -> (ret: Self)
-    ensures
-        ret@ === RmpAttrSpec::from(vmpl, vmsa, perms),
-        ret@.valid_vmpl(),
+        ensures
+            ret@ === RmpAttrSpec::from(vmpl, vmsa, perms),
+            ret@.valid_vmpl(),
     {
-        RmpAttr::empty().set_vmpl(vmpl.as_u64()).set_vmsa(if vmsa {1} else {0}).set_perms(perms as u64)
+        RmpAttr::empty().set_vmpl(vmpl.as_u64()).set_vmsa(
+            if vmsa {
+                1
+            } else {
+                0
+            },
+        ).set_perms(perms as u64)
     }
 }
 
@@ -108,9 +110,10 @@ impl SwSnpMemAttr {
     #[verifier(broadcast_forall)]
     #[verifier(external_body)]
     pub proof fn axiom_pte(&self)
-    ensures
-        self.pte.len() == 1 ==> #[trigger]self.pte() === self.pte.last(),
-    {}
+        ensures
+            self.pte.len() == 1 ==> #[trigger] self.pte() === self.pte.last(),
+    {
+    }
 
     pub open spec fn encrypted(&self) -> bool {
         self.pte().encrypted
@@ -156,13 +159,16 @@ impl SwSnpMemAttr {
 
     pub open spec fn inv_confidential(&self) -> bool {
         &&& self.is_confidential_to(4) ==> self.encrypted()
-        &&& (self.is_confidential_to(1) || self.is_confidential_to(2) || self.is_confidential_to(3)) ==> self.is_confidential_to(4)
+        &&& (self.is_confidential_to(1) || self.is_confidential_to(2) || self.is_confidential_to(3))
+            ==> self.is_confidential_to(4)
     }
 
-    pub open spec fn ensures_read<T: WellFormed + IsConstant>(self, val: Option<T>, ret: T) -> bool {
-        &&& val.is_Some() && self.is_vmpl0_private() ==> {
-           val === Some(ret)
-        }
+    pub open spec fn ensures_read<T: WellFormed + IsConstant>(
+        self,
+        val: Option<T>,
+        ret: T,
+    ) -> bool {
+        &&& val.is_Some() && self.is_vmpl0_private() ==> { val === Some(ret) }
         &&& ret.wf()
         &&& !self.is_confidential_to(1) ==> ret.is_constant_to(1)
         &&& !self.is_confidential_to(2) ==> ret.is_constant_to(2)
@@ -174,33 +180,37 @@ impl SwSnpMemAttr {
 impl HwSnpMemAttr {
     pub open spec fn hvupdate_rel(self, prev: Self) -> bool {
         &&& self.rmp@.inv_hvupdate_rel(prev.rmp@)
-        &&& self.pte == prev.pte// proved by arch pgtable
+        &&& self.pte == prev.pte  // proved by arch pgtable
         //&&& self.rmp@.validated ==> self.rmpmap === prev.rmpmap
+
     }
 
     pub proof fn proof_hvupdate_rel_propograte(next: Self, current: Self, prev: Self)
-    requires
-        next.hvupdate_rel(current),
-        current.hvupdate_rel(prev),
-    ensures
-        next.hvupdate_rel(prev),
-    {}
+        requires
+            next.hvupdate_rel(current),
+            current.hvupdate_rel(prev),
+        ensures
+            next.hvupdate_rel(prev),
+    {
+    }
 }
 
 pub ghost struct SnpMemAttr {
-    pub hw: HwSnpMemAttr, // hardware rmp state
+    pub hw: HwSnpMemAttr,  // hardware rmp state
     pub sw: SwSnpMemAttr,
 }
 
 impl SnpMemAttr {
     pub proof fn proof_valid_access(self, vaddr: int, size: nat, p: Perm)
-    requires
-        p.is_Write() || p.is_Read(),
-        self.valid_access(vaddr, size, p),
-        self.wf(),
-    ensures
-        self.sw.is_vmpl0_private() ==> self.hw.is_vmpl0_private(),
-        //self.hw.is_vmpl0_private() ==> self.sw.is_vmpl0_private(),
+        requires
+            p.is_Write() || p.is_Read(),
+            self.valid_access(vaddr, size, p),
+            self.wf(),
+        ensures
+            self.sw.is_vmpl0_private()
+                ==> self.hw.is_vmpl0_private(),
+    //self.hw.is_vmpl0_private() ==> self.sw.is_vmpl0_private(),
+
     {
         assert(self.hw.rmp@.inv_hvupdate_rel(self.sw.rmp@));
         if self.hw.is_vmpl0_private() {
@@ -216,11 +226,11 @@ pub trait SnpMemAttrTrait {
 }
 
 impl SnpMemAttrTrait for SnpMemAttr {
-    open spec fn snp(&self) -> SwSnpMemAttr{
+    open spec fn snp(&self) -> SwSnpMemAttr {
         self.sw
     }
 
-    open spec fn hw_snp(&self) -> HwSnpMemAttr{
+    open spec fn hw_snp(&self) -> HwSnpMemAttr {
         self.hw
     }
 }
@@ -231,9 +241,9 @@ impl SwSnpMemAttr {
         &&& self.inv_confidential()
         &&& self.deterministic_pte()
         &&& (*self === SwSnpMemAttr::spec_default().spec_set_rmp(self.rmp).spec_set_pte(self.pte))
-        &&& self.rmp@.spec_asid() ==  SwSnpMemAttr::spec_default().rmp@.spec_asid()
-        &&& self.rmp@.spec_gpn() ==  SwSnpMemAttr::spec_default().rmp@.spec_gpn()
-        &&& self.rmp@.spec_size()==  SwSnpMemAttr::spec_default().rmp@.spec_size()
+        &&& self.rmp@.spec_asid() == SwSnpMemAttr::spec_default().rmp@.spec_asid()
+        &&& self.rmp@.spec_gpn() == SwSnpMemAttr::spec_default().rmp@.spec_gpn()
+        &&& self.rmp@.spec_size() == SwSnpMemAttr::spec_default().rmp@.spec_size()
         &&& !self.pte().spec_encrypted() ==> !self.rmp@.spec_validated()
     }
 
@@ -245,10 +255,9 @@ impl SwSnpMemAttr {
             immutable: false,
             assigned: true,
             asid: arbitrary::<nat>() + 1,
-            gpn: arbitrary(), // unused
-            size: PageSize::Size4k, // unused
+            gpn: arbitrary(),  // unused
+            size: PageSize::Size4k,  // unused
         };
-
         SwSnpMemAttr {
             rmp: arbitrary::<RmpEntry>().spec_set_val(rmp_psp),
             pte: seq![PTAttr::spec_default()],
@@ -267,10 +276,10 @@ impl SwSnpMemAttr {
             immutable: false,
             assigned: true,
             asid: arbitrary::<nat>() + 1,
-            gpn: arbitrary(), // unused
-            size: PageSize::Size4k, // unused
+            gpn: arbitrary(),  // unused
+            size: PageSize::Size4k,  // unused
         };
-        Self::init().spec_set_rmp(RmpEntry{val: rmp_psp})
+        Self::init().spec_set_rmp(RmpEntry { val: rmp_psp })
     }
 
     pub open spec fn spec_default_pte() -> Self {
@@ -278,9 +287,7 @@ impl SwSnpMemAttr {
     }
 
     pub open spec fn executable() -> Self {
-        Self::spec_default().spec_set_pte(
-            seq![PTAttr::code()]
-        )
+        Self::spec_default().spec_set_pte(seq![PTAttr::code()])
     }
 
     pub open spec fn shared() -> Self {
@@ -291,22 +298,18 @@ impl SwSnpMemAttr {
             immutable: false,
             assigned: false,
             asid: ASID_FOR_HV!(),
-            gpn: arbitrary(), // unused
-            size: PageSize::Size4k, // unused
+            gpn: arbitrary(),  // unused
+            size: PageSize::Size4k,  // unused
         };
-        Self::spec_default().spec_set_rmp(arbitrary::<RmpEntry>().spec_set_val(rmp_psp)).spec_set_pte(seq![PTAttr::spec_default().spec_set_encrypted(false)])
+        Self::spec_default().spec_set_rmp(
+            arbitrary::<RmpEntry>().spec_set_val(rmp_psp),
+        ).spec_set_pte(seq![PTAttr::spec_default().spec_set_encrypted(false)])
     }
 
     pub open spec fn vmsa() -> Self {
-        let base  = Self::spec_default();
-        base.spec_set_rmp(
-            RmpEntry {
-                val: base.rmp.val.spec_set_vmsa(true)
-            }
-        )
-    }
-
-    /*pub open spec fn vmsa2(attr: RmpAttrSpec) -> Self {
+        let base = Self::spec_default();
+        base.spec_set_rmp(RmpEntry { val: base.rmp.val.spec_set_vmsa(true) })
+    }/*pub open spec fn vmsa2(attr: RmpAttrSpec) -> Self {
         let base  = Self::spec_default();
         let rmp = base.rmp.val;
         let rmpperms = rmp.perms.insert(attr.vmpl(), attr.perms());
@@ -316,6 +319,7 @@ impl SwSnpMemAttr {
             }
         )
     }*/
+
 }
 
 impl SpecDefault for SwSnpMemAttr {
@@ -342,6 +346,7 @@ impl SwSnpMemAttr {
         &&& !self.pte().spec_encrypted()
     }
 }
+
 // Partial Eq on software parts
 impl VSpecEq<SnpMemAttr> for SnpMemAttr {
     #[verifier(inline)]
@@ -374,8 +379,11 @@ impl SnpMemAttr {
     pub open spec fn wf(&self) -> bool {
         &&& self.hw_rmp_wf()
         // rmp status is valid
+
         &&& self.snp().wf()
         // vmpl-x secret must be stored in vmpl-x's confidential memory.
+
     }
 }
-}
+
+} // verus!

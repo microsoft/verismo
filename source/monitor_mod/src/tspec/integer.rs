@@ -1,6 +1,7 @@
 use super::*;
 
 verus! {
+
 // Implement Int Value only for a ghost type without width.
 pub trait IntValue {
     spec fn as_int(&self) -> int;
@@ -12,18 +13,22 @@ pub trait IntOrd {
     spec fn ord_int(&self) -> int;
 }
 
-pub trait NotPrimitive {}
+pub trait NotPrimitive {
+
+}
 
 pub trait ToSetTrait {
     spec fn to_set(&self) -> Set<int>;
 
     fn contains(&self, sval: u64) -> (ret: bool)
-    ensures
-        self.to_set().contains(sval as int) == ret;
-}
+        ensures
+            self.to_set().contains(sval as int) == ret,
+    ;
 }
 
+} // verus!
 verus! {
+
 impl<T1: IntValue> VSpecAdd<int, T1> for T1 {
     open spec fn spec_add(self, rhs: int) -> T1 {
         T1::from_int(self.as_int() + rhs)
@@ -59,8 +64,8 @@ impl<T1: IntValue> VSpecMul<int, T1> for T1 {
         T1::from_int(self.as_int() * rhs)
     }
 }
-}
 
+} // verus!
 /*
 macro_rules! impl_ordint_for_basic_inner {
     ($itype: ty) => {
@@ -83,11 +88,10 @@ macro_rules! impl_ordint_for_basic {
     }
 }
 */
-
 macro_rules! impl_cmp_with_basic {
     ($basict: ty, $($fname: ident),* $(,)?) => {
-        paste::paste!{
-        verus! {
+        paste::paste! {
+                                                                verus! {
         impl<T: IntOrd> VSpecOrd<$basict> for T {
             $(
             #[verifier(inline)]
@@ -96,8 +100,9 @@ macro_rules! impl_cmp_with_basic {
             }
             )*
         }
-        }}
-    }
+        }
+                                                            }
+    };
 }
 
 macro_rules! impl_spec_eq_with_basic {
@@ -109,7 +114,8 @@ macro_rules! impl_spec_eq_with_basic {
                 builtin::spec_eq(self, rhs)
             }
         }
-        })*
+        }
+)*
         verus!{
         impl<T: IntOrd> VSpecEq<$basict> for T {
             #[verifier(inline)]
@@ -138,8 +144,8 @@ macro_rules! impl_cmp_with_basics {
 
 macro_rules! impl_cmp_with_as_int {
     ($($fname: ident),* $(,)?) => {
-        paste::paste!{
-        verus! {
+        paste::paste! {
+                                                                verus! {
         impl<T: IntOrd, T2: IntOrd> VSpecOrd<T2> for T {
             $(
             #[verifier(inline)]
@@ -154,19 +160,22 @@ macro_rules! impl_cmp_with_as_int {
                 builtin::spec_eq(self.ord_int(), rhs.ord_int())
             }
         }
-        }}
-    }
+        }
+                                                            }
+    };
 }
 
 impl_cmp_with_as_int! {spec_lt, spec_le, spec_gt, spec_ge}
 
 verus! {
+
 pub proof fn lemma_int_value_ord<T: IntOrd>(t1: T, t2: T)
-ensures
-    t1.ord_int() > t2.ord_int() ==> t1 > t2,
-{}
+    ensures
+        t1.ord_int() > t2.ord_int() ==> t1 > t2,
+{
 }
 
+} // verus!
 impl_cmp_with_basics! {int, nat, u8, u16, u32, u64, usize}
 impl_spec_eq_with_basics! {int, nat, u8, u16, u32, u64, usize}
 
@@ -177,10 +186,12 @@ crate::macro_const! {
 }
 
 verus! {
+
 impl VSpecEq<()> for () {
     #[verifier(inline)]
     open spec fn spec_eq(self, rhs: Self) -> bool {
         true
     }
 }
-}
+
+} // verus!

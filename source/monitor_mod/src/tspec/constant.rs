@@ -21,8 +21,7 @@ macro_rules! macro_const_int {
             #[allow(unused_attributes)]
             $( #[$attr] )* $vis const $name : $type = $value;
             }
-
-            #[allow(unused_attributes)]
+#[allow(unused_attributes)]
             $( #[$attr] )*
             macro_rules! $name {
                 () => {
@@ -41,8 +40,7 @@ macro_rules! macro_const {
             #[allow(unused_attributes)]
             $( #[$attr] )* $vis const $name : $type = $value;
             }
-
-            #[allow(unused_attributes)]
+#[allow(unused_attributes)]
             $( #[$attr] )*
             macro_rules! $name {
                 () => {

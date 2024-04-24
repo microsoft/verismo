@@ -66,23 +66,29 @@ impl<T: VPrint + IsConstant + WellFormed, const N: usize_t> VPrint for [T; N] {
 }
 
 verus! {
+
 // slice does not have a size, and so cannot use derived PrintAtAllLevel trait.
 // To use derived traits, we use SlicePrinter to print.
 pub struct SlicePrinter<'a, T: IsConstant + WellFormed> {
     pub s: &'a [T],
 }
-}
 
+} // verus!
 verus! {
+
 impl<'a, T: IsConstant + WellFormed + VPrint> VPrint for SlicePrinter<'a, T> {
     open spec fn early_print_requires(&self) -> bool {
-        forall |i| 0 <= i < self.s@.len() ==> self.s@[i].early_print_requires()
+        forall|i| 0 <= i < self.s@.len() ==> self.s@[i].early_print_requires()
     }
 
     #[inline]
-    fn early_print2(&self, Tracked(snpcore): Tracked<&mut SnpCore>, Tracked(console): Tracked<SnpPointsToRaw>) -> (newconsole: Tracked<SnpPointsToRaw>)
-    {
+    fn early_print2(
+        &self,
+        Tracked(snpcore): Tracked<&mut SnpCore>,
+        Tracked(console): Tracked<SnpPointsToRaw>,
+    ) -> (newconsole: Tracked<SnpPointsToRaw>) {
         self.s.early_print2(Tracked(snpcore), Tracked(console))
     }
 }
-}
+
+} // verus!

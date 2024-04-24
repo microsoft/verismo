@@ -3,19 +3,20 @@ use super::*;
 use crate::tspec::*;
 
 verus! {
-    pub fn bit_check(val: u64, bit: u64) -> (ret: bool)
+
+pub fn bit_check(val: u64, bit: u64) -> (ret: bool)
     requires
         bit < 64,
     ensures
         ret == spec_has_bit_set(val as u64, bit as u64),
-    {
-        proof{
-            lemma_bits64!();
-        }
-        val & (1u64 << bit) != 0
+{
+    proof {
+        lemma_bits64!();
     }
+    val & (1u64 << bit) != 0
 }
 
+} // verus!
 verismo! {
     pub fn bit_set(val: &mut u64, bit: u64)
     requires
@@ -96,43 +97,44 @@ verismo! {
 }
 
 verus! {
-    pub fn prev_power_of_two(input: u64) -> (ret: u64)
+
+pub fn prev_power_of_two(input: u64) -> (ret: u64)
     ensures
-        spec_is_prev_power_of_two(input as nat, ret as nat)
-    {
-        proof {
-            lemma_prev_power_of_two(input as u64);
-        }
-        if input == 0 {
-            0
-        } else {
-            proof {
-                lemma_fill_ones(input as u64);
-            }
-            let mut ret: u64 = fill_tailing_ones(input.into()).into();
-            ret = (ret >> 1u64) + 1u64;
-            ret
-        }
+        spec_is_prev_power_of_two(input as nat, ret as nat),
+{
+    proof {
+        lemma_prev_power_of_two(input as u64);
     }
+    if input == 0 {
+        0
+    } else {
+        proof {
+            lemma_fill_ones(input as u64);
+        }
+        let mut ret: u64 = fill_tailing_ones(input.into()).into();
+        ret = (ret >> 1u64) + 1u64;
+        ret
+    }
+}
 
-
-    pub fn next_power_of_two(input: u64) -> (ret: u64)
+pub fn next_power_of_two(input: u64) -> (ret: u64)
     requires
         input <= POW2!(63),
     ensures
-        spec_is_next_power_of_two(input as nat, ret as nat)
-    {
+        spec_is_next_power_of_two(input as nat, ret as nat),
+{
+    proof {
+        lemma_next_power_of_two(input as u64);
+    }
+    if input <= 1 {
+        1
+    } else {
+        let v = input - 1;
         proof {
-            lemma_next_power_of_two(input as u64);
+            lemma_fill_ones(v as u64);
         }
-        if input <= 1 {
-            1
-        } else {
-            let v = input - 1;
-            proof {
-                lemma_fill_ones(v as u64);
-            }
-            fill_tailing_ones(v.into()).reveal_value() + 1
-        }
+        fill_tailing_ones(v.into()).reveal_value() + 1
     }
 }
+
+} // verus!

@@ -2,10 +2,12 @@ use super::*;
 use crate::debug::VPrint;
 
 verus! {
-    pub open spec fn VM_MEM_RANGE() -> (int, nat) {
-        (0, VM_MEM_SIZE as nat)
-    }
+
+pub open spec fn VM_MEM_RANGE() -> (int, nat) {
+    (0, VM_MEM_SIZE as nat)
 }
+
+} // verus!
 verismo! {
 pub type VPage = usize;
 pub type PPage = usize;

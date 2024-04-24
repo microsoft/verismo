@@ -21,21 +21,21 @@ impl VSpecShr<nat, ByteStream> for ByteStream {
 }
 
 pub open spec fn stream_to_data<T: VTypeCast<ByteStream>>(s: ByteStream) -> T {
-    choose |ret: T| ret.vspec_cast_to() =~~= s
+    choose|ret: T| ret.vspec_cast_to() =~~= s
 }
 
 #[verifier(opaque)]
-pub open spec fn stream_from_data<T: VTypeCast<ByteStream>>(data: T) -> ByteStream
-{
+pub open spec fn stream_from_data<T: VTypeCast<ByteStream>>(data: T) -> ByteStream {
     data.vspec_cast_to()
 }
 
 pub proof fn lemma_from_data<T: VTypeCast<ByteStream>>(data: T) -> (ret: ByteStream)
-ensures
-    ret === stream_from_data(data),
-    stream_from_data(stream_to_data::<T>(ret)) === ret,
+    ensures
+        ret === stream_from_data(data),
+        stream_from_data(stream_to_data::<T>(ret)) === ret,
 {
     reveal(stream_from_data);
     stream_from_data(data)
 }
-}
+
+} // verus!

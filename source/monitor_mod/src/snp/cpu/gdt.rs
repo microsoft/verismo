@@ -3,17 +3,22 @@ use crate::arch::reg::*;
 use crate::registers::*;
 
 verus! {
+
 #[verifier::publish]
 pub const GDT_KERNEL_CS: usize = 1;
+
 #[verifier::publish]
 pub const GDT_KERNEL_DS: usize = 3;
+
 #[verifier::publish]
 pub const GDTR_LIMIT: u32 = 0xffff_ffff;
+
 #[verifier::publish]
 pub const GDTR_BASE: u64 = 0;
-}
 
+} // verus!
 verus! {
+
 #[vbit_struct(DescriptorAttr0_7, u64)]
 pub struct DescriptorAttr0_7Spec {
     #[vbits(0, 0)]
@@ -59,67 +64,54 @@ pub struct DescriptorSpec {
     #[vbits(56, 64)]
     pub base24_31: u64,
 }
-}
 
+} // verus!
 verus! {
+
 impl Descriptor {
     pub const fn entry_cs_sys() -> Self {
-        Self::empty()
-            .set_limit0_15(0xffff)
-            .set_limit16_19(0xf)
-            .set_base0_23(0)
-            .set_base24_31(0)
-            .set_attr_0_7(
-                DescriptorAttr0_7::empty()
-                    .set_dpl(0)
-                    .set_sys(1)
-                    .set_write(1)
-                    .set_exe(1)
-                    .set_present(1)
-                    .value(),
-            )
-            .set_attr_8_11(
-                DescriptorAttr8_11::empty()
-                    .set_long(0)
-                    .set_size32_or_16(1)
-                    .set_granularity(1)
-                    .value(),
-            )
+        Self::empty().set_limit0_15(0xffff).set_limit16_19(0xf).set_base0_23(0).set_base24_31(
+            0,
+        ).set_attr_0_7(
+            DescriptorAttr0_7::empty().set_dpl(0).set_sys(1).set_write(1).set_exe(1).set_present(
+                1,
+            ).value(),
+        ).set_attr_8_11(
+            DescriptorAttr8_11::empty().set_long(0).set_size32_or_16(1).set_granularity(1).value(),
+        )
         //Descriptor { value: 0xcf9b000000ffff }
+
     }
 
     pub const fn entry_cs_user() -> Self {
         Self::entry_cs_sys().set_attr_0_7(
-            DescriptorAttr0_7::new(Self::entry_cs_sys().get_attr_0_7())
-                .set_dpl(3)
-                .value(),
+            DescriptorAttr0_7::new(Self::entry_cs_sys().get_attr_0_7()).set_dpl(3).value(),
         )
         //Descriptor { value: 0xcffb000000ffff }
+
     }
 
     pub const fn entry_ds_sys() -> Self {
         Self::entry_cs_sys().set_attr_0_7(
-            DescriptorAttr0_7::new(Self::entry_cs_sys().get_attr_0_7())
-                .set_exe(0)
-                .value(),
+            DescriptorAttr0_7::new(Self::entry_cs_sys().get_attr_0_7()).set_exe(0).value(),
         )
         //Descriptor { value: 0xcf93000000ffff }
+
     }
 
     pub const fn entry_ds_user() -> Self {
         Self::entry_ds_sys().set_attr_0_7(
-            DescriptorAttr0_7::new(Self::entry_cs_sys().get_attr_0_7())
-                .set_dpl(3)
-                .value(),
+            DescriptorAttr0_7::new(Self::entry_cs_sys().get_attr_0_7()).set_dpl(3).value(),
         )
     }
 }
-}
 
+} // verus!
 verus! {
-pub type GDT = Array<u64_s, 32>;
-}
 
+pub type GDT = Array<u64_s, 32>;
+
+} // verus!
 verismo_simple! {
     #[repr(C, packed)]
     #[derive(VDefault)]

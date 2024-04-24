@@ -5,7 +5,8 @@ use crate::arch::entities::MemID;
 use crate::arch::pgtable::*;
 use crate::tspec::*;
 
-verus!{
+verus! {
+
 /// Define TLB as a structural struct;
 /// Use the hidden private int to represent the instance
 /// but will never use the hidden int directly
@@ -15,4 +16,5 @@ pub struct TLB {
 }
 
 pub struct TLBIdx(pub MemID, pub GVN);
-}
+
+} // verus!

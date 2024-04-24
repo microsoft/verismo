@@ -5,7 +5,8 @@ use crate::arch::ramdb::RamDB;
 use crate::arch::rmp::RmpEntry;
 use crate::tspec::*;
 
-verus!{
+verus! {
+
 /// SEV-SNP only prevents software-based integrity attack.
 /// Active DRAM corruption is not resolved.
 ///
@@ -18,4 +19,5 @@ pub struct VRamDB {
     pub sram: RamDB,
     pub rmp: Map<SPN, RmpEntry>,
 }
-}
+
+} // verus!

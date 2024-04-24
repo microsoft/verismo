@@ -14,6 +14,7 @@ use crate::snp::SnpCoreSharedMem;
 use crate::vbox::{MutFnTrait, MutFnWithCSTrait, VBox};
 
 verus! {
+
 #[vbit_struct(SevFeatures, u64)]
 pub struct SevFeaturesSpec {
     #[vbits(0, 0)]
@@ -31,8 +32,8 @@ pub struct SevFeaturesSpec {
     #[vbits(9, 9)]
     secure_tsc: u64,
 }
-}
 
+} // verus!
 verismo_simple! {
 #[derive(VPrint)]
 #[repr(C, align(1))]
@@ -122,160 +123,184 @@ pub struct Vmsa {
 pub type VmsaPage = Vmsa;
 
 verus! {
+
 proof fn proof_vmsa_size()
-ensures
-    spec_size::<VmsaPage>() == spec_cast_integer::<_, nat>(PAGE_SIZE!())
-{}
+    ensures
+        spec_size::<VmsaPage>() == spec_cast_integer::<_, nat>(PAGE_SIZE!()),
+{
 }
 
+} // verus!
 def_asm_addr_for! {
     ap_entry_addr = ap_entry
 }
 
 verus! {
+
 #[derive(IsConstant, WellFormed, SpecSize, VTypeCastSec)]
 pub struct PerCpuData<'a> {
     pub secret: &'a SnpSecretsPageLayout,
     pub cpu: u32,
     pub resvd: u32,
 }
-}
 
+} // verus!
 verus! {
+
 impl<'a> PerCpuData<'a> {
     pub open spec fn inv(&self) -> bool {
         &&& self.wf()
         &&& self.secret.wf_mastersecret()
     }
 }
+
+} // verus!
+verus! {
+
+pub open spec fn ensures_init_ap_vmsa(
+    vmsa: Vmsa,
+    new_vmsa: Vmsa,
+    cpu: VBox<PerCpuData>,
+    cs: SnpCoreSharedMem,
+    newcs: SnpCoreSharedMem,
+) -> bool {
+    &&& newcs.inv_ac()
+    &&& newcs.only_lock_reg_updated(cs, set![], set![spec_ALLOCATOR_lockid()])
+    &&& vmsa.is_constant() ==> new_vmsa.is_constant()
+    &&& (new_vmsa.rdi@.val) == cpu.id()
+    &&& (new_vmsa.rsp@.val) != 0
+    &&& (new_vmsa.vmpl@.val == 0)
 }
 
-verus! {
-    pub open spec fn ensures_init_ap_vmsa(
-        vmsa: Vmsa, new_vmsa: Vmsa, cpu: VBox<PerCpuData>, cs: SnpCoreSharedMem, newcs: SnpCoreSharedMem
-    ) -> bool {
-        &&& newcs.inv_ac()
-        &&& newcs.only_lock_reg_updated(cs, set![], set![spec_ALLOCATOR_lockid()])
-        &&& vmsa.is_constant() ==> new_vmsa.is_constant()
-        &&& (new_vmsa.rdi@.val) == cpu.id()
-        &&& (new_vmsa.rsp@.val) != 0
-        &&& (new_vmsa.vmpl@.val == 0)
-    }
+pub open spec fn requires_init_ap_vmsa(
+    cpu: VBox<PerCpuData>,
+    gdt: &GDT,
+    cs: SnpCoreSharedMem,
+) -> bool {
+    &&& cs.inv_ac()
+    &&& gdt@.is_constant()
+    &&& cpu.wf()
+    &&& cpu@.inv()
+}
 
-    pub open spec fn requires_init_ap_vmsa(cpu: VBox<PerCpuData>, gdt: &GDT, cs: SnpCoreSharedMem) -> bool {
-        &&& cs.inv_ac()
-        &&& gdt@.is_constant()
-        &&& cpu.wf()
-        &&& cpu@.inv()
-    }
-
-    fn init_ap_vmsa<'a>(
-        vmsa: &mut Vmsa,
-        cpu: VBox<PerCpuData>,
-        gdt: &GDT,
-        Tracked(cs): Tracked<&mut SnpCoreSharedMem>,
-    )
+fn init_ap_vmsa<'a>(
+    vmsa: &mut Vmsa,
+    cpu: VBox<PerCpuData>,
+    gdt: &GDT,
+    Tracked(cs): Tracked<&mut SnpCoreSharedMem>,
+)
     requires
-        requires_init_ap_vmsa(cpu, gdt, *old(cs))
+        requires_init_ap_vmsa(cpu, gdt, *old(cs)),
     ensures
         ensures_init_ap_vmsa(*old(vmsa), *vmsa, cpu, *old(cs), *cs),
-    {
-        let stack = VBox::<StackPages>::new_aligned_uninit(PAGE_SIZE, Tracked(cs));
-
-        // Copy control registers
-        vmsa.efer = Msr{reg: MSR_EFER_BASE.into()}.read(
-            Tracked(cs.snpcore.regs.tracked_borrow(RegName::MSR(MSR_EFER_BASE))));
-        vmsa.xcr0 = XCR0.read(Tracked(cs.snpcore.regs.tracked_borrow(RegName::XCr0)));
-        vmsa.cr0 = CR0.read(Tracked(cs.snpcore.regs.tracked_borrow(RegName::Cr0)));
-        vmsa.cr3 = CR3.read(Tracked(cs.snpcore.regs.tracked_borrow(RegName::Cr3)));
-        vmsa.cr4 = CR4.read(Tracked(cs.snpcore.regs.tracked_borrow(RegName::Cr4)));
-
-        // Set AP entry address
-        vmsa.rip = ap_entry_addr().into();
-        // Default PAT
-        vmsa.gpat = crate::pgtable_e::PAT_RESET_VAL.into();
-        vmsa.rdi = cpu.into_raw().0.as_u64().into();
-        // Set stack end addr
-        vmsa.rsp = (stack.into_raw().0.to_usize() + size_of::<StackPages>()).into();
-        // Enable SNP
-        // Use restricted injection
-        let sev_features = SevFeatures::empty().set_snp(1u64)
-            .set_vtom(0u64)
-            .set_reflectvc(0u64)
-            .set_restrict_inj(1u64)
-            .set_alternate_inj(0u64);
-        vmsa.sev_features = sev_features.value.into();
-        vmsa.vmpl = 0u64.into();
-
-        // Reuse GDT
-        let gdtr = GdtBaseLimit.read(
-            Tracked(cs.snpcore.regs.tracked_borrow(RegName::GdtrBaseLimit)));
-        vmsa.gdtr.base = gdtr.base;
-        vmsa.gdtr.limit = gdtr.limit.into();
-        //let gdt_ptr = SnpPPtr::from_usize(gdtr.base as usize);
-        //let gdt = gdt_ptr.borrow(Tracked(gdt_perm));
-        fill_seg(&mut vmsa.cs, gdt, GDT_KERNEL_CS, GDTR_LIMIT, GDTR_BASE);
-        fill_seg(&mut vmsa.es, gdt, GDT_KERNEL_DS, GDTR_LIMIT, GDTR_BASE);
-        fill_seg(&mut vmsa.ss, gdt, GDT_KERNEL_DS, GDTR_LIMIT, GDTR_BASE);
-        fill_seg(&mut vmsa.ds, gdt, GDT_KERNEL_DS, GDTR_LIMIT, GDTR_BASE);
-
-    }
+{
+    let stack = VBox::<StackPages>::new_aligned_uninit(PAGE_SIZE, Tracked(cs));
+    // Copy control registers
+    vmsa.efer = Msr { reg: MSR_EFER_BASE.into() }.read(
+        Tracked(cs.snpcore.regs.tracked_borrow(RegName::MSR(MSR_EFER_BASE))),
+    );
+    vmsa.xcr0 = XCR0.read(Tracked(cs.snpcore.regs.tracked_borrow(RegName::XCr0)));
+    vmsa.cr0 = CR0.read(Tracked(cs.snpcore.regs.tracked_borrow(RegName::Cr0)));
+    vmsa.cr3 = CR3.read(Tracked(cs.snpcore.regs.tracked_borrow(RegName::Cr3)));
+    vmsa.cr4 = CR4.read(Tracked(cs.snpcore.regs.tracked_borrow(RegName::Cr4)));
+    // Set AP entry address
+    vmsa.rip = ap_entry_addr().into();
+    // Default PAT
+    vmsa.gpat = crate::pgtable_e::PAT_RESET_VAL.into();
+    vmsa.rdi = cpu.into_raw().0.as_u64().into();
+    // Set stack end addr
+    vmsa.rsp = (stack.into_raw().0.to_usize() + size_of::<StackPages>()).into();
+    // Enable SNP
+    // Use restricted injection
+    let sev_features = SevFeatures::empty().set_snp(1u64).set_vtom(0u64).set_reflectvc(
+        0u64,
+    ).set_restrict_inj(1u64).set_alternate_inj(0u64);
+    vmsa.sev_features = sev_features.value.into();
+    vmsa.vmpl = 0u64.into();
+    // Reuse GDT
+    let gdtr = GdtBaseLimit.read(Tracked(cs.snpcore.regs.tracked_borrow(RegName::GdtrBaseLimit)));
+    vmsa.gdtr.base = gdtr.base;
+    vmsa.gdtr.limit = gdtr.limit.into();
+    //let gdt_ptr = SnpPPtr::from_usize(gdtr.base as usize);
+    //let gdt = gdt_ptr.borrow(Tracked(gdt_perm));
+    fill_seg(&mut vmsa.cs, gdt, GDT_KERNEL_CS, GDTR_LIMIT, GDTR_BASE);
+    fill_seg(&mut vmsa.es, gdt, GDT_KERNEL_DS, GDTR_LIMIT, GDTR_BASE);
+    fill_seg(&mut vmsa.ss, gdt, GDT_KERNEL_DS, GDTR_LIMIT, GDTR_BASE);
+    fill_seg(&mut vmsa.ds, gdt, GDT_KERNEL_DS, GDTR_LIMIT, GDTR_BASE);
 }
 
+} // verus!
 verus! {
+
 pub struct InitApVmsa;
+
 pub struct InitAPParams<'a> {
     pub fun: InitApVmsa,
     pub cpu: VBox<PerCpuData<'a>>,
     pub gdt: &'a GDT,
 }
+
 pub type InitAPOut = u8;
 
 impl<'a, 'b> MutFnWithCSTrait<'a, SnpCoreSharedMem, InitAPParams<'b>, InitAPOut> for VmsaPage {
-    open spec fn spec_update_cs_requires(&self, params: InitAPParams<'b>, cs: SnpCoreSharedMem) -> bool {
+    open spec fn spec_update_cs_requires(
+        &self,
+        params: InitAPParams<'b>,
+        cs: SnpCoreSharedMem,
+    ) -> bool {
         requires_init_ap_vmsa(params.cpu, params.gdt, cs)
     }
 
-    open spec fn spec_update_cs(&self, prev: &Self,
-        params: InitAPParams<'b>, oldcs: SnpCoreSharedMem,
-        ret: InitAPOut, cs: SnpCoreSharedMem) -> bool {
+    open spec fn spec_update_cs(
+        &self,
+        prev: &Self,
+        params: InitAPParams<'b>,
+        oldcs: SnpCoreSharedMem,
+        ret: InitAPOut,
+        cs: SnpCoreSharedMem,
+    ) -> bool {
         ensures_init_ap_vmsa(*prev, *self, params.cpu, oldcs, cs)
     }
 
-    fn box_update_cs(&'a mut self, params: InitAPParams<'b>, Tracked(cs): Tracked<&mut SnpCoreSharedMem>) -> (ret: u8)
-    {
+    fn box_update_cs(
+        &'a mut self,
+        params: InitAPParams<'b>,
+        Tracked(cs): Tracked<&mut SnpCoreSharedMem>,
+    ) -> (ret: u8) {
         init_ap_vmsa(self, params.cpu, params.gdt, Tracked(cs));
         0
     }
 }
-}
 
+} // verus!
 verus! {
-    pub fn fill_seg(
-        seg: &mut VmsaSegmentRegister,
-        gdt: &GDT,
-        gdt_idx: usize_t,
-        limit: u32_t,
-        base: u64_t,
-    )
+
+pub fn fill_seg(
+    seg: &mut VmsaSegmentRegister,
+    gdt: &GDT,
+    gdt_idx: usize_t,
+    limit: u32_t,
+    base: u64_t,
+)
     requires
         gdt_idx < gdt@.len(),
         gdt@.is_constant(),
     ensures
         seg.is_constant(),
-    {
-        assert(gdt_idx < 32);
-        let selector = (gdt_idx * 8usize);
-        let entry = Descriptor{value: (*gdt.index(gdt_idx)).into()};
-        let attr: u16 = (entry.get_attr_0_7() as u16) | (entry.get_attr_8_11() << 8u64) as u16;
-        seg.selector = selector.into();
-        seg.attr = attr.into();
-        seg.limit = limit.into();
-        seg.base = base.into();
-    }
+{
+    assert(gdt_idx < 32);
+    let selector = (gdt_idx * 8usize);
+    let entry = Descriptor { value: (*gdt.index(gdt_idx)).into() };
+    let attr: u16 = (entry.get_attr_0_7() as u16) | (entry.get_attr_8_11() << 8u64) as u16;
+    seg.selector = selector.into();
+    seg.attr = attr.into();
+    seg.limit = limit.into();
+    seg.base = base.into();
 }
 
+} // verus!
 verus! {
+
 pub struct UpdateRichOSVmsa<'a> {
     pub gdt: &'a GDT,
     pub gdtr_addr: u64,
@@ -283,8 +308,8 @@ pub struct UpdateRichOSVmsa<'a> {
     pub kernel_addr: u64,
     pub vmpl: u8,
 }
-}
 
+} // verus!
 verismo_simple! {
 pub struct UpdateRichOSVmsaOut;
 impl<'a, 'b> MutFnTrait<'a, UpdateRichOSVmsa<'b>, UpdateRichOSVmsaOut> for VmsaPage {

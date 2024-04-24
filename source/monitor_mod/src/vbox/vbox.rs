@@ -11,6 +11,7 @@ use crate::snp::ghcb::*;
 use crate::snp::SnpCoreSharedMem;
 
 verus! {
+
 #[verifier(external_body)]
 #[verifier::reject_recursive_types_in_ground_variants(T)]
 pub struct VBox<T> {
@@ -41,15 +42,15 @@ impl<T> VTypeCast<SecSeqByte> for VBox<T> {
 
 impl<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> VBox<T> {
     pub fn set(self, other: Self) -> (ret: Self)
-    requires
-        self.wf(),
-        other.wf(),
-    ensures
-        ret@ === other@,
-        self.snp() === ret.snp(),
-        ret.only_val_updated(self),
+        requires
+            self.wf(),
+            other.wf(),
+        ensures
+            ret@ === other@,
+            self.snp() === ret.snp(),
+            ret.only_val_updated(self),
     {
-        proof{
+        proof {
             proof_cast_from_seq_unique(other@);
         }
         let (dest, Tracked(dest_perm)) = self.into_raw();
@@ -57,15 +58,19 @@ impl<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> VBox<T> {
         let tracked mut src_perm = src_perm.tracked_into_raw();
         let tracked mut dest_perm = dest_perm.tracked_into_raw();
         mem_copy(
-            src.to_usize(), dest.to_usize(), size_of::<T>(),
-            Tracked(&mut src_perm), Tracked(&mut dest_perm)
+            src.to_usize(),
+            dest.to_usize(),
+            size_of::<T>(),
+            Tracked(&mut src_perm),
+            Tracked(&mut dest_perm),
         );
         let other = VBox::<T>::from_raw(src.to_usize(), Tracked(src_perm.tracked_into()));
-
         VBox::from_raw(dest.to_usize(), Tracked(dest_perm.tracked_into()))
     }
 
-    pub fn to<T2: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>>(self) -> (ret: VBox<T2>)
+    pub fn to<T2: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>>(self) -> (ret: VBox<
+        T2,
+    >)
         requires
             spec_size::<T>() == spec_size::<T2>(),
             is_castable::<T, T2>(self@),
@@ -73,18 +78,19 @@ impl<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> VBox<T> {
         ensures
             self.snp() === ret.snp(),
             self.id() == ret.id(),
-            VTypeCast::<SecSeqByte>::vspec_cast_to(self@) === VTypeCast::<SecSeqByte>::vspec_cast_to(ret@),
+            VTypeCast::<SecSeqByte>::vspec_cast_to(self@) === VTypeCast::<
+                SecSeqByte,
+            >::vspec_cast_to(ret@),
             ret.wf(),
     {
         let (ptr, Tracked(perm0)) = self.into_raw();
         let tracked raw = perm0.tracked_into_raw();
         let tracked perm = raw.tracked_into();
-        proof{
+        proof {
             assert(perm@.wf());
             proof_into_is_constant::<T, SecSeqByte>(perm0@.get_value());
             proof_into_is_constant::<SecSeqByte, T2>(raw@.bytes());
         }
-
         VBox::from_raw(ptr.to_usize(), Tracked(perm))
     }
 }
@@ -111,15 +117,18 @@ impl<T: IsConstant + WellFormed> VBox<T> {
     }
 }
 
-impl<T: IsConstant + WellFormed>  WellFormed for VBox<T> {
+impl<T: IsConstant + WellFormed> WellFormed for VBox<T> {
     open spec fn wf(&self) -> bool {
         &&& inv_snp_value(self.snp(), self.view())
         &&& self.id().spec_valid_addr_with(spec_size::<T>())
     }
 }
+
 impl<T> VBox<T> {
     pub closed spec fn view(&self) -> T;
+
     pub closed spec fn id(&self) -> int;
+
     pub closed spec fn snp(&self) -> SwSnpMemAttr;
 
     pub open spec fn spec_eq(self, other: Self) -> bool {
@@ -135,21 +144,20 @@ impl<T> VBox<T> {
 }
 
 impl<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> VBox<T> {
-    pub fn new_aligned_uninit(
-        align: usize,
-        Tracked(cs): Tracked<&mut SnpCoreSharedMem>) -> (ret: VBox<T>)
-    requires
-        (*old(cs)).inv_ac(),
-        spec_bit64_is_pow_of_2(align as int),
-        spec_size::<T>() >= VeriSMoAllocator::spec_minsize(),
-    ensures
-        (*cs).inv_ac(),
-        (*cs).only_lock_reg_updated((*old(cs)), set![], set![spec_ALLOCATOR_lockid()]),
-        ret.id() % (align as int) == 0,
-        ret.id().spec_valid_addr_with(spec_size::<T>()),
-        ret.snp() === SwSnpMemAttr::spec_default(),
-        ret.wf(),
-        ret@.is_constant(),
+    pub fn new_aligned_uninit(align: usize, Tracked(cs): Tracked<&mut SnpCoreSharedMem>) -> (ret:
+        VBox<T>)
+        requires
+            (*old(cs)).inv_ac(),
+            spec_bit64_is_pow_of_2(align as int),
+            spec_size::<T>() >= VeriSMoAllocator::spec_minsize(),
+        ensures
+            (*cs).inv_ac(),
+            (*cs).only_lock_reg_updated((*old(cs)), set![], set![spec_ALLOCATOR_lockid()]),
+            ret.id() % (align as int) == 0,
+            ret.id().spec_valid_addr_with(spec_size::<T>()),
+            ret.snp() === SwSnpMemAttr::spec_default(),
+            ret.wf(),
+            ret@.is_constant(),
     {
         use crate::global::*;
         let tracked perm = cs.lockperms.tracked_remove(spec_ALLOCATOR_lockid());
@@ -162,13 +170,14 @@ impl<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> VBox<T> {
         }
         let size = size_of::<T>();
         let result = ALLOCATOR().alloc_aligned(
-            size, align,
-            Tracked(&mut perm0), Tracked(&cs.snpcore.coreid));
+            size,
+            align,
+            Tracked(&mut perm0),
+            Tracked(&cs.snpcore.coreid),
+        );
         proof {
-            cs.lockperms.tracked_insert(
-                spec_ALLOCATOR_lockid(), perm0.tracked_remove(0));
+            cs.lockperms.tracked_insert(spec_ALLOCATOR_lockid(), perm0.tracked_remove(0));
         }
-
         if result.is_err() {
             use crate::debug::VEarlyPrintAtLevel;
             new_strlit("\nfailed new_aligned_uninit\n").leak_debug();
@@ -179,39 +188,36 @@ impl<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> VBox<T> {
     }
 
     #[inline(always)]
-    pub fn new_uninit(
-        Tracked(cs): Tracked<&mut SnpCoreSharedMem>) -> (ret: VBox<T>)
-    requires
-        (*old(cs)).lockperms.contains_vlock(spec_ALLOCATOR()),
-        (*old(cs)).inv(),
-        spec_size::<T>() >= VeriSMoAllocator::spec_minsize(),
-    ensures
-        (*cs).only_lock_reg_updated((*old(cs)), set![], set![spec_ALLOCATOR_lockid()]),
-        (*cs).inv(),
-        ret.id().spec_valid_addr_with(spec_size::<T>()),
-        ret.snp() === SwSnpMemAttr::spec_default(),
-        ret@.is_constant(),
+    pub fn new_uninit(Tracked(cs): Tracked<&mut SnpCoreSharedMem>) -> (ret: VBox<T>)
+        requires
+            (*old(cs)).lockperms.contains_vlock(spec_ALLOCATOR()),
+            (*old(cs)).inv(),
+            spec_size::<T>() >= VeriSMoAllocator::spec_minsize(),
+        ensures
+            (*cs).only_lock_reg_updated((*old(cs)), set![], set![spec_ALLOCATOR_lockid()]),
+            (*cs).inv(),
+            ret.id().spec_valid_addr_with(spec_size::<T>()),
+            ret.snp() === SwSnpMemAttr::spec_default(),
+            ret@.is_constant(),
     {
         VBox::new_aligned_uninit(1, Tracked(cs))
     }
 
     #[inline(always)]
-    pub fn new_aligned(
-        align: usize,
-        val: T,
-        Tracked(cs): Tracked<&mut SnpCoreSharedMem>) -> (ret: VBox<T>)
-    requires
-        (*old(cs)).inv_ac(),
-        spec_bit64_is_pow_of_2(align as int),
-        spec_size::<T>() >= VeriSMoAllocator::spec_minsize(),
-        val.wf(),
-    ensures
-        (*cs).inv_ac(),
-        (*cs).only_lock_reg_updated((*old(cs)), set![], set![spec_ALLOCATOR_lockid()]),
-        ret.id() % (align as int) == 0,
-        ret.snp() === SwSnpMemAttr::spec_default(),
-        ret@ === val,
-        ret.wf(),
+    pub fn new_aligned(align: usize, val: T, Tracked(cs): Tracked<&mut SnpCoreSharedMem>) -> (ret:
+        VBox<T>)
+        requires
+            (*old(cs)).inv_ac(),
+            spec_bit64_is_pow_of_2(align as int),
+            spec_size::<T>() >= VeriSMoAllocator::spec_minsize(),
+            val.wf(),
+        ensures
+            (*cs).inv_ac(),
+            (*cs).only_lock_reg_updated((*old(cs)), set![], set![spec_ALLOCATOR_lockid()]),
+            ret.id() % (align as int) == 0,
+            ret.snp() === SwSnpMemAttr::spec_default(),
+            ret@ === val,
+            ret.wf(),
     {
         let b = Self::new_aligned_uninit(align, Tracked(cs));
         let (ptr, Tracked(mut perm)) = b.into_raw();
@@ -220,21 +226,29 @@ impl<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> VBox<T> {
     }
 
     #[inline(always)]
-    pub fn new_shared_page(align: usize, ghcb_h: GhcbHandle, Tracked(cs): Tracked<&mut SnpCoreSharedMem>) -> (ret: (VBox<T>, GhcbHandle))
-    requires
-        (*old(cs)).inv_ac(),
-        ghcb_h.ghcb_wf(),
-        spec_bit64_is_pow_of_2(align as int),
-        align > 0,
-        align % PAGE_SIZE == 0,
-        spec_size::<T>() == PAGE_SIZE,
-    ensures
-        (*cs).inv_ac(),
-        (*cs).only_lock_reg_coremode_updated((*old(cs)), set![], set![spec_ALLOCATOR_lockid(), spec_PT_lockid()]),
-        ret.0.is_shared_page(),
-        ret.0@.is_constant(),
-        ret.1.ghcb_wf(),
-        ret.1.only_val_updated(ghcb_h),
+    pub fn new_shared_page(
+        align: usize,
+        ghcb_h: GhcbHandle,
+        Tracked(cs): Tracked<&mut SnpCoreSharedMem>,
+    ) -> (ret: (VBox<T>, GhcbHandle))
+        requires
+            (*old(cs)).inv_ac(),
+            ghcb_h.ghcb_wf(),
+            spec_bit64_is_pow_of_2(align as int),
+            align > 0,
+            align % PAGE_SIZE == 0,
+            spec_size::<T>() == PAGE_SIZE,
+        ensures
+            (*cs).inv_ac(),
+            (*cs).only_lock_reg_coremode_updated(
+                (*old(cs)),
+                set![],
+                set![spec_ALLOCATOR_lockid(), spec_PT_lockid()],
+            ),
+            ret.0.is_shared_page(),
+            ret.0@.is_constant(),
+            ret.1.ghcb_wf(),
+            ret.1.only_val_updated(ghcb_h),
     {
         let ghost cs1 = *cs;
         let onepage = VBox::<T>::new_aligned_uninit(align, Tracked(cs));
@@ -246,50 +260,61 @@ impl<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> VBox<T> {
         }
         let ghost cs2 = *cs;
         let ret = onepage.mk_shared_page(ghcb_h, Tracked(cs));
-        proof{
-            cs1.lemma_update_prop(cs2, *cs, set![], set![spec_ALLOCATOR_lockid()], set![], set![spec_PT_lockid()]);
-            assert(set![spec_ALLOCATOR_lockid()].union(set![spec_PT_lockid()]) =~~= set![spec_ALLOCATOR_lockid(), spec_PT_lockid()])
+        proof {
+            cs1.lemma_update_prop(
+                cs2,
+                *cs,
+                set![],
+                set![spec_ALLOCATOR_lockid()],
+                set![],
+                set![spec_PT_lockid()],
+            );
+            assert(set![spec_ALLOCATOR_lockid()].union(set![spec_PT_lockid()])
+                =~~= set![spec_ALLOCATOR_lockid(), spec_PT_lockid()])
         }
         ret
     }
 
     #[inline(always)]
     pub fn new(v: T, Tracked(cs): Tracked<&mut SnpCoreSharedMem>) -> (ret: VBox<T>)
-    requires
-        (*old(cs)).lockperms.contains_vlock(spec_ALLOCATOR()),
-        (*old(cs)).inv(),
-        spec_size::<T>() >= VeriSMoAllocator::spec_minsize(),
-        v.wf(),
-    ensures
-        cs.only_lock_reg_updated((*old(cs)), set![], set![spec_ALLOCATOR().lockid()]),
-        cs.inv(),
-        ret.id().spec_valid_addr_with(spec_size::<T>()),
-        ret@ === v,
-        ret.snp() === SwSnpMemAttr::spec_default(),
-        ret.wf(),
+        requires
+            (*old(cs)).lockperms.contains_vlock(spec_ALLOCATOR()),
+            (*old(cs)).inv(),
+            spec_size::<T>() >= VeriSMoAllocator::spec_minsize(),
+            v.wf(),
+        ensures
+            cs.only_lock_reg_updated((*old(cs)), set![], set![spec_ALLOCATOR().lockid()]),
+            cs.inv(),
+            ret.id().spec_valid_addr_with(spec_size::<T>()),
+            ret@ === v,
+            ret.snp() === SwSnpMemAttr::spec_default(),
+            ret.wf(),
     {
         VBox::new_aligned(1, v, Tracked(cs))
     }
 
-    pub fn mk_shared_page(self, ghcb_h: GhcbHandle, Tracked(cs): Tracked<&mut SnpCoreSharedMem>) -> (ret: (VBox<T>, GhcbHandle))
-    requires
-        (*old(cs)).inv_ac(),
-        ghcb_h.ghcb_wf(),
-        self.is_default_page(),
-        self@.is_constant(),
-        spec_size::<T>() == PAGE_SIZE,
-    ensures
-        cs.inv_ac(),
-        cs.only_lock_reg_coremode_updated((*old(cs)), set![], set![spec_PT_lockid()]),
-        ret.0.is_shared_page(),
-        ret.0@.is_constant(),
-        ret.1.ghcb_wf(),
-        ret.1.only_val_updated(ghcb_h),
+    pub fn mk_shared_page(
+        self,
+        ghcb_h: GhcbHandle,
+        Tracked(cs): Tracked<&mut SnpCoreSharedMem>,
+    ) -> (ret: (VBox<T>, GhcbHandle))
+        requires
+            (*old(cs)).inv_ac(),
+            ghcb_h.ghcb_wf(),
+            self.is_default_page(),
+            self@.is_constant(),
+            spec_size::<T>() == PAGE_SIZE,
+        ensures
+            cs.inv_ac(),
+            cs.only_lock_reg_coremode_updated((*old(cs)), set![], set![spec_PT_lockid()]),
+            ret.0.is_shared_page(),
+            ret.0@.is_constant(),
+            ret.1.ghcb_wf(),
+            ret.1.only_val_updated(ghcb_h),
     {
         let onepage = self;
         let (onepage, Tracked(mut perm)) = onepage.into_raw();
         let page: usize = onepage.to_usize().to_page();
-
         let tracked mut page_perms = Map::tracked_empty();
         let tracked prev_perm = perm.tracked_into_raw();
         proof {
@@ -300,14 +325,20 @@ impl<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> VBox<T> {
         }
         let ghcb_h = ghcb_h.mk_shared(page as u64, 1, Tracked(cs), Tracked(&mut page_perms));
         proof {
-            crate::snp::mem::lemma_mk_shared_default_to_shared(prev_perm@, page_perms[page as int]@);
+            crate::snp::mem::lemma_mk_shared_default_to_shared(
+                prev_perm@,
+                page_perms[page as int]@,
+            );
         }
-        let onepage = VBox::from_raw(page.to_addr(), Tracked(page_perms.tracked_remove(page as int).tracked_into()));
+        let onepage = VBox::from_raw(
+            page.to_addr(),
+            Tracked(page_perms.tracked_remove(page as int).tracked_into()),
+        );
         (onepage, ghcb_h)
     }
 }
-}
 
+} // verus!
 verismo_simple! {
 impl<T: IsConstant + WellFormed + SpecSize> VBox<T> {
     #[verifier(external_body)]

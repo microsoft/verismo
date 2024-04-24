@@ -4,6 +4,7 @@ use super::*;
 use crate::vbox::*;
 
 verus! {
+
 impl<T: WellFormed> WellFormed for Vec<T> {
     open spec fn wf(&self) -> bool {
         &&& self@.wf()
@@ -20,8 +21,7 @@ impl<T: IsConstant + WellFormed> IsConstant for Vec<T> {
     }
 }
 
-impl<T: ToSecSeq> VTypeCast<SecSeqByte> for Vec<T>
-{
+impl<T: ToSecSeq> VTypeCast<SecSeqByte> for Vec<T> {
     open spec fn vspec_cast_to(self) -> SecSeqByte {
         self@.vspec_cast_to()
     }
@@ -31,9 +31,10 @@ impl<T: SpecSize> SpecSize for Vec<T> {
     open spec fn spec_size_def() -> nat;
 }
 
-pub struct PushParam <T>{
-    pub val: T
+pub struct PushParam<T> {
+    pub val: T,
 }
+
 impl<'a, T> MutFnTrait<'a, PushParam<T>, bool> for Vec<T> {
     open spec fn spec_update_requires(&self, params: PushParam<T>) -> bool {
         true
@@ -49,9 +50,10 @@ impl<'a, T> MutFnTrait<'a, PushParam<T>, bool> for Vec<T> {
     }
 }
 
-struct RemoveParam{
-    i: usize
+struct RemoveParam {
+    i: usize,
 }
+
 impl<'a, T> MutFnTrait<'a, RemoveParam, T> for Vec<T> {
     closed spec fn spec_update_requires(&self, params: RemoveParam) -> bool {
         0 <= params.i < self.len()
@@ -70,24 +72,23 @@ impl<'a, T> MutFnTrait<'a, RemoveParam, T> for Vec<T> {
 
 impl<T> VBox<Vec<T>> {
     pub fn remove(&mut self, i: usize) -> (ret: T)
-    requires
-        0 <= i < old(self)@.len(),
-    ensures
-        self.snp().is_vmpl0_private() ==>
-            self@@ === old(self)@@.remove(i as int),
-        self.only_val_updated(*old(self)),
-        ret === old(self)@@[i as int],
+        requires
+            0 <= i < old(self)@.len(),
+        ensures
+            self.snp().is_vmpl0_private() ==> self@@ === old(self)@@.remove(i as int),
+            self.only_val_updated(*old(self)),
+            ret === old(self)@@[i as int],
     {
-        self.box_update(RemoveParam{i})
+        self.box_update(RemoveParam { i })
     }
 
     pub fn push(&mut self, val: T)
-    ensures
-        self.snp().is_vmpl0_private() ==>
-            self@@ === old(self)@@.push(val),
-        self.only_val_updated(*old(self)),
+        ensures
+            self.snp().is_vmpl0_private() ==> self@@ === old(self)@@.push(val),
+            self.only_val_updated(*old(self)),
     {
-        self.box_update(PushParam{val});
+        self.box_update(PushParam { val });
     }
 }
-}
+
+} // verus!

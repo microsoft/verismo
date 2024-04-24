@@ -42,27 +42,29 @@ use crate::vbox::VBox;
 static _RICHOS_VMSA: VSpinLock<Vec<Option<VBox<VmsaPage>>>> = VSpinLock::new(Vec::new());
 
 verus! {
-    pub open spec fn richos_vmsa_invfn()-> spec_fn(Vec<Option<VBox<VmsaPage>>>) -> bool
-    {
-        |vec: Vec<Option<VBox<VmsaPage>>>| forall |i|
-            0 <= i < vec@.len() ==>
-                vec[i].is_Some() ==> (#[trigger]vec[i]).get_Some_0().is_page()
-    }
+
+pub open spec fn richos_vmsa_invfn() -> spec_fn(Vec<Option<VBox<VmsaPage>>>) -> bool {
+    |vec: Vec<Option<VBox<VmsaPage>>>|
+        forall|i|
+            0 <= i < vec@.len() ==> vec[i].is_Some() ==> (#[trigger] vec[i]).get_Some_0().is_page()
 }
 
+} // verus!
 use trusted_hacl::SHA512Type;
 #[verifier::external]
 pub static _PCR: VSpinLock<Vec<SHA512Type>> = VSpinLock::new(Vec::new());
 
 verus! {
-pub closed spec fn g_range(id: Globals) -> (int, nat);
-}
 
+pub closed spec fn g_range(id: Globals) -> (int, nat);
+
+} // verus!
 use self::trusted::_ALLOCATOR;
 use crate::lock::MapRawLockTrait;
 use crate::pgtable_e::TrackedPTEPerms;
 
 verus! {
+
 #[gen_shared_globals]
 pub enum Globals {
     #[tname(_ALLOCATOR, VeriSMoAllocator, VeriSMoAllocator::invfn())]
@@ -80,17 +82,19 @@ pub enum Globals {
     #[tname(_PCR, Vec<SHA512Type>, crate::security::pcr::pcr_invfn())]
     PCR,
 }
-}
 
+} // verus!
 verus! {
+
 pub open spec fn is_alloc_perm(alloc_perm: SnpPointsToData<VeriSMoAllocator>) -> bool {
     &&& alloc_perm.wf_const_default(spec_ALLOCATOR().ptrid())
     &&& alloc_perm.get_value()@.inv()
     &&& alloc_perm.get_value().is_constant()
 }
-}
 
+} // verus!
 verus! {
+
 pub trait IsConsole {
     spec fn is_console(&self) -> bool;
 }
@@ -101,4 +105,5 @@ impl IsConsole for SnpPointsToRaw {
         &&& self@.snp() === SwSnpMemAttr::spec_default()
     }
 }
-}
+
+} // verus!

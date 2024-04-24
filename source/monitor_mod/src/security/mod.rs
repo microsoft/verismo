@@ -24,15 +24,24 @@ pub use monitor::*;
 pub use secret::*;
 
 verus! {
-pub const MAX_AUTHTAG_LEN: usize = 32;
-pub const SNP_AEAD_AES_256_GCM: u8 = 1;
-pub const MSG_HDR_VER: u8 = 1;
-pub const SNP_GUEST_MSG_TYPE_REQ: u8 = 5;
-pub const SNP_GUEST_MSG_TYPE_RESP: u8 = 6;
-pub const SNP_ERR_REQ_RESP_MSG: u8 = 0xff;
-pub const VERISMO_VMPCK_ID: u8 = 0;
-}
 
+pub const USER_DATA_LEN: usize = 64;
+
+pub const MAX_AUTHTAG_LEN: usize = 32;
+
+pub const SNP_AEAD_AES_256_GCM: u8 = 1;
+
+pub const MSG_HDR_VER: u8 = 1;
+
+pub const SNP_GUEST_MSG_TYPE_REQ: u8 = 5;
+
+pub const SNP_GUEST_MSG_TYPE_RESP: u8 = 6;
+
+pub const SNP_ERR_REQ_RESP_MSG: u8 = 0xff;
+
+pub const VERISMO_VMPCK_ID: u8 = 0;
+
+} // verus!
 verismo_simple! {
     #[repr(C, align(1))]
     #[derive(Copy, VClone)]
@@ -48,10 +57,12 @@ verismo_simple! {
 }
 
 verus! {
-pub const MAX_SNP_MSG_SZ: u16 = 4000;
-pub const MAX_SNP_MSG_SZ_USIZE: usize = MAX_SNP_MSG_SZ as usize;
-}
 
+pub const MAX_SNP_MSG_SZ: u16 = 4000;
+
+pub const MAX_SNP_MSG_SZ_USIZE: usize = MAX_SNP_MSG_SZ as usize;
+
+} // verus!
 verismo_simple! {
     type SnpGuestMsgPayload = Array<u8, MAX_SNP_MSG_SZ_USIZE>;
     #[repr(C, align(1))]
@@ -101,15 +112,18 @@ verismo_simple! {
 }
 
 verus! {
-    proof fn proof_msg_hdr_size()
-    ensures
-    spec_size::<SnpGuestMsgHdr>() == AsNat!(0x60)
-    {}
 
-    impl SnpGuestChannel {
-        pub open spec fn wf(&self) -> bool {
-            &&& self.req.is_shared_page()
-            &&& self.resp.is_shared_page()
-        }
+proof fn proof_msg_hdr_size()
+    ensures
+        spec_size::<SnpGuestMsgHdr>() == AsNat!(0x60),
+{
+}
+
+impl SnpGuestChannel {
+    pub open spec fn wf(&self) -> bool {
+        &&& self.req.is_shared_page()
+        &&& self.resp.is_shared_page()
     }
 }
+
+} // verus!

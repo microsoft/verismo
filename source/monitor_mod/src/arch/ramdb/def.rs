@@ -9,11 +9,13 @@ pub type MemKey = SymKey<(ASID, int)>;
 
 pub type EncryptedByte = Encrypted<MemKey, Byte>;
 
-verus!{
+verus! {
+
 #[derive(SpecGetter, SpecSetter)]
 pub struct RamDB {
     pub data: Seq<EncryptedByte>,
     pub write_count: int,
     pub crypto_mask: Seq<CryptoMask>,
 }
-}
+
+} // verus!

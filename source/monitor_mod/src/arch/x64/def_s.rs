@@ -7,7 +7,8 @@ use crate::arch::memop::MemOp;
 use crate::arch::reg::*;
 use crate::tspec::*;
 
-verus!{
+verus! {
+
 #[is_variant]
 pub enum Archx64Op {
     MemOp(MemOp<GuestVir>, CPU),
@@ -65,4 +66,5 @@ pub enum ExceptionCode {
     PFault(Archx64Op),
     GP(Archx64Op),
 }
-}
+
+} // verus!

@@ -1,7 +1,8 @@
 use super::*;
 use crate::tspec_e::*;
 
-verus!{
+verus! {
+
 global size_of usize == 8;
 
 #[derive(Copy, Clone, VTypeCast, ExecStruct, NotPrimitive, VTypeCastSec, SpecSize, WellFormed, IsConstant)]
@@ -13,13 +14,21 @@ pub struct GuestPhy;
 #[derive(Copy, Clone, VTypeCast, ExecStruct, NotPrimitive, VTypeCastSec, SpecSize, WellFormed, IsConstant)]
 pub struct SysPhy;
 
-pub trait AddrType {}
+pub trait AddrType {
 
-impl AddrType for GuestVir {}
+}
 
-impl AddrType for GuestPhy {}
+impl AddrType for GuestVir {
 
-impl AddrType for SysPhy {}
+}
+
+impl AddrType for GuestPhy {
+
+}
+
+impl AddrType for SysPhy {
+
+}
 
 pub type SizeType = u64;
 
@@ -44,15 +53,21 @@ pub struct SpecMem<T> {
 }
 
 pub type GVN = SpecPage<GuestVir>;
+
 pub type GPN = SpecPage<GuestPhy>;
+
 pub type SPN = SpecPage<SysPhy>;
 
 pub type GVA = SpecAddr<GuestVir>;
+
 pub type GPA = SpecAddr<GuestPhy>;
+
 pub type SPA = SpecAddr<SysPhy>;
 
 pub type GVMem = SpecMem<GuestVir>;
+
 pub type GPMem = SpecMem<GuestPhy>;
+
 pub type SPMem = SpecMem<SysPhy>;
 
 // VM constants
@@ -102,4 +117,5 @@ impl PageSize {
     }
 }
 }
-}
+
+} // verus!

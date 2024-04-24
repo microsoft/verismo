@@ -126,8 +126,6 @@ verus! {
         // making a unknown data to public to vmpl/hv.
         // Data with other labels cannot become public through this API.
         pub exec fn downgrade_security(&mut self, Ghost(vmpl): Ghost<nat>)
-        /*requires
-            !old(self)@.labels[vmpl].is_Secret(),*/
         requires
             old(self).wf_value(),
         ensures

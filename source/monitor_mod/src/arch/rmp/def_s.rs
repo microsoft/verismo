@@ -5,7 +5,8 @@ use crate::arch::addr_s::*;
 use crate::arch::entities::*;
 use crate::arch::errors::*;
 use crate::tspec::*;
-verus!{
+verus! {
+
 #[derive(SpecGetter, SpecSetter)]
 pub ghost struct HiddenRmpEntryForPSP {
     pub immutable: bool,
@@ -23,12 +24,12 @@ pub ghost struct RmpEntry {
     pub val: HiddenRmpEntryForPSP,
 }
 
-
 impl RmpEntry {
     pub proof fn proof_eq(self, r: Self)
-    ensures
-        (self@ === r@) == (self === r)
-    {}
+        ensures
+            (self@ === r@) == (self === r),
+    {
+    }
 }
 
 pub ghost struct RmpAdjustParam {
@@ -46,6 +47,7 @@ pub ghost struct PvalidateParam {
 }
 
 pub type RmpUpdateParam = RmpEntry;
+
 pub type RmpMap = Map<SPN, RmpEntry>;
 
 #[is_variant]
@@ -67,4 +69,5 @@ crate::macro_const_int! {
     #[macro_export]
     pub const RMP_FAIL_SIZEMISMATCH: u64 = 6;
 }
-}
+
+} // verus!

@@ -4,6 +4,7 @@ use super::*;
 use crate::vbox::MutFnTrait;
 
 verus! {
+
 // DO not use secret as index.
 impl<T, const N: IndexType> Array<T, N> {
     verus! {
@@ -71,6 +72,7 @@ impl<T, const N: IndexType> Array<T, N> {
         }
     }
 }
+
 impl<T, const N: IndexType> Array<T, N> {
     verus! {
         pub fn set(&mut self, index: usize_t, elem: T)
@@ -152,4 +154,5 @@ verus! {
         }
     }
 }
-}
+
+} // verus!

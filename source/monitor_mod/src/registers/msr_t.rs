@@ -219,9 +219,10 @@ macro_rules! impl_reg16 {
 }
 
 verus! {
-pub struct XCR0;
-}
 
+pub struct XCR0;
+
+} // verus!
 verismo! {
 impl AnyRegTrait<u64_s> for XCR0 {
     #[verifier(inline)]

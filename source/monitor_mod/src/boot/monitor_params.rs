@@ -57,29 +57,29 @@ impl MonitorParams {
     }
 }
 
-verus!{
-    impl MonitorParams {
-        pub fn check_valid(&self) -> (ret: bool)
-        requires
-            self.is_constant()
-        ensures
-            ret == self.mp_wf()
-        {
-            if (self.validated_entries.reveal_value() as usize) > self.validated_e820.len() {
-                return false;
-            }
-            if !self.acpi.reveal_value().check_valid_addr(self.acpi_size.reveal_value()) {
-                return false;
-            }
-            if !self.richos_start.reveal_value().check_valid_addr(self.richos_size.reveal_value()) {
-                return false;
-            }
+verus! {
 
-            return true
+impl MonitorParams {
+    pub fn check_valid(&self) -> (ret: bool)
+        requires
+            self.is_constant(),
+        ensures
+            ret == self.mp_wf(),
+    {
+        if (self.validated_entries.reveal_value() as usize) > self.validated_e820.len() {
+            return false;
         }
+        if !self.acpi.reveal_value().check_valid_addr(self.acpi_size.reveal_value()) {
+            return false;
+        }
+        if !self.richos_start.reveal_value().check_valid_addr(self.richos_size.reveal_value()) {
+            return false;
+        }
+        return true
     }
 }
 
+} // verus!
 pub ghost struct MonitorParamPermsToData {
     pub mp: SnpPointsToBytes,
     pub hvparampage: SnpPointsToBytes,

@@ -6,7 +6,8 @@ use crate::arch::pgtable::*;
 use crate::arch::vram::*;
 use crate::tspec::*;
 
-verus!{
+verus! {
+
 #[derive(SpecGetter, SpecSetter)]
 pub struct GuestPTRam {
     pub ram: VRamDB,
@@ -18,4 +19,5 @@ pub struct PTEAccessParam {
     pub gvn: GVN,
     pub lvl: PTLevel,
 }
-}
+
+} // verus!

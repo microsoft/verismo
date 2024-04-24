@@ -31,129 +31,124 @@ verismo_simple! {
 }
 
 verus! {
-    pub fn process_vm_mem(
-        hv_mem_slice: &[HyperVMemMapEntry], e820: &[E820Entry],
-        static_start: usize, static_end: usize,
-        Tracked(memcc): Tracked<SnpMemCoreConsole>,
-        Tracked(unused_preval_memperm): Tracked<RawMemPerms>,
-        Tracked(alloc_perm): Tracked<SnpPointsTo<VeriSMoAllocator>>,
-        Tracked(alloc_lock): Tracked<&mut LockPermRaw>,
-    ) -> (newcc: Tracked<SnpCoreConsole>)
+
+pub fn process_vm_mem(
+    hv_mem_slice: &[HyperVMemMapEntry],
+    e820: &[E820Entry],
+    static_start: usize,
+    static_end: usize,
+    Tracked(memcc): Tracked<SnpMemCoreConsole>,
+    Tracked(unused_preval_memperm): Tracked<RawMemPerms>,
+    Tracked(alloc_perm): Tracked<SnpPointsTo<VeriSMoAllocator>>,
+    Tracked(alloc_lock): Tracked<&mut LockPermRaw>,
+) -> (newcc: Tracked<SnpCoreConsole>)
     requires
         is_alloc_perm(alloc_perm@),
-        old(alloc_lock)@.is_clean_lock_for(
-            spec_ALLOCATOR().ptr_range(), memcc.cc.snpcore.cpu()),
-        init_vm_mem_requires(
-            e820, static_start, static_end,
-            memcc, unused_preval_memperm),
+        old(alloc_lock)@.is_clean_lock_for(spec_ALLOCATOR().ptr_range(), memcc.cc.snpcore.cpu()),
+        init_vm_mem_requires(e820, static_start, static_end, memcc, unused_preval_memperm),
         hv_mem_slice@.is_constant(),
         mem_range_formatted(hv_mem_slice@),
         hv_mem_slice@.len() > 0,
     ensures
         newcc@.wf_core(memcc.cc.snpcore.cpu()),
-        newcc@.snpcore.only_reg_coremode_updated(
-            memcc.cc.snpcore,
-            set![GHCB_REGID()]),
-        spec_ALLOCATOR().lock_default_mem_requires(
-            newcc@.snpcore.cpu(), alloc_lock@),
+        newcc@.snpcore.only_reg_coremode_updated(memcc.cc.snpcore, set![GHCB_REGID()]),
+        spec_ALLOCATOR().lock_default_mem_requires(newcc@.snpcore.cpu(), alloc_lock@),
         is_permof_ALLOCATOR(alloc_lock@),
-    {
-        let ghost verismo_range = range(static_start as int, static_end as int);
-        let tracked mut memcc = memcc;
-
-        let entry = slice_index_get(hv_mem_slice, 0);
-        let tracked SnpMemCoreConsole {memperm, mut cc} = memcc;
-        SlicePrinter{s: hv_mem_slice}.debug(Tracked(&mut cc));
-        proof {
-            memcc =  SnpMemCoreConsole{ memperm, cc};
-            assert(cc.wf());
-            assert(memperm.wf());
-        }
-        // initial 1:1 mapping
-        if entry.start().to_addr().reveal_value() > static_start || entry.end().to_addr().reveal_value() < static_end {
-            // verismo code and static vars are not covered by the first range?
-            vc_terminate(SM_TERM_INVALID_PARAM, Tracked(&mut memcc.cc.snpcore));
-        }
-        let Tracked(memcc) = validate_vm_mem(hv_mem_slice, e820, Tracked(memcc));
-        let alloc_ref = ALLOCATOR();
-        let alloc_ptr = alloc_ref.ptr();
-        let mut allocator: VBox<VeriSMoAllocator> = VBox::from_raw(
-            alloc_ptr.to_usize(), Tracked(alloc_perm));
-        proof{
-            let tracked SnpMemCoreConsole {mut memperm, cc} = memcc;
-            let ghost prev_memperm = memperm;
-            memperm.tracked_union(unused_preval_memperm);
-
-            assert forall |i: int| 0 <= i < hv_mem_slice@.len()
-            implies
-                memperm.contains_default_except((#[trigger]hv_mem_slice@[i]).range(), e820@.to_valid_ranges())
-            by{
-                RawMemPerms::lemma_union_propograte_except(
-                    prev_memperm,
-                    unused_preval_memperm,
-                    hv_mem_slice@[i].range(),
-                    SwSnpMemAttr::spec_default(),
-                    e820@.to_aligned_ranges(),
-                    e820@.to_valid_ranges(),
-                );
-            }
-
-            let static_range = range(static_start as int, static_end as int);
-            let first_range =  hv_mem_slice@[0].range();
-            assert(inside_range(static_range, first_range));
-            let prev_memperm = memperm;
-            memperm.proof_remove_range_ensures(verismo_range);
-            memperm.tracked_split(verismo_range);
-            assert forall |i: int| 0 <= i < hv_mem_slice@.len()
-            implies
-                memperm.contains_default_except(
-                    hv_mem_slice@[i].range(),
-                    e820@.to_valid_ranges().insert(verismo_range))
-            by {
-                let excepted = e820@.to_valid_ranges().insert(verismo_range);
-
-                assert forall |r|
-                    inside_range(r, hv_mem_slice@[i].range()) &&
-                    ranges_disjoint(excepted, r) && r.1 != 0
-                implies
-                    memperm.contains_range(r) && memperm.contains_default_mem(r)
-                by {
-                    assert(excepted.contains(verismo_range));
-                    assert(range_disjoint_(verismo_range, r));
-                    assert(memperm.eq_at(prev_memperm, r));
-                    assert(ranges_disjoint(e820@.to_valid_ranges(), r)) by {
-                        assert forall |rr| e820@.to_valid_ranges().contains(rr)
-                        implies range_disjoint_(rr, r)
-                        by {
-                            assert(excepted.contains(rr));
-                        }
-                    }
-                    assert(prev_memperm.contains_default_except(hv_mem_slice@[i].range(), e820@.to_valid_ranges()));
-                    assert(prev_memperm.contains_range(r));
-                }
-            }
-            memcc = SnpMemCoreConsole {memperm, cc};
-        }
-        let Tracked(cc) = allocator.box_update(
-            (InitAllocFn, hv_mem_slice, e820, static_start, static_end, Tracked(memcc))
-        );
-        let (_, Tracked(alloc_perm)) = allocator.into_raw();
-        proof {
-            assert(allocator@@.inv());
-            alloc_lock.tracked_bind_new(
-                VeriSMoAllocator::invfn(),
-                alloc_perm,
-            );
-            assert(alloc_lock@.invfn.inv(allocator@));
-            assert(alloc_lock@.cpu == cc.snpcore.cpu());
-            assert(alloc_lock@.is_unlocked(cc.snpcore.cpu(), spec_ALLOCATOR().lockid(), spec_ALLOCATOR().ptr_range()));
-            assert(spec_ALLOCATOR().lock_requires(cc.snpcore.cpu(), alloc_lock@));
-        }
-
-        Tracked(cc)
+{
+    let ghost verismo_range = range(static_start as int, static_end as int);
+    let tracked mut memcc = memcc;
+    let entry = slice_index_get(hv_mem_slice, 0);
+    let tracked SnpMemCoreConsole { memperm, mut cc } = memcc;
+    SlicePrinter { s: hv_mem_slice }.debug(Tracked(&mut cc));
+    proof {
+        memcc = SnpMemCoreConsole { memperm, cc };
+        assert(cc.wf());
+        assert(memperm.wf());
     }
+    // initial 1:1 mapping
+    if entry.start().to_addr().reveal_value() > static_start || entry.end().to_addr().reveal_value()
+        < static_end {
+        // verismo code and static vars are not covered by the first range?
+        vc_terminate(SM_TERM_INVALID_PARAM, Tracked(&mut memcc.cc.snpcore));
+    }
+    let Tracked(memcc) = validate_vm_mem(hv_mem_slice, e820, Tracked(memcc));
+    let alloc_ref = ALLOCATOR();
+    let alloc_ptr = alloc_ref.ptr();
+    let mut allocator: VBox<VeriSMoAllocator> = VBox::from_raw(
+        alloc_ptr.to_usize(),
+        Tracked(alloc_perm),
+    );
+    proof {
+        let tracked SnpMemCoreConsole { mut memperm, cc } = memcc;
+        let ghost prev_memperm = memperm;
+        memperm.tracked_union(unused_preval_memperm);
+        assert forall|i: int| 0 <= i < hv_mem_slice@.len() implies memperm.contains_default_except(
+            (#[trigger] hv_mem_slice@[i]).range(),
+            e820@.to_valid_ranges(),
+        ) by {
+            RawMemPerms::lemma_union_propograte_except(
+                prev_memperm,
+                unused_preval_memperm,
+                hv_mem_slice@[i].range(),
+                SwSnpMemAttr::spec_default(),
+                e820@.to_aligned_ranges(),
+                e820@.to_valid_ranges(),
+            );
+        }
+        let static_range = range(static_start as int, static_end as int);
+        let first_range = hv_mem_slice@[0].range();
+        assert(inside_range(static_range, first_range));
+        let prev_memperm = memperm;
+        memperm.proof_remove_range_ensures(verismo_range);
+        memperm.tracked_split(verismo_range);
+        assert forall|i: int| 0 <= i < hv_mem_slice@.len() implies memperm.contains_default_except(
+            hv_mem_slice@[i].range(),
+            e820@.to_valid_ranges().insert(verismo_range),
+        ) by {
+            let excepted = e820@.to_valid_ranges().insert(verismo_range);
+            assert forall|r|
+                inside_range(r, hv_mem_slice@[i].range()) && ranges_disjoint(excepted, r) && r.1
+                    != 0 implies memperm.contains_range(r) && memperm.contains_default_mem(r) by {
+                assert(excepted.contains(verismo_range));
+                assert(range_disjoint_(verismo_range, r));
+                assert(memperm.eq_at(prev_memperm, r));
+                assert(ranges_disjoint(e820@.to_valid_ranges(), r)) by {
+                    assert forall|rr| e820@.to_valid_ranges().contains(rr) implies range_disjoint_(
+                        rr,
+                        r,
+                    ) by {
+                        assert(excepted.contains(rr));
+                    }
+                }
+                assert(prev_memperm.contains_default_except(
+                    hv_mem_slice@[i].range(),
+                    e820@.to_valid_ranges(),
+                ));
+                assert(prev_memperm.contains_range(r));
+            }
+        }
+        memcc = SnpMemCoreConsole { memperm, cc };
+    }
+    let Tracked(cc) = allocator.box_update(
+        (InitAllocFn, hv_mem_slice, e820, static_start, static_end, Tracked(memcc)),
+    );
+    let (_, Tracked(alloc_perm)) = allocator.into_raw();
+    proof {
+        assert(allocator@@.inv());
+        alloc_lock.tracked_bind_new(VeriSMoAllocator::invfn(), alloc_perm);
+        assert(alloc_lock@.invfn.inv(allocator@));
+        assert(alloc_lock@.cpu == cc.snpcore.cpu());
+        assert(alloc_lock@.is_unlocked(
+            cc.snpcore.cpu(),
+            spec_ALLOCATOR().lockid(),
+            spec_ALLOCATOR().ptr_range(),
+        ));
+        assert(spec_ALLOCATOR().lock_requires(cc.snpcore.cpu(), alloc_lock@));
+    }
+    Tracked(cc)
 }
 
+} // verus!
 verismo_simple! {
     fn validate_vm_mem(hv_mem_tb: &[HyperVMemMapEntry], e820: &[E820Entry], Tracked(memcc): Tracked<SnpMemCoreConsole>) -> (newmemcc: Tracked<SnpMemCoreConsole>)
     requires

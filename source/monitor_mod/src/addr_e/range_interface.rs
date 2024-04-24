@@ -618,24 +618,34 @@ pub open spec fn is_format_entry<T: MemRangeInterface>(entry: T, oldself: Seq<T>
 }
 }
 verus! {
-impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N>
-{
+
+impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N> {
     pub fn format_range(&mut self, len: usize_t) -> (ret_lens: (usize_t, usize_t))
-    requires
-        (len).is_constant(),
-        forall |i| 0 <= i < (len as int)==> (#[trigger]old(self)@[i]).self_wf(),
-        0 <= (len as int) <= old(self)@.len(),
-        forall |i| 0 <= i < (len as int) ==> (#[trigger]old(self)@[i]).spec_real_range().0.is_constant() && old(self)@[i].spec_real_range().1.is_constant(),
-        //forall |e| old(self)@.take((len) as int).to_set().contains(e) ==> e.spec_real_range().0.is_constant() && e.spec_real_range().1.is_constant(),
-    ensures
-        ret_lens.0.is_constant(),
-        ret_lens.1.is_constant(),
-        old(self)@.len() == self@.len(),
-        ret_lens.1 <= ret_lens.0,
-        ret_lens.0 <= self@.len(),
-        forall |i| 0 <= i < (len as int)==> (#[trigger]self@[i]).self_wf(),
-        format_range_ensures(self@.take(ret_lens.1 as int), old(self)@.take(len as int), ret_lens.0 as nat),
-        forall |i: int|  (ret_lens.1 as int) <= i < self@.len() ==> old(self)@.contains(self@[i]),
+        requires
+            (len).is_constant(),
+            forall|i| 0 <= i < (len as int) ==> (#[trigger] old(self)@[i]).self_wf(),
+            0 <= (len as int) <= old(self)@.len(),
+            forall|i|
+                0 <= i < (len as int) ==> (#[trigger] old(
+                    self,
+                )@[i]).spec_real_range().0.is_constant() && old(
+                    self,
+                )@[i].spec_real_range().1.is_constant(),
+    //forall |e| old(self)@.take((len) as int).to_set().contains(e) ==> e.spec_real_range().0.is_constant() && e.spec_real_range().1.is_constant(),
+
+        ensures
+            ret_lens.0.is_constant(),
+            ret_lens.1.is_constant(),
+            old(self)@.len() == self@.len(),
+            ret_lens.1 <= ret_lens.0,
+            ret_lens.0 <= self@.len(),
+            forall|i| 0 <= i < (len as int) ==> (#[trigger] self@[i]).self_wf(),
+            format_range_ensures(
+                self@.take(ret_lens.1 as int),
+                old(self)@.take(len as int),
+                ret_lens.0 as nat,
+            ),
+            forall|i: int| (ret_lens.1 as int) <= i < self@.len() ==> old(self)@.contains(self@[i]),
     {
         let n = len;
         if n == 0 {
@@ -646,19 +656,17 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N>
         let ghost oldself = self@;
         let ghost oldseq = self@.take(n as int);
         let less = |v1: T, v2: T| -> (ret: bool)
-        requires
-            v1.spec_lt_requires(&v2),
-        ensures
-            ret == speclt(v1, v2)
-        {
-            v1.less(&v2)
-        };
+            requires
+                v1.spec_lt_requires(&v2),
+            ensures
+                ret == speclt(v1, v2),
+            { v1.less(&v2) };
         proof {
             seq_to_multi_set_to_set(oldseq);
-            assert forall |x, y|
-                oldseq.to_set().contains(x) && oldseq.to_set().contains(y)
-            implies
-            #[trigger] less.requires((x, y)) by {
+            assert forall|x, y|
+                oldseq.to_set().contains(x) && oldseq.to_set().contains(
+                    y,
+                ) implies #[trigger] less.requires((x, y)) by {
                 assert(x.spec_real_range().0.is_constant());
                 assert(x.spec_real_range().1.is_constant());
                 assert(y.spec_real_range().0.is_constant());
@@ -671,31 +679,36 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N>
         proof {
             seq_to_multi_set_to_set(self@.take(n as int));
             assert(self@.take(n as int).to_set() =~~= oldseq.to_set());
-            assert forall |e| self@.take(n as int).to_set().contains(e)
-            implies (e.spec_real_range().0.is_constant() && e.spec_real_range().1.is_constant()) by{
+            assert forall|e| self@.take(n as int).to_set().contains(e) implies (
+            e.spec_real_range().0.is_constant() && e.spec_real_range().1.is_constant()) by {
                 assert(oldseq.to_set().contains(e));
             }
-            assert(oldself.take(n as int).to_range_seq().to_multiset() === self@.take(n as int).to_range_seq().to_multiset()) by {
-                proof_seq_to_seq_eq_multiset(oldself.take(n as int), self@.take(n as int), to_range_fn());
+            assert(oldself.take(n as int).to_range_seq().to_multiset() === self@.take(
+                n as int,
+            ).to_range_seq().to_multiset()) by {
+                proof_seq_to_seq_eq_multiset(
+                    oldself.take(n as int),
+                    self@.take(n as int),
+                    to_range_fn(),
+                );
             }
             seq_to_multi_set_to_set(oldself.take(n as int).to_range_seq());
             seq_to_multi_set_to_set(self@.take(n as int).to_range_seq());
-            assert(oldself.take(n as int).to_valid_ranges() === self@.take(n as int).to_valid_ranges());
+            assert(oldself.take(n as int).to_valid_ranges() === self@.take(
+                n as int,
+            ).to_valid_ranges());
             assert(self@.take(n as int) =~~= self@.take(n as int).take(n as int));
             self@.take(n as int).to_multiset_ensures();
             oldself.take(n as int).to_multiset_ensures();
-            assert forall |i| 0 <= i < (n as int)
-            implies (#[trigger]self@[i]).self_wf()
-            by {
+            assert forall|i| 0 <= i < (n as int) implies (#[trigger] self@[i]).self_wf() by {
                 let e = self@[i];
                 assert(self@.take(n as int)[i] === e);
                 assert(self@.take(n as int).to_multiset().count(e) > 0);
                 assert(oldself.take(n as int).contains(e));
-                let j = choose |j: int| 0 <= j < (n as int) && oldself.take(n as int)[j] === e;
+                let j = choose|j: int| 0 <= j < (n as int) && oldself.take(n as int)[j] === e;
                 assert(0 <= j < (n as int));
                 assert(oldself[j] === oldself.take(n as int)[j]);
             }
-
         }
         // read index
         let mut ri: usize = 0;
@@ -705,55 +718,62 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N>
         let ghost prevself = self@;
         let ghost remap: Seq<int> = Seq::empty();
         while ri < n
-        invariant
-            ri.is_constant(),
-            wi.is_constant(),
-            n.is_constant(),
-            ri <= n,
-            wi <= ri,
-            n <= self@.len(),
-            n == prev.len(),
-            speclt === range_speclt::<T>(),
-            forall |i| 0 <= i < (n as int) ==> (#[trigger]self@[i]).self_wf(),
-            forall |i: int| 0 <= i < (n as int) ==> prev[i] === prevself[i],
-            forall |i: int| (wi as int) <= i < self@.len() ==> self@[i] === prevself[i],
-            forall |e| self@.take(n as int).to_set().contains(e)
-                ==> (e.spec_real_range().0.is_constant() && e.spec_real_range().1.is_constant()),
-            seq_is_sorted(prev, speclt),
-            seq_is_sorted(self@.take(wi as int), speclt),
-            forall |i: int| 0 <= i < (wi as int) ==> (#[trigger]self@[i]).wf_range(),
-            self@.take(wi as int).to_valid_ranges() =~~= prev.take(ri as int).to_valid_ranges(),
-            forall |i: int, j: int| 0 <= i < j < (wi as int) ==>
-                (#[trigger]self@[i]).spec_range().0 <= (#[trigger]self@[j]).spec_range().0 &&
-                (self@[i]).spec_range().end() <= (self@[j]).spec_range().0,
-            seq_is_sorted(remap, |v1: int, v2: int| v1 < v2),
-            remap.len() == wi as int,
-            forall |i| 0 <= i < remap.len() ==>
-                0 <= #[trigger]remap[i] < (ri as int),
-            forall |i| 0 <= i < (wi as int) ==>
-                self@[i] === prev[remap[i]].spec_set_range(self@[i].spec_real_range()),
-        ensures
-            wi.is_constant(),
-            ri.is_constant(),
-            forall |i| 0 <= i < (n as int) ==> (#[trigger]self@[i]).self_wf(),
-            forall |e| self@.take(n as int).to_set().contains(e)
-            ==> (e.spec_real_range().0.is_constant() && e.spec_real_range().1.is_constant()),
-            (wi as int) <= (ri as int) <= (n as int),
-            forall |i: int| (wi as int) <= i < (n as int) ==> self@[i] === prev[i],
-            forall |i: int| (wi as int) <= i < self@.len() ==> self@[i] === prevself[i],
-            self@.take(wi as int).to_valid_ranges() =~~= prev.take(ri as int).to_valid_ranges(),
-            seq_is_sorted(self@.take(wi as int), speclt),
-            forall |i: int| 0 <= i < (wi as int) ==> (#[trigger]self@[i]).wf_range(),
-            forall |i: int, j: int| 0 <= i < j < (wi as int) ==>
-                (#[trigger]self@[i]).spec_range().0 <= (#[trigger]self@[j]).spec_range().0 &&
-                (self@[i]).spec_range().end() <= (self@[j]).spec_range().0,
-            ri != n ==> 0 < (wi as int) < (n as int) && self@[wi as int].spec_start() < self@[wi as int - 1].spec_end(),
-            seq_is_sorted(remap, |v1: int, v2: int| v1 < v2),
-            remap.len() == wi as int,
-            forall |i| 0 <= i < remap.len() ==>
-                0 <= #[trigger]remap[i] < (ri as int),
-            forall |i| 0 <= i < wi as int ==>
-                self@[i] === prev[remap[i]].spec_set_range(self@[i].spec_real_range()),
+            invariant
+                ri.is_constant(),
+                wi.is_constant(),
+                n.is_constant(),
+                ri <= n,
+                wi <= ri,
+                n <= self@.len(),
+                n == prev.len(),
+                speclt === range_speclt::<T>(),
+                forall|i| 0 <= i < (n as int) ==> (#[trigger] self@[i]).self_wf(),
+                forall|i: int| 0 <= i < (n as int) ==> prev[i] === prevself[i],
+                forall|i: int| (wi as int) <= i < self@.len() ==> self@[i] === prevself[i],
+                forall|e|
+                    self@.take(n as int).to_set().contains(e) ==> (
+                    e.spec_real_range().0.is_constant() && e.spec_real_range().1.is_constant()),
+                seq_is_sorted(prev, speclt),
+                seq_is_sorted(self@.take(wi as int), speclt),
+                forall|i: int| 0 <= i < (wi as int) ==> (#[trigger] self@[i]).wf_range(),
+                self@.take(wi as int).to_valid_ranges() =~~= prev.take(ri as int).to_valid_ranges(),
+                forall|i: int, j: int|
+                    0 <= i < j < (wi as int) ==> (#[trigger] self@[i]).spec_range().0 <= (
+                    #[trigger] self@[j]).spec_range().0 && (self@[i]).spec_range().end() <= (
+                    self@[j]).spec_range().0,
+                seq_is_sorted(remap, |v1: int, v2: int| v1 < v2),
+                remap.len() == wi as int,
+                forall|i| 0 <= i < remap.len() ==> 0 <= #[trigger] remap[i] < (ri as int),
+                forall|i|
+                    0 <= i < (wi as int) ==> self@[i] === prev[remap[i]].spec_set_range(
+                        self@[i].spec_real_range(),
+                    ),
+            ensures
+                wi.is_constant(),
+                ri.is_constant(),
+                forall|i| 0 <= i < (n as int) ==> (#[trigger] self@[i]).self_wf(),
+                forall|e|
+                    self@.take(n as int).to_set().contains(e) ==> (
+                    e.spec_real_range().0.is_constant() && e.spec_real_range().1.is_constant()),
+                (wi as int) <= (ri as int) <= (n as int),
+                forall|i: int| (wi as int) <= i < (n as int) ==> self@[i] === prev[i],
+                forall|i: int| (wi as int) <= i < self@.len() ==> self@[i] === prevself[i],
+                self@.take(wi as int).to_valid_ranges() =~~= prev.take(ri as int).to_valid_ranges(),
+                seq_is_sorted(self@.take(wi as int), speclt),
+                forall|i: int| 0 <= i < (wi as int) ==> (#[trigger] self@[i]).wf_range(),
+                forall|i: int, j: int|
+                    0 <= i < j < (wi as int) ==> (#[trigger] self@[i]).spec_range().0 <= (
+                    #[trigger] self@[j]).spec_range().0 && (self@[i]).spec_range().end() <= (
+                    self@[j]).spec_range().0,
+                ri != n ==> 0 < (wi as int) < (n as int) && self@[wi as int].spec_start()
+                    < self@[wi as int - 1].spec_end(),
+                seq_is_sorted(remap, |v1: int, v2: int| v1 < v2),
+                remap.len() == wi as int,
+                forall|i| 0 <= i < remap.len() ==> 0 <= #[trigger] remap[i] < (ri as int),
+                forall|i|
+                    0 <= i < wi as int ==> self@[i] === prev[remap[i]].spec_set_range(
+                        self@[i].spec_real_range(),
+                    ),
         {
             let ghost aset = self@.take(n as int).to_set();
             let ghost subs = self@.take(n as int);
@@ -784,9 +804,11 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N>
                 let prev_sub = prev.take(ri as int);
                 let prev_next_sub = prev.take(ri as int + 1);
                 assert(prev_next_sub =~~= prev_sub.push(v));
-                assert(prev_next_sub.to_range_seq() =~~= prev_sub.to_range_seq().push(v.spec_range()));
+                assert(prev_next_sub.to_range_seq() =~~= prev_sub.to_range_seq().push(
+                    v.spec_range(),
+                ));
                 // prove valid range set when there is an empty range.
-                if v.spec_range().1 == 0  {
+                if v.spec_range().1 == 0 {
                     assert(v.spec_range().1 == 0);
                     assert(prev_sub.to_valid_ranges() =~~= prev_next_sub.to_valid_ranges()) by {
                         //lemma_to_valid_ranges_push(prev_sub.to_range_seq(), v.spec_range());
@@ -794,14 +816,16 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N>
                         prev_next_sub.lemma_valid_ranges_reveal();
                         assert(!prev_next_sub.to_valid_ranges_internal().contains(v.spec_range()));
                         assert(!prev_sub.to_valid_ranges_internal().contains(v.spec_range()));
-                        assert(prev_sub.to_valid_ranges_internal() =~~= prev_next_sub.to_valid_ranges_internal()) by {
+                        assert(prev_sub.to_valid_ranges_internal()
+                            =~~= prev_next_sub.to_valid_ranges_internal()) by {
                             let s1 = prev_sub.to_valid_ranges_internal();
                             let s2 = prev_next_sub.to_valid_ranges_internal();
-                            assert forall |r: (int, nat)| s1.contains(r) == s2.contains(r)
-                            by {
+                            assert forall|r: (int, nat)| s1.contains(r) == s2.contains(r) by {
                                 if s1.contains(r) {
                                     assert(r.1 != 0);
-                                    let i = choose|i| prev_sub[i].spec_range() === r && 0 <= i && i < prev_sub.len();
+                                    let i = choose|i|
+                                        prev_sub[i].spec_range() === r && 0 <= i && i
+                                            < prev_sub.len();
                                     assert(prev_sub[i].spec_range() === r);
                                     assert(0 <= i && i < prev_next_sub.len());
                                     assert(prev_next_sub[i].spec_range() === r);
@@ -809,7 +833,9 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N>
                                 }
                                 if s2.contains(r) {
                                     assert(r.1 != 0);
-                                    let i = choose|i| prev_next_sub[i].spec_range() === r && 0 <= i && i < prev_next_sub.len();
+                                    let i = choose|i|
+                                        prev_next_sub[i].spec_range() === r && 0 <= i && i
+                                            < prev_next_sub.len();
                                     assert(prev_next_sub[i].spec_range() === r);
                                     assert(0 <= i && i < prev_next_sub.len());
                                     assert(i != ri as int);
@@ -821,19 +847,26 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N>
                     }
                 }
                 // prove sorted subrange
+
                 proof_sorted_subrange(prev, speclt, ri as int, n as int);
                 proof_sorted_subrange(prev, speclt, ri as int + 1, n as int);
-
                 // prove unchanged right seq
-                if ri as int + 1  < n as int {
-                    assert(prev_self.subrange(wi as int + 1, n as int) =~~=  prev_self.subrange(wi as int, n as int).subrange(1, n as int - wi as int));
-                    assert(prev.subrange(wi as int + 1, n as int) =~~= prev.subrange(wi as int, n as int).subrange(1, n as int -  wi as int));
-                    assert(self@.subrange(wi as int + 1, n as int) =~~= prev.subrange(wi as int + 1, n as int));
+                if ri as int + 1 < n as int {
+                    assert(prev_self.subrange(wi as int + 1, n as int) =~~= prev_self.subrange(
+                        wi as int,
+                        n as int,
+                    ).subrange(1, n as int - wi as int));
+                    assert(prev.subrange(wi as int + 1, n as int) =~~= prev.subrange(
+                        wi as int,
+                        n as int,
+                    ).subrange(1, n as int - wi as int));
+                    assert(self@.subrange(wi as int + 1, n as int) =~~= prev.subrange(
+                        wi as int + 1,
+                        n as int,
+                    ));
                 }
-                assert forall |i| 0 <= i < wi as int
-                implies
-                    self@[i] === prev[remap[i]].spec_set_range(self@[i].spec_real_range())
-                by {
+                assert forall|i| 0 <= i < wi as int implies self@[i]
+                    === prev[remap[i]].spec_set_range(self@[i].spec_real_range()) by {
                     assert(self@[i] === prev_self[i]);
                 }
             }
@@ -841,19 +874,18 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N>
             assert(self@[ri as int].self_wf());
             if entry.size().reveal_value() == 0 {
                 ri = ri + 1;
-                continue;
+                continue ;
             }
             let start = entry.start();
             let size = entry.size();
-            proof{
+            proof {
                 T::proof_constant_real_wf((start, size));
             }
             entry.update_range((start, size));
-
             if wi > 0 {
                 assert(self@[wi as int - 1].self_wf());
-                if start.reveal_value() < self.index(wi-1).end().reveal_value() {
-                    break;
+                if start.reveal_value() < self.index(wi - 1).end().reveal_value() {
+                    break ;
                 }
             }
             self.update(wi, entry);
@@ -863,10 +895,8 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N>
                 remap = remap.push(ri as int - 1);
                 assert(remap.len() == wi as int);
                 assert(prev[remap[wi as int - 1]] === v);
-                assert forall |i| 0 <= i < wi as int
-                implies
-                    self@[i] === prev[remap[i]].spec_set_range(self@[i].spec_real_range())
-                by {
+                assert forall|i| 0 <= i < wi as int implies self@[i]
+                    === prev[remap[i]].spec_set_range(self@[i].spec_real_range()) by {
                     if i < wi as int - 1 {
                         assert(self@[i] === prev_self[i]);
                     }
@@ -874,12 +904,12 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N>
                 }
                 let newseq = self@;
                 assert(n <= newseq.len());
-                assert forall |e| newseq.take(n as int).to_set().contains(e)
-                implies (e.spec_real_range().0.is_constant() && e.spec_real_range().1.is_constant()) by {
+                assert forall|e| newseq.take(n as int).to_set().contains(e) implies (
+                e.spec_real_range().0.is_constant() && e.spec_real_range().1.is_constant()) by {
                     let newsub = newseq.take(n as int);
                     assert(newsub.to_set().contains(e));
                     assert(newsub.contains(e));
-                    let i = choose |i: int| (newsub[i] === e && 0 <= i < (newsub.len() as int));
+                    let i = choose|i: int| (newsub[i] === e && 0 <= i < (newsub.len() as int));
                     assert(newsub[i] === e);
                     assert(0 <= i < (newsub.len() as int));
                     assert(newseq[i] === newsub[i]);
@@ -889,31 +919,46 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N>
                         assert(e === entry);
                     }
                 }
-
                 self@.take(wi as int).to_range_seq().to_multiset_ensures();
                 seq_to_multi_set_to_set(self@.take(wi as int).to_range_seq());
-                assert(self@.take(wi as int).to_valid_ranges() =~~= prev.take(ri as int).to_valid_ranges()) by {
+                assert(self@.take(wi as int).to_valid_ranges() =~~= prev.take(
+                    ri as int,
+                ).to_valid_ranges()) by {
                     assert(self@.take(wi as int - 1) =~~= prev_self.take(wi as int - 1));
-                    lemma_to_valid_ranges_push(self@.take(wi as int - 1).to_range_seq(), entry.spec_range());
-                    lemma_to_valid_ranges_push(prev.take(ri as int - 1).to_range_seq(), entry.spec_range());
-                    assert(self@.take(wi as int).to_range_seq()
-                        =~~= self@.take(wi as int - 1).to_range_seq().push(entry.spec_range())
+                    lemma_to_valid_ranges_push(
+                        self@.take(wi as int - 1).to_range_seq(),
+                        entry.spec_range(),
                     );
-                    assert(prev.take(ri as int).to_range_seq() =~~= prev.take(ri as int - 1).to_range_seq().push(entry.spec_range()));
+                    lemma_to_valid_ranges_push(
+                        prev.take(ri as int - 1).to_range_seq(),
+                        entry.spec_range(),
+                    );
+                    assert(self@.take(wi as int).to_range_seq() =~~= self@.take(
+                        wi as int - 1,
+                    ).to_range_seq().push(entry.spec_range()));
+                    assert(prev.take(ri as int).to_range_seq() =~~= prev.take(
+                        ri as int - 1,
+                    ).to_range_seq().push(entry.spec_range()));
                 }
                 proof_sorted_subrange(prev, speclt, ri as int, n as int);
             }
         }
         proof {
             if ri == n {
-                assert(self@.take(wi as int).to_valid_ranges() === prev.take(n as int).to_valid_ranges());
-                assert(oldself.take(n as int).to_valid_ranges() === prev.take(n as int).to_valid_ranges());
-                assert(self@.take(wi as int).to_valid_ranges() === oldself.take(n as int).to_valid_ranges());
+                assert(self@.take(wi as int).to_valid_ranges() === prev.take(
+                    n as int,
+                ).to_valid_ranges());
+                assert(oldself.take(n as int).to_valid_ranges() === prev.take(
+                    n as int,
+                ).to_valid_ranges());
+                assert(self@.take(wi as int).to_valid_ranges() === oldself.take(
+                    n as int,
+                ).to_valid_ranges());
             }
-            assert forall |i| 0 <= i < wi as int
-            implies
-                is_format_entry(self@[i], oldself.take(n as int))
-            by {
+            assert forall|i| 0 <= i < wi as int implies is_format_entry(
+                self@[i],
+                oldself.take(n as int),
+            ) by {
                 let k = remap[i];
                 assert(self@[i] === prev[k].spec_set_range(self@[i].spec_real_range()));
                 assert(k < ri as int);
@@ -922,22 +967,21 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N>
                 assert(prev.to_multiset().contains(prev[k]));
                 assert(oldself.subrange(0, n as int).to_multiset().contains(prev[k]));
                 oldself.subrange(0, n as int).to_multiset_ensures();
-                assert(exists |j| oldself[j] === prev[k] && 0 <= j < (n as int));
-                let j = choose |j| oldself[j] === prev[k] && 0 <= j < (n as int);
+                assert(exists|j| oldself[j] === prev[k] && 0 <= j < (n as int));
+                let j = choose|j| oldself[j] === prev[k] && 0 <= j < (n as int);
                 assert(oldself[j] === prev[k]);
-
-                assert(exists |j| 0 <= j < (n as int) &&
-                    self@[i] === oldself.take(n as int)[j].spec_set_range(self@[i].spec_real_range())) by
-                {
+                assert(exists|j|
+                    0 <= j < (n as int) && self@[i] === oldself.take(n as int)[j].spec_set_range(
+                        self@[i].spec_real_range(),
+                    )) by {
                     assert(0 <= j < (n as int));
                     assert(self@[i] === oldself[j].spec_set_range(self@[i].spec_real_range()));
                 }
                 assert(is_format_entry(self@[i], oldself.take(n as int)));
             }
-            assert forall |i: int|  (wi as int) <= i < self@.len()
-            implies
-                oldself.contains(self@[i])
-            by {
+            assert forall|i: int| (wi as int) <= i < self@.len() implies oldself.contains(
+                self@[i],
+            ) by {
                 assert(prevself[i] === self@[i]);
                 assert(prevself.contains(self@[i]));
                 /*prevself.take(n as int).to_multiset_ensures();
@@ -946,14 +990,16 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N>
                     oldself.take(n as int).to_multiset().count(self@[i]));*/
                 prevself.to_multiset_ensures();
                 oldself.to_multiset_ensures();
-                assert(prevself.to_multiset().count(self@[i]) ===
-                    oldself.to_multiset().count(self@[i]));
+                assert(prevself.to_multiset().count(self@[i]) === oldself.to_multiset().count(
+                    self@[i],
+                ));
             }
         }
-        proof{
+        proof {
             self@.take(wi as int).lemma_valid_ranges_reveal();
         }
         (ri, wi)
     }
 }
-}
+
+} // verus!

@@ -1,10 +1,12 @@
 use super::*;
 
 verus! {
-pub const VMPL_COUNT: usize = 4;
-pub const BSP: u64 = 0;
-}
 
+pub const VMPL_COUNT: usize = 4;
+
+pub const BSP: u64 = 0;
+
+} // verus!
 #[macro_export]
 macro_rules! RICHOS_VMPL {
     () => {
