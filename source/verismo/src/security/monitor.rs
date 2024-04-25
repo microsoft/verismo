@@ -929,7 +929,7 @@ pub fn start_richos(
         spec_is_default_pages_const_to_vmpl(
             acpi_perms,
             (mparam.acpi@.val as int).to_page(),
-            (mparam.acpi_size@.val as int).to_page(),
+            (mparam.acpi_size@.val as int).to_page() as nat,
             RICHOS_VMPL as nat,
         ),
         richos_perm@.wf_const_default(
@@ -954,8 +954,8 @@ pub fn start_richos(
     let mut osmem = osmem_ptr.take(Tracked(&mut osmem_perm));
     let ghost cs2 = *cs;
     // Assign ACPI table to VMPL2
-    let acpi_start_page = mparam.acpi.reveal_value().to_page();
-    let acpi_pages = mparam.acpi_size.reveal_value().to_page();
+    let acpi_start_page = mparam.acpi.reveal_value().to_page() as usize;
+    let acpi_pages = mparam.acpi_size.reveal_value().to_page() as usize;
     osmem_add(
         &mut osmem,
         acpi_start_page,

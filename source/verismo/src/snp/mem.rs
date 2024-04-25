@@ -316,7 +316,7 @@ impl GhcbHandle {
             assert(page_perms.contains_key(start_page as int));
             assert forall |i| start_page <= i < start_page + npages 
             implies 
-                #[trigger]old_page_perms.contains_key(start_page as int)
+                #[trigger]old_page_perms.contains_key(i)
             by{}
         }
         let ret = self.ghcb_change_page_state_via_pg(
@@ -374,7 +374,7 @@ impl GhcbHandle {
         proof {
             assert forall |i| (start_page <= i < (start_page + npages))
             implies ((#[trigger] page_perms.contains_key(i)) && 
-            old_page_perms[i].contains_key(i) && mk_private_ensures_pageperm(old_page_perms[i]@, page_perms[i]@)) 
+            old_page_perms.contains_key(i) && mk_private_ensures_pageperm(old_page_perms[i]@, page_perms[i]@)) 
             by {
                 let page_perm = page_perms[i]@;
                 let prev_page_perm = old_page_perms[i]@;
