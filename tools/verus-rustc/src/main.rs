@@ -200,62 +200,8 @@ fn run_verus_verify(
     command.arg("--no-builtin");
     debug!("cmd: {:?}", command);
 
-    // Redirect stdout to a file
-    let stdout_file = OpenOptions::new().read(true).write(true).create(true).open("verus-stdout.txt")?;
-    command.stdout(Stdio::piped());
-
-    // Redirect stderr to a file and keep it visible on the terminal
-    let stderr_file = OpenOptions::new().read(true).write(true).create(true).open("verus-stderr.txt")?;
-    command.stderr(Stdio::piped());
-
-    command.stderr(Stdio::piped());
-
-    // Execute the command
-    let mut child = command.spawn()?;
-    
-    // Read stderr and print it to the terminal while also writing it to the file
-    if let Some(stderr) = child.stderr.take() {
-        let stderr_reader = BufReader::new(stderr);
-        let mut stderr_file_writer = BufWriter::new(stderr_file);
-
-        thread::spawn(move || {
-            for byte in stderr_reader.bytes() {
-                if let Ok(byte) = byte {
-                    // Print stderr to the terminal
-                    eprint!("{}", byte as char);
-
-                    // Write stderr to the file
-                    stderr_file_writer.write_all(&[byte])?;
-                }
-            }
-            Ok::<(), std::io::Error>(())
-        });
-    }
-
-    // Read stdout and print it to the terminal
-    if let Some(stdout) = child.stdout.take() {
-        let stdout_reader = BufReader::new(stdout);
-
-        let mut stdout_file_writer = BufWriter::new(stdout_file);
-
-        thread::spawn(move || {
-            for byte in stdout_reader.bytes() {
-                if let Ok(byte) = byte {
-                    // Print stderr to the terminal
-                    print!("{}", byte as char);
-
-                    // Write stderr to the file
-                    stdout_file_writer.write_all(&[byte])?;
-                }
-            }
-            Ok::<(), std::io::Error>(())
-        });
-
-    }
-
     // Wait for the command to finish and get its status
-    let status = child.wait()?;
-
+    let status = command.status()?;
     if !status.success() {
         exit(status.code().unwrap_or(1));
     }

@@ -111,9 +111,15 @@ impl<T: IsConstant + WellFormed> VBox<T> {
         &&& self.snp() === SwSnpMemAttr::spec_default()
     }
 
+    pub open spec fn is_vmpl0_private_page(&self) -> bool {
+        &&& self.is_page()
+        &&& self.snp().is_vmpl0_private()
+    }
+
     pub open spec fn is_vmsa_page(&self) -> bool {
         &&& self.is_page()
-        &&& self.snp() === SwSnpMemAttr::vmsa()
+        &&& self.snp().is_vmpl0_private()
+        &&& self.snp().rmp@.spec_vmsa()
     }
 }
 

@@ -7,6 +7,8 @@ fn main() {
     // Environment vars during build.
     if cfg!(feature = "noverify") {
         println!("cargo:rustc-env=VERUS_ARGS=--no-verify");
+    } else {
+        println!("cargo:rustc-env=VERUS_ARGS=--rlimit=8000 --expand-errors --multiple-errors=5 --triggers-silent --time-expanded --no-auto-recommends-check --output-json");
     }
 
     let module_path = env::var("CARGO_MANIFEST_DIR").unwrap();

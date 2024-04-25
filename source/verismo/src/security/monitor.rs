@@ -136,11 +136,11 @@ pub fn run_richos(
     requires
         0 < nextvmpl_id@.vmpl < 4,
         nextvmpl_id@.vmpl === vmsa@.vmpl.vspec_cast_to(),
+        nextvmpl_id@.vmpl == RICHOS_VMPL,
         handle.wf(),
         guest_channel.wf(),
         old(cs).inv_stage_verismo(),
-        vmsa.is_default_page(),
-        vmsa@.is_constant(),
+        vmsa.is_vmpl0_private_page(),
         secret.wf_mastersecret(),
     ensures
         false,
@@ -149,8 +149,7 @@ pub fn run_richos(
         reveal_strlit("Run richos.");
     }
     new_strlit("Run richos.").leak_debug();
-    let vmpl: u8 = vmsa.borrow().vmpl.into();
-    let (handle, vmsa) = handle.register_vmsa(vmpl, vmsa, Tracked(nextvmpl_id), Tracked(cs));
+    let (handle, vmsa) = handle.register_vmsa(RICHOS_VMPL as u8, vmsa, Tracked(nextvmpl_id), Tracked(cs));
     let mut gvca_page = None;
     let mut mh = MonitorHandle { handle, guest_channel, vmsa, gvca_page, secret, stat: 0 };
     assert(cs.inv_stage_verismo());
@@ -453,6 +452,16 @@ impl<'a> MonitorHandle<'a> {
         let mut mhandle = self;
         let GhcbHyperPageHandle(mut ghcb_h, hyperpage_h) = mhandle.handle;
         let ghost cs2 = *cs;
+        // Should we reset rmp permission? Not necessary.
+        // The memory still belongs to rich os and thus we do not need to reset;
+        // VeriSMo never invalidate a page explicitly.
+        // Instead, it relies on hypervisor's rmpupdate to automatically invalidate a page.
+        // If hypervisor did not run rmpupdate to change the page to shared, 
+        // verismo will see a double-validation err when it pvalidate it again;
+        // If hypervisor changes the mapping, the validation succeeds only for an invalidated page which has resetted rmp perms (rmpupdate will reset perms).
+        // If hypervisor do not changes the mapping, the next validation only succeeds if the hypervisor has marked the page as shared.
+        // In both cases, the page will become vmpl0 private.
+        // That is also why verismo mk_shared do not call pvalidate(false).
         let (ghcb_h, entry) = osmem_adjust(ghcb_h, entry, !is_priv, Tracked(cs));
         let entry = osmem_entry_merge(left, entry);
         let entry = osmem_entry_merge(entry, right);
@@ -569,7 +578,7 @@ impl<'a> MonitorHandle<'a> {
         let vmsa = ret.unwrap();
         let (vmsa_ptr, Tracked(vmsa_perm)) = vmsa.into_raw();
         let tracked vmsa_perm = vmsa_perm.tracked_into_raw();
-        rmp_reset_vmpl_perm(vmsa_gpn, Tracked(&cs.snpcore), Tracked(&mut vmsa_perm));
+        rmp_reset_vmpl_perm(vmsa_gpn, Tracked(&mut cs.snpcore), Tracked(&mut vmsa_perm));
         proof {
             assert(vmsa_perm@.snp().is_vmpl0_private());
         }
@@ -588,7 +597,7 @@ impl<'a> MonitorHandle<'a> {
         #[verusfmt::skip]
         proof {
             assert(richos_vmsa_invfn()(vmsa_vec)) by {
-                assert forall|i| 0 <= i < vmsa_vec.len() implies 
+                assert forall|i| 0 <= i < vmsa_vec.len() implies
                     (vmsa_vec[i].is_Some() ==> is_richos_vmsa_box(#[trigger] vmsa_vec[i].get_Some_0()))
                 by {
                     if vmsa_vec[i].is_Some() {

@@ -92,9 +92,9 @@ impl GhcbHyperPageHandle {
         requires
             self.wf(),
             (*old(cs)).inv(),
-            vmsa.is_default_page(),
-            nextvmpl_id@.vmpl == vmpl,
+            vmsa.is_vmpl0_private_page(),
             vmsa@.vmpl.spec_eq(vmpl as int),
+            nextvmpl_id@.vmpl == vmpl,
             0 < vmpl < 4,
         ensures
             cs.inv(),

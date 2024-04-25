@@ -89,7 +89,7 @@ pub fn get_vtl(vmpl: u8) -> (vtl: u8)
     }
 }
 
-pub closed spec fn _hyperpage_wf(id: int, snp: SwSnpMemAttr) -> bool {
+pub open spec fn _hyperpage_wf(id: int, snp: SwSnpMemAttr) -> bool {
     &&& snp === SwSnpMemAttr::shared()
     &&& id % PAGE_SIZE!() == 0
 }

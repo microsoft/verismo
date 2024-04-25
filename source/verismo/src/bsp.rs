@@ -34,6 +34,7 @@ pub extern "C" fn ap_call(
     requires
         nextvmpl_id@.vmpl == RICHOS_VMPL as nat,
         cs.inv_stage_ap_wait(),
+        cpu.inv(),
 {
     use crate::debug::VPrintAtLevel;
     let tracked mut cs = cs;
@@ -44,13 +45,14 @@ pub extern "C" fn ap_call(
     let (hyperv, ghcb) = HyperPageHandle::new_shared_page(PAGE_SIZE, ghcb, Tracked(&mut cs));
     let (guest_channel, ghcb) = SnpGuestChannel::new(ghcb, Tracked(&mut cs));
     let ghcb_hv_h = GhcbHyperPageHandle(ghcb, hyperv);
+    assert(ghcb_hv_h.wf());
     let mut vmsa: VBox<VmsaPage>;
     loop
         invariant
             cs.inv_stage_ap_wait(),
             nextvmpl_id@.vmpl == RICHOS_VMPL as nat,
         ensures
-            vmsa.snp().is_vmpl0_private(),
+            vmsa.is_vmpl0_private_page(),
             vmsa@.vmpl.spec_eq(RICHOS_VMPL),
     {
         let tracked mut vmsa_lock = cs.lockperms.tracked_remove(spec_RICHOS_VMSA_lockid());

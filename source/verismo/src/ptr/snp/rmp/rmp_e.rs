@@ -307,7 +307,8 @@ pub open spec fn spec_rmpadjmem_requires_at(
 ) -> bool {
     &&& page_perm@.snp().requires_rmpadjust_mem((i as int).to_addr(), RMP_4K as int, attr, None)
     &&& page_perm@.wf_range((i.to_addr(), PAGE_SIZE as nat))
-    &&& page_perm@.bytes().is_constant_to(attr.spec_vmpl() as nat)
+    &&& attr.spec_perms() > 0 ==> page_perm@.bytes().is_constant_to(attr.spec_vmpl() as nat)
+    &&& 0 < attr.spec_vmpl() < 4
 }
 
 pub open spec fn spec_rmpadjmem_requires(
@@ -442,27 +443,29 @@ pub fn rmpadjmem(
     }
 }
 
-pub fn rmpadjust2(
+pub fn rmpadjust_check(
     vaddr: u64,
     psize: u64,
     attr: RmpAttr,
-    Tracked(mycore): Tracked<&SnpCore>,
+    Tracked(snpcore): Tracked<&mut SnpCore>,
     Tracked(newcore): Tracked<Option<CoreIdPerm>>,
     Tracked(perm): Tracked<&mut SnpPointsToRaw>,
-) -> (ret: u64)
+)
     requires
-        old(perm)@.snp().requires_rmpadjust(vaddr as int, psize as int, attr@, newcore, old(perm)@),
-        old(perm)@.wf_range((vaddr as int, PAGE_SIZE as nat)),
-        old(perm)@.bytes().is_constant_to(attr.spec_vmpl() as nat),
-        mycore.coreid@.vmpl == 0,
-        attr.spec_vmpl() > mycore.coreid@.vmpl,
+        spec_rmpadjmem_requires_at(*old(perm), (vaddr as int).to_page(), attr@),
+        old(snpcore).inv(),
     ensures
-        old(perm)@.snp.rmpadjust_ret(perm@.snp, ret, vaddr as int, psize as int, attr@),
+        spec_ensures_rmpadjust(*old(perm), *perm, (vaddr as int).to_page(), attr@),
         old(perm)@.range() === perm@.range(),
         old(perm)@.snp_bytes === perm@.snp_bytes,
-        (ret == 0 && old(perm)@.wf()) ==> perm@.wf(),
+        old(perm)@.wf() ==> perm@.wf(),
+        *snpcore === *old(snpcore),
 {
-    rmpadjust(vaddr, psize, attr, Tracked(mycore), Tracked(newcore), Tracked(perm))
+    let rc = rmpadjust(vaddr, psize, attr, Tracked(snpcore), Tracked(newcore), Tracked(perm));
+    if rc != 0 {
+        // failed validation ==> possible attack
+        vc_terminate(SM_TERM_INVALID_PARAM, Tracked(snpcore));
+    }
 }
 
 } // verus!

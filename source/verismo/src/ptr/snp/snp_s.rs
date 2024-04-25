@@ -85,7 +85,6 @@ impl SwSnpMemAttr {
         &&& attr.is_vmsa() ==> newcore.is_Some()
         &&& !attr.is_vmsa() ==> newcore.is_None()
         &&& self.rmp@.spec_validated()  // need to be validated before rmpadjust, otherwises it will never return.
-
         &&& self.wf()
     }
 

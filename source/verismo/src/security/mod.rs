@@ -1,3 +1,5 @@
+use alloc::vec::Vec;
+
 use crate::addr_e::*;
 use crate::arch::addr_s::*;
 use crate::arch::entities::VMPL;
@@ -14,7 +16,6 @@ use crate::tspec::*;
 use crate::tspec_e::*;
 use crate::vbox::*;
 use crate::*;
-use alloc::vec::Vec;
 
 mod mem;
 mod monitor;
@@ -45,16 +46,18 @@ pub const VERISMO_VMPCK_ID: u8 = 0;
 } // verus!
 verus! {
 
-    pub open spec fn is_richos_vmsa_box(vmsa: VBox<VmsaPage>) -> bool {
-        &&& vmsa.snp().is_vmpl0_private()
-        &&& vmsa.is_page()
-        &&& vmsa@.vmpl.spec_eq(RICHOS_VMPL)
-    }
+pub open spec fn is_richos_vmsa_box(vmsa: VBox<VmsaPage>) -> bool {
+    &&& vmsa.snp().is_vmpl0_private()
+    &&& vmsa.is_page()
+    &&& vmsa@.vmpl.spec_eq(RICHOS_VMPL)
+}
+
 pub open spec fn richos_vmsa_invfn() -> spec_fn(Vec<Option<VBox<VmsaPage>>>) -> bool {
     |vec: Vec<Option<VBox<VmsaPage>>>|
         forall|i|
-            0 <= i < vec@.len() ==> 
-            (vec[i].is_Some() ==> is_richos_vmsa_box(#[trigger] vec[i].get_Some_0()))
+            0 <= i < vec@.len() ==> (vec[i].is_Some() ==> is_richos_vmsa_box(
+                #[trigger] vec[i].get_Some_0(),
+            ))
 }
 
 } // verus!
