@@ -368,7 +368,7 @@ impl GhcbHandle {
             Tracked(&mut cs.snpcore),
         );
         proof {
-            assert forall|i| (start_page <= i < (start_page + npages))
+            assert forall |i| (start_page <= i < (start_page + npages))
             implies (#[trigger] page_perms.contains_key(i) && mk_private_ensures_pageperm(old_page_perms[i]@, page_perms[i]@)) 
             by {
                 let page_perm = page_perms[i]@;
@@ -386,9 +386,7 @@ impl GhcbHandle {
                 assert(page_perm.snp().rmp === SwSnpMemAttr::spec_default().rmp);
             }
 
-            #[verusfmt::skip]
-            assert(forall|i|
-                (start_page <= i < (start_page + npages)) ==> ((#[trigger]page_perms.contains_key(i)) && mk_private_ensures_pageperm(old(page_perms)[i]@, page_perms[i]@)));
+            assert(forall |i| (start_page <= i < (start_page + npages)) ==> ((#[trigger]page_perms.contains_key(i)) && mk_private_ensures_pageperm(old_page_perms[i]@, page_perms[i]@)));
         }
         ret
     }
