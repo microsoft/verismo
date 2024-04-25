@@ -1,0 +1,293 @@
+use super::memid::ASID;
+use super::*;
+use crate::arch::addr::SPA;
+use crate::crypto::*;
+use crate::pervasive::map::Map;
+use crate::pervasive::option::*;
+use crate::pervasive::seq::Seq;
+use crate::pervasive::set::Set;
+use crate::tspec::size_s::*;
+use crate::tspec::Byte;
+use crate::*;
+
+pub type MemKey = SymKey<(ASID, int)>;
+
+crate::macro_const_int! {
+    pub const MEM_UNIT_SIZE: u64 = 16u64;
+}
+
+type EncryptedByte = Encrypted<MemKey, Byte>;
+
+#[derive(SpecGetter, SpecSetter)]
+pub struct RamDB {
+    pub data: Stream<EncryptedByte>,
+    pub dom: Set<SPA>,
+    pub write_count: int,
+    pub crypto_mask: Stream<CryptoMask>,
+}
+
+verus! {
+    pub open spec fn idx(spa: SPA) -> int{
+        idx2(spa.value())
+    }
+
+    pub open spec fn idx2(spa_val: int) -> int{
+        spa_val / MEM_UNIT_SIZE!()
+    }
+
+    impl SPMem {
+        pub open spec fn contains_block_idx(&self, i: int) -> bool
+        {
+            &&& idx(self[0]) <= i
+            &&& idx(self[self.len() -1]) >= i
+        }
+    }
+
+impl RamDB {
+    pub open spec fn dom(&self) -> Set<SPA> {
+        self.dom
+    }
+
+    pub closed spec fn inv(&self) -> bool {
+        forall |spa: SPA|  (#[trigger] self.data[spa.value()]).key.key.1 == idx(spa)
+    }
+
+    pub proof fn lemma_write_inv(&self, asid: ASID, spmem: SPMem, bytes: Seq<Byte>)
+    requires
+        self.inv()
+    ensures
+        self.write_raw(asid, spmem, bytes).inv(),
+        self.write_raw(asid, spmem, bytes).dom() === self.dom(),
+    {
+        reveal(Self::write_raw);
+        let new = self.write_raw(asid, spmem, bytes);
+        assert forall |spa: SPA|
+            (#[trigger] new.data[spa.value()]).key.key.1 ==  idx(spa)
+        by {
+            self.lemma_write_raw(asid, spmem, bytes);
+            assert(new.data[spa.value()] === self.to_write(spa, asid, spmem, bytes));
+        };
+    }
+
+    /// The encryption of data is done with a 128-bit key in a mode which
+    /// utilizes an additional physical address-based tweak to protect
+    /// against cipher-text block moveattacks
+    pub open spec fn write<T>(&self, asid: ASID, spa: SPMem, data: T) -> Self
+    {
+        let bytes = ByteStream::from_data(data).spec_take(0, spec_size::<T>());
+        self.write_raw(asid, spa, bytes)
+    }
+
+    pub open spec fn to_write(&self, i: SPA, asid: ASID, spmem: SPMem, bytes: Seq<Byte>) -> EncryptedByte
+    {
+        let crypto_mask: Byte = self.crypto_mask[self.spec_write_count()].get_mask();
+        if spmem.contains(i)
+        {
+            let k = i.value() - spmem[0].value();
+            SymKey{key: (asid, idx(i))}.encrypt(
+                bytes[k],
+                crypto_mask)
+        } else if spmem.contains_block_idx(idx(i))  {
+            SymKey{key: (asid, idx(i))}.encrypt(
+                SymKey{key: (asid, idx(i))}.decrypt(self.data[i.value()]),
+                crypto_mask
+            )
+        } else {
+            self.data[i.value()]
+        }
+    }
+
+    pub open spec fn write_raw(&self, asid: ASID, spmem: SPMem, bytes: Seq<Byte>) -> Self
+    {
+        let bytes =
+        Stream::new(
+            |i: int|
+            self.to_write(SPA::new(i), asid, spmem, bytes)
+        );
+        self.spec_set_data(bytes).spec_set_write_count(self.spec_write_count() + 1)
+    }
+
+    pub proof fn lemma_write_raw(&self, asid: ASID, spmem: SPMem, bytes: Seq<Byte>)
+    ensures
+        forall|spa: SPA| self.write_raw(asid, spmem, bytes).spec_data()[spa.value()] === #[trigger] self.to_write(spa, asid, spmem, bytes)
+    {
+        reveal(Self::write_raw);
+    }
+
+    pub open spec fn read_one_byte(&self, asid: ASID, spa: SPA) -> Byte {
+        SymKey{key: (asid, idx(spa))}.decrypt(self.data[spa.value()])
+    }
+
+    pub open spec fn read_byte_at(&self, asid: ASID, spmem: SPMem, i: int) -> Byte {
+        if 0 <= i < spmem.len() {
+            self.read_one_byte(asid, spmem[i])
+        } else {
+            0
+        }
+    }
+
+    /// Only the VM itself can decrypt the data at the exact spa;
+    #[verifier(inline)]
+    pub open spec fn read_bytes_by_asid(&self, asid: ASID, spmem: SPMem) -> ByteStream {
+        Stream::new(
+            |i: int| self.read_byte_at(asid, spmem, i)
+        )
+    }
+
+    //#[verifier(opaque)]
+    pub open spec fn read_by_asid<T>(&self, asid: ASID, spmem: SPMem) -> T {
+        let bytes = self.read_bytes_by_asid(asid, spmem);
+
+       ByteStream::to_data(bytes)
+    }
+
+    pub proof fn lemma_write_change_byte(&self, asid: ASID, spmem: SPMem, data: ByteStream, rspa: SPA)
+    requires
+        spmem.is_valid(),
+        spmem.contains(rspa),
+    ensures
+        self.write_raw(asid, spmem, data.to_seq(spmem.len())).read_one_byte(asid, rspa) === data[rspa.value() - spmem.first().value()]
+    {
+        reveal(Self::write_raw);
+        let bytes = data.to_seq(spmem.len());
+        let crypto_mask: Byte = self.crypto_mask[self.spec_write_count()].get_mask();
+        let new = self.write_raw(asid, spmem, bytes);
+        let read_byte = new.read_one_byte(asid, rspa);
+        let k = rspa.value() - spmem.first().value();
+        assert(0 <= k < spmem.len());
+        assert(new.data[rspa.value()] ===
+        SymKey{key: (asid, idx(spmem[k]))}.encrypt(
+            bytes[k],
+            crypto_mask)
+        );
+        assert(read_byte === SymKey{key: (asid, idx(spmem[k]))}.decrypt(new.data[spmem[k].value()]));
+        assert(bytes[k] === read_byte);
+    }
+
+    pub proof fn lemma_write_unchange_byte(&self, asid: ASID, spmem: SPMem, data: ByteStream, rspa: SPA)
+    requires
+        spmem.is_valid(),
+        !spmem.contains(rspa),
+    ensures
+        self.write_raw(asid, spmem, data.to_seq(spmem.len())).read_one_byte(asid, rspa) === self.read_one_byte(asid, rspa)
+    {
+        reveal(Self::write_raw);
+    }
+
+    pub proof fn lemma_write_unchange_byte_any_enc(&self, asid: ASID, spmem: SPMem, data: ByteStream, rasid: ASID, rspa: SPA)
+    requires
+        spmem.is_valid(),
+        idx(spmem.first()) > idx(rspa) || idx(spmem.last()) < idx(rspa),
+    ensures
+        self.write_raw(asid, spmem, data.to_seq(spmem.len())).read_one_byte(rasid, rspa) === self.read_one_byte(rasid, rspa)
+    {
+        reveal(Self::write_raw);
+    }
+
+    //#[verifier(external_body)]
+    pub proof fn proof_read_write(&self, asid: ASID, spmem: SPMem, data: ByteStream)
+    requires
+        spmem.is_valid(),
+    ensures
+        self.write_raw(asid, spmem, data.to_seq(spmem.len())).read_bytes_by_asid(asid, spmem).to_seq(spmem.len()) === data.to_seq(spmem.len()),
+    {
+        reveal(Self::read_bytes_by_asid);
+        reveal(Self::write_raw);
+        let bytes = data.to_seq(spmem.len());
+        let new = self.write_raw(asid, spmem, bytes);
+        let read_bytes = new.read_bytes_by_asid(asid, spmem);
+        let crypto_mask: Byte = self.crypto_mask[self.spec_write_count()].get_mask();
+        assert(
+            read_bytes === Stream::new(
+                |i: int| new.read_byte_at(asid, spmem, i)
+            )
+        );
+        assert(
+            new.data === Stream::new(
+                |i: int| self.to_write(SPA::new(i), asid, spmem, bytes)
+            )
+        );
+        assert(bytes.len() === spmem.len());
+        assert forall | k|
+            0 <= k < bytes.len()
+        implies
+            (bytes[k] === read_bytes[k])
+        by {
+            let i = spmem[k].value();
+            assert(k == i - spmem[0].value());
+            assert(spmem[k].to_page() === spmem.to_page());
+            assert(0 <= k < spmem.len());
+            assert(spmem.contains(spmem[k]));
+            self.lemma_write_change_byte(asid, spmem, data, spmem[k]);
+        }
+        assert(bytes.ext_equal(read_bytes.to_seq(spmem.len())));
+    }
+
+    pub open spec fn spa_is_encrypted(&self, spa: SPA, asid: ASID) -> bool
+    {
+        true
+        /*
+        self.data[spa.value()].key === SymKey{
+            key: (asid, idx(spa))
+        }*/
+    }
+
+    pub open spec fn disjoint_write_read_requires(&self, asid: ASID, spa: SPMem, rspa: SPMem) -> bool
+    {
+        &&& rspa.disjoint(spa)
+        /*&&& (forall |i| 0 <= i < spa.len() ==>
+                self.spa_is_encrypted(#[trigger] spa[i], asid))*/
+    }
+
+    //#[verifier(external_body)]
+    pub proof fn proof_read_write_no_change(&self, asid: ASID, spmem: SPMem, data: ByteStream, rspa: SPMem)
+    requires
+        self.inv(),
+        spmem.is_valid(),
+        //self.disjoint_write_read_requires(asid, spmem, rspa),
+        rspa.disjoint(spmem)
+    ensures
+        self.write_raw(asid, spmem, data.to_seq(spmem.len())).read_bytes_by_asid(asid, rspa) === self.read_bytes_by_asid(asid, rspa),
+    {
+        let new = self.write_raw(asid, spmem, data.to_seq(spmem.len()));
+        reveal(Self::read_bytes_by_asid);
+        let bytes = Stream::new(
+            |i: int| self.read_byte_at(asid, rspa, i)
+        );
+        let new_bytes = Stream::new(
+            |i: int| new.read_byte_at(asid, rspa, i)
+        );
+        assert forall |s: int|
+            0 <= s < rspa.len()
+        implies
+            bytes[s] === new_bytes[s]
+        by {
+            self.lemma_write_unchange_byte(asid, spmem, data, rspa[s]);
+        }
+        assert(new_bytes === bytes) by {
+            assert(new_bytes.ext_equal(bytes));
+        }
+    }
+
+
+    /// Only the VM itself can decrypt the data at the exact spa;
+    #[verifier(opaque)]
+    pub open spec fn read_all_by_asid(&self, asid: ASID) -> ByteStream {
+        Stream::new(
+            |i: int| if !SPA::new(0).to_page().is_null() {
+                    SymKey{key: (asid, idx2(i))}.decrypt(self.data[i])
+                } else {
+                    0
+                }
+        )
+    }
+
+    pub open spec fn hv_update(&self, newram: Self, memid: MemID) -> Self {
+        newram
+    }
+
+    pub open spec fn hv_view(&self, memid: MemID) -> ByteStream {
+        self.read_all_by_asid(memid.to_asid())
+    }
+}
+}

@@ -1,0 +1,2 @@
+#!/bin/sh
+"python3" "/home/ziqiaozhou/verismo/source/verismo/../../igvm/igvm/igvmgen.py" "-k" "/home/ziqiaozhou/verismo/source/target/target/release/build/verismo-abee417d9afd8f47/out/../../../monitor" "-o" "/home/ziqiaozhou/verismo/source/target/target/release/build/verismo-abee417d9afd8f47/out/../../../verismo-rust.bin" "-vtl=2" "-append" "root=/dev/sda rw debugpat" "-inform" "verismo" "-boot_mode" "x64" "-pgtable_level" "4" "-vmpl2_kernel" "/root/snp/out/vmpl2/sm/arch/x86/boot/bzImage"

@@ -1,0 +1,4 @@
+[build]
+rustc = "rustc"
+incremental = true
+

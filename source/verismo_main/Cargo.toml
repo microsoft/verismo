@@ -1,0 +1,19 @@
+[package]
+name = "verismo_main"
+version = "0.1.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = ["non_std", "debug"]
+non_std = []
+no_global_allocator = ["verismo/no_global_allocator"]
+debug = ["verismo/debug"]
+noverify = ["verismo/noverify"]
+verifymodule=["verismo/verifymodule"]
+
+[dependencies]
+verismo = {path = "../verismo"}
+builtin = { path = "../../tools/verus/source/builtin"}
+builtin_macros = { path = "../../tools/verus/source/builtin_macros"}
+vstd = {path = "../vstd"}

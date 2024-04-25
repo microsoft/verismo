@@ -1,0 +1,9 @@
+[package]
+name = "verus-rustc"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = "3.0"
+log = "0.4"
+log4rs  = "1.0"
