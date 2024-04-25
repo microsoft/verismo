@@ -248,13 +248,14 @@ pub fn pvalmem(
             retp@.snp().ensures_pvalidated(perm@.snp(), val),
             retp@.snp_wf_range((start as int, (vaddr - start) as nat)),
             snpcore.inv(),
-            perm@.bytes().wf() ==> retp@.bytes().wf(),
+            old_perm@.bytes().wf() ==> perm@.bytes().wf(),
+            old_perm@.bytes().wf() ==> retp@.bytes().wf(),
             snpcore.coreid@.vmpl == 0,
             oldsnpcore === *snpcore,
     {
         let ghost prev_perm = perm;
         let tracked (mut current_perm, next_perm) = perm.trusted_split(PAGE_SIZE as nat);
-        let ghost old_perm = current_perm;
+        let ghost old_current_perm = current_perm;
         let mut rflags: u64 = 0;
         let validate = if val {
             1
@@ -283,14 +284,15 @@ pub fn pvalmem(
             assert(retp@.snp() === current_perm@.snp());
             HwSnpMemAttr::reveal_use_rflags();
             assert(retp@.snp.wf());
-            if prev_perm@.bytes().wf() {
+            if old_perm@.bytes().wf() {
                 assert(retp@.bytes().wf());
-                assert(old_perm@.bytes() =~~= prev_perm@.bytes().take(PAGE_SIZE as int));
-                assert(old_perm@.bytes().wf());
+                assert(old_current_perm@.bytes() =~~= prev_perm@.bytes().take(PAGE_SIZE as int));
+                assert(old_current_perm@.bytes().wf());
                 assert(current_perm@.bytes().wf());
                 assert((retp@.bytes() + current_perm@.bytes()).wf());
             }
             retp = retp.tracked_join(current_perm);
+            assert(old_perm@.bytes().wf() ==> retp@.bytes().wf());
             perm = next_perm;
             assert(retp@.range() === (start as int, (vaddr - start) as nat));
         }

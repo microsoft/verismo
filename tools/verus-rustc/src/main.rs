@@ -197,11 +197,7 @@ fn run_verus_verify(
         command.arg("--compile");
     }
 
-    command.arg("--no-auto-recommends-check");
-    //command.arg("--no-solver-version-check");
     command.arg("--no-builtin");
-    command.arg("--time-expanded");
-    //command.args(["--help"]);
     debug!("cmd: {:?}", command);
 
     // Redirect stdout to a file

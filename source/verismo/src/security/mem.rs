@@ -651,6 +651,8 @@ pub fn osmem_check_and_get_page<T: IsConstant + SpecSize + WellFormed + VTypeCas
         ret.is_Some() ==> ret.get_Some_0().0.wf(),
         ret.is_Some() ==> ret.get_Some_0().0.is_page(),
         ret.is_Some() ==> ret.get_Some_0().0.snp().encrypted(),
+        ret.is_Some() ==> ret.get_Some_0().0.snp().rmp@.spec_validated(),
+        ret.is_Some() ==> ret.get_Some_0().0.id() == (ppage as int).to_addr(),
         ret.is_Some() ==> os_mem_valid_snp(ret.get_Some_0().1, ret.get_Some_0().0.snp()),
         cs.inv(),
         (*cs).only_lock_reg_updated((*old(cs)), set![], set![spec_PT().lockid()]),

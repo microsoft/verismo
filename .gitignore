@@ -17,3 +17,4 @@ richos/module/*.dwo
 **target/
 **.rust_verify
 **.bin
+**.log

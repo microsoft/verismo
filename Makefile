@@ -1,5 +1,5 @@
 IGVMGEN ?= tools/igvm/igvm/igvmgen.py
-profile ?= debug
+profile ?= release
 IMAGE ?= verismo.bin
 TARGET_DIR = source/target/target/${profile}
 TMP_IMAGE = ${TARGET_DIR}/verismo-rust.bin
@@ -9,17 +9,22 @@ LINUX ?= /root/snp/out/vmpl2/sm/arch/x86/boot/bzImage
 LINUX_OUT=../out/vmpl2/sm
 LINUX_HEADER_DIR=$(realpath $(LINUX_OUT))/mod
 IGVM = ${TARGET_DIR}/igvm.sh
-all: $(IMAGE)
+
+all: build image fs
 
 build: ${target}
 
-verify:
-	cd source/verismo_main && cargo build
+verify: verifyonly image fs
+
+verifyonly:
+	cd source/verismo_main && cargo build --release
+
 
 ${target}:
-	cd source/verismo_main && cargo build --features noverify
+	cd source/verismo_main && cargo build --features noverify --release
 
 ${IGVM}: ${target}
+
 ${TMP_IMAGE}: ${IGVM}
 	sh ${IGVM}
 
@@ -44,7 +49,7 @@ fs: driver
 #		-pgtable_level 4\
 #		-vmpl2_kernel  $(LINUX)
 
-$(IMAGE): ${TMP_IMAGE}
+$(IMAGE):
 	cp ${TMP_IMAGE} $(IMAGE)
 
 image: $(IMAGE)

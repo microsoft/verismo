@@ -48,8 +48,10 @@ pub extern "C" fn ap_call(
     loop
         invariant
             cs.inv_stage_ap_wait(),
+            nextvmpl_id@.vmpl == RICHOS_VMPL as nat,
         ensures
-            vmsa.is_default_page(),
+            vmsa.snp().is_vmpl0_private(),
+            vmsa@.vmpl.spec_eq(RICHOS_VMPL),
     {
         let tracked mut vmsa_lock = cs.lockperms.tracked_remove(spec_RICHOS_VMSA_lockid());
         let (vmsa_vec_ptr, Tracked(mut vmsa_vec_perm), Tracked(mut vmsa_lock0)) =

@@ -571,7 +571,7 @@ impl<'a> MonitorHandle<'a> {
         let tracked vmsa_perm = vmsa_perm.tracked_into_raw();
         rmp_reset_vmpl_perm(vmsa_gpn, Tracked(&cs.snpcore), Tracked(&mut vmsa_perm));
         proof {
-            assert(vmsa_perm@.snp().is_default());
+            assert(vmsa_perm@.snp().is_vmpl0_private());
         }
         let mut vmsa = VBox::<VmsaPage>::from_raw(
             vmsa_ptr.to_usize(),
@@ -585,10 +585,12 @@ impl<'a> MonitorHandle<'a> {
         let ghost prev_vmsa_vec = vmsa_vec;
         fill_vec(&mut vmsa_vec, cpu + 1);
         vmsa_vec.set(cpu, Some(vmsa));
+        #[verusfmt::skip]
         proof {
             assert(richos_vmsa_invfn()(vmsa_vec)) by {
-                assert forall|i| 0 <= i < vmsa_vec.len() implies vmsa_vec[i].is_Some() ==> (
-                #[trigger] vmsa_vec[i]).get_Some_0().is_page() by {
+                assert forall|i| 0 <= i < vmsa_vec.len() implies 
+                    (vmsa_vec[i].is_Some() ==> is_richos_vmsa_box(#[trigger] vmsa_vec[i].get_Some_0()))
+                by {
                     if vmsa_vec[i].is_Some() {
                         assert(i == cpu || prev_vmsa_vec[i] === vmsa_vec[i]);
                     }
