@@ -445,7 +445,6 @@ pub fn rmpadjmem(
 
 pub fn rmpadjust_check(
     vaddr: u64,
-    psize: u64,
     attr: RmpAttr,
     Tracked(snpcore): Tracked<&mut SnpCore>,
     Tracked(perm): Tracked<&mut SnpPointsToRaw>,
@@ -460,7 +459,7 @@ pub fn rmpadjust_check(
         old(perm)@.wf() ==> perm@.wf(),
         *snpcore === *old(snpcore),
 {
-    let rc = rmpadjust(vaddr, psize, attr, Tracked(snpcore), Tracked(None), Tracked(perm));
+    let rc = rmpadjust(vaddr, RMP_4K, attr, Tracked(snpcore), Tracked(None), Tracked(perm));
     if rc != 0 {
         // failed validation ==> possible attack
         vc_terminate(SM_TERM_INVALID_PARAM, Tracked(snpcore));

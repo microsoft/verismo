@@ -149,7 +149,12 @@ pub fn run_richos(
         reveal_strlit("Run richos.");
     }
     new_strlit("Run richos.").leak_debug();
-    let (handle, vmsa) = handle.register_vmsa(RICHOS_VMPL as u8, vmsa, Tracked(nextvmpl_id), Tracked(cs));
+    let (handle, vmsa) = handle.register_vmsa(
+        RICHOS_VMPL as u8,
+        vmsa,
+        Tracked(nextvmpl_id),
+        Tracked(cs),
+    );
     let mut gvca_page = None;
     let mut mh = MonitorHandle { handle, guest_channel, vmsa, gvca_page, secret, stat: 0 };
     assert(cs.inv_stage_verismo());
@@ -456,7 +461,7 @@ impl<'a> MonitorHandle<'a> {
         // The memory still belongs to rich os and thus we do not need to reset;
         // VeriSMo never invalidate a page explicitly.
         // Instead, it relies on hypervisor's rmpupdate to automatically invalidate a page.
-        // If hypervisor did not run rmpupdate to change the page to shared, 
+        // If hypervisor did not run rmpupdate to change the page to shared,
         // verismo will see a double-validation err when it pvalidate it again;
         // If hypervisor changes the mapping, the validation succeeds only for an invalidated page which has resetted rmp perms (rmpupdate will reset perms).
         // If hypervisor do not changes the mapping, the next validation only succeeds if the hypervisor has marked the page as shared.

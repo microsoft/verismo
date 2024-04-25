@@ -60,18 +60,11 @@ pub fn rmp_reset_vmpl_perm(
     {
         let ghost prev_perm = *perm;
         let rmp_attr = RmpAttr::empty().set_vmpl(vmpl as u64).set_perms(0);
-        rmpadjust_check(
-            page.to_addr() as u64,
-            RMP_4K,
-            rmp_attr,
-            Tracked(snpcore),
-            Tracked(perm),
-        );
+        rmpadjust_check(page.to_addr() as u64, rmp_attr, Tracked(snpcore), Tracked(perm));
         proof {
             assert(rmp_attr@.perms() =~~= PagePerm::empty());
             assert(rmp_attr@.vmpl() == VMPL::from_int(vmpl as int));
-            assert forall|i: int| 1 <= i < (vmpl + 1) 
-            implies #[trigger] spec_reset_perm_at(
+            assert forall|i: int| 1 <= i < (vmpl + 1) implies #[trigger] spec_reset_perm_at(
                 *perm,
                 old_perm,
                 i as nat,

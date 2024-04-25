@@ -21,15 +21,13 @@ static _CONSOLE: VSpinLock<Console> = VSpinLock::new(Console);
 
 use crate::pgtable_e::PtePerms;
 #[verifier::external]
-static _PT: VSpinLock<TrackedPTEPerms> = VSpinLock::new(TrackedPTEPerms {
-    perms: Tracked::assume_new(),
-});
+static _PT: VSpinLock<TrackedPTEPerms> =
+    VSpinLock::new(TrackedPTEPerms { perms: Tracked::assume_new() });
 
 use crate::security::TrackedSecretsOSAreaPerms;
 #[verifier::external]
-static _SECRET_PERM: VSpinLock<TrackedPTEPerms> = VSpinLock::new(TrackedPTEPerms {
-    perms: Tracked::assume_new(),
-});
+static _SECRET_PERM: VSpinLock<TrackedPTEPerms> =
+    VSpinLock::new(TrackedPTEPerms { perms: Tracked::assume_new() });
 
 use alloc::vec::Vec;
 

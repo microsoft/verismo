@@ -763,9 +763,10 @@ pub fn _osmem_add_ram_from_allocator(
             assert(aligned_perm@.wf_const_default(aligned_perm@.range()));
             proof {
                 assert forall|i|
-                    start_page <= i < (start_page + npages) implies 
-                    #[trigger] page_perms.contains_key(i)
-                    && page_perms[i]@.wf_default((i.to_addr(), PAGE_SIZE as nat)) && page_perms[i]@.bytes().is_constant_to(RICHOS_VMPL as nat) by {
+                    start_page <= i < (start_page
+                        + npages) implies #[trigger] page_perms.contains_key(i)
+                    && page_perms[i]@.wf_default((i.to_addr(), PAGE_SIZE as nat))
+                    && page_perms[i]@.bytes().is_constant_to(RICHOS_VMPL as nat) by {
                     assert(page_perms.contains_key(i));
                     let offset = i.to_addr() - aligned_perm@.range().0;
                     assert(page_perms[i]@.bytes() =~~= aligned_perm@.bytes().subrange(
