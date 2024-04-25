@@ -22,7 +22,7 @@ fn main() {
     let work_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let executable_path = format!("{}/../../../verismo_main", target_dir); // Adjust the path if necessary
     let igvmgen = work_dir.clone() + "/../../tools/igvm/igvm/igvmgen.py";
-    let bzimage = work_dir.clone() + "../../richos/target/bzImage";
+    let bzimage = work_dir.clone() + "/../../richos/target/bzImage";
     let igvmscript_path = format!("{}/../../../igvm.sh", target_dir);
     println!("cargo:rerun-if-changed={}", igvmgen);
     let igvmout = format!("{}/../../../verismo-rust.bin", target_dir);

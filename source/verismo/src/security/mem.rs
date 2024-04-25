@@ -17,9 +17,9 @@ pub open spec fn spec_is_default_pages_const_to_vmpl(
     vmpl: nat,
 ) -> bool {
     forall|i|
-        start_page <= i < (start_page + npages) ==> #[trigger] page_perms.contains_key(i)
+        start_page <= i < (start_page + npages) ==> (#[trigger] page_perms.contains_key(i)
             && page_perms[i]@.wf_default((i.to_addr(), PAGE_SIZE as nat))
-            && page_perms[i]@.bytes().is_constant_to(vmpl)
+            && page_perms[i]@.bytes().is_constant_to(vmpl))
 }
 
 pub const RICHOS_VMPL: u8 = 1;
@@ -763,9 +763,9 @@ pub fn _osmem_add_ram_from_allocator(
             assert(aligned_perm@.wf_const_default(aligned_perm@.range()));
             proof {
                 assert forall|i|
-                    start_page <= i < (start_page
-                        + npages) implies #[trigger] page_perms.contains_key(i)
-                    && page_perms[i]@.wf_const_default((i.to_addr(), PAGE_SIZE as nat)) by {
+                    start_page <= i < (start_page + npages) implies 
+                    #[trigger] page_perms.contains_key(i)
+                    && page_perms[i]@.wf_default((i.to_addr(), PAGE_SIZE as nat)) && page_perms[i]@.bytes().is_constant_to(RICHOS_VMPL as nat) by {
                     assert(page_perms.contains_key(i));
                     let offset = i.to_addr() - aligned_perm@.range().0;
                     assert(page_perms[i]@.bytes() =~~= aligned_perm@.bytes().subrange(

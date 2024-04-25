@@ -154,8 +154,6 @@ impl GhcbHyperPageHandle {
             vc_terminate(SM_TERM_INVALID_PARAM, Tracked(&mut cs.snpcore));
         }
         assert(vmsa_perm@.wf());
-        assert(vmsa_perm@.snp().rmp@.perms =~~= crate::arch::rmp::perm_s::rmp_perm_init());
-        //assert(vmsa_perm@.snp() === SwSnpMemAttr::vmsa2(rmp_attr@));
         let handle = handle.config_percpu_intercept(Tracked(cs));
         proof {
             cs1.lemma_update_prop(cs2, cs3, set![], set![], set![], set![]);

@@ -345,13 +345,14 @@ impl GhcbHandle {
             );
             assert(set![].union(set![spec_PT().lockid()]) =~~= set![spec_PT().lockid()]);
             assert forall|i|
-                start_page <= i < start_page + npages implies #[trigger] page_perms.contains_key(i)
+                start_page <= i < start_page + npages implies 
+                (#[trigger] page_perms.contains_key(i)
                 && spec_perm_requires_pvalidate(
                 page_perms[i],
                 i.to_addr(),
                 PAGE_SIZE as nat,
                 true,
-            ) by {
+            )) by {
                 assert(prev_page_perms.contains_key(i));
                 assert(page_perms.contains_key(i));
                 assert(prev_page_perms[i]@.snp().wf());
@@ -369,11 +370,13 @@ impl GhcbHandle {
             Tracked(&mut cs.snpcore),
         );
         proof {
-            assert forall|i| start_page <= i < (start_page + npages) implies (
-            page_perms).contains_key(i) && mk_private_ensures_pageperm(
+            assert forall|i| start_page <= i < (start_page + npages) 
+            implies 
+            (#[trigger]page_perms.contains_key(i) && 
+            mk_private_ensures_pageperm(
                 old_page_perms[i]@,
                 page_perms[i]@,
-            ) by {
+            )) by {
                 let page_perm = page_perms[i]@;
                 let prev_page_perm = old_page_perms[i]@;
                 assert(old_page_perms.contains_key(i));
