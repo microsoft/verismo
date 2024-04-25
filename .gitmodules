@@ -15,3 +15,5 @@
 [submodule "richos/snplinux"]
 	path = richos/snplinux
 	url = git@github.com:MSRSSP/snplinux.git
+[submodule "tools/igvm"]
+	url = git@github.com:ziqiaozhou/igvm.git
