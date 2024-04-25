@@ -5,6 +5,7 @@ use crate::arch::addr_s::VM_MEM_SIZE;
 use crate::debug::VPrint;
 use crate::registers::SnpCore;
 use crate::snp::SnpCoreConsole;
+use crate::vbox::{BorrowFnTrait, MutFnTrait};
 
 verus! {
 

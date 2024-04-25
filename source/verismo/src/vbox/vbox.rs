@@ -9,6 +9,7 @@ use crate::lock::{LockPermRaw, MapLockContains, MapRawLockTrait};
 use crate::registers::CoreIdPerm;
 use crate::snp::ghcb::*;
 use crate::snp::SnpCoreSharedMem;
+use crate::debug::VPrintAtLevel;
 
 verus! {
 
@@ -165,7 +166,6 @@ impl<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> VBox<T> {
             ret.wf(),
             ret@.is_constant(),
     {
-        use crate::global::*;
         let tracked perm = cs.lockperms.tracked_remove(spec_ALLOCATOR_lockid());
         let tracked mut perm0 = Map::tracked_empty();
         proof {
@@ -185,7 +185,6 @@ impl<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> VBox<T> {
             cs.lockperms.tracked_insert(spec_ALLOCATOR_lockid(), perm0.tracked_remove(0));
         }
         if result.is_err() {
-            use crate::debug::VEarlyPrintAtLevel;
             new_strlit("\nfailed new_aligned_uninit\n").leak_debug();
             vc_terminate_debug(SM_TERM_MEM, Tracked(cs));
         }

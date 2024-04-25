@@ -1,5 +1,6 @@
 use super::*;
 use crate::registers::CoreIdPerm;
+use crate::debug::VPrintAtLevel;
 
 verus! {
 
@@ -26,7 +27,6 @@ impl VSpinLock<VeriSMoAllocator> {
             res.0.is_Ok() ==> talloc_valid_ptr(size, res.0.get_Ok_0()) && (
             res.0.get_Ok_0().0 as int) % (align as int) == 0,
     {
-        use crate::debug::VEarlyPrintAtLevel;
         let tracked alloc_lockperm = alloc_lockperm;
         (new_strlit("\n new")).leak_debug();
         let (ptr, Tracked(mut allocperm), Tracked(alloc_lockperm)) = self.acquire(
@@ -40,7 +40,6 @@ impl VSpinLock<VeriSMoAllocator> {
         ptr.put(Tracked(&mut allocperm), allocator);
         self.release(Tracked(&mut alloc_lockperm), Tracked(allocperm), Tracked(coreid));
         if let Some((addr, perm)) = result {
-            use crate::debug::VEarlyPrintAtLevel;
             (new_strlit(": "), addr).leak_debug();
             (Ok((addr, perm)), Tracked(alloc_lockperm))
         } else {
@@ -106,7 +105,6 @@ impl VSpinLock<VeriSMoAllocator> {
         let mut allocator = ptr.take(Tracked(&mut allocperm));
         assert(alloc_lockperm@.invfn.inv(allocator));
         assert(VeriSMoAllocator::invfn()(allocator));
-        use crate::debug::VEarlyPrintAtLevel;
         ((new_strlit("\ndealloc: "), addr), size).leak_debug();
         allocator.dealloc_inner(addr, size, Tracked(memperm));
         ptr.put(Tracked(&mut allocperm), allocator);

@@ -198,7 +198,6 @@ pub fn init_cpu_for_crypto(cpuid_page: &SnpCpuidTable, Tracked(cs): Tracked<&mut
             set![spec_CONSOLE_lockid()],
         ),
 {
-    use crate::debug::VPrintAtLevel;
     let cpuid_table = cpuid_page.fn_.as_slice();
     process_cpuid(0x8000_001f, 0, 0, 0, cpuid_table);
     let ret = process_cpuid(0x1, 0, 0, 0, cpuid_table);
