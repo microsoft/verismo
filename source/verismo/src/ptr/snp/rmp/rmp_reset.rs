@@ -65,7 +65,6 @@ pub fn rmp_reset_vmpl_perm(
             RMP_4K,
             rmp_attr,
             Tracked(snpcore),
-            Tracked(None),
             Tracked(perm),
         );
         proof {

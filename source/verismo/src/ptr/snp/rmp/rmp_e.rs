@@ -448,7 +448,6 @@ pub fn rmpadjust_check(
     psize: u64,
     attr: RmpAttr,
     Tracked(snpcore): Tracked<&mut SnpCore>,
-    Tracked(newcore): Tracked<Option<CoreIdPerm>>,
     Tracked(perm): Tracked<&mut SnpPointsToRaw>,
 )
     requires
@@ -461,7 +460,7 @@ pub fn rmpadjust_check(
         old(perm)@.wf() ==> perm@.wf(),
         *snpcore === *old(snpcore),
 {
-    let rc = rmpadjust(vaddr, psize, attr, Tracked(snpcore), Tracked(newcore), Tracked(perm));
+    let rc = rmpadjust(vaddr, psize, attr, Tracked(snpcore), Tracked(None), Tracked(perm));
     if rc != 0 {
         // failed validation ==> possible attack
         vc_terminate(SM_TERM_INVALID_PARAM, Tracked(snpcore));

@@ -141,7 +141,6 @@ impl GhcbHyperPageHandle {
             ));
         }
         assert(vmsa_perm@.wf());
-        assert(vmsa_perm@.snp() === SwSnpMemAttr::spec_default());
         let rc = rmpadjust(
             vmsa_addr,
             RMP_4K,
