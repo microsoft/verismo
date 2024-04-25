@@ -1,14 +1,16 @@
-# Project
+# VeriSMo: A formally verified security module for AMD confidential VMs.
 
-> This repo has been populated by an initial template to help get you started. Please
-> make sure to update the content to build a great experience for community-building.
+This repo includes the code for VeriSMo project.
 
-As the maintainer of this project, please make a few updates:
+## Files
 
-- Improving this README.MD file to provide a great experience
-- Updating SUPPORT.MD with content about this project's support experience
-- Understanding the security reporting process in SECURITY.MD
-- Remove this section from the README
+- tools/ : includes verifier and compiler tools and scripts.
+- deps/ : includes hacl package
+- source/ : verismo code
+- source/monitor : generates executable bin
+- source/modules : 
+
+
 
 ## Contributing
 

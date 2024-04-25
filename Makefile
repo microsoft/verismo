@@ -3,7 +3,7 @@ profile ?= debug
 IMAGE ?= verismo.bin
 TARGET_DIR = source/target/target/${profile}
 TMP_IMAGE = ${TARGET_DIR}/verismo-rust.bin
-target ?= ${TARGET_DIR}/monitor
+target ?= ${TARGET_DIR}/verismo_main
 CMD ?= root=/dev/sda rw debugpat
 LINUX ?= /root/snp/out/vmpl2/sm/arch/x86/boot/bzImage
 LINUX_OUT=../out/vmpl2/sm
@@ -14,10 +14,10 @@ all: $(IMAGE)
 build: ${target}
 
 verify:
-	cd source/monitor && cargo build
+	cd source/verismo_main && cargo build
 
 ${target}:
-	cd source/monitor && cargo build --features noverify
+	cd source/verismo_main && cargo build --features noverify
 
 ${IGVM}: ${target}
 ${TMP_IMAGE}: ${IGVM}

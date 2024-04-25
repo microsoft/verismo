@@ -31,8 +31,8 @@ fn find_rs_files(path: &Path) -> Vec<String> {
     files
 }
 
-fn process_module(monitor_mod_path: &str, module_name: &str) -> Vec<String> {
-    let dir = Path::new(monitor_mod_path).join("src");
+fn process_module(verismo_path: &str, module_name: &str) -> Vec<String> {
+    let dir = Path::new(verismo_path).join("src");
     let module_files = find_rs_files(&dir);
 
     let prefix = dir.into_os_string().into_string().unwrap();
@@ -91,7 +91,7 @@ fn main() -> io::Result<()> {
 
     log4rs::init_config(config).unwrap();
 
-    let target = "monitor_mod";
+    let target = "verismo";
     let script = env::current_exe()?;
     let script_dir = script.parent().unwrap();
     let top_dir = script_dir.parent().unwrap();
@@ -149,7 +149,7 @@ fn main() -> io::Result<()> {
     ];
     let crate_name = get_value(&args, "--crate-name");
     if let Some(crate_name) = crate_name {
-        if target == crate_name || crate_name == "monitor"  {
+        if target == crate_name || crate_name == "verismo_main"  {
             if target == crate_name {
                 verus_args.extend(module_verus_args);
             }

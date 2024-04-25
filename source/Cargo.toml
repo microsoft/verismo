@@ -1,7 +1,7 @@
 [workspace]
 members = [
-    "monitor",
-    "monitor_mod",
+    "verismo_main",
+    "verismo",
     "verismo_macro",
     "vstd"
 ]
