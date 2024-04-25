@@ -36,7 +36,7 @@ Now, run verification checks and build the binary.
 Run
 
 ```
-make verify
+make verify -f Makefile.default
 ``` 
 
 or  
@@ -60,7 +60,7 @@ A fully verified result should have "verified": 2138, "errors": 0,
 If no changes are made in `source/verismo`, we recommend to build without verification to speed up the build process.
 
 ```
-make noverify
+make debugbuild -f Makefile.default
 ``` 
 
 or  

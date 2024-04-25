@@ -14,7 +14,7 @@ echo "submodule init"
 (
   git submodule update --init $TOOLS_DIR/verus
   git submodule update --init $TOOLS_DIR/verusfmt
-  git submodule update --init $TOOLS_DIR/igvm
+  git submodule update --init $TOOLS_DIR/igvm || true
   git submodule update --init $TOOLS_DIR/../deps/hacl-packages
 )
 echo "init vstd"
