@@ -9,6 +9,8 @@ LINUX ?= ${CURDIR}/richos/target/arch/x86/boot/bzImage
 LINUX_HEADER_DIR=$(realpath $(LINUX_OUT))/mod
 LINUX_CONFIG = richos/kernel/config-richos
 
+default: verifyonly
+
 debugbuild: buildonly fs
 	sh ${TARGET_DIR}/${DEBUG}/igvm.sh
 
