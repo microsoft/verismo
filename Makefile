@@ -1,33 +1,33 @@
 IGVMGEN ?= tools/igvm/igvm/igvmgen.py
-profile ?= release
+RELEASE ?= release
+DEBUG ?= debug
 IMAGE ?= verismo.bin
-TARGET_DIR = ${CURDIR}/source/target/target/${profile}
-TMP_IMAGE = ${TARGET_DIR}/verismo-rust.bin
-target ?= ${TARGET_DIR}/verismo_main
+TARGET_DIR = ${CURDIR}/source/target/target/
 CMD ?= root=/dev/sda rw debugpat
 LINUX_OUT= ${CURDIR}/richos/target
 LINUX ?= ${CURDIR}/richos/target/arch/x86/boot/bzImage
 LINUX_HEADER_DIR=$(realpath $(LINUX_OUT))/mod
-IGVM = ${TARGET_DIR}/igvm.sh
 LINUX_CONFIG = richos/kernel/config-richos
 
-all: build image fs
+debugbuild: buildonly fs
+	sh ${TARGET_DIR}/${DEBUG}/igvm.sh
 
-build: ${target}
-
-verify: verifyonly image fs
+verify: verifyonly fs
+	sh ${TARGET_DIR}/${RELEASE}/igvm.sh
 
 verifyonly:
-	cd source/verismo_main && (cargo build --release 2>&2 | tee -a verus-stderr.log)
+	cd source/verismo_main &&\
+	(cargo build --release 2>&2 | tee -a verus-stderr.log)
 
 
-${target}:
-	cd source/verismo_main && cargo build --features noverify
+${CURDIR}/source/target/target/release/verismo_main:
+	verifyonly
 
-${IGVM}: ${target}
+${CURDIR}/source/target/target/${DEBUG}/verismo_main: buildonly
 
-${TMP_IMAGE}: ${IGVM}
-	sh ${IGVM}
+buildonly:
+	cd source/verismo_main && cargo build --features noverify 
+
 
 $(LINUX_OUT):
 	mkdir -p $(LINUX_OUT)
@@ -46,11 +46,6 @@ driver: kernel
 
 fs: driver
 	make -C richos/fs test-fs/verismo.vhdx
-
-$(IMAGE):
-	cp ${TMP_IMAGE} $(IMAGE)
-
-image: $(IMAGE)
 
 upload: $(IMAGE)
 	sh scripts/upload.sh $(IMAGE)
