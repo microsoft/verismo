@@ -49,8 +49,9 @@ pub open spec fn richos_vmsa_invfn() -> spec_fn(Vec<Option<VBox<VmsaPage>>>) -> 
     |vec: Vec<Option<VBox<VmsaPage>>>|
         forall|i|
             0 <= i < vec@.len() ==> vec[i].is_Some() ==> (
-            #[trigger] vec[i]).get_Some_0().is_default_page()
-                && vec[i].get_Some_0()@.vmpl.spec_eq(RICHOS_VMPL as nat)
+            #[trigger] vec[i]).get_Some_0().is_default_page() && vec[i].get_Some_0()@.vmpl.spec_eq(
+                RICHOS_VMPL as nat,
+            )
 }
 
 } // verus!
