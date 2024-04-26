@@ -1,10 +1,10 @@
 [submodule "verus"]
 	path = tools/verus
-	url = git@github.com:ziqiaozhou/verus.git
+	url = https://github.com/ziqiaozhou/verus
 	branch = verismo-main
 [submodule "igvm"]
 	path = tools/igvm
-	url = git@github.com:MSRSSP/igvm.git
+	url = https://github.com/ziqiaozhou/igvm-tooling
 [submodule "hacl-packages"]
 	path = deps/hacl-packages
 	url = https://github.com/ziqiaozhou/hacl-packages
@@ -15,5 +15,3 @@
 [submodule "richos/snplinux"]
 	path = richos/snplinux
 	url = git@github.com:MSRSSP/snplinux.git
-[submodule "tools/igvm"]
-	url = git@github.com:ziqiaozhou/igvm.git
