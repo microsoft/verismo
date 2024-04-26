@@ -1,17 +1,17 @@
 [submodule "verus"]
 	path = tools/verus
-	url = https://github.com/ziqiaozhou/verus
+	url = git@github.com:ziqiaozhou/verus.git
 	branch = verismo-main
 [submodule "igvm"]
 	path = tools/igvm
-	url = https://github.com/ziqiaozhou/igvm-tooling
+	url = git@github.com:ziqiaozhou/igvm-tooling.git
 [submodule "hacl-packages"]
 	path = deps/hacl-packages
-	url = https://github.com/ziqiaozhou/hacl-packages
+	url = git@github.com:ziqiaozhou/hacl-packages.git
 	branch = non_std
 [submodule "tools/verusfmt"]
 	path = tools/verusfmt
-	url = https://github.com/verus-lang/verusfmt.git
+	url = git@github.com:verus-lang/verusfmt.git
 [submodule "richos/snplinux"]
 	path = richos/snplinux
 	url = git@github.com:MSRSSP/snplinux.git
