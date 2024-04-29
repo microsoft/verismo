@@ -15,7 +15,7 @@ container_export() {
     # export rootfs from ${container_cli}
     echo "created ${container}"
     rm -f ${name}.tar
-    ${container_cli} export -o ${name}.tar ${container}
+    ${container_cli} export ${container} -o ${name}.tar
     ${container_cli} rm ${container}
 }
 
@@ -41,23 +41,16 @@ buildah_export() {
     buildah export "${name}" > ${name}.tar
 }
 
-# Function to export root filesystem using Buildah
-podman_export() {
-    echo "podman_export"
-    podman build -t "${name}" "${dir}"
-    podman export "localhost/${name}" > ${name}.tar
-}
-
 mount_image(){
     # Create root filesystem image
-    mkdir -p mnt
+    mkdir -p ./mnt
     sudo umount mnt >> /dev/null
     rm -f ${name}.img
     dd if=/dev/zero of=${name}.img bs=1M count=256
     mkfs.ext4 -F -L linuxroot ${name}.img > /dev/null
     # Mount the image and extract the root filesystem
     sudo mount ${name}.img ./mnt/
-    tar -xf $name.tar -C mnt
+    sudo tar -xf $name.tar -C mnt
 }
 
 
