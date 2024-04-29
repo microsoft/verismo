@@ -21,8 +21,8 @@ fn main() {
     let target_dir = env::var("OUT_DIR").unwrap();
     let work_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let executable_path = format!("{}/../../../verismo_main", target_dir); // Adjust the path if necessary
-    let igvmgen = work_dir.clone() + "/../../tools/igvm/igvm/igvmgen.py";
-    let bzimage = work_dir.clone() + "/../../richos/target/bzImage";
+    let igvmgen = work_dir.clone() + "/../../tools/igvm/src/igvm/igvmgen.py";
+    let bzimage = work_dir.clone() + "/../../richos/target/arch/x86/boot/bzImage";
     let igvmscript_path = format!("{}/../../../igvm.sh", target_dir);
     println!("cargo:rerun-if-changed={}", igvmgen);
     let igvmout = format!("{}/../../../verismo-rust.bin", target_dir);
@@ -40,7 +40,7 @@ fn main() {
         "x64",
         "-pgtable_level",
         "4",
-        "-vmpl2_kernel",
+        "-shared_payload",
         &bzimage,
     ]);
 

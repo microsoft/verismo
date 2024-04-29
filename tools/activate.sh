@@ -41,4 +41,8 @@ echo "building verusfmt."
     cargo build --release || exit 1
 ) || return 1
 
+echo "add igvm deps"
+(
+    cd "$TOOLS_DIR/igvm" && touch src/__init__.py && sudo apt install acpica-tools && python3 -m pip install frozendict && python3 -m pip install src/
+)
 export PATH="$SCRIPT_DIR/vargo/target/release:$TOOLS_DIR/verusfmt/target/release:$PATH"
