@@ -1,6 +1,6 @@
 use super::*;
-use crate::registers::CoreIdPerm;
 use crate::debug::VPrintAtLevel;
+use crate::registers::CoreIdPerm;
 
 verus! {
 

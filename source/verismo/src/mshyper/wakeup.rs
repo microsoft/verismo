@@ -1,8 +1,8 @@
 use super::*;
+use crate::pgtable_e::va_to_pa;
 use crate::security::SnpSecretsPageLayout;
 use crate::snp::cpu::{InitAPParams, InitApVmsa, PerCpuData, GDT};
 use crate::snp::percpu::BSP;
-use crate::pgtable_e::va_to_pa;
 
 verus! {
 
@@ -118,7 +118,6 @@ impl GhcbHyperPageHandle {
         let (vmsa_ptr, Tracked(vmsa_perm)) = vmsa.into_raw();
         let tracked mut vmsa_perm = vmsa_perm.tracked_into_raw();
         // register vmsa
-
         let vmsa_paddr = va_to_pa(vmsa_addr, Tracked(&vmsa_perm));
         let value = (vmsa_paddr as u64) | HV_X64_REGISTER_SEV_CONTROL_USE_SEV;
         let handle = handle.set_vp_reg(

@@ -23,9 +23,10 @@ use crate::tspec_e::*;
 use crate::vbox::VBox;
 
 mod ap {
-use super::*;
-use crate::debug::VPrintAtLevel;
-verus! {
+    use super::*;
+    use crate::debug::VPrintAtLevel;
+    verus! {
+
 /// AP entry
 #[no_mangle]
 pub extern "C" fn ap_call(
@@ -98,7 +99,8 @@ pub extern "C" fn ap_call(
     loop {
     }
 }
-}
+
+} // verus!
 } // verus!
 verus! {
 

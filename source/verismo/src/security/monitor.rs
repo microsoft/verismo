@@ -7,9 +7,9 @@ use crate::boot::monitor_params::*;
 use crate::debug::VPrint;
 use crate::lock::*;
 use crate::mshyper::*;
+use crate::security::pcr::*;
 use crate::snp::cpu::UpdateVMPL;
 use crate::snp::cpuid::SnpCpuidTable;
-use crate::security::pcr::*;
 
 pub const MAX_LOCK_REQ: usize = 4;
 

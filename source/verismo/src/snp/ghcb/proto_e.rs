@@ -1,6 +1,6 @@
 use super::*;
-use crate::debug::VPrintAtLevel;
 use crate::arch::reg::MSR_GHCB_BASE;
+use crate::debug::VPrintAtLevel;
 use crate::registers::*;
 
 verus! {
@@ -34,7 +34,6 @@ pub fn SM_TERM_RICHOS_ERR(subcode: u64_t) -> (ret: u64_t)
 }
 
 } // verus!
-
 verus! {
 
 pub const GHCB_HV_DEBUG: u64 = 0xf03;

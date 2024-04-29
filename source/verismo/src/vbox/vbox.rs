@@ -4,12 +4,12 @@ use super::*;
 use crate::addr_e::{AddrTrait, OnePage, PageTrait, SpecAddrTrait, SpecPageTrait};
 use crate::allocator::VeriSMoAllocator;
 use crate::arch::addr_s::PAGE_SIZE;
+use crate::debug::VPrintAtLevel;
 use crate::global::*;
 use crate::lock::{LockPermRaw, MapLockContains, MapRawLockTrait};
 use crate::registers::CoreIdPerm;
 use crate::snp::ghcb::*;
 use crate::snp::SnpCoreSharedMem;
-use crate::debug::VPrintAtLevel;
 
 verus! {
 
