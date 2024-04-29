@@ -14,4 +14,4 @@
 	url = git@github.com:verus-lang/verusfmt.git
 [submodule "richos/snplinux"]
 	path = richos/snplinux
-	url = git@github.com:ziqiaozhou/snplinux.git
+	url = git@github.com:ziqiaozhou/linux.git
