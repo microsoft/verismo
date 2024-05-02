@@ -1,4 +1,7 @@
 use super::*;
+use crate::arch::reg::MSR_GHCB_BASE;
+use crate::debug::VPrintAtLevel;
+use crate::registers::*;
 
 verus! {
 
@@ -31,9 +34,6 @@ pub fn SM_TERM_RICHOS_ERR(subcode: u64_t) -> (ret: u64_t)
 }
 
 } // verus!
-use crate::arch::reg::MSR_GHCB_BASE;
-use crate::registers::*;
-
 verus! {
 
 pub const GHCB_HV_DEBUG: u64 = 0xf03;
@@ -255,7 +255,6 @@ pub fn vc_terminate(reason_code: u64_t, Tracked(snpcore): Tracked<&mut SnpCore>)
     ensures
         false,
 {
-    use crate::debug::VEarlyPrintAtLevel;
     (new_strlit("terminate: "), reason_code).leak_debug();
     vc_terminate_s(reason_code, Tracked(snpcore))
 }
@@ -269,11 +268,6 @@ pub fn early_vc_terminate_debug(
     ensures
         false,
 {
-    proof {
-        reveal_strlit("terminate: ");
-    }
-    use crate::debug::VEarlyPrintAtLevel;
-    (new_strlit("terminate: "), reason_code).debug(Tracked(cc));
     vc_terminate_s(reason_code, Tracked(&mut cc.snpcore))
 }
 
@@ -287,7 +281,6 @@ pub fn vc_terminate_debug(reason_code: u64_t, Tracked(cs): Tracked<&mut SnpCoreS
     proof {
         reveal_strlit("terminate: ");
     }
-    use crate::debug::VPrintAtLevel;
     (new_strlit("terminate: "), reason_code).debug(Tracked(cs));
     vc_terminate_s(reason_code, Tracked(&mut cs.snpcore))
 }

@@ -314,10 +314,9 @@ impl GhcbHandle {
         let ghost old_page_perms = *page_perms;
         proof {
             assert(page_perms.contains_key(start_page as int));
-            assert forall |i| start_page <= i < start_page + npages 
-            implies 
-                #[trigger]old_page_perms.contains_key(i)
-            by{}
+            assert forall|i|
+                start_page <= i < start_page
+                    + npages implies #[trigger] old_page_perms.contains_key(i) by {}
         }
         let ret = self.ghcb_change_page_state_via_pg(
             vn_to_pn(start_page, Tracked(page_perms.tracked_borrow(start_page as int))),
@@ -372,10 +371,9 @@ impl GhcbHandle {
             Tracked(&mut cs.snpcore),
         );
         proof {
-            assert forall |i| (start_page <= i < (start_page + npages))
-            implies ((#[trigger] page_perms.contains_key(i)) && 
-            old_page_perms.contains_key(i) && mk_private_ensures_pageperm(old_page_perms[i]@, page_perms[i]@)) 
-            by {
+            assert forall|i| (start_page <= i < (start_page + npages)) implies ((
+            #[trigger] page_perms.contains_key(i)) && old_page_perms.contains_key(i)
+                && mk_private_ensures_pageperm(old_page_perms[i]@, page_perms[i]@)) by {
                 let page_perm = page_perms[i]@;
                 let prev_page_perm = old_page_perms[i]@;
                 assert(old_page_perms.contains_key(i));
@@ -390,8 +388,10 @@ impl GhcbHandle {
                 ).spec_set_rmp(page_perm.snp().rmp));
                 assert(page_perm.snp().rmp === SwSnpMemAttr::spec_default().rmp);
             }
-
-            assert(forall |i| (start_page <= i < (start_page + npages)) ==> ((#[trigger]page_perms.contains_key(i)) && mk_private_ensures_pageperm(old_page_perms[i]@, page_perms[i]@)));
+            assert(forall|i|
+                (start_page <= i < (start_page + npages)) ==> ((#[trigger] page_perms.contains_key(
+                    i,
+                )) && mk_private_ensures_pageperm(old_page_perms[i]@, page_perms[i]@)));
         }
         ret
     }

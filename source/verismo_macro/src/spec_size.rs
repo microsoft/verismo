@@ -289,7 +289,6 @@ pub fn verismo_defoffset_expand(input: proc_macro::TokenStream) -> proc_macro::T
                         builtin::imply(self.snp().is_vmpl0_private(),
                             builtin::equal(ret, self@.#spec_get_field())),
                     {
-                        use crate::vbox::*;
                         return self.box_borrow(#copy_field_param);
                     }
                 }
@@ -321,7 +320,6 @@ pub fn verismo_defoffset_expand(input: proc_macro::TokenStream) -> proc_macro::T
                         self@.spec_update(&old(self)@, #update_field_param{val}, true),
                         self.only_val_updated(*old(self)),
                     {
-                        use crate::vbox::MutFnTrait;
                         self.box_update(#update_field_param{val});
                     }
                 }

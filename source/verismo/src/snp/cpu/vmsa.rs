@@ -11,7 +11,7 @@ use crate::registers::*;
 use crate::security::SnpSecretsPageLayout;
 use crate::snp::percpu::StackPages;
 use crate::snp::SnpCoreSharedMem;
-use crate::vbox::{MutFnTrait, MutFnWithCSTrait, VBox};
+use crate::vbox::{BorrowFnTrait, MutFnTrait, MutFnWithCSTrait, VBox};
 
 verus! {
 

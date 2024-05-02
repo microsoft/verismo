@@ -39,7 +39,8 @@ $(LINUX_OUT)/.config: $(LINUX_OUT)
 	cp ${LINUX_CONFIG} $(LINUX_OUT)/.config
 
 $(LINUX): richos/snplinux/ $(LINUX_OUT)/.config
-	cd richos/snplinux/ && make O=$(LINUX_OUT) -j && make O=$(LINUX_OUT) INSTALL_MOD_PATH=$(LINUX_HEADER_DIR) modules_install
+	git submodule update --init richos/snplinux || true
+	cd richos/snplinux/ && make O=$(LINUX_OUT) CC=gcc-9 -j && make O=$(LINUX_OUT) INSTALL_MOD_PATH=$(LINUX_HEADER_DIR) modules_install
 
 kernel: $(LINUX)
 
@@ -54,3 +55,4 @@ upload: $(IMAGE)
 
 clean:
 	cd source && cargo clean
+

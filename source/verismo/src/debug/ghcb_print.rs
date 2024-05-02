@@ -8,6 +8,7 @@ use crate::ptr::*;
 use crate::registers::*;
 use crate::snp::ghcb::*;
 use crate::snp::snpcore_console_wf;
+use crate::lock::MapRawLockTrait;
 
 verus! {
 
@@ -439,7 +440,7 @@ impl<T: ?Sized + VPrint> VPrintLock for T {
         let console_ref = CONSOLE();
         let tracked consolelock = cs.lockperms.tracked_remove(console_ref.lockid());
         let ghost oldconsolelock = consolelock;
-        use crate::lock::MapRawLockTrait;
+
         assert(cs.lockperms.inv(cs.snpcore.cpu()));
         assert(console_ref.is_constant());
         let (_, Tracked(console), Tracked(mut consolelock)) = console_ref.acquire(

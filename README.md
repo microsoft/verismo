@@ -70,7 +70,8 @@ cd source/verismo_main; cargo build --feature noverify --release;
 ```
 
 ## 3. Create VM image (skip if you run `make` or `make verify`)
-
+1. Download linux submodule: `git submodule update --init richos/snplinux`
+2. Build guest OS and drivers: `make fs -f Makefile.default`
 1. Run `sh source/target/target/release/verismo/igvm.sh` to generate the verismo in IGVM format for Hyper-V: `source/target/target/release/verismo/verismo-rust.bin`
 2. Run `make fs` to generate a vhdx file  as filesystem for the VM: `richos/test-fs/verismo.vhdx`
 

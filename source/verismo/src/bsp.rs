@@ -22,7 +22,10 @@ use crate::tspec::*;
 use crate::tspec_e::*;
 use crate::vbox::VBox;
 
-verus! {
+mod ap {
+    use super::*;
+    use crate::debug::VPrintAtLevel;
+    verus! {
 
 /// AP entry
 #[no_mangle]
@@ -36,7 +39,6 @@ pub extern "C" fn ap_call(
         cs.inv_stage_ap_wait(),
         cpu.inv(),
 {
-    use crate::debug::VPrintAtLevel;
     let tracked mut cs = cs;
     let cpu_id = cpu.cpu as usize;
     (new_strlit("ap call "), cpu_id).leak_debug();
@@ -99,6 +101,7 @@ pub extern "C" fn ap_call(
 }
 
 } // verus!
+} // verus!
 verus! {
 
 pub open spec fn shared_mem_range() -> Map<int, (int, nat)> {
@@ -120,6 +123,7 @@ impl SnpCoreSharedMem {
 }
 
 } // verus!
+pub use ap::ap_call;
 verus! {
 
 #[no_mangle]

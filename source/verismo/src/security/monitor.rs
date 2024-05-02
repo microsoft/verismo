@@ -7,6 +7,7 @@ use crate::boot::monitor_params::*;
 use crate::debug::VPrint;
 use crate::lock::*;
 use crate::mshyper::*;
+use crate::security::pcr::*;
 use crate::snp::cpu::UpdateVMPL;
 use crate::snp::cpuid::SnpCpuidTable;
 
@@ -688,7 +689,6 @@ impl<'a> MonitorHandle<'a> {
             cs.inv_stage_pcr(),
             cs.only_lock_reg_coremode_updated(*old(cs), set![], set![spec_PCR_lockid()]),
     {
-        use crate::security::pcr::*;
         let mut mhandle = self;
         if let Some(gvca) = mhandle.gvca_page {
             let req: VBox<ExtendPCRReq> = gvca.to();
@@ -717,7 +717,6 @@ impl<'a> MonitorHandle<'a> {
             cs.inv_stage_pcr(),
             ret.wf(),
     {
-        use crate::security::pcr::attest_pcr;
         let mut mhandle = self;
         if let Some(gvca) = mhandle.gvca_page {
             let GhcbHyperPageHandle(ghcb_h, hyperpage_h) = mhandle.handle;
@@ -754,7 +753,6 @@ impl<'a> MonitorHandle<'a> {
             cs.inv_stage_verismo(),
             cs.only_lock_reg_coremode_updated(*old(cs), set![], set![spec_OSMEM_lockid()]),
     {
-        use crate::security::pcr::*;
         let mut mhandle = self;
         assert(spec_size::<LockKernReq>() == PAGE_SIZE) by {
             assert(spec_size::<LockKernEntry>() == 16);
