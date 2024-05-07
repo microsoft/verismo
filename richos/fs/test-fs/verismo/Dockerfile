@@ -26,7 +26,8 @@ COPY ./files/* /
 COPY ./files/etc/* /etc/
 COPY ./files/etc/network/* /etc/network/
 COPY ./files/etc/init.d/* /etc/init.d/
-COPY ./files/verismo/verismo.ko /verismo.ko
+COPY ./files/verismo/verismo.ko /verismo/verismo.ko
+COPY ./files/verismo/test.sh /verismo/test.sh
 COPY --from=verismo-dev  /verismo/user/decode_report /verismo/
 RUN chmod +x /etc/init.d/verismo && \
     rc-update add verismo default
