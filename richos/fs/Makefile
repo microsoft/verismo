@@ -1,5 +1,6 @@
 FILES-verismo:=
 FILES-verismo+=$(CURDIR)/../module/verismo.ko
+FILES-verismo+=$(CURDIR)/../module/test.sh
 FILES-verismo+=$(CURDIR)/../user
 
 test-fs/%.vhdx: test-fs/% 

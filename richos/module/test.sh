@@ -2,13 +2,14 @@ echo "Extend PCR"
 pcrdata=$(xxd -l 32 -c 32 -p < /dev/random)
 echo "4 0 ${pcrdata}" > /proc/verismo
 dmesg |tail -n 11|grep "req"
-
+sleep 2
 echo "Attest PCR"
 bytes32=$(xxd -l 32 -c 32 -p < /dev/random)
 echo "6 0 ${bytes32}" > /proc/verismo
 dmesg |tail -n 11|grep "req"
 cat /proc/verismo > report
 /verismo/decode_report ./report
+sleep 2
 echo "Make page shared"
 echo "2 1 test" > /proc/verismo
 dmesg |tail -n 11|grep "req"
