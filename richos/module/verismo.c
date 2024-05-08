@@ -6,8 +6,9 @@
 #include <asm/msr.h> // msr
 #include <asm/io.h> // addr translation
 #include <linux/seq_file.h>
-
+#include <linux/kprobes.h>
 #include <linux/kallsyms.h>
+
 MODULE_LICENSE("GPL");
 u64 kernel_start_addr;
 u64 kernel_end_addr;
@@ -75,8 +76,22 @@ DEFINE_PER_CPU(void *, cpu_msg);
 
 #define msg this_cpu_read(cpu_msg)
 
+static u8 prev_msg[0x1000];
+
 static void *test_pages = 0;
-static int buffer_len = 4096;
+static int buffer_len = 0x1000;
+
+static unsigned long (*kallsyms_lookup_name_fn)(const char *name);
+
+static inline unsigned long kallsyms_get_sym(const char *name)
+{
+	unsigned long addr = kallsyms_lookup_name_fn(name);
+	if (addr == 0) {
+		pr_err("Failed to find address for %s!!", name);
+	}
+	pr_debug("Export %s at %lx\n", name, addr);
+	return addr;
+}
 
 void verismo_request(union snp_vmpl_request *req, void *this_msg)
 {
@@ -97,24 +112,21 @@ void verismo_request(union snp_vmpl_request *req, void *this_msg)
 		break;
 	}
 	case LockKernExe: {
-		kernel_start_addr =
-			(u64)virt_to_phys((void *)0xffffffff90000000);
-		kernel_end_addr = (u64)virt_to_phys((void *)0xffffffff90d2f624);
 		req->values[0] = (u64)virt_to_phys(this_msg);
 		lock_req = (struct LockReq *)this_msg;
-		lock_req->start =
-			(u64)virt_to_phys((void *)0xffffffff90000000) >> 12;
-		lock_req->end = (u64)(virt_to_phys((void *)0xffffffff9080092a) +
-				      0xfff) >>
-				12;
+		lock_req->start = (u64)virt_to_phys((void *)kallsyms_get_sym("startup_64")) >> 12;
+			//(u64)virt_to_phys((void *)0xffffffff90000000) >> 12;
+		lock_req->end =
+			(u64)virt_to_phys((void *)kallsyms_get_sym("_etext") + 0xfff) >> 12;
+			//(u64)(virt_to_phys((void *)0xffffffff9080092a)
 		lock_req += 1;
 		lock_req->start =
-			(u64)virt_to_phys((void *)0xffffffff90cfd000) >> 12;
-		lock_req->end = (u64)(virt_to_phys((void *)0xffffffff90d2f67a) +
-				      0xfff) >>
-				12;
+			(u64)virt_to_phys((void *)kallsyms_get_sym("early_idt_handler_array")) >> 12;
+		lock_req->end = 
+			(u64)virt_to_phys((void *)kallsyms_get_sym("_einittext") + 0xfff) >> 12;
+		//(u64)(virt_to_phys((void *)0xffffffff90d2f7a7) + 0xfff) >> 12;
 		lock_req += 1;
-		lock_req->start = (u64)(start_addr + 0xfff) >> 12;
+		lock_req->start = (u64)(start_addr) >> 12;
 		lock_req->end = (u64)(end_addr + 0xfff) >> 12;
 		break;
 	}
@@ -134,11 +146,14 @@ void verismo_request(union snp_vmpl_request *req, void *this_msg)
 	       req->values[1], req->values[2]);
 	start = rdtsc();
 	if (req->op != WakupAp) {
+		local_irq_disable();
 		snp_send_vmpl_via_ghcb_msr(req);
+		local_irq_enable();
 	}
 	end = rdtsc();
 	printk("req->op = %x, time = %lld\n", req->op, end - start);
-    if (use_out_msg)
+	memcpy(prev_msg, this_msg, 0x1000);
+    	if (use_out_msg)
 	    print_hex_dump(KERN_INFO, "resp : ", DUMP_PREFIX_NONE, 128, 1, this_msg,
 		       128, false);
 }
@@ -170,7 +185,7 @@ ssize_t verismo_write(struct file *f, const char __user *buf, size_t len,
 
 static int verismo_seq_show(struct seq_file *seq, void *offset)
 {
-	seq_write(seq, msg, buffer_len);
+	seq_write(seq, prev_msg, buffer_len);
 	return 0;
 }
 
@@ -215,11 +230,32 @@ static void verismo_free_percpu(void *unused)
 		this_cpu_write(cpu_msg, 0);
 	}
 }
+
+static unsigned long kprobe_lookup(const char *name)
+{
+	unsigned long addr;
+	int err;
+	struct kprobe kp = { .symbol_name = name };
+	err = register_kprobe(&kp);
+	if (err < 0) {
+		pr_err("failed to find %s: error(%d)\n", name, err);
+		return 0;
+	}
+	addr = (unsigned long)kp.addr;
+	unregister_kprobe(&kp);
+	return addr;
+}
+
 // Function to be called when the module is loaded
 static int __init init_verismo(void)
 {
 	// Create the /proc/hello_world file
 	const struct module *mod = THIS_MODULE;
+
+	kallsyms_lookup_name_fn = (unsigned long (*)(
+		const char *name))kprobe_lookup("kallsyms_lookup_name");
+	if (!kallsyms_lookup_name_fn)
+		return -EINVAL;
 	// Get the base address of the module
 	start_addr = (u64)virt_to_phys(mod->core_layout.base);
 	end_addr = (u64)virt_to_phys(mod->core_layout.base +

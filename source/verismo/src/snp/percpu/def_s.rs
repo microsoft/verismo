@@ -15,5 +15,5 @@ macro_rules! RICHOS_VMPL {
 }
 
 verismo_simple! {
-pub type StackPages = [u8; 0x4000];
+pub type StackPages = [u8; 0x10000];
 }

@@ -236,6 +236,12 @@ impl OSMemEntry {
         &&& self.is_constant()
     }
 
+    pub open spec fn wf_kern_cleared(&self) -> bool {
+        &&& self.closed_wf()
+        &&& self.is_constant()
+        &&& self.spec_osperm().spec_kern_exe() == 0
+    }
+
     pub proof fn proof_open_wf(&self)
     ensures
         self.wf() == self.open_wf(),
@@ -266,6 +272,11 @@ verus! {
 pub open spec fn osmem_wf(osmem: Seq<OSMemEntry>) -> bool {
     &&& osmem.is_constant()
     &&& forall|i| 0 <= i < osmem.len() ==> osmem[i].wf()
+}
+
+pub open spec fn osmem_wf_kern_cleared(osmem: Seq<OSMemEntry>) -> bool {
+    &&& osmem.is_constant()
+    &&& forall|i| 0 <= i < osmem.len() ==> osmem[i].wf_kern_cleared()
 }
 
 pub fn osmem_adjust(
@@ -1005,7 +1016,7 @@ pub fn create_osmem_from_allocator(vmpl: u8, Tracked(cs): Tracked<&mut SnpCoreSh
     tmposmem
 }
 
-pub fn _lock_kernel(
+fn _lock_kernel(
     osmem: &mut OSMem,
     range: &(usize, usize),
     Tracked(snpcore): Tracked<&mut SnpCore>,
@@ -1074,6 +1085,7 @@ pub fn _lock_kernel(
                 ));
             }
             rmpadjmem(tmp_start, tmp_npages, attr, Tracked(snpcore), Tracked(&mut page_perms));
+            (new_strlit("\nLock Kernel "), (tmp_start, tmp_end)).leak_debug();
             if left.npages.reveal_value() > 0 {
                 osmem.push(left);
             }
@@ -1088,10 +1100,119 @@ pub fn _lock_kernel(
     return start;
 }
 
+#[verifier(external_body)]
+fn clear_kern_if_private(entry: OSMemEntry, Tracked(cs): Tracked<&mut SnpCoreSharedMem>) -> (ret:
+    OSMemEntry)
+    requires
+        entry.wf(),
+    ensures
+        entry.wf(),
+{
+    let mut entry = entry;
+    let ghost old_osperm = entry.spec_osperm();
+    let osperm = OSMemPerm::new(entry.osperm.into()).set_kern_exe(0).value;
+    let attr = RmpAttr::empty().set_vmpl(RICHOS_VMPL as u64).set_perms(
+        entry.osperm.into(),
+    ).set_vmsa(0);
+    entry.osperm = osperm.into();
+    let mut tmp_start: usize = entry.start_page.into();
+    let npages: usize = entry.npages.into();
+    let ghost start = tmp_start;
+    let Tracked(mut page_perms) = entry.page_perms;
+    proof {
+        assert forall|i|
+            tmp_start <= i < tmp_start + npages implies #[trigger] page_perms.contains_key(i)
+            && spec_rmpadjmem_requires_at(page_perms[i], i, attr@) by {
+            assert(page_perms.contains_key(i));
+            assert(spec_contains_page_perm(page_perms, i, entry.spec_osperm()));
+            assert(page_perms[i]@.wf_range((i.to_addr(), PAGE_SIZE as nat)));
+        }
+        assert(page_perms.dom() =~~= Set::new(|i| tmp_start <= i < (tmp_start + npages)));
+    }
+    (new_strlit("\nClear Kern_exe "), (tmp_start, npages)).leak_debug();
+    let end = tmp_start + npages;
+    while tmp_start < end
+        invariant
+            start <= tmp_start <= end,
+            (start as int).spec_valid_pn_with((end - start) as nat),
+            spec_contains_page_perms(
+                page_perms.remove_keys(Set::new(|p| tmp_start <= p < end)),
+                tmp_start as int,
+                (end - tmp_start) as nat,
+                old_osperm,
+            ),
+            cs.inv(),
+            cs.only_lock_reg_updated((*old(cs)), set![], set![spec_PT().lockid()]),
+            spec_contains_page_perms(
+                page_perms.remove_keys(Set::new(|p| start <= p < tmp_start)),
+                start as int,
+                (tmp_start - start) as nat,
+                entry.spec_osperm(),
+            ),
+    {
+        assert(page_perms.contains_key(tmp_start as int));
+        let tracked page_perm = page_perms.tracked_remove(tmp_start as int);
+        let check = if tmp_start < 0x1000 {
+            Some(true)
+        } else {
+            check_is_encrypted(tmp_start.to_addr(), Tracked(&page_perm), Tracked(cs))
+        };
+        match check {
+            Some(encrypted) => {
+                if encrypted {
+                    rmpadjust_check(
+                        tmp_start.to_addr() as u64,
+                        attr,
+                        Tracked(&mut cs.snpcore),
+                        Tracked(&mut page_perm),
+                    );
+                } else {
+                }
+            },
+            None => {
+                new_strlit("Do not support unmapped memory!").leak_debug();
+            },
+        }
+        proof { page_perms.tracked_insert(tmp_start as int, page_perm) }
+        tmp_start = tmp_start + 1;
+    }
+    entry.page_perms = Tracked(page_perms);
+    entry
+}
+
+#[inline]
+#[verifier(external_body)]
+fn _clear_kern_exe(osmem: &mut OSMem, Tracked(cs): Tracked<&mut SnpCoreSharedMem>)
+    requires
+        osmem_wf(old(osmem)@),
+        old(cs).inv(),
+    ensures
+        osmem_wf(osmem@),
+        cs.inv(),
+        cs.only_lock_reg_updated((*old(cs)), set![], set![spec_PT().lockid()]),
+{
+    let mut i = 0;
+    while i < osmem.len()
+        invariant
+            0 <= i <= osmem.len(),
+            osmem_wf(osmem@),
+            cs.inv(),
+            cs.only_lock_reg_updated((*old(cs)), set![], set![spec_PT().lockid()]),
+    {
+        let mut entry = osmem.remove(i);
+        proof {
+            assert(entry.wf());
+        }
+        let entry = clear_kern_if_private(entry, Tracked(cs));
+        osmem.insert(i, entry);
+        i = i + 1;
+    }
+}
+
 pub fn lock_kernel(
     osmem: &mut OSMem,
     ranges: &Vec<(usize, usize)>,
-    Tracked(snpcore): Tracked<&mut SnpCore>,
+    Tracked(cs): Tracked<&mut SnpCoreSharedMem>,
 )
     requires
         osmem_wf(old(osmem)@),
@@ -1099,11 +1220,11 @@ pub fn lock_kernel(
             0 <= i < ranges@.len() ==> (ranges@[i].0 as int).spec_valid_pn_with(
                 ranges@[i].1 as nat,
             ),
-        old(snpcore).inv(),
+        old(cs).inv(),
     ensures
         osmem_wf(osmem@),
-        snpcore.inv(),
-        *snpcore === *old(snpcore),
+        cs.inv(),
+        cs.only_lock_reg_updated((*old(cs)), set![], set![spec_PT().lockid()]),
 {
     let mut i = 0;
     while i < ranges.len()
@@ -1113,15 +1234,17 @@ pub fn lock_kernel(
                 0 <= i < ranges@.len() ==> (ranges@[i].0 as int).spec_valid_pn_with(
                     ranges@[i].1 as nat,
                 ),
-            snpcore.inv(),
-            *snpcore === *old(snpcore),
+            cs.inv(),
+            cs.only_lock_reg_updated((*old(cs)), set![], set![spec_PT().lockid()]),
     {
         let range = &ranges[i];
-        let end = _lock_kernel(osmem, range, Tracked(snpcore));
+        let end = _lock_kernel(osmem, range, Tracked(&mut cs.snpcore));
         if end < range.1 {
-            vc_terminate(SM_TERM_RICHOS_ERR(10), Tracked(snpcore));
+            vc_terminate(SM_TERM_RICHOS_ERR(10), Tracked(&mut cs.snpcore));
         }
+        i = i + 1;
     }
+    _clear_kern_exe(osmem, Tracked(cs));
 }
 
 } // verus!

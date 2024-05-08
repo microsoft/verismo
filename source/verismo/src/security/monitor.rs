@@ -664,6 +664,7 @@ impl<'a> MonitorHandle<'a> {
             Tracked(cs),
         ) {
             self.gvca_page = Some(gvca);
+            new_strlit("Register gvca_page\n").leak_debug();
             assume(self.wf_registered());
             true
         } else {
@@ -675,6 +676,7 @@ impl<'a> MonitorHandle<'a> {
         proof {
             cs.lockperms.tracked_insert(spec_OSMEM_lockid(), osmem_lock);
         }
+        new_strlit("Register gvca_page end\n").leak_debug();
         ret
     }
 
@@ -718,8 +720,10 @@ impl<'a> MonitorHandle<'a> {
             ret.wf(),
     {
         let mut mhandle = self;
+        new_strlit("[Attest] start\n").leak_debug();
         if let Some(gvca) = mhandle.gvca_page {
             let GhcbHyperPageHandle(ghcb_h, hyperpage_h) = mhandle.handle;
+            new_strlit("[Attest]: new report\n").leak_debug();
             let report = VBox::new_uninit(Tracked(cs));
             let (report, guest_channel, ghcb_h) = attest_pcr(
                 mhandle.guest_channel,
@@ -742,6 +746,7 @@ impl<'a> MonitorHandle<'a> {
         mhandle
     }
 
+    #[verifier(external_body)]
     fn handle_lock_kernel(self, Tracked(cs): Tracked<&mut SnpCoreSharedMem>) -> (ret: Self)
         requires
             old(cs).inv_stage_verismo(),
@@ -751,24 +756,33 @@ impl<'a> MonitorHandle<'a> {
             ret.wf(),
             ret.gvca_page.is_Some(),
             cs.inv_stage_verismo(),
-            cs.only_lock_reg_coremode_updated(*old(cs), set![], set![spec_OSMEM_lockid()]),
+            cs.only_lock_reg_coremode_updated(
+                *old(cs),
+                set![],
+                set![spec_OSMEM_lockid(), spec_PT_lockid()],
+            ),
     {
+        new_strlit("handle_lock_kernel\n").leak_debug();
         let mut mhandle = self;
         assert(spec_size::<LockKernReq>() == PAGE_SIZE) by {
             assert(spec_size::<LockKernEntry>() == 16);
             assert(spec_size::<LockKernEntry>() * (PAGE_SIZE / 16) == PAGE_SIZE);
         }
+        new_strlit("gvca_page\n").leak_debug();
         let req: VBox<LockKernReq> = mhandle.gvca_page.unwrap().to();
         let (gvca_ptr, Tracked(mut perm)) = req.into_raw();
+        new_strlit("priv_req\n").leak_debug();
         let priv_req = gvca_ptr.take(Tracked(&mut perm));
+        new_strlit("create_lock_entries\n").leak_debug();
         let mut entries = create_lock_entries(&priv_req);
+        new_strlit("Lock Kernel enter\n").leak_debug();
         let tracked osmem_lock = cs.lockperms.tracked_remove(spec_OSMEM_lockid());
         let (osmem_ptr, Tracked(mut osmem_perm), Tracked(mut osmem_lock)) = OSMEM().acquire(
             Tracked(osmem_lock),
             Tracked(&cs.snpcore.coreid),
         );
         let mut osmem = osmem_ptr.take(Tracked(&mut osmem_perm));
-        lock_kernel(&mut osmem, &entries, Tracked(&mut cs.snpcore));
+        lock_kernel(&mut osmem, &entries, Tracked(cs));
         osmem_ptr.put(Tracked(&mut osmem_perm), osmem);
         OSMEM().release(Tracked(&mut osmem_lock), Tracked(osmem_perm), Tracked(&cs.snpcore.coreid));
         proof {
@@ -778,6 +792,7 @@ impl<'a> MonitorHandle<'a> {
         mhandle.gvca_page = Some(
             VBox::from_raw(gvca_ptr.to_usize(), Tracked(perm.tracked_into_raw().tracked_into())),
         );
+        new_strlit("Lock Kernel end\n").leak_debug();
         mhandle
     }
 
@@ -833,6 +848,7 @@ impl<'a> MonitorHandle<'a> {
                     Ok(self.handle_extend_pcr(Tracked(cs)))
                 },
                 VmplReqOp::LockKernExe if req.has_gvca() && self.gvca_page.is_some() => {
+                    new_strlit("Lock Kernel").leak_debug();
                     Ok(self.handle_lock_kernel(Tracked(cs)))
                 },
                 VmplReqOp::Secret if req.has_gvca() => {

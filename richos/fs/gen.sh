@@ -58,7 +58,7 @@ mount_image(){
 to_vhdx() {
     # Create cpio archive if using inram fs
     # find mnt | cpio -H newc -o > "${name}.cpio"
-    sudo umount mnt
+    sleep 5; sudo umount mnt
     qemu-img convert -O vhdx ${name}.img ${name}.vhdx
     rm -rf mnt ${name}.tar ${name}.img
 
