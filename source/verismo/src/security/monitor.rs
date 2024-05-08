@@ -756,7 +756,11 @@ impl<'a> MonitorHandle<'a> {
             ret.wf(),
             ret.gvca_page.is_Some(),
             cs.inv_stage_verismo(),
-            cs.only_lock_reg_coremode_updated(*old(cs), set![], set![spec_OSMEM_lockid(), spec_PT_lockid()]),
+            cs.only_lock_reg_coremode_updated(
+                *old(cs),
+                set![],
+                set![spec_OSMEM_lockid(), spec_PT_lockid()],
+            ),
     {
         new_strlit("handle_lock_kernel\n").leak_debug();
         let mut mhandle = self;
