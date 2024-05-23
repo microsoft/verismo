@@ -1253,6 +1253,7 @@ pub fn lock_kernel(
         old(cs).inv(),
     ensures
         osmem_wf(osmem@),
+        osmem_wf_kern_cleared(osmem@),
         cs.inv(),
         cs.only_lock_reg_updated((*old(cs)), set![], set![spec_PT().lockid()]),
 {

@@ -30,12 +30,11 @@ impl SnpCoreSharedMem {
         &&& self.inv()
         &&& contains_OSMEM(self.lockperms)
         &&& contains_RICHOS_VMSA(self.lockperms)
+        &&& contains_PCR(self.lockperms)
     }
 
     pub open spec fn inv_stage_ap_wait(&self) -> bool {
-        &&& self.inv()
-        &&& contains_OSMEM(self.lockperms)
-        &&& contains_RICHOS_VMSA(self.lockperms)
+        self.inv_stage_verismo()
     }
 
     pub open spec fn inv_stage_pcr(&self) -> bool {

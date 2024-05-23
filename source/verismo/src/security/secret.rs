@@ -338,7 +338,11 @@ verus! {
 pub const SHA512_LEN2: usize = SHA512_LEN * 2;
 
 pub fn cal2_sha512(input1: &SHA512Type, input2: &SHA512Type) -> (ret: SHA512Type)
+    requires
+        input1.wf(),
+        input2.wf(),
     ensures
+        ret.wf(),
         ret === spec_cal_sha512((input1@ + input2@).vspec_cast_to()),
 {
     let mut tmp_buf: Array<u8_s, SHA512_LEN2> = Default::default();
@@ -359,7 +363,10 @@ pub fn cal2_sha512(input1: &SHA512Type, input2: &SHA512Type) -> (ret: SHA512Type
 
 pub fn cal_sha512<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>>(buf: &T) -> (ret:
     SHA512Type)
+    requires
+        buf.wf(),
     ensures
+        ret.wf(),
         ret === spec_cal_sha512(buf.vspec_cast_to()),
 {
     let mut ret: SHA512Type = Default::default();

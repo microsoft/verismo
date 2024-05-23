@@ -24,13 +24,13 @@ pub struct ExtendPCRReq {
 verus! {
 
 pub open spec fn pcr_invfn() -> spec_fn(Vec<SHA512Type>) -> bool {
-    |vec: Vec<SHA512Type>| vec.len() > 1 && forall|i| 0 < i < vec.len() ==> vec[i].wf()
+    |vec: Vec<SHA512Type>| vec.len() >= 1 && forall|i| 0 < i < vec.len() ==> vec[i].wf()
 }
 
 } // verus!
 verus! {
 
-#[verifier(external_body)]
+//#[verifier(external_body)]
 pub fn extend_pcr(
     index: usize,
     data: &Array<u8_s, USER_DATA_LEN>,
@@ -51,14 +51,20 @@ pub fn extend_pcr(
     );
     assert(pcr_invfn()(pcr_perm@.get_value()));
     let mut pcr = pcr_ptr.take(Tracked(&mut pcr_perm));
+    proof {
+        assert(pcr@.wf());
+        assert(pcr_invfn()(pcr));
+    }
     if pcr.len() < index {
         new_strlit("pcr.len() < index").leak_debug();
     } else if pcr.len() == index {
         pcr.push(cal_sha512(data));
     } else {
-        let pcr_data = pcr[index];
-        pcr.set(0, cal2_sha512(&pcr_data, data));
+        let pcr_data = pcr[index].clone();
+        pcr.set(index, cal2_sha512(&pcr_data, data));
     }
+    assert forall|i| 0 < i < pcr.len() implies pcr[i].wf() by {}
+    assert(pcr_invfn()(pcr));
     pcr_ptr.put(Tracked(&mut pcr_perm), pcr);
     PCR().release(Tracked(&mut pcr_lock), Tracked(pcr_perm), Tracked(&cs.snpcore.coreid));
     proof {
