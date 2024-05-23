@@ -1100,43 +1100,35 @@ fn _lock_kernel(
     return start;
 }
 
-#[verifier(external_body)]
 fn clear_kern_if_private(entry: OSMemEntry, Tracked(cs): Tracked<&mut SnpCoreSharedMem>) -> (ret:
     OSMemEntry)
     requires
         entry.wf(),
+        old(cs).inv(),
     ensures
-        entry.wf(),
+        ret.wf_kern_cleared(),
+        cs.inv(),
+        cs.only_lock_reg_updated((*old(cs)), set![], set![spec_PT().lockid()]),
 {
-    let mut entry = entry;
     let ghost old_osperm = entry.spec_osperm();
-    let osperm = OSMemPerm::new(entry.osperm.into()).set_kern_exe(0).value;
-    let attr = RmpAttr::empty().set_vmpl(RICHOS_VMPL as u64).set_perms(
-        entry.osperm.into(),
-    ).set_vmsa(0);
-    entry.osperm = osperm.into();
-    let mut tmp_start: usize = entry.start_page.into();
-    let npages: usize = entry.npages.into();
+    let OSMemEntry { page_perms: Tracked(mut page_perms), start_page, npages, osperm } = entry;
+    let osperm = OSMemPerm::new(osperm.into()).set_kern_exe(0);
+    let mut tmp_start: usize = start_page.into();
+    let npages: usize = npages.into();
     let ghost start = tmp_start;
-    let Tracked(mut page_perms) = entry.page_perms;
     proof {
-        assert forall|i|
-            tmp_start <= i < tmp_start + npages implies #[trigger] page_perms.contains_key(i)
-            && spec_rmpadjmem_requires_at(page_perms[i], i, attr@) by {
-            assert(page_perms.contains_key(i));
-            assert(spec_contains_page_perm(page_perms, i, entry.spec_osperm()));
-            assert(page_perms[i]@.wf_range((i.to_addr(), PAGE_SIZE as nat)));
-        }
         assert(page_perms.dom() =~~= Set::new(|i| tmp_start <= i < (tmp_start + npages)));
     }
     (new_strlit("\nClear Kern_exe "), (tmp_start, npages)).leak_debug();
     let end = tmp_start + npages;
+    let tracked mut new_page_perms = Map::tracked_empty();
     while tmp_start < end
         invariant
             start <= tmp_start <= end,
             (start as int).spec_valid_pn_with((end - start) as nat),
+            osperm@ === old_osperm@.spec_set_kern_exe(0),
             spec_contains_page_perms(
-                page_perms.remove_keys(Set::new(|p| tmp_start <= p < end)),
+                page_perms,
                 tmp_start as int,
                 (end - tmp_start) as nat,
                 old_osperm,
@@ -1144,14 +1136,26 @@ fn clear_kern_if_private(entry: OSMemEntry, Tracked(cs): Tracked<&mut SnpCoreSha
             cs.inv(),
             cs.only_lock_reg_updated((*old(cs)), set![], set![spec_PT().lockid()]),
             spec_contains_page_perms(
-                page_perms.remove_keys(Set::new(|p| start <= p < tmp_start)),
+                new_page_perms,
                 start as int,
                 (tmp_start - start) as nat,
-                entry.spec_osperm(),
+                osperm,
             ),
     {
+        let attr = RmpAttr::empty().set_vmpl(RICHOS_VMPL as u64).set_perms(
+            osperm.value as u64,
+        ).set_vmsa(0);
         assert(page_perms.contains_key(tmp_start as int));
+        proof {
+            assert(spec_contains_page_perm(page_perms, tmp_start as int, old_osperm));
+            assert(page_perms[tmp_start as int]@.wf_range(
+                ((tmp_start as int).to_addr(), PAGE_SIZE as nat),
+            ));
+        }
         let tracked page_perm = page_perms.tracked_remove(tmp_start as int);
+        proof {
+            assert(os_mem_valid_snp(old_osperm, page_perm@.snp()));
+        }
         let check = if tmp_start < 0x1000 {
             Some(true)
         } else {
@@ -1160,34 +1164,58 @@ fn clear_kern_if_private(entry: OSMemEntry, Tracked(cs): Tracked<&mut SnpCoreSha
         match check {
             Some(encrypted) => {
                 if encrypted {
+                    assert(spec_rmpadjmem_requires_at(page_perm, (tmp_start as int), attr@));
                     rmpadjust_check(
                         tmp_start.to_addr() as u64,
                         attr,
                         Tracked(&mut cs.snpcore),
                         Tracked(&mut page_perm),
                     );
+                    assert(os_mem_valid_snp(osperm, page_perm@.snp()));
                 } else {
+                    assert(os_mem_valid_snp(osperm, page_perm@.snp()));
                 }
             },
             None => {
                 new_strlit("Do not support unmapped memory!").leak_debug();
+                vc_terminate(SM_TERM_RICHOS_ERR(0), Tracked(&mut cs.snpcore));
             },
         }
-        proof { page_perms.tracked_insert(tmp_start as int, page_perm) }
+        proof {
+            new_page_perms.tracked_insert(tmp_start as int, page_perm);
+            assert forall|i| #[trigger]
+                new_page_perms.contains_key(i) implies spec_contains_page_perm(
+                new_page_perms,
+                i,
+                osperm,
+            ) by {
+                if tmp_start == i {
+                    assert(new_page_perms[i] === page_perm);
+                    assert(page_perm@.wf_not_null((i.to_addr(), PAGE_SIZE as nat)));
+                    assert(os_mem_valid_snp(osperm, page_perm@.snp()));
+                    assert(page_perm@.bytes().is_constant_to(RICHOS_VMPL as nat));
+                }
+            }
+            assert(new_page_perms.dom() =~~= Set::new(|i: int| start <= i < tmp_start + 1));
+        }
         tmp_start = tmp_start + 1;
     }
-    entry.page_perms = Tracked(page_perms);
-    entry
+    OSMemEntry {
+        osperm: osperm.value.into(),
+        page_perms: Tracked(new_page_perms),
+        start_page,
+        npages: npages.into(),
+    }
 }
 
 #[inline]
-#[verifier(external_body)]
 fn _clear_kern_exe(osmem: &mut OSMem, Tracked(cs): Tracked<&mut SnpCoreSharedMem>)
     requires
         osmem_wf(old(osmem)@),
         old(cs).inv(),
     ensures
         osmem_wf(osmem@),
+        osmem_wf_kern_cleared(osmem@),
         cs.inv(),
         cs.only_lock_reg_updated((*old(cs)), set![], set![spec_PT().lockid()]),
 {
@@ -1196,6 +1224,7 @@ fn _clear_kern_exe(osmem: &mut OSMem, Tracked(cs): Tracked<&mut SnpCoreSharedMem
         invariant
             0 <= i <= osmem.len(),
             osmem_wf(osmem@),
+            osmem_wf_kern_cleared(osmem@.take(i as int)),
             cs.inv(),
             cs.only_lock_reg_updated((*old(cs)), set![], set![spec_PT().lockid()]),
     {
@@ -1207,6 +1236,7 @@ fn _clear_kern_exe(osmem: &mut OSMem, Tracked(cs): Tracked<&mut SnpCoreSharedMem
         osmem.insert(i, entry);
         i = i + 1;
     }
+    assert(osmem@ =~~= osmem@.take(osmem@.len() as int));
 }
 
 pub fn lock_kernel(
