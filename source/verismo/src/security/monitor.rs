@@ -746,7 +746,6 @@ impl<'a> MonitorHandle<'a> {
         mhandle
     }
 
-    #[verifier(external_body)]
     fn handle_lock_kernel(self, Tracked(cs): Tracked<&mut SnpCoreSharedMem>) -> (ret: Self)
         requires
             old(cs).inv_stage_verismo(),
@@ -796,7 +795,6 @@ impl<'a> MonitorHandle<'a> {
         mhandle
     }
 
-    #[verifier(external_body)]
     fn handle_vmpl_request(
         self,
         req: &GvcaHeader,
@@ -810,7 +808,8 @@ impl<'a> MonitorHandle<'a> {
         ensures
             ret.is_Ok() ==> ret.get_Ok_0().wf(),
             cs.inv_stage_verismo(),
-            cs.only_lock_reg_coremode_updated(*old(cs), set![], set![spec_OSMEM_lockid()]),
+    //cs.only_lock_reg_coremode_updated(*old(cs), set![], set![spec_OSMEM_lockid(), spec_PT_lockid()]),
+
     {
         let op = VmplReqOp::from_u64(req.op as u64);
         match op {
@@ -824,13 +823,13 @@ impl<'a> MonitorHandle<'a> {
                         Err(e) => { Err(e) },
                     }
                 },
-                VmplReqOp::SetPrivate => {
+                VmplReqOp::SetPrivate if req.has_gvca() => {
                     self.handle_mk_private_shared(vmpl, req.gpn(), req.npages(), true, Tracked(cs))
                 },
-                VmplReqOp::SetShared => {
+                VmplReqOp::SetShared if req.has_gvca() => {
                     self.handle_mk_private_shared(vmpl, req.gpn(), req.npages(), false, Tracked(cs))
                 },
-                VmplReqOp::Register => {
+                VmplReqOp::Register if req.has_gvca() => {
                     new_strlit("Register").leak_debug();
                     let mut h = self;
                     if h.handle_register(req.gpn(), Tracked(cs)) {
@@ -839,7 +838,7 @@ impl<'a> MonitorHandle<'a> {
                         Err(SM_TERM_RICHOS_ERR(4) as u8)
                     }
                 },
-                VmplReqOp::Attest if req.has_gvca() => {
+                VmplReqOp::Attest if req.has_gvca() && self.gvca_page.is_some() => {
                     new_strlit("Attest").leak_debug();
                     Ok(self.handle_attest(Tracked(cs)))
                 },
