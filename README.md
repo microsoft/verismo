@@ -36,7 +36,7 @@ Now, run verification checks and build the binary.
 Run
 
 ```
-make verify -f Makefile.default
+make verify
 ``` 
 
 or  
@@ -60,7 +60,7 @@ A fully verified result should have "verified": 2138, "errors": 0,
 If no changes are made in `source/verismo`, we recommend to build without verification to speed up the build process.
 
 ```
-make debugbuild -f Makefile.default
+make debugbuild
 ``` 
 
 or  
@@ -70,6 +70,7 @@ cd source/verismo_main; cargo build --feature noverify --release;
 ```
 
 ## 3. Create VM image (skip if you run `make` or `make verify`)
+
 1. Download linux submodule: `git submodule update --init richos/snplinux`
 2. Build guest OS and drivers: `make fs -f Makefile.default`
 1. Run `sh source/target/target/release/verismo/igvm.sh` to generate the verismo in IGVM format for Hyper-V: `source/target/target/release/verismo/verismo-rust.bin`
