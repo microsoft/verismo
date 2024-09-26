@@ -41,11 +41,9 @@ impl SwSnpMemAttr {
 
     pub open spec fn requires_pvalidate(&self, vaddr: int, is_2m: int, val: int) -> bool {
         &&& is_2m % 2 == 0  // Only support 4k page
-
         &&& (val % 2 == 0)
             == self.rmp@.spec_validated()
         //&&& (val % 2 == 1) ==>  self.rmp@.perms =~~= rmp_perm_init()
-
         &&& self.deterministic_pte()
         &&& self.encrypted()
     }
@@ -80,12 +78,10 @@ impl SwSnpMemAttr {
         newcore: Option<CoreIdPerm>,
     ) -> bool {
         &&& is_2m % 2 == 0  // Only support 4k page
-
         &&& 1 <= attr.spec_vmpl() <= 3
         &&& attr.is_vmsa() ==> newcore.is_Some()
         &&& !attr.is_vmsa() ==> newcore.is_None()
         &&& self.rmp@.spec_validated()  // need to be validated before rmpadjust, otherwises it will never return.
-
         &&& self.wf()
     }
 

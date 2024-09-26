@@ -4,7 +4,8 @@ use syn_verus::punctuated::Punctuated;
 use syn_verus::spanned::Spanned;
 use syn_verus::{
     AngleBracketedGenericArguments, DataStruct, Field, GenericArgument, GenericParam, Generics,
-    Ident, Lit, LitInt, Path, PathArguments, PathSegment, TraitBound, TraitBoundModifier, Type, TypeParamBound, TypePath, Visibility,
+    Ident, Lit, LitInt, Path, PathArguments, PathSegment, TraitBound, TraitBoundModifier, Type,
+    TypeParamBound, TypePath, Visibility,
 };
 
 pub fn get_closed_or_open(s: &DataStruct) -> TokenStream {
@@ -45,10 +46,7 @@ pub fn new_path(names: &[&str], span: Span) -> Path {
             arguments: PathArguments::None,
         });
     }
-    Path {
-        leading_colon: None,
-        segments: path_segments,
-    }
+    Path { leading_colon: None, segments: path_segments }
 }
 pub fn gen_trait_bound(names: Vec<&str>, span: Span) -> TypeParamBound {
     //let path = TypePath {qself: None, path: new_path(&names.as_slice())};
@@ -138,12 +136,8 @@ pub fn type_to_type_generic(ty: &Type) -> Type {
 
 pub fn is_ghost_or_tracked_type(ty: &Type) -> bool {
     if let Type::Path(tpath) = ty {
-        let path_segments = tpath
-            .path
-            .segments
-            .iter()
-            .map(|segment| segment.ident.to_string())
-            .collect::<Vec<_>>();
+        let path_segments =
+            tpath.path.segments.iter().map(|segment| segment.ident.to_string()).collect::<Vec<_>>();
         if path_segments.last() == Some(&"Ghost".to_string()) {
             true
         } else if path_segments.last() == Some(&"Tracked".to_string()) {
@@ -211,7 +205,6 @@ pub fn field_name_ty(field: &Field, i: usize, span: Span) -> (proc_macro2::Token
 
     (field_name, field.ty.clone())
 }
-
 
 pub fn get_field(fname: &proc_macro2::TokenStream, span: Span) -> Ident {
     let getter_ident = Ident::new(&format!("spec_{}", fname.to_string()), span);

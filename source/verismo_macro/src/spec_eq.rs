@@ -12,11 +12,8 @@ pub fn verismo_eq_expand(input: proc_macro::TokenStream) -> proc_macro::TokenStr
     let name = input.ident;
     let generics = input.generics;
     let (_impl_generics, ty_generics, _where_clause) = generics.split_for_impl();
-    let _ty_generics_fn = if !generics.params.is_empty() {
-        quote!(::#ty_generics)
-    } else {
-        quote!()
-    };
+    let _ty_generics_fn =
+        if !generics.params.is_empty() { quote!(::#ty_generics) } else { quote!() };
     let _instance = Ident::new("self", name.span());
     let _spec_type = generic_mod();
 

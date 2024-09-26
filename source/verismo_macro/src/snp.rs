@@ -72,11 +72,7 @@ pub fn verismo_snp_expand2(
         quote! {true}
     };
 
-    let trt = if trtstr.len() > 0 {
-        Some(Ident::new(trtstr, name.span()))
-    } else {
-        None
-    };
+    let trt = if trtstr.len() > 0 { Some(Ident::new(trtstr, name.span())) } else { None };
     let usetrt = if let Some(t) = trt {
         quote! {#t for}
     } else {
@@ -89,11 +85,7 @@ pub fn verismo_snp_expand2(
     };
 
     let trt = vec![trtstr];
-    add_bound_to_generic(
-        &mut cast_generic,
-        gen_trait_bound(trt, name.span()),
-        name.span(),
-    );
+    add_bound_to_generic(&mut cast_generic, gen_trait_bound(trt, name.span()), name.span());
     let (impl_generics, ty_generics, where_clause) = cast_generic.split_for_impl();
 
     let expanded = quote! {

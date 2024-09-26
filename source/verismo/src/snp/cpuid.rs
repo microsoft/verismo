@@ -65,7 +65,8 @@ impl SnpCpuidTable {
 verus! {
 
 //AMD 11.3.2 Enabling Extended SSE Instruction Execution
-/*See linux/latest/source/arch/x86/include/asm/cpufeatures.h*//* CPUID level 0x00000001 (EDX), word 0 */
+/*See linux/latest/source/arch/x86/include/asm/cpufeatures.h*/
+/* CPUID level 0x00000001 (EDX), word 0 */
 pub const X86_FEATURE_FXSR: u32 = BIT32!(24);
 
 pub const X86_FEATURE_XMM: u32 = BIT32!(25);

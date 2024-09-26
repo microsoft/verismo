@@ -22,11 +22,8 @@ pub fn verismo_cast_seq_expand(
     let seqtype = new_path(&seqtypenames, name.span());
     let seqtype0 = Ident::new(seqtypenames[0], name.span());
     let (_impl_generics, ty_generics, _where_clause) = generics.split_for_impl();
-    let _ty_generics_fn = if !generics.params.is_empty() {
-        quote!(::#ty_generics)
-    } else {
-        quote!()
-    };
+    let _ty_generics_fn =
+        if !generics.params.is_empty() { quote!(::#ty_generics) } else { quote!() };
     let _instance = Ident::new("self", name.span());
     let _spec_type = generic_mod();
     let mut secseqcalls = vec![];
@@ -39,14 +36,10 @@ pub fn verismo_cast_seq_expand(
     let s = &s;
     for (i, field) in s.fields.iter().enumerate() {
         let (fname, ftype) = field_name_ty(&field, i, name.span());
-        secseqcalls.extend(gen_field_calls(
-            &fname,
-            &ftype,
-            &|fname, ftype| match ftype {
-                Type::Reference(_) => quote! {VTypeCast::<#seqtype>::vspec_cast_to(0u64)},
-                _ => quote! {VTypeCast::<#seqtype>::vspec_cast_to(self.#fname)},
-            },
-        ));
+        secseqcalls.extend(gen_field_calls(&fname, &ftype, &|fname, ftype| match ftype {
+            Type::Reference(_) => quote! {VTypeCast::<#seqtype>::vspec_cast_to(0u64)},
+            _ => quote! {VTypeCast::<#seqtype>::vspec_cast_to(self.#fname)},
+        }));
         cast_proof_calls.extend(gen_field_calls(
             &fname,
             &ftype,
@@ -72,11 +65,7 @@ pub fn verismo_cast_seq_expand(
     let mut cast_generic = generics.clone();
     let mut trt = vec!["VTypeCast"];
     trt.extend(seqtypenames);
-    add_bound_to_generic(
-        &mut cast_generic,
-        gen_trait_bound(trt, name.span()),
-        name.span(),
-    );
+    add_bound_to_generic(&mut cast_generic, gen_trait_bound(trt, name.span()), name.span());
 
     let (impl_generics, ty_generics, where_clause) = cast_generic.split_for_impl();
     let expand2 = quote! {

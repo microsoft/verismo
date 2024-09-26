@@ -18,15 +18,14 @@ pub fn verismo_enum_int_expand(input: TokenStream) -> TokenStream {
                 match &variant.discriminant {
                     Some(discriminant) => {
                         let expr = &discriminant.1;
-                        let default_lit = if let syn_verus::Expr::Lit(ExprLit {
-                            lit: Lit::Int(l),
-                            attrs: _,
-                        }) = expr
-                        {
-                            l
-                        } else {
-                            unreachable!()
-                        };
+                        let default_lit =
+                            if let syn_verus::Expr::Lit(ExprLit { lit: Lit::Int(l), attrs: _ }) =
+                                expr
+                            {
+                                l
+                            } else {
+                                unreachable!()
+                            };
                         default = default_lit.base10_parse::<u64>().unwrap();
                     }
                     None => {}

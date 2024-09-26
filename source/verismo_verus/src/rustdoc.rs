@@ -113,11 +113,8 @@ fn attr_for_sig(
         Some(block) => {
             if is_spec(&sig) {
                 if show_body(attrs) {
-                    let b = Expr::Block(ExprBlock {
-                        attrs: vec![],
-                        label: None,
-                        block: block.clone(),
-                    });
+                    let b =
+                        Expr::Block(ExprBlock { attrs: vec![], label: None, block: block.clone() });
                     v.push(encoded_body("body", &b));
                 }
             }
@@ -212,13 +209,7 @@ fn encoded_mode_info(sig: &Signature) -> String {
     let param_modes = sig
         .inputs
         .iter()
-        .map(|fn_arg| {
-            if fn_arg.tracked.is_some() {
-                "\"Tracked\""
-            } else {
-                "\"Default\""
-            }
-        })
+        .map(|fn_arg| if fn_arg.tracked.is_some() { "\"Tracked\"" } else { "\"Default\"" })
         .collect::<Vec<&str>>();
     let param_modes = param_modes.join(",");
 

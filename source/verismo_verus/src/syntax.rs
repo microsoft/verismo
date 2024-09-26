@@ -133,9 +133,7 @@ macro_rules! quote_verbatim {
 }
 
 impl Visitor {
-    fn take_ghost<T: Default>(&self, dest: &mut T) -> T {
-        take_ghost(self.erase_ghost, dest)
-    }
+    fn take_ghost<T: Default>(&self, dest: &mut T) -> T { take_ghost(self.erase_ghost, dest) }
 
     fn maybe_erase_expr(&self, span: Span, e: Expr) -> Expr {
         if self.erase_ghost {
@@ -221,9 +219,7 @@ impl Visitor {
                     }
                 }
 
-                posts.push(Expr::Verbatim(
-                    quote! {builtin::imply(#constant_pre, #constant_post)},
-                ));
+                posts.push(Expr::Verbatim(quote! {builtin::imply(#constant_pre, #constant_post)}));
 
                 //println!("self.inside_ghost = {}", self.inside_ghost);
                 match &sig.requires {
@@ -234,9 +230,7 @@ impl Visitor {
                         let _exprs: Punctuated<Expr, token::Comma> = Punctuated::new();
                         let r = Requires {
                             exprs: Specification { exprs: pres },
-                            token: syn_verus::token::Requires {
-                                span: sig.requires.span(),
-                            },
+                            token: syn_verus::token::Requires { span: sig.requires.span() },
                         };
                         sig.requires = Some(r);
                     }
@@ -249,9 +243,7 @@ impl Visitor {
                     None => {
                         let e = Ensures {
                             exprs: Specification { exprs: posts },
-                            token: syn_verus::token::Ensures {
-                                span: sig.requires.span(),
-                            },
+                            token: syn_verus::token::Ensures { span: sig.requires.span() },
                             attrs: vec![],
                         };
                         sig.ensures = Some(e);
@@ -302,10 +294,7 @@ impl Visitor {
 
         let (inside_ghost, mode_attrs): (u32, Vec<Attribute>) = match &mode {
             FnMode::Default => (0, vec![]),
-            FnMode::Spec(token) => (
-                1,
-                vec![mk_verus_attr(token.spec_token.span, quote! { spec })],
-            ),
+            FnMode::Spec(token) => (1, vec![mk_verus_attr(token.spec_token.span, quote! { spec })]),
             FnMode::SpecChecked(token) => (
                 1,
                 vec![mk_verus_attr(
@@ -313,14 +302,10 @@ impl Visitor {
                     quote_spanned! { token.spec_token.span => spec(checked) },
                 )],
             ),
-            FnMode::Proof(token) => (
-                1,
-                vec![mk_verus_attr(token.proof_token.span, quote! { proof })],
-            ),
-            FnMode::Exec(token) => (
-                0,
-                vec![mk_verus_attr(token.exec_token.span, quote! { exec })],
-            ),
+            FnMode::Proof(token) => {
+                (1, vec![mk_verus_attr(token.proof_token.span, quote! { proof })])
+            }
+            FnMode::Exec(token) => (0, vec![mk_verus_attr(token.exec_token.span, quote! { exec })]),
         };
         self.inside_ghost = inside_ghost;
         *publish = Publish::Default;
@@ -711,9 +696,7 @@ impl Visitor {
                         let x = &fun.sig.ident;
                         let span = x.span();
                         spec_fun.sig.ident = Ident::new(&format!("{VERUS_SPEC}{x}"), span);
-                        spec_fun
-                            .attrs
-                            .push(mk_rust_attr(span, "doc", quote! { hidden }));
+                        spec_fun.attrs.push(mk_rust_attr(span, "doc", quote! { hidden }));
                         fun.sig.erase_spec_fields();
                         spec_items.push(TraitItem::Method(spec_fun));
                     }
@@ -752,36 +735,11 @@ impl Visitor {
 
     fn closure_quant_operators(&mut self, expr: &mut Expr) -> bool {
         let unary = match expr {
-            Expr::Unary(
-                u @ ExprUnary {
-                    op: UnOp::Forall(..),
-                    ..
-                },
-            ) => u,
-            Expr::Unary(
-                u @ ExprUnary {
-                    op: UnOp::Exists(..),
-                    ..
-                },
-            ) => u,
-            Expr::Unary(
-                u @ ExprUnary {
-                    op: UnOp::Choose(..),
-                    ..
-                },
-            ) => u,
-            Expr::Call(ExprCall {
-                attrs: _,
-                func,
-                paren_token: _,
-                args: _,
-            }) => {
-                if let Expr::Path(syn_verus::ExprPath {
-                    path,
-                    qself: None,
-                    attrs: _,
-                }) = &**func
-                {
+            Expr::Unary(u @ ExprUnary { op: UnOp::Forall(..), .. }) => u,
+            Expr::Unary(u @ ExprUnary { op: UnOp::Exists(..), .. }) => u,
+            Expr::Unary(u @ ExprUnary { op: UnOp::Choose(..), .. }) => u,
+            Expr::Call(ExprCall { attrs: _, func, paren_token: _, args: _ }) => {
+                if let Expr::Path(syn_verus::ExprPath { path, qself: None, attrs: _ }) = &**func {
                     if path.segments.len() == 1
                         && ILLEGAL_CALLEES.contains(&path.segments[0].ident.to_string().as_str())
                     {
@@ -816,10 +774,7 @@ impl Visitor {
                     *expr = Expr::Verbatim(quote_spanned!(span => compile_error!(#err)));
                     return true;
                 }
-                (
-                    std::mem::take(&mut closure.inner_attrs),
-                    closure.inputs.len(),
-                )
+                (std::mem::take(&mut closure.inner_attrs), closure.inputs.len())
             }
             _ => panic!("expected closure for quantifier"),
         };
@@ -896,12 +851,7 @@ impl Visitor {
                 stmts.push(stmt_with_semi!(token.span => ::builtin::invariant_ensures([#exprs])));
             }
         }
-        if let Some(Ensures {
-            attrs: _,
-            token: _,
-            mut exprs,
-        }) = ensures
-        {
+        if let Some(Ensures { attrs: _, token: _, mut exprs }) = ensures {
             if exprs.exprs.len() > 0 {
                 for expr in exprs.exprs.iter_mut() {
                     self.visit_expr_mut(expr);
@@ -915,12 +865,7 @@ impl Visitor {
                 if matches!(expr, Expr::Tuple(..)) {
                     let err = "decreases cannot be a tuple; use `decreases x, y` rather than `decreases (x, y)`";
                     let expr = Expr::Verbatim(quote_spanned!(token.span => compile_error!(#err)));
-                    stmts.push(Stmt::Semi(
-                        expr,
-                        Semi {
-                            spans: [token.span],
-                        },
-                    ));
+                    stmts.push(Stmt::Semi(expr, Semi { spans: [token.span] }));
                 }
             }
             stmts.push(stmt_with_semi!(token.span => ::builtin::decreases((#exprs))));
@@ -944,12 +889,8 @@ fn extract_quant_triggers(
     for attr in inner_attrs {
         let trigger: syn_verus::Result<syn_verus::Specification> =
             syn_verus::parse2(attr.tokens.clone());
-        let path_segments_str = attr
-            .path
-            .segments
-            .iter()
-            .map(|x| x.ident.to_string())
-            .collect::<Vec<_>>();
+        let path_segments_str =
+            attr.path.segments.iter().map(|x| x.ident.to_string()).collect::<Vec<_>>();
         let ident_str = match &path_segments_str[..] {
             [attr_name] => Some(attr_name),
             _ => None,
@@ -959,11 +900,8 @@ fn extract_quant_triggers(
                 return Ok(ExtractQuantTriggersFound::Auto);
             }
             (Ok(trigger), Some(id)) if id == &"trigger" => {
-                let tuple = ExprTuple {
-                    attrs: vec![],
-                    paren_token: Paren(span),
-                    elems: trigger.exprs,
-                };
+                let tuple =
+                    ExprTuple { attrs: vec![], paren_token: Paren(span), elems: trigger.exprs };
                 triggers.push(Expr::Tuple(tuple));
             }
             (Err(err), _) => {
@@ -1030,15 +968,10 @@ impl VisitMut for Visitor {
         }
 
         let mode_block = match expr {
-            Expr::Unary(ExprUnary {
-                op: UnOp::Proof(..),
-                ..
-            }) => Some((false, false)),
-            Expr::Call(ExprCall {
-                func: box Expr::Path(path),
-                args,
-                ..
-            }) if path.qself.is_none() && args.len() == 1 => {
+            Expr::Unary(ExprUnary { op: UnOp::Proof(..), .. }) => Some((false, false)),
+            Expr::Call(ExprCall { func: box Expr::Path(path), args, .. })
+                if path.qself.is_none() && args.len() == 1 =>
+            {
                 if path_is_ident(&path.path, "Ghost") {
                     Some((true, false))
                 } else if path_is_ident(&path.path, "Tracked") {
@@ -1115,17 +1048,11 @@ impl VisitMut for Visitor {
         self.inside_arith = is_inside_arith;
         self.assign_to = is_assign_to;
         let do_replace = match &expr {
-            Expr::Lit(ExprLit {
-                lit: Lit::Int(..), ..
-            }) => true,
+            Expr::Lit(ExprLit { lit: Lit::Int(..), .. }) => true,
             Expr::Cast(..) => true,
             Expr::Index(..) if !self.inside_external => true,
-            Expr::Unary(ExprUnary {
-                op: UnOp::Neg(..), ..
-            }) => true,
-            Expr::Unary(ExprUnary {
-                op: UnOp::Not(..), ..
-            }) => true,
+            Expr::Unary(ExprUnary { op: UnOp::Neg(..), .. }) => true,
+            Expr::Unary(ExprUnary { op: UnOp::Not(..), .. }) => true,
             Expr::Binary(ExprBinary {
                 op:
                     BinOp::Eq(..)
@@ -1167,10 +1094,7 @@ impl VisitMut for Visitor {
         if do_replace && self.inside_type == 0 {
             let e = take_expr(expr);
             match e {
-                Expr::Lit(ExprLit {
-                    lit: Lit::Int(lit),
-                    attrs,
-                }) => {
+                Expr::Lit(ExprLit { lit: Lit::Int(lit), attrs }) => {
                     ////println!("expr = {}", lit);
                     let span = lit.span();
                     let n = lit.base10_digits().to_string();
@@ -1183,10 +1107,8 @@ impl VisitMut for Visitor {
                                 *expr = if !use_sec_type {
                                     quote_verbatim!(span, attrs => ::builtin::spec_literal_integer(#n))
                                 } else {
-                                    let lit = Expr::Lit(ExprLit {
-                                        lit: Lit::Int(lit),
-                                        attrs: vec![],
-                                    });
+                                    let lit =
+                                        Expr::Lit(ExprLit { lit: Lit::Int(lit), attrs: vec![] });
                                     quote_verbatim! {span, attrs => #sec_const(#lit) }
                                 };
                             }
@@ -1197,10 +1119,8 @@ impl VisitMut for Visitor {
                                 *expr = if !use_sec_type {
                                     quote_verbatim! {span, attrs => (::builtin::spec_literal_int(#n)) }
                                 } else {
-                                    let lit = Expr::Lit(ExprLit {
-                                        lit: Lit::Int(lit),
-                                        attrs: vec![],
-                                    });
+                                    let lit =
+                                        Expr::Lit(ExprLit { lit: Lit::Int(lit), attrs: vec![] });
                                     quote_verbatim! {span, attrs => #sec_const(#lit) }
                                 };
                             }
@@ -1209,20 +1129,16 @@ impl VisitMut for Visitor {
                                 *expr = if !use_sec_type {
                                     quote_verbatim! {span, attrs => (::builtin::spec_literal_nat(#n)) }
                                 } else {
-                                    let lit = Expr::Lit(ExprLit {
-                                        lit: Lit::Int(lit),
-                                        attrs: vec![],
-                                    });
+                                    let lit =
+                                        Expr::Lit(ExprLit { lit: Lit::Int(lit), attrs: vec![] });
                                     quote_verbatim! {span, attrs => #sec_const(#lit) }
                                 };
                             }
                             InsideArith::Fixed => {
                                 // We generally won't want int/nat literals for bitwise ops,
                                 // so use Rust's native integer literals
-                                let newexpr = Expr::Lit(ExprLit {
-                                    lit: Lit::Int(lit),
-                                    attrs: vec![],
-                                });
+                                let newexpr =
+                                    Expr::Lit(ExprLit { lit: Lit::Int(lit), attrs: vec![] });
                                 *expr = if !use_sec_type {
                                     quote_verbatim! {span, attrs => (#newexpr) }
                                 } else {
@@ -1265,18 +1181,12 @@ impl VisitMut for Visitor {
                     } else {
                         // Has a native Rust integer suffix, so leave it as a secure literal
                         *expr = if !use_sec_type {
-                            let tmp = Expr::Lit(ExprLit {
-                                lit: Lit::Int(lit),
-                                attrs: vec![],
-                            });
+                            let tmp = Expr::Lit(ExprLit { lit: Lit::Int(lit), attrs: vec![] });
                             quote_verbatim! {span, attrs => (#tmp) }
                         } else {
                             let ident =
                                 Ident::new(format!("{}_s", lit.suffix()).as_str(), lit.span());
-                            let tmp = Expr::Lit(ExprLit {
-                                lit: Lit::Int(lit),
-                                attrs: vec![],
-                            });
+                            let tmp = Expr::Lit(ExprLit { lit: Lit::Int(lit), attrs: vec![] });
                             quote_verbatim! {span, attrs => #ident::#const_fn(#tmp) }
                         };
                     }
@@ -1483,13 +1393,7 @@ impl VisitMut for Visitor {
 
     fn visit_attribute_mut(&mut self, attr: &mut Attribute) {
         if let syn_verus::AttrStyle::Outer = attr.style {
-            match &attr
-                .path
-                .segments
-                .iter()
-                .map(|x| &x.ident)
-                .collect::<Vec<_>>()[..]
-            {
+            match &attr.path.segments.iter().map(|x| &x.ident).collect::<Vec<_>>()[..] {
                 [attr_name] if attr_name.to_string() == "trigger" => {
                     *attr = mk_verus_attr(attr.span(), quote! { trigger });
                 }
@@ -1523,10 +1427,7 @@ impl VisitMut for Visitor {
                                 pound_token: token::Pound { spans: [span] },
                                 style: AttrStyle::Outer,
                                 bracket_token: token::Bracket { span },
-                                path: Path {
-                                    leading_colon: None,
-                                    segments: path_segments,
-                                },
+                                path: Path { leading_colon: None, segments: path_segments },
                                 tokens: if let Some(nested) = nested {
                                     quote! { #nested }
                                 } else {
@@ -1542,13 +1443,7 @@ impl VisitMut for Visitor {
         }
 
         if let syn_verus::AttrStyle::Inner(_) = attr.style {
-            match &attr
-                .path
-                .segments
-                .iter()
-                .map(|x| &x.ident)
-                .collect::<Vec<_>>()[..]
-            {
+            match &attr.path.segments.iter().map(|x| &x.ident).collect::<Vec<_>>()[..] {
                 [attr_name] if attr_name.to_string() == "trigger" => {
                     // process something like: #![trigger f(a, b), g(c, d)]
                     // attr.tokens is f(a, b), g(c, d)
@@ -1685,13 +1580,8 @@ impl VisitMut for Visitor {
             crate::rustdoc::process_item_fn(fun);
         }
         self.inside_ghost = if !is_exe(&fun.sig) { 1 } else { 0 };
-        let _stmts = self.visit_fn(
-            &mut fun.attrs,
-            Some(&fun.vis),
-            &mut fun.sig,
-            fun.semi_token,
-            false,
-        );
+        let _stmts =
+            self.visit_fn(&mut fun.attrs, Some(&fun.vis), &mut fun.sig, fun.semi_token, false);
         fun.semi_token = None;
         visit_item_fn_mut(self, fun);
         self.inside_ghost = 0;
@@ -1728,13 +1618,8 @@ impl VisitMut for Visitor {
         }
         self.inside_ghost = if !is_exe(&method.sig) { 1 } else { 0 };
         let _is_spec_method = method.sig.ident.to_string().starts_with(VERUS_SPEC);
-        let _stmts = self.visit_fn(
-            &mut method.attrs,
-            None,
-            &mut method.sig,
-            method.semi_token,
-            true,
-        );
+        let _stmts =
+            self.visit_fn(&mut method.attrs, None, &mut method.sig, method.semi_token, true);
         visit_trait_item_method_mut(self, method);
         self.inside_ghost = 0;
         //println!("visit_trait_item_method_mut self.inside_ghost = 0");
@@ -1772,8 +1657,7 @@ impl VisitMut for Visitor {
         self.inside_external = attr_is_external(&item.attrs);
         visit_item_struct_mut(self, item);
         item.attrs.extend(data_mode_attrs(&item.mode));
-        item.attrs
-            .extend(struct_data_mode_attrs(&item.mode, self.inside_external));
+        item.attrs.extend(struct_data_mode_attrs(&item.mode, self.inside_external));
 
         item.mode = DataMode::Default;
         self.inside_external = is_external;
@@ -1953,30 +1837,15 @@ impl Parse for MacroInvoke {
         if input.peek(syn_verus::token::Paren) {
             let paren = parenthesized!(content in input);
             let elements = content.parse()?;
-            Ok(MacroInvoke {
-                path,
-                bang,
-                delimiter: Delimiter::Paren(paren),
-                elements,
-            })
+            Ok(MacroInvoke { path, bang, delimiter: Delimiter::Paren(paren), elements })
         } else if input.peek(syn_verus::token::Bracket) {
             let bracket = bracketed!(content in input);
             let elements = content.parse()?;
-            Ok(MacroInvoke {
-                path,
-                bang,
-                delimiter: Delimiter::Bracket(bracket),
-                elements,
-            })
+            Ok(MacroInvoke { path, bang, delimiter: Delimiter::Bracket(bracket), elements })
         } else {
             let brace = braced!(content in input);
             let elements = content.parse()?;
-            Ok(MacroInvoke {
-                path,
-                bang,
-                delimiter: Delimiter::Brace(brace),
-                elements,
-            })
+            Ok(MacroInvoke { path, bang, delimiter: Delimiter::Brace(brace), elements })
         }
     }
 }
@@ -1989,12 +1858,7 @@ impl Parse for MacroInvokeExplicitExpr {
         if input.peek(syn_verus::token::Paren) {
             let paren = parenthesized!(content in input);
             let elements = content.parse()?;
-            Ok(MacroInvokeExplicitExpr {
-                path,
-                bang,
-                delimiter: Delimiter::Paren(paren),
-                elements,
-            })
+            Ok(MacroInvokeExplicitExpr { path, bang, delimiter: Delimiter::Paren(paren), elements })
         } else if input.peek(syn_verus::token::Bracket) {
             let bracket = bracketed!(content in input);
             let elements = content.parse()?;
@@ -2007,12 +1871,7 @@ impl Parse for MacroInvokeExplicitExpr {
         } else {
             let brace = braced!(content in input);
             let elements = content.parse()?;
-            Ok(MacroInvokeExplicitExpr {
-                path,
-                bang,
-                delimiter: Delimiter::Brace(brace),
-                elements,
-            })
+            Ok(MacroInvokeExplicitExpr { path, bang, delimiter: Delimiter::Brace(brace), elements })
         }
     }
 }
@@ -2204,19 +2063,11 @@ fn rejoin_tokens(stream: proc_macro::TokenStream) -> proc_macro::TokenStream {
         let l2 = s2.start();
         s1.source_file() == s2.source_file() && l1.eq(&l2)
     };
-    for i in 0..(if tokens.len() >= 2 {
-        tokens.len() - 2
-    } else {
-        0
-    }) {
+    for i in 0..(if tokens.len() >= 2 { tokens.len() - 2 } else { 0 }) {
         let t0 = pun(&tokens[i]);
         let t1 = pun(&tokens[i + 1]);
         let t2 = pun(&tokens[i + 2]);
-        let t3 = if i + 3 < tokens.len() {
-            pun(&tokens[i + 3])
-        } else {
-            None
-        };
+        let t3 = if i + 3 < tokens.len() { pun(&tokens[i + 3]) } else { None };
         match (t0, t1, t2, t3) {
             (
                 Some(('<', Joint, _)),
@@ -2358,18 +2209,13 @@ pub(crate) fn proof_macro_explicit_exprs(
 /// Constructs #[name(tokens)]
 fn mk_rust_attr(span: Span, name: &str, tokens: TokenStream) -> Attribute {
     let mut path_segments = Punctuated::new();
-    path_segments.push(PathSegment {
-        ident: Ident::new(name, span),
-        arguments: PathArguments::None,
-    });
+    path_segments
+        .push(PathSegment { ident: Ident::new(name, span), arguments: PathArguments::None });
     Attribute {
         pound_token: token::Pound { spans: [span] },
         style: AttrStyle::Outer,
         bracket_token: token::Bracket { span },
-        path: Path {
-            leading_colon: None,
-            segments: path_segments,
-        },
+        path: Path { leading_colon: None, segments: path_segments },
         tokens: quote! { (#tokens) },
     }
 }
@@ -2377,22 +2223,15 @@ fn mk_rust_attr(span: Span, name: &str, tokens: TokenStream) -> Attribute {
 /// Constructs #[verus::internal(tokens)]
 fn mk_verus_attr(span: Span, tokens: TokenStream) -> Attribute {
     let mut path_segments = Punctuated::new();
-    path_segments.push(PathSegment {
-        ident: Ident::new("verus", span),
-        arguments: PathArguments::None,
-    });
-    path_segments.push(PathSegment {
-        ident: Ident::new("internal", span),
-        arguments: PathArguments::None,
-    });
+    path_segments
+        .push(PathSegment { ident: Ident::new("verus", span), arguments: PathArguments::None });
+    path_segments
+        .push(PathSegment { ident: Ident::new("internal", span), arguments: PathArguments::None });
     Attribute {
         pound_token: token::Pound { spans: [span] },
         style: AttrStyle::Outer,
         bracket_token: token::Bracket { span },
-        path: Path {
-            leading_colon: None,
-            segments: path_segments,
-        },
+        path: Path { leading_colon: None, segments: path_segments },
         tokens: quote! { (#tokens) },
     }
 }
@@ -2440,12 +2279,7 @@ impl Visitor {
         let span = ty.span();
 
         match ty {
-            Type::Array(TypeArray {
-                bracket_token: _,
-                elem,
-                semi_token: _,
-                len,
-            }) => {
+            Type::Array(TypeArray { bracket_token: _, elem, semi_token: _, len }) => {
                 if !self.inside_external || must_replace {
                     *ty = Type::Verbatim(quote_spanned! { span =>
                         Array<#elem, #len>
@@ -2554,12 +2388,8 @@ fn is_exe(sig: &Signature) -> bool {
 
 pub fn is_ghost_or_tracked_type(ty: &Type) -> bool {
     if let Type::Path(tpath) = ty {
-        let path_segments = tpath
-            .path
-            .segments
-            .iter()
-            .map(|segment| segment.ident.to_string())
-            .collect::<Vec<_>>();
+        let path_segments =
+            tpath.path.segments.iter().map(|segment| segment.ident.to_string()).collect::<Vec<_>>();
         if path_segments.last() == Some(&"Ghost".to_string()) {
             true
         } else if path_segments.last() == Some(&"Tracked".to_string()) {

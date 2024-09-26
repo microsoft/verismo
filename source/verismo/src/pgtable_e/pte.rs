@@ -230,13 +230,11 @@ pub open spec fn wf_ptes(m: Map<(nat, int), PtePerm>) -> bool {
     &&& m[(PAGE_TABLE_LEVELS as nat, 0)].val().value == static_cr3_value()
     &&& m.contains_key(top_lvl_idx())
     // All existed entries are valid
-
     &&& forall|i|
         m.contains_key(i) ==> #[trigger] m[i].wf(
             i,
         )
     // When an entry exists
-
     &&& forall|lvl: nat, addr: int| 0 <= lvl < 4 ==> pte_perms_wf_prev(m, lvl, addr)
 }
 

@@ -12,11 +12,8 @@ pub fn verismo_print_expand(input: proc_macro::TokenStream) -> proc_macro::Token
     let name = input.ident;
     let generics = input.generics;
     let (_impl_generics, ty_generics, _where_clause) = generics.split_for_impl();
-    let _ty_generics_fn = if !generics.params.is_empty() {
-        quote!(::#ty_generics)
-    } else {
-        quote!()
-    };
+    let _ty_generics_fn =
+        if !generics.params.is_empty() { quote!(::#ty_generics) } else { quote!() };
     let _instance = Ident::new("self", name.span());
 
     let mut print_calls = vec![];

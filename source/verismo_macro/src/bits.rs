@@ -59,11 +59,7 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
                 }
             }
         }
-        max_bits = if max_bits < bit_last {
-            bit_last
-        } else {
-            max_bits
-        };
+        max_bits = if max_bits < bit_last { bit_last } else { max_bits };
         let field_max_val: u64 = (1 << (bit_last - bit_start + 1)) - 1;
         let mask: u64 = field_max_val;
         let set_mask: u64 = field_max_val << bit_start;

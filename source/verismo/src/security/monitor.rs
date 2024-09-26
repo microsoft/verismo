@@ -120,7 +120,6 @@ impl<'a> MonitorHandle<'a> {
         &&& snp.is_confidential_to(4)
         &&& snp.pte().spec_encrypted()
         //&&& snp.rmp@[VMPL::from_int(RICHOS_VMPL as int)].is_super_of(OSMemPermSpec::readwrite().to_value().to_page_perm())
-
         &&& self.vmsa.is_vmsa_page()
         &&& self.secret.wf_mastersecret()
     }

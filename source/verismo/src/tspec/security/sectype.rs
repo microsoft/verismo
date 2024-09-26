@@ -1069,4 +1069,4 @@ impl VNot for bool {
 }
 
 } // verus!
-//impl_spec_ops_for_seq! {Seq<u8>}
+  //impl_spec_ops_for_seq! {Seq<u8>}

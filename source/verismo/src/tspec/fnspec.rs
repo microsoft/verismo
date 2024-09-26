@@ -89,10 +89,10 @@ pub open spec fn fn_vspec_shl<T1: VSpecShl<T2, T3>, T2, T3>() -> spec_fn(T1, T2)
 macro_rules! def_builtin_unary_spec_fn {
     ($fname: ident, $op: tt, $t1: ty, $t2: ty) => {
         paste::paste! {verus!{
-            pub open spec fn [<fn_ $fname _ $t1 _ $t2>]() -> spec_fn($t1) -> $t2 {
-                |v1: $t1| $op v1
-            }
-        }
+                    pub open spec fn [<fn_ $fname _ $t1 _ $t2>]() -> spec_fn($t1) -> $t2 {
+                        |v1: $t1| $op v1
+                    }
+                }
 }
     };
 }

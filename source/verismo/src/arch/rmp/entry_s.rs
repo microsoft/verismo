@@ -12,7 +12,6 @@ impl HiddenRmpEntryForPSP {
             ==> !self.validated
         //&&& self.validated ==> (self.perms === preventry.perms && self.asid === preventry.asid && preventry.validated && self.vmsa == preventry.vmsa && self.size == preventry.size)
         //&&& (self !== preventry)  ==> ((self.perms === super::perm_s::rmp_perm_init()))
-
         &&& (self !== preventry) ==> {
             &&& self.perms[VMPL::VMPL0] =~~= PagePerm::full()
             &&& self.perms[VMPL::VMPL0] =~~= preventry.perms[VMPL::VMPL0]

@@ -135,7 +135,6 @@ impl SnpPointsToBytes {
 
     pub open spec fn spec_write_rel(self, prev: Self, bytes: SecSeqByte) -> bool {
         &&& self.snp_bytes === bytes  // equal value without memattr
-
         &&& self.snp_bytes.is_constant() == prev.snp_bytes.is_constant()
         &&& self.range() === prev.range()
         &&& self.snp == prev.snp

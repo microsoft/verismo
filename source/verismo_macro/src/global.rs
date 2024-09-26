@@ -72,10 +72,7 @@ pub fn parse_global(
             }
             }
         }
-        syn_verus::Item::Fn(ItemFn {
-            sig: Signature { ident, .. },
-            ..
-        }) => {
+        syn_verus::Item::Fn(ItemFn { sig: Signature { ident, .. }, .. }) => {
             quote! {
                     verus!{
                     impl #gspec {

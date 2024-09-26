@@ -19,10 +19,8 @@ impl Parse for AsmInput {
 
 pub fn asm_global(input: TokenStream) -> TokenStream {
     let AsmInput { func_name, varname } = parse_macro_input!(input);
-    let spec_func_name = Ident::new(
-        format!("spec_{}", func_name.to_string()).as_str(),
-        func_name.span(),
-    );
+    let spec_func_name =
+        Ident::new(format!("spec_{}", func_name.to_string()).as_str(), func_name.span());
     let asm_str = format!("lea rax, [rip + {}]", varname.to_string());
     let asm_tokens = quote! {
         verus!{

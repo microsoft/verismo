@@ -12,7 +12,6 @@ pub open spec fn rmp_model_eq(rmp: &RmpMap, other: &RmpMap) -> bool {
     &&& (rmp_inv(other) ==> rmp_inv(rmp))
     &&& (forall|memid|
         (rmp_inv_sw(other, memid) ==> rmp_inv_sw(rmp, memid)))  // tODO: prove this
-
     &&& rmp.dom() === other.dom()
     &&& (forall|spn: SPN|
         rmp[spn].view().spec_validated() ==> #[trigger] rmp[spn] === #[trigger] other[spn])

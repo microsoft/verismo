@@ -29,11 +29,8 @@ pub fn verismo_size_expand(input: proc_macro::TokenStream) -> proc_macro::TokenS
     let name = input.ident;
     let generics = input.generics;
     let (_impl_generics, ty_generics, _where_clause) = generics.split_for_impl();
-    let _ty_generics_fn = if !generics.params.is_empty() {
-        quote!(::#ty_generics)
-    } else {
-        quote!()
-    };
+    let _ty_generics_fn =
+        if !generics.params.is_empty() { quote!(::#ty_generics) } else { quote!() };
     let _instance = Ident::new("self", name.span());
     let _spec_type = generic_mod();
 
@@ -47,11 +44,7 @@ pub fn verismo_size_expand(input: proc_macro::TokenStream) -> proc_macro::TokenS
     let s = &s;
     for (i, field) in s.fields.iter().enumerate() {
         let (fname, ftype) = field_name_ty(&field, i, name.span());
-        if field
-            .attrs
-            .iter()
-            .any(|attr| attr.path.is_ident("def_offset"))
-        {
+        if field.attrs.iter().any(|attr| attr.path.is_ident("def_offset")) {
             let field_name = &field.ident;
             let _field_offset_exe = field_offset_exe(&fname, name.span());
             let _field_copy = Ident::new(
@@ -147,11 +140,8 @@ pub fn verismo_defoffset_expand(input: proc_macro::TokenStream) -> proc_macro::T
     let name = input.ident;
     let generics = input.generics;
     let (impl_generics, ty_generics, _where_clause) = generics.split_for_impl();
-    let _ty_generics_fn = if !generics.params.is_empty() {
-        quote!(::#ty_generics)
-    } else {
-        quote!()
-    };
+    let _ty_generics_fn =
+        if !generics.params.is_empty() { quote!(::#ty_generics) } else { quote!() };
     let _instance = Ident::new("self", name.span());
     let _spec_type = generic_mod();
 
@@ -169,11 +159,7 @@ pub fn verismo_defoffset_expand(input: proc_macro::TokenStream) -> proc_macro::T
     let s = &s;
     for (i, field) in s.fields.iter().enumerate() {
         let (fname, ftype) = field_name_ty(&field, i, name.span());
-        if field
-            .attrs
-            .iter()
-            .any(|attr| attr.path.is_ident("def_offset"))
-        {
+        if field.attrs.iter().any(|attr| attr.path.is_ident("def_offset")) {
             let field_name = &field.ident;
             let field_offset_exe = field_offset_exe(&fname, name.span());
             let field_copy = Ident::new(

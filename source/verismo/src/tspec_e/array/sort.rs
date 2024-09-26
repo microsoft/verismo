@@ -112,12 +112,10 @@ pub open spec fn spec_less_fn_requires<T, F: FnOnce(T, T) -> bool>(
             (x, y),
         )
     // less and speclt relationship
-
     &&& forall|x, y, r|
         less.ensures((x, y), r) ==> (speclt(x, y)
             == r)
         // spec_lt properties
-
     &&& forall|x, y| #[trigger] speclt(x, y) ==> !speclt(y, x)
     &&& forall|x| !#[trigger] speclt(x, x)
     &&& forall|x, y, z| #[trigger] speclt(x, y) && !#[trigger] speclt(z, y) ==> speclt(x, z)

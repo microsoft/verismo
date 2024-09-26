@@ -254,7 +254,6 @@ impl SpecBuddyAllocator {
             |key| self.perms.contains_key(key),
             |k: (nat, nat)| if k.0 != bucket || k.1 < idx {old_self.perms[k]} else if k.1 > idx {old_self.perms[(k.0, (k.1 - 1) as nat)]} else {free_perm}
         )*/
-
         &&& self.free_lists =~~= old_self.free_lists.update(
             bucket as int,
             self.free_lists[bucket as int],

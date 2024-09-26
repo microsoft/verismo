@@ -1,5 +1,5 @@
-use super::*;
 use super::buddy::ORDER_USIZE;
+use super::*;
 use crate::linkedlist::LinkedList;
 
 seq_macro::seq!(N in 0..32 {

@@ -4,11 +4,11 @@ use vstd::string::*;
 
 use super::*;
 use crate::global::*;
+use crate::lock::MapRawLockTrait;
 use crate::ptr::*;
 use crate::registers::*;
 use crate::snp::ghcb::*;
 use crate::snp::snpcore_console_wf;
-use crate::lock::MapRawLockTrait;
 
 verus! {
 

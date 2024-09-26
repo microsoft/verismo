@@ -141,7 +141,8 @@ pub fn init_idt_content(idt: &mut InterruptDescriptorTable, gdt_selector: u16)
     {
         idt.update(i, IDTEntry::from_addr_selector(dummy_handler as u64, gdt_selector));
         i = i + 1;
-    }/*assert(idt@.len() == 256);
+    }
+    /*assert(idt@.len() == 256);
     seq_macro::seq!(N in 0..21 {
         #(
             idt.update((N as usize_t).into(), IDTEntry::from_addr_selector(isr_handler_addr_~N().into(), gdt_selector));

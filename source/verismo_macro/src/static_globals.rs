@@ -1,8 +1,6 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn_verus::{
-    parse_macro_input, Data, DeriveInput, Expr, Fields, Ident, Type,
-};
+use syn_verus::{parse_macro_input, Data, DeriveInput, Expr, Fields, Ident, Type};
 
 struct ParsedArgs {
     global_ident: Ident,
@@ -20,11 +18,7 @@ impl syn_verus::parse::Parse for ParsedArgs {
         content.parse::<syn_verus::Token![,]>()?;
         let initfn_tokens: proc_macro2::TokenStream = content.parse()?;
         let invfn = syn_verus::parse2(initfn_tokens)?;
-        Ok(ParsedArgs {
-            global_ident,
-            type_ident,
-            invfn,
-        })
+        Ok(ParsedArgs { global_ident, type_ident, invfn })
     }
 }
 
@@ -56,22 +50,14 @@ pub fn gen_shared_globals(input: TokenStream) -> TokenStream {
                 let spec_fn =
                     Ident::new(&format!("spec_{}", variant_name.to_string()), name.span());
 
-                let memrange_fn = Ident::new(
-                    &format!("spec_{}_range", variant_name.to_string()),
-                    name.span(),
-                );
-                let lockid_fn = Ident::new(
-                    &format!("spec_{}_lockid", variant_name.to_string()),
-                    name.span(),
-                );
-                let contains_fn = Ident::new(
-                    &format!("contains_{}", variant_name.to_string()),
-                    name.span(),
-                );
-                let islock_fn = Ident::new(
-                    &format!("is_permof_{}", variant_name.to_string()),
-                    name.span(),
-                );
+                let memrange_fn =
+                    Ident::new(&format!("spec_{}_range", variant_name.to_string()), name.span());
+                let lockid_fn =
+                    Ident::new(&format!("spec_{}_lockid", variant_name.to_string()), name.span());
+                let contains_fn =
+                    Ident::new(&format!("contains_{}", variant_name.to_string()), name.span());
+                let islock_fn =
+                    Ident::new(&format!("is_permof_{}", variant_name.to_string()), name.span());
                 let axiom_func_name = Ident::new(
                     &format!("axiom_global_{}", variant_name.to_string().to_uppercase()),
                     name.span(),
@@ -150,4 +136,3 @@ pub fn gen_shared_globals(input: TokenStream) -> TokenStream {
     };
     TokenStream::from(expanded)
 }
-

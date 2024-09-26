@@ -11,7 +11,6 @@ pub const ENTRY_OPTION_MIN: u16_t = 0xe00;
 pub const ENTRY_MIN_PRE: u16_t = 0x8e00;
 
 //0b1000_1110_0000_0000;
-
 } // verus!
 verismo_simple! {
 #[repr(C, align(1))]

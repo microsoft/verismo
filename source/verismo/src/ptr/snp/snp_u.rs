@@ -378,7 +378,6 @@ impl SnpMemAttr {
     pub open spec fn wf(&self) -> bool {
         &&& self.hw_rmp_wf()
         // rmp status is valid
-
         &&& self.snp().wf()
         // vmpl-x secret must be stored in vmpl-x's confidential memory.
 
