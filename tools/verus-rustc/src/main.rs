@@ -5,13 +5,8 @@ use log4rs::encode::pattern::PatternEncoder;
 use std::collections::HashSet;
 use std::env;
 use std::fs::File;
-use std::io::{self};
 use std::path::Path;
 use std::process::{exit, Command};
-use std::process::Stdio;
-use std::io::{BufWriter, BufReader, Read, Write};
-use std::thread;
-use std::fs::OpenOptions;
 
 fn find_rs_files(path: &Path) -> Vec<String> {
     let mut files = Vec::new();
@@ -74,10 +69,10 @@ fn get_value(args: &[String], param: &str) -> Option<String> {
     }
     None
 }
-fn main() -> io::Result<()> {
+fn main() -> std::io::Result<()> {
     let logfile = FileAppender::builder()
         .encoder(Box::new(PatternEncoder::new("{l} - {m}\n")))
-        .build("/tmp/verismo_log.log")
+        .build("verismo_log.log")
         .unwrap();
 
     let config = Config::builder()
@@ -91,7 +86,10 @@ fn main() -> io::Result<()> {
 
     log4rs::init_config(config).unwrap();
 
-    let target = "verismo";
+    let main_target = env::var("CARGO_PKG_NAME").unwrap_or_default();
+    // crate1,crate2,..
+    let verus_target_str = env::var("VERUS_TARGETS").unwrap_or_default();
+    let verus_targets: Vec<&str> = verus_target_str.split(',').collect();
     let script = env::current_exe()?;
     let script_dir = script.parent().unwrap();
     let top_dir = script_dir.parent().unwrap();
@@ -108,7 +106,7 @@ fn main() -> io::Result<()> {
 
     let mut module_verus_args: Vec<String> = vec![];
     if let Ok(module_name) = env::var("VERUS_MODULE") {
-        let module_path = env::var("MODULE_PATH").unwrap_or_default();
+        let module_path = env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
         let modules = process_module(&module_path, &module_name);
         module_verus_args.extend(modules);
     } else {
@@ -149,17 +147,30 @@ fn main() -> io::Result<()> {
     ];
     let crate_name = get_value(&args, "--crate-name");
     if let Some(crate_name) = crate_name {
-        if target == crate_name || crate_name == "verismo_main"  {
-            if target == crate_name {
+        if verus_targets.contains(&crate_name.as_str()) {
+            if main_target == crate_name {
+                // only do module-level verification for the target crate.
                 verus_args.extend(module_verus_args);
             }
+            let extra_str = env::var(format!("{}_VERUS_ARGS", crate_name)).unwrap_or_default();
+            let extra: Vec<&str> = if !extra_str.is_empty() {
+                extra_str.split(" ").collect()
+            } else {
+                vec![]
+            };
+            let extra: Vec<String> = extra.iter().map(|s| s.to_string()).collect();
+            verus_args.extend(extra);
             run_verus_verify(&verifier_path, &args, &verus_args, &rust_flags, true)?;
         } else if crate_name == "vstd" {
             args.extend(verus_lib_cfg);
             run_verus_verify(
                 &verifier_path,
                 &args,
-                &["--no-vstd".to_string(), "--no-verify".to_string()],
+                &[
+                    "--no-vstd".to_string(),
+                    "--no-verify".to_string(),
+                    "--no-builtin".to_string(),
+                ],
                 &rust_flags_verus_lib,
                 true,
             )?;
@@ -181,12 +192,11 @@ fn run_verus_verify(
     verus_args: &[String],
     rust_flags: &str,
     compile: bool,
-) -> io::Result<()> {
+) -> std::io::Result<()> {
     let mut command = Command::new(verifier_path);
     let mut combined_args = args.to_vec();
     combined_args.extend_from_slice(verus_args);
     command.args(combined_args);
-
     command.env("RUSTFLAGS", rust_flags);
     command.env(
         "LD_LIBRARY_PATH",
@@ -197,7 +207,6 @@ fn run_verus_verify(
         command.arg("--compile");
     }
 
-    command.arg("--no-builtin");
     debug!("cmd: {:?}", command);
 
     // Wait for the command to finish and get its status
@@ -209,7 +218,7 @@ fn run_verus_verify(
     Ok(())
 }
 
-fn run_rustc(args: &[String], rust_flags: &str) -> io::Result<()> {
+fn run_rustc(args: &[String], rust_flags: &str) -> std::io::Result<()> {
     let mut command = Command::new("rustc");
     command.args(args);
     command.env("RUSTFLAGS", rust_flags);
