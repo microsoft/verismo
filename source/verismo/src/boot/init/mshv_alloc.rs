@@ -236,20 +236,14 @@ fn init_allocator(
                             (inside_range(r, used_range) && r.1 != 0 && ranges_disjoint(
                                 e820@.to_valid_ranges(),
                                 r,
-                            )) implies (#[trigger] hv_memperm.contains_range(r)
-                            && hv_memperm[r].snp() === SwSnpMemAttr::spec_default()) by {
+                            )) implies (hv_memperm.contains_range(r) && hv_memperm[r].snp()
+                            === SwSnpMemAttr::spec_default()) by {
                             assert(ranges_disjoint(except_ranges, r)) by {
                                 assert(range_disjoint_(verismo_static, used_range));
                             }
                             assert(hv_memperm.contains_default_except(used_range, except_ranges));
                             assert(hv_memperm.contains_range(r));
                         }
-                        assert(forall|r|
-                            (inside_range(r, used_range) && r.1 != 0 && ranges_disjoint(
-                                e820@.to_valid_ranges(),
-                                r,
-                            )) ==> (#[trigger] hv_memperm.contains_range(r) && hv_memperm[r].snp()
-                                === SwSnpMemAttr::spec_default()));
                     }
                 }
                 let Tracked(tmpcc) = init_allocator_e820(
