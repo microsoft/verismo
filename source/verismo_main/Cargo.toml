@@ -10,7 +10,6 @@ non_std = []
 no_global_allocator = ["verismo/no_global_allocator"]
 debug = ["verismo/debug"]
 noverify = ["verismo/noverify"]
-verifymodule=["verismo/verifymodule"]
 
 [dependencies]
 verismo = {path = "../verismo"}

@@ -17,4 +17,4 @@ incremental = true
 debug-assertions = false
 
 [env]
-VERUS_PATH = { value = "../tools/verus/source/target-verus/release/verus", relative = true }
+VERUS = { value = "../tools/verus/source/target-verus/release/verus", relative = true }

@@ -5,34 +5,10 @@ use std::process::Command;
 
 fn main() {
     // Environment vars during build.
-    if cfg!(feature = "noverify") {
-        println!("cargo:rustc-env=VERUS_ARGS=--no-verify --no-builtin");
-    } else {
-        let verus_args = [
-            "--rlimit=8000",
-            "--no-builtin",
-            "--expand-errors",
-            "--multiple-errors=5",
-            "--triggers-silent",
-            "--time-expanded",
-            "--no-auto-recommends-check",
-            "--output-json",
-            "--trace",
-        ];
-        println!("cargo:rustc-env=VERUS_ARGS={}", verus_args.join(" "));
-    }
-
-    let module_path = env::var("CARGO_MANIFEST_DIR").unwrap();
-    println!("cargo:rustc-env=MODULE_PATH={}", module_path);
-    let target = env::var("CARGO_PKG_NAME").unwrap_or_default();
-    println!("cargo:rustc-env=VERUS_TARGETS={}", target);
-    for (key, value) in env::vars() {
-        // You can filter or modify which ones to pass to rustc
-        println!("cargo:rustc-env={}={}", key, value);
-    }
-
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-env-changed=MODULE");
+
+    init_verify(&["verismo", "vstd"]);
 
     // Post build
     let target_dir = env::var("OUT_DIR").unwrap();
@@ -74,4 +50,34 @@ fn main() {
         .arg(igvmscript_path)
         .status()
         .expect("Failed to change file permissions");
+}
+
+#[inline]
+pub fn init_verify(verus_libs: &[&str]) {
+    if cfg!(feature = "noverify") {
+        println!("cargo:rustc-env=VERUS_ARGS=--no-verify");
+    } else {
+        let verus_args = [
+            "--rlimit=8000",
+            "--expand-errors",
+            "--multiple-errors=5",
+            "--triggers-silent",
+            "--no-auto-recommends-check",
+            "--trace",
+            "-Z unstable-options",
+        ];
+        println!("cargo:rustc-env=VERUS_ARGS={}", verus_args.join(" "));
+    }
+
+    let target = std::env::var("CARGO_PKG_NAME").unwrap_or_default();
+    let mut targets: Vec<&str> = vec![&target];
+    targets.extend(verus_libs);
+    println!("cargo:rustc-env=VERUS_TARGETS={}", targets.join(","));
+    for (key, value) in std::env::vars() {
+        // You can filter or modify which ones to pass to rustc
+        println!("cargo:rustc-env={}={}", key, value);
+    }
+
+    let module_path = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    println!("cargo:rustc-env=MODULE_PATH={}", module_path);
 }

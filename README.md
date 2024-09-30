@@ -47,7 +47,7 @@ cd source/verismo_main; cargo build --release;
 
 ### b. To verify a single module, which is useful for development:
 ```
-cd source/verismo; VERUS_MODULE=security::monitor cargo build --features verifymodule --release;
+cd source/verismo; VERUS_MODULE=security::monitor cargo build --release;
 ```
 
 ### c. Understand results:

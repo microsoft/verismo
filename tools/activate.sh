@@ -27,19 +27,19 @@ echo "init vstd"
 echo "building verus-rustc."
 (
     cd "$TOOLS_DIR/verus-rustc" || exit 1
-    cargo build --release || exit 1
+    VERUS_DIR=$TOOLS_DIR/verus cargo build --release || exit 1
 ) || return 1
 
-echo "building verus (slow)..."
-(
-  cd "$TOOLS_DIR/verus/source" && tools/get-z3.sh && source ../tools/activate && vargo build --release || exit 1
-)
+# echo "building verus (slow)..."
+# (
+#   cd "$TOOLS_DIR/verus/source" && tools/get-z3.sh && source ../tools/activate && vargo build --release || exit 1
+# )
 
-echo "building verusfmt."
-(
-    cd "$TOOLS_DIR/verusfmt" || exit 1
-    cargo build --release || exit 1
-) || return 1
+# echo "building verusfmt."
+# (
+#     cd "$TOOLS_DIR/verusfmt" || exit 1
+#     cargo build --release || exit 1
+# ) || return 1
 
 echo "add igvm deps"
 (
