@@ -7,6 +7,8 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=install-verus.sh");
     println!("rerun-if-env-changed=HOME");
+    println!("rerun-if-env-changed=VERUS_PATH");
+    println!("rerun-if-env-changed=CARGO_HOME");
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set"));
     let cargo_home_dir =
         env::var("CARGO_HOME").map_or(PathBuf::from("/usr/local"), |v| PathBuf::from(v));
