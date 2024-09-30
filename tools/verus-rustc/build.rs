@@ -39,13 +39,7 @@ fn main() {
 
     // Check if the directory exists
     if verus_dir.exists() {
-        println!("{:#?} already exists. Pulling latest changes...", verus_dir);
-        let status = Command::new("git")
-            .arg("pull")
-            .current_dir(&verus_dir)
-            .status()
-            .expect("Failed to pull latest changes");
-        check_status(status);
+        println!("{:#?} already exists.", verus_dir);
     } else {
         let repo_url = "https://github.com/verus-lang/verus";
         println!(
