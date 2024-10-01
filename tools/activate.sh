@@ -26,7 +26,7 @@ echo "building verus-rustc."
 (
     cd "$TOOLS_DIR/verus-rustc" || exit 1
     echo $TOOLS_DIR/verus
-    cargo clean && VERUS_DIR=$TOOLS_DIR/verus cargo build --release
+    cargo clean && VERUS_PATH=$TOOLS_DIR/verus cargo build --release
 ) || return 1
 
 # echo "building verus (slow)..."
