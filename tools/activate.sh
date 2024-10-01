@@ -8,7 +8,7 @@ else
   return 1
 fi
 
-TOOLS_DIR=$SCRIPT_DIR
+TOOLS_DIR=$(realpath $SCRIPT_DIR)
 
 echo "submodule init"
 (
@@ -25,7 +25,8 @@ echo "submodule init"
 echo "building verus-rustc."
 (
     cd "$TOOLS_DIR/verus-rustc" || exit 1
-    cargo clean && VERUS_DIR=$TOOLS_DIR/verus cargo build --release -vv
+    echo $TOOLS_DIR/verus
+    cargo clean && VERUS_DIR=$TOOLS_DIR/verus cargo build --release
 ) || return 1
 
 # echo "building verus (slow)..."
