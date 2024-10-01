@@ -25,7 +25,7 @@ echo "submodule init"
 echo "building verus-rustc."
 (
     cd "$TOOLS_DIR/verus-rustc" || exit 1
-    VERUS_DIR=$TOOLS_DIR/verus cargo build --release -vv
+    cargo clean && VERUS_DIR=$TOOLS_DIR/verus cargo build --release -vv
 ) || return 1
 
 # echo "building verus (slow)..."
