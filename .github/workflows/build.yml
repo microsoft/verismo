@@ -20,7 +20,7 @@ jobs:
           submodules: recursive
 
       - name: Install depdendencies
-        run: sudo apt-get install build-essential ninja-build libclang-dev libelf-dev qemu-system podman gcc-9 cmake bison flex unzip pip && ./tools/activate.sh
+        run: ./tools/activate.sh
 
       - name: Build
         run: cd source/verismo && cargo build
