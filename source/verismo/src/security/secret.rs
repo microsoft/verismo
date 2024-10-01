@@ -313,7 +313,7 @@ pub fn enc_payload(
     let mut snphdr: SnpGuestMsgHdr = msg.copy_snphdr();
     snphdr.algo = SNP_AEAD_AES_256_GCM.into();
     snphdr.hdr_version = MSG_HDR_VER.into();
-    snphdr.hdr_sz = sizeof::<SnpGuestMsgHdr>().into();
+    snphdr.hdr_sz = size_of::<SnpGuestMsgHdr>().into();
     snphdr.msg_type = msg_type.into();
     snphdr.msg_version = version.into();
     snphdr.msg_seqno = msg_no.into();

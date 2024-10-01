@@ -3,7 +3,6 @@ members = [
     "verismo_main",
     "verismo",
     "verismo_macro",
-    "vstd"
 ]
 
 # the profile used for `cargo build`
