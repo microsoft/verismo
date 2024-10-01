@@ -1,0 +1,40 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
+      - name: Install depdendencies
+      - run: ./tools/install.sh || ./tools/activate.sh
+
+      - name: Install specified rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+            toolchain: 'nightly-2023-12-22'
+            target: x86_64-unknown-none
+            profile: minimal
+            override: true
+            components: rustfmt, rust-src, clippy, rustc-dev, llvm-tools-preview, cargo
+      
+      - name: Build
+      - run: cd source/verismo && cargo build
+
+      - name: Build richos vhdx
+      - run: make fs
+      
+
