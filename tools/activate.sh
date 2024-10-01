@@ -13,7 +13,6 @@ TOOLS_DIR=$SCRIPT_DIR
 echo "submodule init"
 (
   git submodule update --init $TOOLS_DIR/verus
-  git submodule update --init $TOOLS_DIR/../deps/hacl-packages
 )
 
 # echo "init vstd"
@@ -26,7 +25,7 @@ echo "submodule init"
 echo "building verus-rustc."
 (
     cd "$TOOLS_DIR/verus-rustc" || exit 1
-    VERUS_DIR=$TOOLS_DIR/verus cargo build --release || exit 1
+    VERUS_DIR=$TOOLS_DIR/verus cargo build --release -v || exit 1
 ) || return 1
 
 # echo "building verus (slow)..."
