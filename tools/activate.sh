@@ -43,6 +43,6 @@ echo "add igvm deps"
 (
     sudo apt install acpica-tools && python3 -m pip install frozendict
     git clone https://github.com/ziqiaozhou/igvm-tooling $TOOLS_DIR/igvm -b verismo-igvm
-    cd "$TOOLS_DIR/igvm" && touch src/__init__.py &&  && python3 -m pip install src/
+    cd "$TOOLS_DIR/igvm" && touch src/__init__.py && python3 -m pip install src/
 )
 export PATH="$SCRIPT_DIR/vargo/target/release:$TOOLS_DIR/verusfmt/target/release:$PATH"
