@@ -24,6 +24,3 @@ jobs:
 
       - name: Build
         run: cd source/verismo && cargo build
-
-      
-
