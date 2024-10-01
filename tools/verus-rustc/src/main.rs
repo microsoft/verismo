@@ -4,6 +4,7 @@ use log4rs::config::{Appender, Config, Root};
 use log4rs::encode::pattern::PatternEncoder;
 use std::env;
 use std::fs::File;
+use std::io::Write;
 use std::process::{exit, Command};
 
 fn get_value(args: &[String], param: &str) -> Option<String> {
@@ -104,16 +105,9 @@ fn main() -> std::io::Result<()> {
     let _cmd_log = File::create("cmd.log")?;
 
     let rust_flags = env::var("RUSTFLAGS").unwrap_or_default();
-    let rust_flags_verus_lib = format!(
-        "{} --cfg proc_macro_span --cfg verus_keep_ghost --cfg span_locations",
-        rust_flags
-    );
-    let verus_lib_cfg = [
-        "--cfg".to_string(),
-        "proc_macro_span".to_string(),
-        "--cfg".to_string(),
-        "verus_keep_ghost".to_string(),
-    ];
+    let rust_flags_verus_lib =
+        format!("{} --cfg verus_keep_ghost --cfg span_locations", rust_flags);
+    let verus_lib_cfg = ["--cfg".to_string(), "verus_keep_ghost".to_string()];
     let crate_name = get_value(&args, "--crate-name");
     debug!(
         "verus_targets = {:#?}, crate  = {:#?}",
@@ -204,10 +198,13 @@ fn run_verus_verify(
     debug!("cmd: {:?}", command);
 
     // Wait for the command to finish and get its status
-    let status = command.status()?;
-    if !status.success() {
-        exit(status.code().unwrap_or(1));
+    let output = command.output()?;
+    if !output.status.success() {
+        exit(output.status.code().unwrap_or(1));
     }
+
+    std::io::stdout().write_all(&output.stdout).unwrap();
+    std::io::stderr().write_all(&output.stderr).unwrap();
 
     Ok(())
 }
@@ -221,10 +218,12 @@ fn run_rustc(args: &[String], rust_flags: &str) -> std::io::Result<()> {
         env::var("LD_LIBRARY_PATH").unwrap_or_default(),
     );
     debug!("cmd: {:?}", command);
-    let status = command.status()?;
-    if !status.success() {
-        exit(status.code().unwrap_or(1));
+    let output = command.output()?;
+    if !output.status.success() {
+        exit(output.status.code().unwrap_or(1));
     }
+    std::io::stdout().write_all(&output.stdout).unwrap();
+    std::io::stderr().write_all(&output.stderr).unwrap();
 
     Ok(())
 }
