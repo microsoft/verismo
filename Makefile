@@ -38,8 +38,13 @@ $(LINUX_OUT)/.config: $(LINUX_OUT)
 	mkdir -p $(LINUX_OUT)
 	cp ${LINUX_CONFIG} $(LINUX_OUT)/.config
 
-$(LINUX): richos/snplinux/ $(LINUX_OUT)/.config
-	git submodule update --init richos/snplinux || true
+${CURDIR}/richos/snplinux:
+	git clone  https://github.com/ziqiaozhou/linux --depth 1 -b vmpl2/verismo-rebase richos/snplinux
+	cd richos/snplinux
+	git checkout a03a1933bc8aa6bac68c707b2fd3978eb16aedeb
+	cd ../../
+
+$(LINUX): ${CURDIR}/richos/snplinux/ $(LINUX_OUT)/.config
 	cd richos/snplinux/ && make O=$(LINUX_OUT) CC=gcc-9 -j && make O=$(LINUX_OUT) INSTALL_MOD_PATH=$(LINUX_HEADER_DIR) modules_install
 
 kernel: $(LINUX)

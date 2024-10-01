@@ -15,4 +15,4 @@ noverify = ["verismo/noverify"]
 verismo = {path = "../verismo"}
 builtin = { path = "../../tools/verus/source/builtin"}
 builtin_macros = { path = "../../tools/verus/source/builtin_macros"}
-vstd = {path = "../vstd"}
+vstd = {path = "../../tools/verus/source/vstd"}
