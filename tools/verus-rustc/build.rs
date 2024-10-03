@@ -5,10 +5,15 @@ use std::process::{Command, ExitStatus};
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=install-verus.sh");
     println!("rerun-if-env-changed=HOME");
     println!("rerun-if-env-changed=VERUS_PATH");
     println!("rerun-if-env-changed=CARGO_HOME");
+    if cfg!(feature = "installverus") {
+        install_verus();
+    }
+}
+
+fn install_verus() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set"));
     let cargo_home_dir =
         env::var("CARGO_HOME").map_or(PathBuf::from("/usr/local"), |v| PathBuf::from(v));
@@ -17,8 +22,10 @@ fn main() {
         .map_or(cargo_home_dir.join("git/checkouts/verus"), |v| {
             PathBuf::from(v)
         });
+    let verus_rev = env::var("VERUS_REV");
+    let rust_version = env::var("VERUS_RUST_VERSION").unwrap_or("nightly-2023-12-22".into());
     let is_install = env::var("DEBUG").unwrap() == "false";
-    println!("{:#?}", env::vars());
+
     let install_dir = if is_install {
         env::var("CARGO_INSTALL_ROOT").map_or(cargo_home_dir.join("bin"), |v| PathBuf::from(v))
     } else {
@@ -53,6 +60,15 @@ fn main() {
             .status()
             .expect("Failed to clone the repository");
         check_status(status);
+
+        if verus_rev.is_ok() {
+            let status = Command::new("git")
+                .arg("checkout")
+                .arg(verus_rev.unwrap())
+                .status()
+                .expect("Failed to checkout the specified commit");
+            check_status(status);
+        }
     }
 
     let verus_rust_toolchain = verus_dir.join("rust-toolchain.toml");
@@ -60,16 +76,18 @@ fn main() {
     // Read the rust-toolchain.toml file
     let toolchain_content =
         fs::read_to_string(&verus_rust_toolchain).expect("Failed to read rust-toolchain.toml");
-
     // Check and update the toolchain version
-    if toolchain_content.contains(r#"channel = "1.76.0""#) {
-        let updated_content = toolchain_content.replace("1.76.0", "nightly-2023-12-22");
-        fs::write(&verus_rust_toolchain, updated_content)
-            .expect("Failed to update rust-toolchain.toml");
-    } else if !toolchain_content.contains(r#"channel = "nightly-2023-12-22""#) {
-        panic!("rust toolchain version != 1.76. Please update the script");
-    }
-
+    let mut toolconfig: toml::Value =
+        toml::de::from_str::<toml::Value>(toolchain_content.as_str()).unwrap();
+    *toolconfig
+        .get_mut("toolchain")
+        .unwrap()
+        .get_mut("channel")
+        .unwrap() = rust_version.into();
+    let _ = fs::write(
+        &verus_rust_toolchain,
+        toml::ser::to_string(&toolconfig).unwrap(),
+    );
     // Run additional commands in the verus directory
     if !verus_dir.join("source/z3").exists() {
         let status = Command::new("tools/get-z3.sh")
