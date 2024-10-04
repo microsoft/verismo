@@ -5,6 +5,14 @@ members = [
     "verismo_macro",
 ]
 
+[workspace.dependencies]
+# Verus repos
+builtin = { git = "https://github.com/verus-lang/verus", rev ="a413824dd7c20fe0f72ce988acafb60767fd88e6" }
+builtin_macros = { git = "https://github.com/verus-lang/verus", rev ="a413824dd7c20fe0f72ce988acafb60767fd88e6" }
+vstd = { git = "https://github.com/verus-lang/verus", rev ="a413824dd7c20fe0f72ce988acafb60767fd88e6", features = ["alloc"], default-features = false }
+syn_verus = { git = "https://github.com/verus-lang/verus", features = ["full", "visit-mut", "extra-traits"], rev ="a413824dd7c20fe0f72ce988acafb60767fd88e6" }
+prettyplease_verus = { git = "https://github.com/verus-lang/verus", rev ="a413824dd7c20fe0f72ce988acafb60767fd88e6" }
+
 # the profile used for `cargo build`
 [profile.dev]
 panic = "abort" # disable stack unwinding on panic

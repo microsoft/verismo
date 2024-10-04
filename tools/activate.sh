@@ -10,39 +10,14 @@ fi
 
 TOOLS_DIR=$(realpath $SCRIPT_DIR)
 
-echo "submodule init"
-(
-  git submodule update --init $TOOLS_DIR/verus
-)
-
-# echo "init vstd"
-# (
-#   cd "$TOOLS_DIR/../source/vstd/" || exit 1
-#   ln -s ../../tools/verus/source/vstd src
-#   cp "lib.rs" "src/"
-# )
-
 echo "building verus-rustc."
 (
-    cd "$TOOLS_DIR/verus-rustc" || exit 1
-    echo $TOOLS_DIR/verus
-    cargo clean && VERUS_PATH=$TOOLS_DIR/verus cargo build --release
+    VERUS_REV=a413824dd7c20fe0f72ce988acafb60767fd88e6 cargo install --path $TOOLS_DIR/verus-rustc
 ) || return 1
-
-# echo "building verus (slow)..."
-# (
-#   cd "$TOOLS_DIR/verus/source" && tools/get-z3.sh && source ../tools/activate && vargo build --release || exit 1
-# )
-
-# echo "building verusfmt."
-# (
-#     cd "$TOOLS_DIR/verusfmt" || exit 1
-#     cargo build --release || exit 1
-# ) || return 1
 
 echo "add igvm deps"
 (
-    sudo apt install acpica-tools && python3 -m pip install frozendict
+    python3 -m pip install frozendict
     git clone https://github.com/ziqiaozhou/igvm-tooling $TOOLS_DIR/igvm -b verismo-igvm
     cd "$TOOLS_DIR/igvm" && touch src/__init__.py && python3 -m pip install src/
 )
