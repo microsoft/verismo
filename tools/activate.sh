@@ -31,5 +31,9 @@ echo "add igvm deps"
 (
     python3 -m pip install frozendict
     git clone https://github.com/ziqiaozhou/igvm-tooling $TOOLS_DIR/igvm -b verismo-igvm
-    cd "$TOOLS_DIR/igvm" && touch src/__init__.py && python3 -m pip install src/
+    cd "$TOOLS_DIR/igvm" && touch src/__init__.py
+    if [ ! -f $TOOLS_DIR/venv ]; then
+    python3 -m venv $TOOLS_DIR/venv
+    fi
+    source $TOOLS_DIR/venv/bin/activate && python3 -m pip install src/
 )
