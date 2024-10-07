@@ -5,7 +5,7 @@ unstable-options = true
 
 [build]
 target = "target.json"
-rustc = "../tools/verus-rustc/target/release/verus-rustc"
+rustc = "verus-rustc"
 incremental = true
 
 [profile.dev]
@@ -17,4 +17,4 @@ incremental = true
 debug-assertions = false
 
 [env]
-VERUS = { value = "../tools/verus/source/target-verus/release/verus", relative = true }
+VERUS= {value = "../tools/verus/source/target-verus/release/verus", relative = true}

@@ -5,6 +5,21 @@ members = [
     "verismo_macro",
 ]
 
+[workspace.dependencies]
+# Verus repos
+builtin = { git = "https://github.com/ziqiaozhou/verus", rev ="7c4a5274a4d74522f3965eb038bb7e22fa5eebef" }
+vstd = { git = "https://github.com/ziqiaozhou/verus", rev ="7c4a5274a4d74522f3965eb038bb7e22fa5eebef", features = ["alloc"], default-features = false }
+builtin_macros = { git = "https://github.com/ziqiaozhou/verus", rev ="7c4a5274a4d74522f3965eb038bb7e22fa5eebef" }
+syn_verus = { git = "https://github.com/ziqiaozhou/verus", rev ="7c4a5274a4d74522f3965eb038bb7e22fa5eebef", features = ["full", "visit-mut", "extra-traits"] }
+prettyplease_verus = { git = "https://github.com/ziqiaozhou/verus", rev ="7c4a5274a4d74522f3965eb038bb7e22fa5eebef" }
+
+[patch.'https://github.com/ziqiaozhou/verus']
+builtin = { path = "../tools/verus/source/builtin" }
+vstd = { path = "../tools/verus/source/vstd", features = ["alloc"], default-features = false }
+builtin_macros = { path = "../tools/verus/source/builtin_macros" }
+syn_verus = { path = "../tools/verus/dependencies/syn", features = ["full", "visit-mut", "extra-traits"] }
+prettyplease_verus = { path = "../tools/verus/dependencies/prettyplease" }
+
 # the profile used for `cargo build`
 [profile.dev]
 panic = "abort" # disable stack unwinding on panic

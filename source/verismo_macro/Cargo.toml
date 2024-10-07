@@ -13,5 +13,5 @@ proc-macro2 = "1.0.39"
 quote = "1.0"
 synstructure = "0.12"
 syn = "1.0"
-syn_verus = { path="../../tools/verus/dependencies/syn", features = ["full", "visit-mut", "extra-traits"] }
-prettyplease_verus = { path="../../tools/verus/dependencies/prettyplease" }
+syn_verus = { workspace = true }
+prettyplease_verus = { workspace = true }

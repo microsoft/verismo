@@ -3,7 +3,6 @@ use log4rs::append::file::FileAppender;
 use log4rs::config::{Appender, Config, Root};
 use log4rs::encode::pattern::PatternEncoder;
 use std::env;
-use std::fs::File;
 use std::io::Write;
 use std::process::{exit, Command};
 
@@ -101,8 +100,6 @@ fn main() -> std::io::Result<()> {
             verus_snp_dir.to_string_lossy()
         );
     env::set_var("LD_LIBRARY_PATH", &ld_library_path);
-
-    let _cmd_log = File::create("cmd.log")?;
 
     let rust_flags = env::var("RUSTFLAGS").unwrap_or_default();
     let rust_flags_verus_lib =

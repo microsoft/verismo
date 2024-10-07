@@ -7,3 +7,6 @@ edition = "2021"
 clap = "3.0"
 log = "0.4"
 log4rs  = "1.0"
+
+[build-dependencies]
+toml = "0.7"

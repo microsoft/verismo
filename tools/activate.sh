@@ -10,40 +10,30 @@ fi
 
 TOOLS_DIR=$(realpath $SCRIPT_DIR)
 
-echo "submodule init"
-(
-  git submodule update --init $TOOLS_DIR/verus
-)
-
-# echo "init vstd"
-# (
-#   cd "$TOOLS_DIR/../source/vstd/" || exit 1
-#   ln -s ../../tools/verus/source/vstd src
-#   cp "lib.rs" "src/"
-# )
-
 echo "building verus-rustc."
 (
-    cd "$TOOLS_DIR/verus-rustc" || exit 1
-    echo $TOOLS_DIR/verus
-    cargo clean && VERUS_PATH=$TOOLS_DIR/verus cargo build --release
-) || return 1
-
-# echo "building verus (slow)..."
-# (
-#   cd "$TOOLS_DIR/verus/source" && tools/get-z3.sh && source ../tools/activate && vargo build --release || exit 1
-# )
-
-# echo "building verusfmt."
-# (
-#     cd "$TOOLS_DIR/verusfmt" || exit 1
-#     cargo build --release || exit 1
-# ) || return 1
+    cargo install --path $TOOLS_DIR/verus-rustc
+    cargo install --path $TOOLS_DIR/cargo-v
+    if [ ! -d "${TOOLS_DIR}/verus" ]; then
+    git clone https://github.com/ziqiaozhou/verus ${TOOLS_DIR}/verus
+    fi
+    cd ${TOOLS_DIR}/verus
+    git checkout 7c4a5274a4d74522f3965eb038bb7e22fa5eebef
+    cd source
+    source ../tools/activate
+    if [ ! -f "${TOOLS_DIR}/verus/source/z3" ]; then
+    ./tools/get-z3.sh
+    fi
+     vargo build --release
+)
 
 echo "add igvm deps"
 (
-    sudo apt install acpica-tools && python3 -m pip install frozendict
+    python3 -m pip install frozendict
     git clone https://github.com/ziqiaozhou/igvm-tooling $TOOLS_DIR/igvm -b verismo-igvm
-    cd "$TOOLS_DIR/igvm" && touch src/__init__.py && python3 -m pip install src/
+    cd "$TOOLS_DIR/igvm" && touch src/__init__.py
+    if [ ! -f $TOOLS_DIR/venv ]; then
+    python3 -m venv $TOOLS_DIR/venv
+    fi
+    source $TOOLS_DIR/venv/bin/activate && python3 -m pip install src/
 )
-export PATH="$SCRIPT_DIR/vargo/target/release:$TOOLS_DIR/verusfmt/target/release:$PATH"

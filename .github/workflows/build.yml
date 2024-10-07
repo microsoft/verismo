@@ -23,4 +23,4 @@ jobs:
         run: ./tools/activate.sh
 
       - name: Build
-        run: cd source/verismo && cargo build
+        run: cd source/verismo && cargo v build

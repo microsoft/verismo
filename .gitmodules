@@ -1,4 +1,0 @@
-[submodule "verus"]
-	path = tools/verus
-	url = https://github.com/ziqiaozhou/verus
-	branch = verismo-main
