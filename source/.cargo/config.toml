@@ -15,3 +15,6 @@ debug-assertions = true
 [profile.release]
 incremental = true
 debug-assertions = false
+
+[env]
+VERUS= {value = "../tools/verus/source/target-verus/release/verus", relative = true}

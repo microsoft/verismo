@@ -12,8 +12,20 @@ TOOLS_DIR=$(realpath $SCRIPT_DIR)
 
 echo "building verus-rustc."
 (
-    VERUS_REV=a413824dd7c20fe0f72ce988acafb60767fd88e6 cargo install --path $TOOLS_DIR/verus-rustc
-) || return 1
+    cargo install --path $TOOLS_DIR/verus-rustc
+    cargo install --path $TOOLS_DIR/cargo-v
+    if [ ! -d "${TOOLS_DIR}/verus" ]; then
+    git clone https://github.com/ziqiaozhou/verus ${TOOLS_DIR}/verus
+    fi
+    cd ${TOOLS_DIR}/verus
+    git checkout 7c4a5274a4d74522f3965eb038bb7e22fa5eebef
+    cd source
+    source ../tools/activate
+    if [ ! -f "${TOOLS_DIR}/verus/source/z3" ]; then
+    ./tools/get-z3.sh
+    fi
+     vargo build --release
+)
 
 echo "add igvm deps"
 (
@@ -21,4 +33,3 @@ echo "add igvm deps"
     git clone https://github.com/ziqiaozhou/igvm-tooling $TOOLS_DIR/igvm -b verismo-igvm
     cd "$TOOLS_DIR/igvm" && touch src/__init__.py && python3 -m pip install src/
 )
-export PATH="$SCRIPT_DIR/vargo/target/release:$TOOLS_DIR/verusfmt/target/release:$PATH"

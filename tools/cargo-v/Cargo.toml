@@ -5,3 +5,5 @@ edition = "2021"
 
 [dependencies]
 signal-hook = "0.3"
+toml = "0.7"
+clap = "4.5"

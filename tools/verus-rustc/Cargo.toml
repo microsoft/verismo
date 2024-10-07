@@ -10,7 +10,3 @@ log4rs  = "1.0"
 
 [build-dependencies]
 toml = "0.7"
-
-[features]
-default = ["installverus"]
-installverus = []
