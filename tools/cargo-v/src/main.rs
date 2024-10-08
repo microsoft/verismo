@@ -116,7 +116,7 @@ fn get_verus_path() -> (Option<PathBuf>, String, String) {
 
 fn install() {
     // Get the verus revision
-    let (path, verus_rev, url) = get_verus_path();
+    let (path, url, verus_rev) = get_verus_path();
 
     println!("Using verus commit {} {} {:?}", url, verus_rev, path);
     install_verus(url.as_str(), verus_rev.as_str(), path);
