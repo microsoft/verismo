@@ -111,7 +111,24 @@ fn main() -> std::io::Result<()> {
         verus_targets, crate_name
     );
     if let Some(crate_name) = crate_name {
-        if verus_targets.contains(&crate_name.as_str()) {
+        if crate_name == "vstd" {
+            args.extend(verus_lib_cfg);
+            let mut verus_args = vec![
+                "--no-vstd".to_string(),
+                "--no-verify".to_string(),
+                "--cfg".to_string(),
+                "erasure_macro_todo".to_string(),
+            ];
+            verus_args.extend(update_imports_exports(&crate_name, &args, &[]));
+            run_verus_verify(
+                &verus,
+                &args,
+                &verus_args,
+                &rust_flags_verus_lib,
+                true,
+                true,
+            )?;
+        } else if verus_targets.contains(&crate_name.as_str()) {
             let extra_str = env::var(format!("{}_VERUS_ARGS", crate_name)).unwrap_or_default();
             let extra: Vec<&str> = if !extra_str.is_empty() {
                 extra_str.split(" ").collect()
@@ -123,23 +140,6 @@ fn main() -> std::io::Result<()> {
             verus_args.extend(extra);
             verus_args.extend(update_imports_exports(&crate_name, &args, &verus_targets));
             args.extend(verus_lib_cfg);
-            run_verus_verify(
-                &verus,
-                &args,
-                &verus_args,
-                &rust_flags_verus_lib,
-                true,
-                true,
-            )?;
-        } else if crate_name == "vstd" {
-            args.extend(verus_lib_cfg);
-            let mut verus_args = vec![
-                "--no-vstd".to_string(),
-                "--no-verify".to_string(),
-                "--cfg".to_string(),
-                "erasure_macro_todo".to_string(),
-            ];
-            verus_args.extend(update_imports_exports(&crate_name, &args, &[]));
             run_verus_verify(
                 &verus,
                 &args,

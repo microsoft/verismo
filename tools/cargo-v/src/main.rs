@@ -1,3 +1,4 @@
+use cargo_metadata::CargoOpt;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
@@ -17,21 +18,23 @@ fn main() {
     }
 
     let args = &args[2..];
+    let verus_meta = VerusMetadata::new(args);
     match args[0].as_str() {
+        "build" => {
+            build(&verus_meta, args);
+        }
+        "prepare-verus" => {
+            install(&verus_meta, false);
+        }
+        "install-verus" => {
+            install(&verus_meta, true);
+        }
         "enable" => {
+            println("use cargo-v -- build directly.");
             activate();
         }
         "disable" => {
             deactivate();
-        }
-        "build" => {
-            build(&args);
-        }
-        "prepare-verus" => {
-            install(false);
-        }
-        "install-verus" => {
-            install(true);
         }
         _ => {
             panic!("{} not implemented", args[0]);
@@ -56,15 +59,16 @@ fn rust_version() -> String {
     env::var("VERUS_RUST_VERSION").unwrap_or("nightly-2023-12-22".into())
 }
 
-fn build(args: &[String]) {
-    let verus = verus();
-    println!("Use verus at {:?}", verus);
+fn build(verus_meta: &VerusMetadata, args: &[String]) {
+    let verus = verus_meta.verus();
+    let verus_crates = verus_meta.find_verus_crates();
     // Run cargo build with additional arguments
     let status = Command::new("cargo")
         .args(args)
         .env("VERUS", verus)
         .env("RUSTC", "verus-rustc")
         .env("RUSTUP_TOOLCHAIN", rust_version())
+        .env("VERUS_TARGETS", verus_crates.join(","))
         .status()
         .expect("Failed to execute cargo build");
 
@@ -73,9 +77,9 @@ fn build(args: &[String]) {
     }
 }
 
-fn install(global: bool) {
+fn install(verus_meta: &VerusMetadata, global: bool) {
     // Get the verus revision
-    install_verus(global);
+    install_verus(verus_meta, global);
 
     let status = Command::new("cargo")
         .arg("install")
@@ -119,79 +123,116 @@ fn deactivate() {
     }
 }
 
-fn find_verus_dir() -> Option<PathBuf> {
-    //cargo metadata --format-version 1 | jq -r '.packages[] | select(.name == "builtin") | .targets[].src_path'
-    let output = Command::new("cargo")
-        .arg("metadata")
-        .arg("--format-version=1")
-        .output()
-        .expect("Failed to execute command");
+fn extract_features(args: &[String]) -> Vec<String> {
+    let mut extracted_features = Vec::new();
 
-    // Check if the command was successful
-    if !output.status.success() {
-        eprintln!(
-            "Error executing cargo metadata: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        return None;
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--features" {
+            // Check the next argument
+            i += 1;
+            extracted_features.push(args[i].clone());
+        }
+        i += 1; // Move to the next argument
     }
 
-    // Parse the JSON output
-    let json: serde_json::Value =
-        serde_json::from_slice(&output.stdout).expect("Failed to parse JSON");
+    extracted_features
+}
 
-    // Extract the src_path for the "builtin" package
-    if let Some(packages) = json.get("packages") {
-        for package in packages.as_array().unwrap() {
-            if package.get("name").unwrap() == "builtin" {
-                if let Some(targets) = package.get("targets") {
-                    for target in targets.as_array().unwrap() {
-                        if let Some(src_path) = target.get("src_path") {
-                            let builtin_path = PathBuf::from(src_path.as_str().unwrap());
-                            return Some(
-                                builtin_path
-                                    .parent()
-                                    .unwrap()
-                                    .parent()
-                                    .unwrap()
-                                    .parent()
-                                    .unwrap()
-                                    .parent()
-                                    .unwrap()
-                                    .to_path_buf(),
-                            );
-                        }
+struct VerusMetadata {
+    meta: cargo_metadata::Metadata,
+    verus_path: Option<PathBuf>,
+}
+
+impl VerusMetadata {
+    fn new(args: &[String]) -> VerusMetadata {
+        let features = extract_features(args);
+        let mut ret = VerusMetadata {
+            meta: cargo_metadata::MetadataCommand::new()
+                .features(CargoOpt::SomeFeatures(features))
+                .exec()
+                .expect("failed to get metadata"),
+            verus_path: None,
+        };
+        ret.verus_path = ret.find_verus_dir();
+        ret
+    }
+
+    fn verus_dir(&self) -> PathBuf {
+        env::var("VERUS_PATH").map_or(
+            self.verus_path.clone().unwrap_or(PathBuf::from("verus")),
+            PathBuf::from,
+        )
+    }
+
+    fn verus(&self) -> PathBuf {
+        let ret = env::var("VERUS").map_or(
+            self.verus_path
+                .clone()
+                .expect("need to init VerusMetadata")
+                .join("source/target-verus/release/verus"),
+            PathBuf::from,
+        );
+        if !ret.exists() {
+            panic!(
+                "Please run `cargo v install-verus` to build verus first at {:?}",
+                ret
+            )
+        }
+        ret
+    }
+
+    fn find_verus_crates(&self) -> Vec<String> {
+        let mut ret = vec![];
+        for p in &self.meta.packages {
+            for d in &p.dependencies {
+                if d.name == "builtin"
+                    && d.source
+                        .as_ref()
+                        .expect("builtin should have source")
+                        .contains("verus")
+                {
+                    ret.push(p.name.clone());
+                    break;
+                }
+            }
+        }
+        ret
+    }
+
+    fn find_verus_dir(&self) -> Option<PathBuf> {
+        self.find_src_dir("builtin")
+    }
+
+    fn find_src_dir(&self, c: &str) -> Option<PathBuf> {
+        for p in &self.meta.packages {
+            if p.name.as_str() == c {
+                for t in &p.targets {
+                    let builtin_path = PathBuf::from(t.src_path.as_str());
+                    if builtin_path.exists() {
+                        return Some(
+                            builtin_path
+                                .parent()
+                                .unwrap()
+                                .parent()
+                                .unwrap()
+                                .parent()
+                                .unwrap()
+                                .parent()
+                                .unwrap()
+                                .to_path_buf(),
+                        );
                     }
                 }
             }
         }
+        None
     }
-    return None;
 }
 
-fn verus_dir() -> PathBuf {
-    env::var("VERUS_PATH").map_or(find_verus_dir().unwrap_or(PathBuf::from("verus")), |v| {
-        PathBuf::from(v)
-    })
-}
-
-fn verus() -> PathBuf {
-    let ret = env::var("VERUS")
-        .map_or(verus_dir().join("source/target-verus/release/verus"), |v| {
-            PathBuf::from(v)
-        });
-    if !ret.exists() {
-        panic!(
-            "Please run `cargo v install-verus` to build verus first at {:?}",
-            ret
-        )
-    }
-    ret
-}
-
-fn install_verus(install: bool) {
+fn install_verus(verus_meta: &VerusMetadata, install: bool) {
     // Construct the path to the dependency's source code
-    let verus_dir = verus_dir();
+    let verus_dir = verus_meta.verus_dir();
     let rust_version = env::var("VERUS_RUST_VERSION").unwrap_or("nightly-2023-12-22".into());
 
     println!("Building verus...");
@@ -226,7 +267,7 @@ fn install_verus(install: bool) {
     // Run additional commands in the verus directory
     if !verus_dir.join("source/z3").exists() {
         let status = Command::new("tools/get-z3.sh")
-            .current_dir(&verus_dir.join("source"))
+            .current_dir(verus_dir.join("source"))
             .status()
             .expect("Failed to run get-z3.sh");
         check_status(status);
@@ -241,17 +282,17 @@ fn install_verus(install: bool) {
         .arg(
             "source ../tools/activate && vargo build --release --vstd-no-verify --vstd-no-verusfmt",
         )
-        .current_dir(&verus_dir.join("source"))
+        .current_dir(verus_dir.join("source"))
         .status()
         .expect("Failed to build verus");
     check_status(status);
     if install {
         let cargo_home_dir = env::var("CARGO_HOME").map_or(
             PathBuf::from(format!("{}/.cargo/", env::var("HOME").unwrap())),
-            |v| PathBuf::from(v),
+            PathBuf::from,
         );
         let install_dir =
-            env::var("CARGO_INSTALL_ROOT").map_or(cargo_home_dir.join("bin"), |v| PathBuf::from(v));
+            env::var("CARGO_INSTALL_ROOT").map_or(cargo_home_dir.join("bin"), PathBuf::from);
 
         if !install_dir.exists() {
             panic!("{:#?} does not exist", install_dir);
