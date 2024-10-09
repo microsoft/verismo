@@ -20,7 +20,10 @@ jobs:
           submodules: recursive
 
       - name: Install depdendencies
-        run: ./tools/activate.sh
+        run: |
+            cargo install --path tools/cargo-v
+            cargo install --path tools/verus-rustc
+            cargo-v prepare-verus
 
       - name: Build
         run: cd source/verismo && cargo v build

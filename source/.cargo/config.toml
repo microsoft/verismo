@@ -16,5 +16,6 @@ debug-assertions = true
 incremental = true
 debug-assertions = false
 
-[env]
-VERUS= {value = "../tools/verus/source/target-verus/release/verus", relative = true}
+[alias]
+vfmt = "run-script vfmt" # Format verus codes
+verify = "v build"

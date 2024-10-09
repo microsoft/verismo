@@ -15,6 +15,7 @@ fn main() {
     }
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-env-changed=MODULE");
+    println!("cargo:rerun-if-env-changed=verismo_VERUS_ARGS");
     init_verify(&["vstd"]);
 }
 
