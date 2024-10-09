@@ -1,10 +1,7 @@
-use signal_hook::consts::SIGINT;
-use signal_hook::consts::SIGTERM;
-use signal_hook::iterator::Signals;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
-use std::process::{exit, Command};
+use std::process::Command;
 
 fn check_status(status: std::process::ExitStatus) {
     if !status.success() {
@@ -30,8 +27,11 @@ fn main() {
         "build" => {
             build(&args);
         }
+        "prepare-verus" => {
+            install(false);
+        }
         "install-verus" => {
-            install();
+            install(true);
         }
         _ => {
             panic!("{} not implemented", args[0]);
@@ -39,95 +39,49 @@ fn main() {
     }
 }
 
+fn show_rust_version() {
+    let _ = Command::new("rustup")
+        .arg("override")
+        .arg("list")
+        .status()
+        .expect("Failed to execute command");
+    let _ = Command::new("rustup")
+        .arg("show")
+        .arg("active-toolchain")
+        .status()
+        .expect("Failed to execute command");
+}
+
+fn rust_version() -> String {
+    env::var("VERUS_RUST_VERSION").unwrap_or("nightly-2023-12-22".into())
+}
+
 fn build(args: &[String]) {
-    // Set up signal handling
-    let verus_arg = args.iter().position(|arg| arg == "--verus");
-    let verus_path = verus_arg.map_or(
-        get_verus_path().0.map_or(PathBuf::from("verus"), |p| {
-            p.join("source/target-verus/release/verus").to_path_buf()
-        }),
-        |i| PathBuf::from(&args[i + 1]),
-    );
-    let mut signals = Signals::new(&[SIGINT, SIGTERM]).expect("Unable to set up signal handling");
-    let _ = std::thread::spawn(move || {
-        for _ in signals.forever() {
-            deactivate();
-            exit(0);
-        }
-    });
-    activate();
+    let verus = verus();
+    println!("Use verus at {:?}", verus);
     // Run cargo build with additional arguments
     let status = Command::new("cargo")
         .args(args)
-        .env("VERUS", verus_path)
+        .env("VERUS", verus)
         .env("RUSTC", "verus-rustc")
+        .env("RUSTUP_TOOLCHAIN", rust_version())
         .status()
         .expect("Failed to execute cargo build");
 
     if !status.success() {
         eprintln!("cargo build failed with status: {}", status);
     }
-    deactivate();
 }
 
-fn get_verus_path() -> (Option<PathBuf>, String, String) {
-    let output = Command::new("cargo")
-        .arg("tree")
-        .output()
-        .expect("Failed to execute cargo tree");
-
-    let out = String::from_utf8_lossy(&output.stdout);
-    let grep = out.lines().find(|line| line.contains("builtin_macros"));
-    let path = grep
-        .map(|line| {
-            line.split("(proc-macro) (")
-                .nth(1)
-                .and_then(|s| s.split(")").nth(0))
-                .unwrap()
-        })
-        .unwrap();
-    let verus_rev = grep
-        .map(|line| {
-            line.split("rev=")
-                .nth(1)
-                .and_then(|s| s.split('#').next())
-                .unwrap_or("")
-        })
-        .unwrap_or("");
-
-    let url = grep
-        .map(|line| {
-            line.split("https:")
-                .nth(1)
-                .and_then(|s| s.split('?').nth(0))
-                .unwrap_or("")
-        })
-        .unwrap_or("//github.com/verus-lang/verus");
-    let url = "https:".to_string() + url;
-    let path = PathBuf::from(path);
-    let path = if path.exists() {
-        Some(path.parent().unwrap().parent().unwrap().to_path_buf())
-    } else {
-        None
-    };
-    (path, url, verus_rev.to_string())
-}
-
-fn install() {
+fn install(global: bool) {
     // Get the verus revision
-    let (path, url, verus_rev) = get_verus_path();
+    install_verus(global);
 
-    println!("Using verus commit {} {} {:?}", url, verus_rev, path);
-    install_verus(url.as_str(), verus_rev.as_str(), path);
-
-    let rust_version = env::var("VERUS_RUST_VERSION").unwrap_or("nightly-2023-12-22".into());
     let status = Command::new("cargo")
         .arg("install")
         .arg("--git")
         .arg("https://github.com/microsoft/verismo/")
         .arg("verus-rustc")
-        .env("VERUS_RUST_VERSION", rust_version)
-        .env("VERUS_REV", verus_rev)
         .status()
         .expect("Failed to execute cargo install");
 
@@ -137,7 +91,7 @@ fn install() {
 }
 
 fn activate() {
-    let rust_version = env::var("VERUS_RUST_VERSION").unwrap_or("nightly-2023-12-22".into());
+    let rust_version = rust_version();
     // Set the rustup override and RUSTC variable
     let status = Command::new("rustup")
         .arg("override")
@@ -149,6 +103,7 @@ fn activate() {
     if !status.success() {
         eprintln!("rustup override set failed with status: {}", status);
     }
+    show_rust_version();
 }
 
 fn deactivate() {
@@ -164,54 +119,91 @@ fn deactivate() {
     }
 }
 
-fn install_verus(repo_url: &str, verus_rev: &str, path: Option<PathBuf>) {
-    let cargo_home_dir = env::var("CARGO_HOME").map_or(
-        PathBuf::from(format!("{}/.cargo/", env::var("HOME").unwrap())),
-        |v| PathBuf::from(v),
-    );
-    // Construct the path to the dependency's source code
-    let verus_dir = if path.is_some() {
-        path.unwrap()
-    } else {
-        env::var("VERUS_PATH").map_or(
-            cargo_home_dir.join(&format!("git/checkouts/verus-{}", verus_rev)),
-            |v| PathBuf::from(v),
-        )
-    };
-    let rust_version = env::var("VERUS_RUST_VERSION").unwrap_or("nightly-2023-12-22".into());
+fn find_verus_dir() -> Option<PathBuf> {
+    //cargo metadata --format-version 1 | jq -r '.packages[] | select(.name == "builtin") | .targets[].src_path'
+    let output = Command::new("cargo")
+        .arg("metadata")
+        .arg("--format-version=1")
+        .output()
+        .expect("Failed to execute command");
 
-    let install_dir =
-        env::var("CARGO_INSTALL_ROOT").map_or(cargo_home_dir.join("bin"), |v| PathBuf::from(v));
-
-    if !install_dir.exists() {
-        panic!("{:#?} does not exist", install_dir);
+    // Check if the command was successful
+    if !output.status.success() {
+        eprintln!(
+            "Error executing cargo metadata: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return None;
     }
 
+    // Parse the JSON output
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("Failed to parse JSON");
+
+    // Extract the src_path for the "builtin" package
+    if let Some(packages) = json.get("packages") {
+        for package in packages.as_array().unwrap() {
+            if package.get("name").unwrap() == "builtin" {
+                if let Some(targets) = package.get("targets") {
+                    for target in targets.as_array().unwrap() {
+                        if let Some(src_path) = target.get("src_path") {
+                            let builtin_path = PathBuf::from(src_path.as_str().unwrap());
+                            return Some(
+                                builtin_path
+                                    .parent()
+                                    .unwrap()
+                                    .parent()
+                                    .unwrap()
+                                    .parent()
+                                    .unwrap()
+                                    .parent()
+                                    .unwrap()
+                                    .to_path_buf(),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return None;
+}
+
+fn verus_dir() -> PathBuf {
+    env::var("VERUS_PATH").map_or(find_verus_dir().unwrap_or(PathBuf::from("verus")), |v| {
+        PathBuf::from(v)
+    })
+}
+
+fn verus() -> PathBuf {
+    let ret = env::var("VERUS")
+        .map_or(verus_dir().join("source/target-verus/release/verus"), |v| {
+            PathBuf::from(v)
+        });
+    if !ret.exists() {
+        panic!(
+            "Please run `cargo v install-verus` to build verus first at {:?}",
+            ret
+        )
+    }
+    ret
+}
+
+fn install_verus(install: bool) {
+    // Construct the path to the dependency's source code
+    let verus_dir = verus_dir();
+    let rust_version = env::var("VERUS_RUST_VERSION").unwrap_or("nightly-2023-12-22".into());
+
     println!("Building verus...");
-    let zip = format!("{}.zip", verus_rev);
 
     // Check if the directory exists
     if verus_dir.exists() {
         println!("{:#?} already exists.", verus_dir);
     } else {
-        println!(
-            "{:#?} does not exist. Cloning the repository...",
+        panic!(
+            "{:#?} does not exist. Please put builtin in Cargo.toml or download verus to $VERUS_PATH",
             &verus_dir
         );
-        let status = Command::new("wget")
-            .arg(&format! {"{}/archive/{}", repo_url, zip})
-            .status()
-            .expect("Failed to clone the repository");
-        check_status(status);
-        let status = Command::new("unzip")
-            .arg("-q")
-            .arg(zip.clone())
-            .arg("-d")
-            .arg(verus_dir.parent().unwrap())
-            .status()
-            .expect("Failed to unzip the file");
-        check_status(status);
-        let _ = fs::remove_file(zip);
     }
 
     let verus_rust_toolchain = verus_dir.join("rust-toolchain.toml");
@@ -253,27 +245,38 @@ fn install_verus(repo_url: &str, verus_rev: &str, path: Option<PathBuf>) {
         .status()
         .expect("Failed to build verus");
     check_status(status);
+    if install {
+        let cargo_home_dir = env::var("CARGO_HOME").map_or(
+            PathBuf::from(format!("{}/.cargo/", env::var("HOME").unwrap())),
+            |v| PathBuf::from(v),
+        );
+        let install_dir =
+            env::var("CARGO_INSTALL_ROOT").map_or(cargo_home_dir.join("bin"), |v| PathBuf::from(v));
 
-    // Copy the built binaries to the install directory
-    for binary in [
-        "verus",
-        "rust_verify",
-        "z3",
-        "verus-root",
-        "libvstd.rlib",
-        "vstd.vir",
-        "libstate_machines_macros.so",
-        "libbuiltin_macros.so",
-        "libbuiltin.rlib",
-    ]
-    .iter()
-    {
-        let src = verus_dir.join("source/target-verus/release").join(binary);
-        let dest = install_dir.join(binary);
-        if !src.exists() {
-            panic!("{:#?} not exists", src);
+        if !install_dir.exists() {
+            panic!("{:#?} does not exist", install_dir);
         }
-        println!("copy {:#?} to {:#?}", src, dest);
-        fs::copy(&src, &dest).expect("Failed to copy binary");
+        // Copy the built binaries to the install directory
+        for binary in [
+            "verus",
+            "rust_verify",
+            "z3",
+            "verus-root",
+            "libvstd.rlib",
+            "vstd.vir",
+            "libstate_machines_macros.so",
+            "libbuiltin_macros.so",
+            "libbuiltin.rlib",
+        ]
+        .iter()
+        {
+            let src = verus_dir.join("source/target-verus/release").join(binary);
+            let dest = install_dir.join(binary);
+            if !src.exists() {
+                panic!("{:#?} not exists", src);
+            }
+            println!("copy {:#?} to {:#?}", src, dest);
+            fs::copy(&src, &dest).expect("Failed to copy binary");
+        }
     }
 }
