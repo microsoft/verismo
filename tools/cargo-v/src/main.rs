@@ -30,7 +30,7 @@ fn main() {
             install(&verus_meta, true);
         }
         "enable" => {
-            println("use cargo-v -- build directly.");
+            println!("use cargo-v -- build directly.");
             activate();
         }
         "disable" => {
