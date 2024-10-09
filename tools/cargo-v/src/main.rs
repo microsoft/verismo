@@ -276,14 +276,4 @@ fn install_verus(repo_url: &str, verus_rev: &str, path: Option<PathBuf>) {
         println!("copy {:#?} to {:#?}", src, dest);
         fs::copy(&src, &dest).expect("Failed to copy binary");
     }
-
-    // Install verusfmt
-    println!("Installing verusfmt...");
-    let status = Command::new("cargo")
-        .arg("install")
-        .arg("--git")
-        .arg("https://github.com/verus-lang/verusfmt")
-        .status()
-        .expect("Failed to install verusfmt");
-    check_status(status);
 }
