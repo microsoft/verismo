@@ -187,6 +187,7 @@ fn run_verus_verify(
         "LD_LIBRARY_PATH",
         env::var("LD_LIBRARY_PATH").unwrap_or_default(),
     );
+    command.env_remove("CARGO_MAKEFLAGS");
 
     if compile {
         command.arg("--compile");
