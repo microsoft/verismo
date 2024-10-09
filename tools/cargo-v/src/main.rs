@@ -2,7 +2,6 @@ use signal_hook::consts::SIGINT;
 use signal_hook::consts::SIGTERM;
 use signal_hook::iterator::Signals;
 use std::env;
-use std::ffi::OsStr;
 use std::fs;
 use std::path::PathBuf;
 use std::process::{exit, Command};
@@ -50,7 +49,7 @@ fn build(args: &[String]) {
         |i| PathBuf::from(&args[i + 1]),
     );
     let mut signals = Signals::new(&[SIGINT, SIGTERM]).expect("Unable to set up signal handling");
-    let handle = std::thread::spawn(move || {
+    let _ = std::thread::spawn(move || {
         for _ in signals.forever() {
             deactivate();
             exit(0);
@@ -121,13 +120,13 @@ fn install() {
     println!("Using verus commit {} {} {:?}", url, verus_rev, path);
     install_verus(url.as_str(), verus_rev.as_str(), path);
 
-    let verus_rust_version = "nightly-2023-12-22";
+    let rust_version = env::var("VERUS_RUST_VERSION").unwrap_or("nightly-2023-12-22".into());
     let status = Command::new("cargo")
         .arg("install")
         .arg("--git")
         .arg("https://github.com/microsoft/verismo/")
         .arg("verus-rustc")
-        .env("VERUS_RUST_VERSION", verus_rust_version)
+        .env("VERUS_RUST_VERSION", rust_version)
         .env("VERUS_REV", verus_rev)
         .status()
         .expect("Failed to execute cargo install");
@@ -138,11 +137,12 @@ fn install() {
 }
 
 fn activate() {
+    let rust_version = env::var("VERUS_RUST_VERSION").unwrap_or("nightly-2023-12-22".into());
     // Set the rustup override and RUSTC variable
     let status = Command::new("rustup")
         .arg("override")
         .arg("set")
-        .arg("nightly-2023-12-22")
+        .arg(rust_version)
         .status()
         .expect("Failed to execute rustup override");
 
@@ -152,14 +152,13 @@ fn activate() {
 }
 
 fn deactivate() {
-    // Unset the rustup override
     let status = Command::new("rustup")
         .arg("override")
         .arg("unset")
-        .arg("--nonexistent")
+        .arg("--path")
+        .arg(env::current_dir().expect("no current dir"))
         .status()
         .expect("Failed to execute rustup override unset");
-
     if !status.success() {
         eprintln!("rustup override unset failed with status: {}", status);
     }
@@ -247,7 +246,9 @@ fn install_verus(repo_url: &str, verus_rev: &str, path: Option<PathBuf>) {
         .env_clear()
         .env("PATH", env_path)
         .arg("-c")
-        .arg("source ../tools/activate && vargo build --release")
+        .arg(
+            "source ../tools/activate && vargo build --release --vstd-no-verify --vstd-no-verusfmt",
+        )
         .current_dir(&verus_dir.join("source"))
         .status()
         .expect("Failed to build verus");
