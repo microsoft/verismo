@@ -4,6 +4,12 @@ use crate::arch::entities::*;
 use crate::tspec::*;
 use crate::*;
 
+macro_rules! BIT64 {
+    ($x: expr) => {
+        (1u64 << (($x) as u64))
+    };
+}
+
 verus! {
 
 pub proof fn lemma_pt_entry_count()
@@ -65,7 +71,7 @@ impl PTLevel {
         let ret = lvl.spec_table_index(SpecAddr::<T>::new(val as int));
         let t1 = val >> (lvl.spec_offset() as u64);
         bit_shl64_pow2_auto();
-        proof_bit_u64_and_rel_mod(t1, PT_ENTRY_NUM!());
+        proof_bit64_and_rel_mod(t1, PT_ENTRY_NUM!());
         assert(t1 & PT_ENTRY_IDX_MASK!() == t1 % PT_ENTRY_NUM!());
         bit64_shr_div_rel(val, 12);
         bit64_shr_div_rel(val, 21);

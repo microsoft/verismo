@@ -8,7 +8,12 @@ use crate::registers::*;
 use crate::snp::SnpCoreSharedMem;
 use crate::tspec::*;
 use crate::tspec_e::*;
-use crate::{BIT32, BIT64};
+
+macro_rules! BIT32 {
+    ($x: expr) => {
+        (1u32 << ($x))
+    };
+}
 
 verus! {
 

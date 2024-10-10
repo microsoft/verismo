@@ -4,7 +4,14 @@ use super::*;
 use crate::arch::addr_s::*;
 use crate::arch::entities::*;
 use crate::tspec::*;
-use crate::{macro_def, BIT64};
+use crate::macro_def;
+
+#[macro_export]
+macro_rules! BIT64 {
+    ($x: expr) => {
+        (1u64 << (($x) as u64))
+    };
+}
 
 verus! {
 

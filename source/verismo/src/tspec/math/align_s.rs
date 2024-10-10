@@ -30,7 +30,7 @@ seq_macro::seq!(N in 0..64 {
                 val % align == (val & sub(align, 1)),
             {
                 #(
-                    assert(val % BIT64!(N as u64) == (val & sub(BIT64!(N as u64), 1))) by(bit_vector);
+                    assert(val % (1u64 << N) == (val & sub((1u64 << N), 1))) by(bit_vector);
                 )*
             }
         }
@@ -53,7 +53,7 @@ pub proof fn proof_align_down(val: nat, align: nat) -> (ret: (u64, u64, u64))
     let val64 = val as u64;
     let mask = sub(align as u64, 1);
     let ret = val - val % align;
-    let align64 = BIT64!(bits);
+    let align64 = (1u64 << bits);
     bit_shl64_pow2_auto();
     assert(val / align * align == val - val % align) by (nonlinear_arith)
         requires
@@ -68,7 +68,7 @@ pub proof fn proof_align_down(val: nat, align: nat) -> (ret: (u64, u64, u64))
     bit64_shr_div_rel(val64, bits);
     bit_lsh64_mul_rel(val64 >> bits, bits);
     assert((val64 >> bits) << bits == val64 / align64 * align64);
-    assert(val64 & !sub(BIT64!(bits), 1) == ((val64 >> bits) << bits)) by (bit_vector)
+    assert(val64 & !sub((1u64 << bits), 1) == ((val64 >> bits) << bits)) by (bit_vector)
         requires
             bits < 64,
     ;

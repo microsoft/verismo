@@ -2,6 +2,12 @@ use vstd::prelude::*;
 
 use super::*;
 
+macro_rules! BIT64 {
+    ($x: expr) => {
+        (1u64 << (($x) as u64))
+    };
+}
+
 verus! {
     pub open spec fn has_bit_closure(input: u64) -> spec_fn(u64) -> bool {
         |b: u64| spec_has_bit_set(input, b)
@@ -333,7 +339,7 @@ verus! {
         implies
             spec_has_bit_set(ret, b)
         by {
-            bit_or64_auto();
+            bit64_or_auto();
             if b <= h  && sub(h, b) < nbits {
                 assert(spec_has_bit_set(input, b));
                 assert(spec_has_bit_set(ret, b));

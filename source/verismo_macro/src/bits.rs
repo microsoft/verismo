@@ -93,7 +93,7 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
                 ret <= #field_max_val as #fty,
                 ret >= 0,
             {
-                bit_and64_auto();
+                bit64_and_auto();
                 self.#spec_getter()
             }
 
@@ -103,7 +103,7 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
                 self.view().#spec_getter() <= #field_max_val as #fty
             {
                 proof {
-                    bit_and64_auto();
+                    bit64_and_auto();
                 }
                 let mask = #mask as #fty;
                 (self.value() >> (#bit_start as #fty)) & mask

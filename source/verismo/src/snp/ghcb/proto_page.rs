@@ -4,6 +4,12 @@ use crate::global::{spec_ALLOCATOR, spec_CONSOLE, spec_PT};
 use crate::pgtable_e::*;
 use crate::snp::mem::*;
 
+macro_rules! BIT8 {
+    ($x: expr) => {
+        (1u8 << ($x))
+    };
+}
+
 verismo_simple! {
 
 #[derive(SpecGetter, SpecSetter, Copy, VClone)]

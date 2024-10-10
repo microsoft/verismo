@@ -6,7 +6,7 @@ verus! {
 
 #[verifier(inline)]
 pub open spec fn spec_pow2_to_bits(val: u64) -> u64 {
-    choose|ret: u64| BIT64!(ret) == val && 0 <= ret < 64
+    choose|ret: u64| (1u64 << ret) == val && 0 <= ret < 64
 }
 
 pub open spec fn spec_int_pow2(offset: int) -> int
@@ -43,7 +43,7 @@ seq_macro::seq!(N in 0..64 {
             #[verifier(inline)]
             pub open spec fn spec_bit64_is_shl_by_bits(val: u64) -> bool {
                 #(
-                    ||| val == BIT64!(N as u64)
+                    ||| val == (1u64 << N)
                 )*
             }
         }
