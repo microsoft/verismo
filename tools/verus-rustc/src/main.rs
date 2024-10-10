@@ -51,7 +51,7 @@ fn update_imports_exports(
 fn main() -> std::io::Result<()> {
     let logfile = FileAppender::builder()
         .encoder(Box::new(PatternEncoder::new("{l} - {m}\n")))
-        .build("/tmp/verus_rustc.log")
+        .build("verus_rustc.log")
         .unwrap();
 
     let config = Config::builder()
