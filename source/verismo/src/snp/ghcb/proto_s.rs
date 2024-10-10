@@ -149,11 +149,11 @@ pub const SM_TERM_RICHOS: u64 = 0xf;
 
 pub const SM_TERM_PERMS: u64 = 0x10;
 
-} // verus!
-macro_const! {
-
 pub const SUBCODE_OFFSET: u64 = 0x8u64;
-}
+} // verus!
+
+
+
 
 verus! {
 

@@ -278,8 +278,7 @@ impl AnyRegTrait<u64_s> for XCR0 {
 }
 }
 
-use crate::BIT64;
-crate::macro_const! {
+verus!{
 pub const CR4_OSFXSR: u64 = BIT64!(9);
 pub const CR4_OSXMMEXCPT: u64 = BIT64!(10);
 pub const CR4_OSXSAVE: u64 = BIT64!(18);
@@ -295,6 +294,7 @@ pub const XCR0_OPMASK: u64 = BIT64!(5);
 pub const XCR0_ZMM_HI256: u64 = BIT64!(6);
 pub const XCR0_HI16_ZMM: u64 = BIT64!(7);
 }
+
 impl_reg64! {
     CR0, "cr0", Cr0,
     CR3, "cr3", Cr3,

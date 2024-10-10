@@ -14,6 +14,20 @@ macro_rules! BIT64 {
 
 verus! {
 
+pub const PT_ENTRY_SIZE: u64 = 8u64;
+pub const L3_OFFSET: u64 = 39u64;
+pub const L2_OFFSET: u64 = 30u64;
+pub const L1_OFFSET: u64 = 21u64;
+pub const L0_OFFSET: u64 = 12u64;
+pub const PT_ENTRY_NUM_BIT: u64 = 9u64;
+
+pub const L3_PGSIZE: u64 = BIT64!(39);
+pub const L2_PGSIZE: u64 = BIT64!(30);
+pub const L1_PGSIZE: u64 = BIT64!(21);
+pub const L0_PGSIZE: u64 = BIT64!(12);
+pub const PT_ENTRY_NUM: u64 = BIT64!(9);
+pub const PT_ENTRY_IDX_MASK: u64 = 0x1ff;
+
 #[verifier::reject_recursive_types(T)]
 #[verifier::reject_recursive_types(PT)]
 pub ghost struct MemMap<T, PT> {
@@ -59,46 +73,6 @@ pub type SpecSysPTEntry = SpecPageTableEntry<SysPhy>;
 pub type GuestPTEntry = PageTableEntry<GuestPhy>;
 
 pub type SysPTEntry = PageTableEntry<SysPhy>;
-
-} // verus!
-verus! {
-
-pub const PT_ENTRY_SIZE: u64 = 8u64;
-
-} // verus!
-crate::macro_const! {
-    #[macro_export]
-    pub const L3_OFFSET: u64 = 39u64;
-    #[macro_export]
-    pub const L2_OFFSET: u64 = 30u64;
-    #[macro_export]
-    pub const L1_OFFSET: u64 = 21u64;
-    #[macro_export]
-    pub const L0_OFFSET: u64 = 12u64;
-    #[macro_export]
-    pub const PT_ENTRY_NUM_BIT: u64 = 9u64;
-}
-
-crate::macro_const! {
-    #[macro_export]
-    pub const L3_PGSIZE: u64 = BIT64!(39);
-    #[macro_export]
-    pub const L2_PGSIZE: u64 = BIT64!(30);
-    #[macro_export]
-    pub const L1_PGSIZE: u64 = BIT64!(21);
-    #[macro_export]
-    pub const L0_PGSIZE: u64 = BIT64!(12);
-    #[macro_export]
-
-    pub const PT_ENTRY_NUM: u64 = BIT64!(9);
-}
-
-crate::macro_const! {
-    #[macro_export]
-    pub const PT_ENTRY_IDX_MASK: u64 = 0x1ff;
-}
-
-verus! {
 
 pub spec fn spec_page_frame_bits() -> u64;
 

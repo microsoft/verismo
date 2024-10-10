@@ -285,22 +285,22 @@ pub closed spec fn spec_table_index(vaddr: u64, lvl: nat) -> int {
 
 pub proof fn proof_table_index(vaddr: u64, lvl: nat)
     ensures
-        0 <= spec_table_index(vaddr, lvl) < PT_ENTRY_NUM!(),
+        0 <= spec_table_index(vaddr, lvl) < PT_ENTRY_NUM,
         PT_ENTRY_NUM == 512,
-        PT_ENTRY_NUM!() == 512,
+        PT_ENTRY_NUM == 512,
 {
-    assert(PT_ENTRY_NUM!() == 512) by {
-        assert(PT_ENTRY_NUM!() == 512) by (bit_vector);
+    assert(PT_ENTRY_NUM == 512) by {
+        assert(PT_ENTRY_NUM == 512) by (bit_vector);
     }
     let addr_index = VAddrIndex { value: vaddr };
     addr_index.lemma_bound_index0();
-    assert(0 <= addr_index.spec_index0() < PT_ENTRY_NUM!());
+    assert(0 <= addr_index.spec_index0() < PT_ENTRY_NUM);
     addr_index.lemma_bound_index1();
-    assert(0 <= addr_index.spec_index1() < PT_ENTRY_NUM!());
+    assert(0 <= addr_index.spec_index1() < PT_ENTRY_NUM);
     addr_index.lemma_bound_index2();
-    assert(0 <= addr_index.spec_index2() < PT_ENTRY_NUM!());
+    assert(0 <= addr_index.spec_index2() < PT_ENTRY_NUM);
     addr_index.lemma_bound_index3();
-    assert(0 <= addr_index.spec_index3() < PT_ENTRY_NUM!());
+    assert(0 <= addr_index.spec_index3() < PT_ENTRY_NUM);
 }
 
 } // verus!
@@ -315,8 +315,8 @@ fn next_addr(vaddr: u64) -> (ret: u64)
 
 fn table_index(vaddr: u64, lvl: u8) -> (ret: usize)
     ensures
-        0 <= ret < PT_ENTRY_NUM!(),
-        PT_ENTRY_NUM!() == PT_ENTRY_NUM,
+        0 <= ret < PT_ENTRY_NUM,
+        PT_ENTRY_NUM == PT_ENTRY_NUM,
         PT_ENTRY_NUM == 512,
         (ret as int) == spec_table_index(vaddr, lvl as nat),
 {

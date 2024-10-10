@@ -9,10 +9,10 @@ verus! {
 impl PTLevel {
     pub open spec fn spec_pgsize(&self) -> int {
         let val = match *self {
-            PTLevel::L3 => L3_PGSIZE!(),
-            PTLevel::L2 => L2_PGSIZE!(),
-            PTLevel::L1 => L1_PGSIZE!(),
-            PTLevel::L0 => L0_PGSIZE!(),
+            PTLevel::L3 => L3_PGSIZE,
+            PTLevel::L2 => L2_PGSIZE,
+            PTLevel::L1 => L1_PGSIZE,
+            PTLevel::L0 => L0_PGSIZE,
         };
         val as int
     }
@@ -42,7 +42,7 @@ impl PTLevel {
     }
 
     pub open spec fn spec_table_index<T: AddrType>(&self, vaddr: SpecAddr<T>) -> int {
-        (vaddr.value() / self.spec_pgsize()) % (PT_ENTRY_NUM!() as int)
+        (vaddr.value() / self.spec_pgsize()) % (PT_ENTRY_NUM as int)
     }
 }
 
@@ -106,7 +106,7 @@ impl<T: AddrType> SpecPageTableEntry<T> {
 
     pub open spec fn addr_for_idx(&self, idx: nat) -> SpecAddr<T>
         recommends
-            idx < PT_ENTRY_NUM!(),
+            idx < PT_ENTRY_NUM,
     {
         let offset = (idx * PT_ENTRY_SIZE) as int;
         self.spec_addr() + offset

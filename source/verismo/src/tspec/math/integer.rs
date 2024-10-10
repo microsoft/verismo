@@ -180,7 +180,7 @@ verus! {
         input != 0,
     ensures
         ret == spec_fill_ones_exe(input),
-        (ret >> 1) < MAXU64!(),
+        (ret >> 1) < u64::MAX,
         (!ret & input) == 0,
         (ret & input) == input,
         ret / 2 < input,
@@ -211,7 +211,7 @@ verus! {
             reveal_with_fuel(_fill_ones, 7);
         }
         assert(ret == nbits_mask(add(high_bit,1)));
-        assert((ret >> 1) < MAXU64!()) by(bit_vector);
+        assert((ret >> 1) < u64::MAX) by(bit_vector);
         assert(ret >= 1) by(bit_vector)
         requires
             0 <= high_bit < 64,
@@ -264,7 +264,7 @@ verus! {
         spec_bit64_is_shl_by_bits(ret as u64),
         spec_is_next_power_of_two(input as nat, ret as nat),
         ret == spec_next_power_of_two_exe(input),
-        input > 1 ==> spec_fill_ones_exe(sub(input, 1)) < MAXU64!(),
+        input > 1 ==> spec_fill_ones_exe(sub(input, 1)) < u64::MAX,
     {
         if input <= 1 {
             bit_shl64_pow2_auto();
@@ -275,7 +275,7 @@ verus! {
             let fill_ones = lemma_fill_ones(input1);
             let high_bit = proof_get_highest_bit(input1);
             let ret = add(fill_ones, 1);
-            assert(fill_ones < MAXU64!()) by(bit_vector)
+            assert(fill_ones < u64::MAX) by(bit_vector)
             requires
                 0 < input1 < POW2!(63),
                 fill_ones/2 < input1;
@@ -283,7 +283,7 @@ verus! {
             requires
                 fill_ones == nbits_mask(add(high_bit, 1)),
                 ret == add(fill_ones, 1u64),
-                fill_ones < MAXU64!(),
+                fill_ones < u64::MAX,
                 0 <= high_bit < 64;
             ret
         }

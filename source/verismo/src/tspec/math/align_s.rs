@@ -6,15 +6,15 @@ verus! {
 pub proof fn lemam_bit_or_mask_bound(val: u64, align: u64) -> (mask: u64)
     requires
         spec_bit64_is_shl_by_bits(align),
-        val <= MAXU64!() - align,
+        val <= u64::MAX - align,
     ensures
         mask == sub(align, 1),
-        (val | mask) < MAXU64!(),
+        (val | mask) < u64::MAX,
 {
     let mask = sub(align, 1);
-    assert((val | mask) < MAXU64!()) by (bit_vector)
+    assert((val | mask) < u64::MAX) by (bit_vector)
         requires
-            val <= sub(MAXU64!(), align),
+            val <= sub(u64::MAX, align),
             mask == sub(align, 1),
             spec_bit64_is_shl_by_bits(align),
     ;
@@ -79,7 +79,7 @@ pub proof fn proof_align_up(val: nat, align: nat) -> (ret: (u64, u64, u64, u64))
     requires
         spec_bit64_is_pow_of_2(align as int),
         val as u64 == val,
-        val + align <= MAXU64!(),
+        val + align <= u64::MAX,
     ensures
         ret.0 == sub(align as u64, 1),
         ret.1 == spec_pow2_to_bits(align as u64),

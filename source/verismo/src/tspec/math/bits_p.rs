@@ -365,19 +365,19 @@ verus! {
             forall |a: u64| #[trigger] !(!a) == a,
             forall |a: u64| #[trigger] (!a) & a == 0,
             !0u64 == 0xffffffffffffffffu64,
-            forall |a: u64| #[trigger] (!a) == sub(MAXU64!(), a),
+            forall |a: u64| #[trigger] (!a) == sub(u64::MAX, a),
     {}
 
     #[verifier(bit_vector)]
     pub proof fn proof_bit_u64_not(a: u64)
     ensures
-        (!a) == sub(MAXU64!(), a)
+        (!a) == sub(u64::MAX, a)
     {}
 
     #[verifier(bit_vector)]
     pub proof fn proof_bit_usize_not(a: usize)
     ensures
-        (!a) == sub(MAXU64!() as usize, a)
+        (!a) == sub(u64::MAX as usize, a)
     {}
 
     #[verifier(bit_vector)]
@@ -417,7 +417,7 @@ verus!{
         a < 64,
     ensures
         ret == (b >> a),
-        ret * (1u64 << a) <= MAXU64!(),
+        ret * (1u64 << a) <= u64::MAX,
         (b>>a) == (b / (1u64 << a)),
     {
         let ret = (b >> a);
@@ -425,9 +425,9 @@ verus!{
             if a == N {
                 assert(ret == b / (1u64 << N)) by(bit_vector)
                 requires ret == (b >> N);
-                assert(b <= MAXU64!());
+                assert(b <= u64::MAX);
                 bit_shl64_pow2_auto();
-                assert(b / POW2!(N) * POW2!(N) <= MAXU64!());
+                assert(b / POW2!(N) * POW2!(N) <= u64::MAX);
             }
         )*
         ret
@@ -440,7 +440,7 @@ seq_macro::seq!(N in 0..64 {
         pub proof fn bit_lsh64_mul_rel(b: u64, a: u64)
         requires
             a < 64,
-            b * (1u64 << a) <= MAXU64!(),
+            b * (1u64 << a) <= u64::MAX,
         ensures
             (b<<a) == (b * (1u64 << a)),
         {
@@ -448,7 +448,7 @@ seq_macro::seq!(N in 0..64 {
                  if a == N {
                     assert((b<<N) == mul(b, (1u64 << N))) by(bit_vector);
                     bit_shl64_pow2_auto();
-                    assert(b * (1u64 << N) <= MAXU64!());
+                    assert(b * (1u64 << N) <= u64::MAX);
                     assert(mul(b, POW2!(N)) == b * POW2!(N));
                     assert((b<<N) == b * (1u64 << N));
                 }

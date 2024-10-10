@@ -121,7 +121,7 @@ impl GuestPTRam {
         let l0_entry = self.l0_entry(memid);
         let idx = lvl.spec_table_index(gvn.to_addr()) as nat;
         let pte_gpa_ok = self.map_entry_gpa_ok(memid, gvn, lvl);
-        assert(0 <= idx < PT_ENTRY_NUM!()) by {
+        assert(0 <= idx < PT_ENTRY_NUM) by {
             lvl.proof_table_index_range(gvn.to_addr());
         }
         assert(memtype(memid, pte_gpa_ok.get_Some_0().to_page()).is_pt(lvl)) by {

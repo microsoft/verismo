@@ -178,11 +178,6 @@ pub proof fn lemma_int_value_ord<T: IntOrd>(t1: T, t2: T)
 impl_cmp_with_basics! {int, nat, u8, u16, u32, u64, usize}
 impl_spec_eq_with_basics! {int, nat, u8, u16, u32, u64, usize}
 
-crate::macro_const! {
-    #[macro_export]
-    pub const MAXU64: u64  = 0xffff_ffff_ffff_ffffu64;
-}
-
 verus! {
 
 impl VSpecEq<()> for () {

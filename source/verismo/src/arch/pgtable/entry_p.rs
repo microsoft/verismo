@@ -14,9 +14,9 @@ verus! {
 
 pub proof fn lemma_pt_entry_count()
     ensures
-        PT_ENTRY_NUM!() == 512,
+        PT_ENTRY_NUM == 512,
 {
-    assert(PT_ENTRY_NUM!() == 512) by (bit_vector);
+    assert(1u64 << 9 == 512) by (bit_vector);
 }
 
 impl PTLevel {
@@ -43,17 +43,17 @@ impl PTLevel {
 
     pub proof fn proof_table_index_range<T: AddrType>(&self, vaddr: SpecAddr<T>)
         ensures
-            0 <= self.spec_table_index(vaddr) < PT_ENTRY_NUM!(),
+            0 <= self.spec_table_index(vaddr) < PT_ENTRY_NUM,
     {
         bits_p::bit64_shl_auto();
         proof_div_pos_neg_rel(vaddr.value(), self.spec_pgsize());
-        proof_mod_range(vaddr.value() / self.spec_pgsize(), PT_ENTRY_NUM!() as int)
+        proof_mod_range(vaddr.value() / self.spec_pgsize(), PT_ENTRY_NUM as int)
     }
 
     pub proof fn proof_table_index<T: AddrType>(vaddr: u64, lvl: PTLevel)
         ensures
-            0 <= lvl.spec_table_index(GVA::new(vaddr as int)) < PT_ENTRY_NUM!(),
-            ((vaddr >> (lvl.spec_offset() as u64)) & PT_ENTRY_IDX_MASK!()) as int
+            0 <= lvl.spec_table_index(GVA::new(vaddr as int)) < PT_ENTRY_NUM,
+            ((vaddr >> (lvl.spec_offset() as u64)) & PT_ENTRY_IDX_MASK) as int
                 == lvl.spec_table_index(GVA::new(vaddr as int)),
     {
         Self::lemma_table_index::<T>(vaddr, lvl);
@@ -64,15 +64,15 @@ impl PTLevel {
         ensures
             ret == lvl.spec_table_index(SpecAddr::<T>::new(val as int)),
             (val >> (lvl.spec_offset() as u64)) == (val / (lvl.spec_pgsize() as u64)),
-            (val >> (lvl.spec_offset() as u64)) & PT_ENTRY_IDX_MASK!() == (val
-                / lvl.spec_pgsize() as u64) % PT_ENTRY_NUM!(),
-            ((val >> (lvl.spec_offset() as u64)) & PT_ENTRY_IDX_MASK!()) as int == ret,
+            (val >> (lvl.spec_offset() as u64)) & PT_ENTRY_IDX_MASK == (val
+                / lvl.spec_pgsize() as u64) % PT_ENTRY_NUM,
+            ((val >> (lvl.spec_offset() as u64)) & PT_ENTRY_IDX_MASK) as int == ret,
     {
         let ret = lvl.spec_table_index(SpecAddr::<T>::new(val as int));
         let t1 = val >> (lvl.spec_offset() as u64);
         bit_shl64_pow2_auto();
-        proof_bit64_and_rel_mod(t1, PT_ENTRY_NUM!());
-        assert(t1 & PT_ENTRY_IDX_MASK!() == t1 % PT_ENTRY_NUM!());
+        proof_bit64_and_rel_mod(t1, PT_ENTRY_NUM);
+        assert(t1 & PT_ENTRY_IDX_MASK == t1 % PT_ENTRY_NUM);
         bit64_shr_div_rel(val, 12);
         bit64_shr_div_rel(val, 21);
         bit64_shr_div_rel(val, 30);
@@ -81,14 +81,14 @@ impl PTLevel {
         lemma_pt_entry_count();
         lemma_bits64!();
         bit_shl64_pow2_auto();
-        assert(PT_ENTRY_NUM!() == PT_ENTRY_NUM!() as int);
-        assert(ret == (val as int / lvl.spec_pgsize()) % (PT_ENTRY_NUM!() as int));
+        assert(PT_ENTRY_NUM == PT_ENTRY_NUM as int);
+        assert(ret == (val as int / lvl.spec_pgsize()) % (PT_ENTRY_NUM as int));
         assert((val as int / lvl.spec_pgsize()) == (val / lvl.spec_pgsize() as u64))
             by (nonlinear_arith)
             requires
-                0 < lvl.spec_pgsize() < MAXU64!(),
+                0 < lvl.spec_pgsize() < u64::MAX,
         ;
-        assert(ret == (val / lvl.spec_pgsize() as u64) % PT_ENTRY_NUM!());
+        assert(ret == (val / lvl.spec_pgsize() as u64) % PT_ENTRY_NUM);
         ret
     }
 
@@ -102,14 +102,14 @@ impl PTLevel {
 impl<T: AddrType> SpecPageTableEntry<T> {
     pub proof fn lemma_each_table_is_one_page(&self, idx: nat)
         requires
-            idx < PT_ENTRY_NUM!(),
+            idx < PT_ENTRY_NUM,
         ensures
             self.addr_for_idx(idx).to_page() === self.spec_ppn(),
     {
-        assert(PT_ENTRY_NUM!() == 512) by {
+        assert(PT_ENTRY_NUM == 512) by {
             bit_shl64_pow2_auto();
         };
-        assert(PAGE_SIZE!() === PT_ENTRY_NUM!() * PT_ENTRY_SIZE);
+        assert(PAGE_SIZE!() === PT_ENTRY_NUM * PT_ENTRY_SIZE);
     }
 
     proof fn test_flags(entry: Self)
