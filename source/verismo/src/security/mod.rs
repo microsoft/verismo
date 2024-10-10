@@ -134,7 +134,7 @@ verus! {
 
 proof fn proof_msg_hdr_size()
     ensures
-        spec_size::<SnpGuestMsgHdr>() == AsNat!(0x60),
+        spec_size::<SnpGuestMsgHdr>() == 0x60,
 {
 }
 

@@ -38,7 +38,7 @@ impl PTLevel {
     }
 
     pub open spec fn spec_offset(&self) -> int {
-        (39 - (self.as_int() * AsInt!(PT_ENTRY_NUM_BIT!())))
+        (39 - (self.as_int() * (PT_ENTRY_NUM_BIT as int)))
     }
 
     pub open spec fn spec_table_index<T: AddrType>(&self, vaddr: SpecAddr<T>) -> int {

@@ -9,7 +9,6 @@ mod constant;
 mod default;
 mod fmap;
 mod isconst;
-mod macros;
 mod ops;
 mod range_set;
 #[macro_use]
