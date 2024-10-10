@@ -5,7 +5,6 @@ unstable-options = true
 
 [build]
 target = "target.json"
-rustc = "verus-rustc"
 incremental = true
 
 [profile.dev]
