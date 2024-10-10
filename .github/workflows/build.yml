@@ -35,11 +35,10 @@ jobs:
             ${{ env.VERUS_PATH }}/tools/vargo -> target
 
       - name: Install depdendencies
-        working-directory: source
         run: |
-            cargo install --path tools/cargo-v
-            cargo install --path tools/verus-rustc
-            cargo-v prepare-verus
+            cargo install --path ../tools/cargo-v
+            cargo install --path ../tools/verus-rustc
+            cd source && cargo-v prepare-verus
   
       - name: Build
         working-directory: source/verismo
