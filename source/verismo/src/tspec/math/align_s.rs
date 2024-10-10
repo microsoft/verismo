@@ -65,7 +65,7 @@ pub proof fn proof_align_down(val: nat, align: nat) -> (ret: (u64, u64, u64))
             val == val64,
             align == align as u64,
     ;
-    bit_rsh64_div_rel(val64, bits);
+    bit64_shr_div_rel(val64, bits);
     bit_lsh64_mul_rel(val64 >> bits, bits);
     assert((val64 >> bits) << bits == val64 / align64 * align64);
     assert(val64 & !sub(BIT64!(bits), 1) == ((val64 >> bits) << bits)) by (bit_vector)
@@ -109,7 +109,7 @@ pub proof fn proof_align_up(val: nat, align: nat) -> (ret: (u64, u64, u64, u64))
         requires
             align != 0,
     ;
-    bit_rsh64_div_rel(val64, bits);
+    bit64_shr_div_rel(val64, bits);
     lemma_bit_and_mod_rel(val64, align64);
     assert(val % align == (val64 % align64));
     lemam_bit_or_mask_bound(val64, align64);

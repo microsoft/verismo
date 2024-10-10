@@ -75,7 +75,7 @@ verismo! {
         ret as int == spec_u64_highu32(value as int)
     {
         proof {
-            bit_rsh64_div_rel(value as u64, 32);
+            bit64_shr_div_rel(value as u64, 32);
             bit_shl64_pow2_auto();
         }
         (value >> 32u64) as u32

@@ -94,7 +94,7 @@ pub proof fn proof_pow2_to_bits(val: nat) -> (ret: u64)
         assert(ret < 64);
         let next_bits64 = next_bits as u64;
         let ret_bits64 = next_bits64 + 1;
-        bit_rsh64_div_rel(val64, 1);
+        bit64_shr_div_rel(val64, 1);
         return ret as u64;
     } else {
         return 0;

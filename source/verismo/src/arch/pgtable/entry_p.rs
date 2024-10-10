@@ -67,10 +67,10 @@ impl PTLevel {
         bit_shl64_pow2_auto();
         proof_bit_u64_and_rel_mod(t1, PT_ENTRY_NUM!());
         assert(t1 & PT_ENTRY_IDX_MASK!() == t1 % PT_ENTRY_NUM!());
-        bit_rsh64_div_rel(val, 12);
-        bit_rsh64_div_rel(val, 21);
-        bit_rsh64_div_rel(val, 30);
-        bit_rsh64_div_rel(val, 39);
+        bit64_shr_div_rel(val, 12);
+        bit64_shr_div_rel(val, 21);
+        bit64_shr_div_rel(val, 30);
+        bit64_shr_div_rel(val, 39);
         PTLevel::proof_size_offset(lvl, (lvl.spec_pgsize() as u64), (lvl.spec_offset() as u64));
         lemma_pt_entry_count();
         lemma_bits64!();

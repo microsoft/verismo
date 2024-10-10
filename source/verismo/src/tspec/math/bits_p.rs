@@ -469,7 +469,7 @@ verus! {
 
 seq_macro::seq!(N in 0..64 {
 verus!{
-    pub proof fn bit_rsh64_div_rel(b: u64, a: u64) -> (ret: u64)
+    pub proof fn bit64_shr_div_rel(b: u64, a: u64) -> (ret: u64)
     requires
         a < 64,
     ensures
