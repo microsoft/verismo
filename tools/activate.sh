@@ -13,9 +13,8 @@ TOOLS_DIR=$(realpath $SCRIPT_DIR)
 echo "building verus-rustc."
 (
   cargo install --path $TOOLS_DIR/cargo-v
-  cargo v prepare-verus
   cargo install --path $TOOLS_DIR/verus-rustc
-  cargo install cargo-run-script
+  cargo v prepare-verus
   curl --proto '=https' --tlsv1.2 -LsSf https://github.com/verus-lang/verusfmt/releases/download/v0.4.3/verusfmt-installer.sh | sh
 )
 

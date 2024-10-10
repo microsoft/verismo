@@ -41,10 +41,7 @@ jobs:
             ${{ env.VERUS_PATH }}/tools/vargo -> target
 
       - name: Install depdendencies
-        run: |
-            cargo install --path tools/cargo-v
-            cargo install --path tools/verus-rustc
-            cd source && cargo-v prepare-verus
+        run: ./tools/activate.sh
   
       - name: Build
         working-directory: source/verismo
@@ -59,5 +56,5 @@ jobs:
         working-directory: tools/verus-rustc
 
       - name: Fmt verus code
-        run: ./tools/fmt.sh
+        run: ./tools/fmt.sh --check
 
