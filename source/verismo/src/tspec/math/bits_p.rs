@@ -306,13 +306,14 @@ pub proof fn bit_shl64_pow2_auto()
 }
 );
 
+// Add more when necessary; We may add all between [0,64)
+mask_proof_for_bits!(
+    2u64,
+    3u64,
+    12u64,
+);
+
 verus! {
-    // Add more when necessary; We may add all between [0,64)
-    mask_proof_for_bits!(
-        2u64,
-        3u64,
-        12u64,
-    );
 
     #[verifier(bit_vector)]
     pub const proof fn bit64_and_auto()
