@@ -6,12 +6,15 @@ use crate::arch::addr_s::GVA;
 use crate::linkedlist::{LinkedList, Node, SpecListItem};
 use crate::ptr::*;
 
-verus!{
-    pub const MIN_ADDR_ALIGN: usize = 8usize;
-    pub const ORDER: usize = 32usize;
-    pub const ORDER_USIZE: usize = 32usize;
-}
+verus! {
 
+pub const MIN_ADDR_ALIGN: usize = 8usize;
+
+pub const ORDER: usize = 32usize;
+
+pub const ORDER_USIZE: usize = 32usize;
+
+} // verus!
 verismo_simple! {
 pub struct BuddyAllocator {
     perms: Tracked<Map<(nat, nat), SnpPointsToRaw>>,
@@ -423,7 +426,7 @@ impl BuddyAllocator {
         let ghost old_self = *self;
         let ghost gbucket = bucket as nat;
         proof {
-            bit_shl64_pow2_auto();
+            bit64_shl_values_auto();
         }
         proof {
             assert(self@.wf_bucket(gbucket));
@@ -504,7 +507,7 @@ impl BuddyAllocator {
         let tracked (mut node_rperm, free_perm) = perm.trusted_split(MIN_ADDR_ALIGN as nat);
         let tracked mut node_perm = node_rperm.trusted_into();
         proof {
-            bit_shl64_pow2_auto();
+            bit64_shl_values_auto();
         }
         let nodeptr = SnpPPtr::<Node<()>>::from_usize(start);
         nodeptr.replace(Tracked(&mut node_perm), Node::default());
@@ -583,7 +586,7 @@ impl BuddyAllocator {
             size.is_constant(),
     {
         proof {
-            bit_shl64_pow2_auto();
+            bit64_shl_values_auto();
         }
         let ghost old_size = *size;
         *size =
@@ -617,7 +620,7 @@ impl BuddyAllocator {
                 self@.inv(),
         {
             proof {
-                bit_shl64_pow2_auto();
+                bit64_shl_values_auto();
                 assert(self@.wf_bucket(i as nat));
             }
             if !self.free_lists.index(i).is_empty() && i > bucket {
@@ -639,7 +642,7 @@ impl BuddyAllocator {
                         size.is_constant(),
                 {
                     proof {
-                        bit_shl64_pow2_auto();
+                        bit64_shl_values_auto();
                     }
                     let ghost prev_self = *self;
                     if let Some((start1, tperm)) = self.pop(j) {
@@ -693,7 +696,7 @@ impl BuddyAllocator {
             self@.inv(),
     {
         proof {
-            bit_shl64_pow2_auto();
+            bit64_shl_values_auto();
         }
         let mut current_bucket = pow2_to_bits(size as u64) as usize;
         let mut current_addr: usize = addr;
@@ -950,7 +953,7 @@ impl BuddyAllocator {
             let tracked (mut cur_perm, mut remain_perm) = total_perm.trusted_split(size as nat);
             proof {
                 total_perm = remain_perm;
-                bit_shl64_pow2_auto();  // prove size is power of 2 and bucket is valid;
+                bit64_shl_values_auto();  // prove size is power of 2 and bucket is valid;
             }
             // Get the bucket id.
             let bucket = pow2_to_bits(size as u64) as usize;

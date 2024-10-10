@@ -31,22 +31,3 @@ macro_rules! macro_const_int {
         )+
     };
 }
-
-#[macro_export]
-macro_rules! macro_const {
-    ($($(#[$attr:meta])* $vis:vis const $name:ident : $type:ty = $value:expr ;)+) => {
-        $(
-            builtin_macros::verus!{
-            #[allow(unused_attributes)]
-            $( #[$attr] )* $vis const $name : $type = $value;
-            }
-#[allow(unused_attributes)]
-            $( #[$attr] )*
-            macro_rules! $name {
-                () => {
-                    $value
-                }
-            }
-        )+
-    };
-}

@@ -26,7 +26,7 @@ verismo! {
         spec_has_bit_set(*val as u64, bit as u64),
     {
         proof{
-            proof_bit_check(*val as u64, bit as u64);
+            proof_bit64_clear_set_property(*val as u64, bit as u64);
         }
         *val = *val | (1u64 << bit)
     }
@@ -40,7 +40,7 @@ verismo! {
         //(*val)@ === ((*old(val)) & (!(1u64_s << bit)))@
     {
         proof{
-            proof_bit_check((*val) as u64, bit as u64);
+            proof_bit64_clear_set_property((*val) as u64, bit as u64);
         }
         *val = (*val) & (!(1u64_s << bit))
     }
@@ -61,8 +61,8 @@ verismo! {
         ret as int == spec_u32_to_u64(low as int, high as int)
     {
         proof {
-            bit_shl64_pow2_auto();
-            bit_lsh64_mul_rel(high as u64, 32);
+            bit64_shl_values_auto();
+            bit64_shl_mul_rel(high as u64, 32);
         }
         let low = low as u64;
         let high = high as u64;
@@ -76,7 +76,7 @@ verismo! {
     {
         proof {
             bit64_shr_div_rel(value as u64, 32);
-            bit_shl64_pow2_auto();
+            bit64_shl_values_auto();
         }
         (value >> 32u64) as u32
     }

@@ -13,7 +13,7 @@ pub proof fn lemma_get_low_bits_via_bit_op(val: u64, align: u64) -> (ret: u64)
         val & sub(ret, 1) == 0,
         val & ret == ret,
 {
-    bit_shl64_pow2_auto();
+    bit64_shl_values_auto();
     let ret = val & add(!val, 1);
     assert(val & ret == ret) by (bit_vector)
         requires

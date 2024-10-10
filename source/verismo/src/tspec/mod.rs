@@ -24,6 +24,8 @@ mod stream;
 mod wellformed;
 
 //use builtin::*;
+pub use alloc::string::String;
+
 pub use builtin_macros::*;
 pub use cast::*;
 pub use default::*;
@@ -47,7 +49,7 @@ pub use vstd::prelude::*;
 pub use vstd::slice::SliceAdditionalSpecFns;
 pub use vstd::std_specs::option::OptionAdditionalFns;
 pub use vstd::std_specs::result::ResultAdditionalSpecFns;
-pub use vstd::string::{StrSlice, String, *};
+pub use vstd::string::{StrSlice, *};
 pub use vstd::view::*;
 pub use wellformed::*;
 

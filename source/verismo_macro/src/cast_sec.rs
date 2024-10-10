@@ -78,16 +78,8 @@ pub fn verismo_cast_seq_expand(
             }
         }
     };
-    /*
-        impl #impl_generics SpecSize for #name #ty_generics #where_clause {
-            #[verifier(inline)]
-            open spec fn spec_size_def() -> (ret: nat)
-            {
-                #size
-            }
-        }
-    }*/
-    //#size_tokens
-    //println!("{}", expand2);
+    if name.to_string() == "VSnpPointsToNode" {
+        println!("{}", expand2);
+    }
     proc_macro::TokenStream::from(expand2)
 }

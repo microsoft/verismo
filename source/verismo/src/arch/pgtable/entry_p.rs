@@ -37,7 +37,7 @@ impl PTLevel {
         ensures
             size == (1u64 << offset),
     {
-        bit_shl64_pow2_auto();
+        bit64_shl_values_auto();
         assert(size == (1u64 << offset));
     }
 
@@ -70,7 +70,7 @@ impl PTLevel {
     {
         let ret = lvl.spec_table_index(SpecAddr::<T>::new(val as int));
         let t1 = val >> (lvl.spec_offset() as u64);
-        bit_shl64_pow2_auto();
+        bit64_shl_values_auto();
         proof_bit64_and_rel_mod(t1, PT_ENTRY_NUM);
         assert(t1 & PT_ENTRY_IDX_MASK == t1 % PT_ENTRY_NUM);
         bit64_shr_div_rel(val, 12);
@@ -80,7 +80,7 @@ impl PTLevel {
         PTLevel::proof_size_offset(lvl, (lvl.spec_pgsize() as u64), (lvl.spec_offset() as u64));
         lemma_pt_entry_count();
         lemma_bits64!();
-        bit_shl64_pow2_auto();
+        bit64_shl_values_auto();
         assert(PT_ENTRY_NUM == PT_ENTRY_NUM as int);
         assert(ret == (val as int / lvl.spec_pgsize()) % (PT_ENTRY_NUM as int));
         assert((val as int / lvl.spec_pgsize()) == (val / lvl.spec_pgsize() as u64))
@@ -107,7 +107,7 @@ impl<T: AddrType> SpecPageTableEntry<T> {
             self.addr_for_idx(idx).to_page() === self.spec_ppn(),
     {
         assert(PT_ENTRY_NUM == 512) by {
-            bit_shl64_pow2_auto();
+            bit64_shl_values_auto();
         };
         assert(PAGE_SIZE!() === PT_ENTRY_NUM * PT_ENTRY_SIZE);
     }

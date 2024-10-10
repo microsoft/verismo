@@ -6,7 +6,6 @@ pub type NoAdditional = ();
 
 impl_secure_type! {NoAdditional, pub type}
 
-
 impl<T> WellFormed for SpecSecType<T, NoAdditional> {
     #[verifier(inline)]
     open spec fn wf(&self) -> bool {

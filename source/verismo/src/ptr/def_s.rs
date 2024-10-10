@@ -52,14 +52,17 @@ impl<V: IsConstant + WellFormed + SpecSize> SnpPPtr<V> {
 }
 
 } // verus!
-verismo_simple! {
-    #[verifier(external_body)]
-    #[verifier::reject_recursive_types_in_ground_variants(V)]
-    pub tracked struct SnpPointsTo<V> {
-        phantom: marker::PhantomData<V>,
-        no_copy: NoCopy,
-    }
+verus! {
 
+#[verifier(external_body)]
+#[verifier::reject_recursive_types_in_ground_variants(V)]
+pub tracked struct SnpPointsTo<V> {
+    phantom: marker::PhantomData<V>,
+    no_copy: NoCopy,
+}
+
+} // verus!
+verismo_simple! {
     pub trait IsSnpPPtr{}
 
     /// Represents the meaning of a [`PointsTo`] object.

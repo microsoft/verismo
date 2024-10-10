@@ -11,7 +11,7 @@ pub fn SM_EVERCRYPT_ERR(subcode: u64_t) -> (ret: u64_t)
         subcode < 0x100,
 {
     proof {
-        assert(subcode << SUBCODE_OFFSET < 0x10000) by (bit_vector)
+        assert(subcode << 8 < 0x10000) by (bit_vector)
             requires
                 subcode < 0x100,
         ;
@@ -25,7 +25,7 @@ pub fn SM_TERM_RICHOS_ERR(subcode: u64_t) -> (ret: u64_t)
         subcode < 0x100,
 {
     proof {
-        assert(subcode << SUBCODE_OFFSET < 0x10000) by (bit_vector)
+        assert(subcode << 0x8 < 0x10000) by (bit_vector)
             requires
                 subcode < 0x100,
         ;

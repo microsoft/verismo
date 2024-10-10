@@ -54,7 +54,7 @@ pub proof fn proof_align_down(val: nat, align: nat) -> (ret: (u64, u64, u64))
     let mask = sub(align as u64, 1);
     let ret = val - val % align;
     let align64 = (1u64 << bits);
-    bit_shl64_pow2_auto();
+    bit64_shl_values_auto();
     assert(val / align * align == val - val % align) by (nonlinear_arith)
         requires
             align != 0,
@@ -66,7 +66,7 @@ pub proof fn proof_align_down(val: nat, align: nat) -> (ret: (u64, u64, u64))
             align == align as u64,
     ;
     bit64_shr_div_rel(val64, bits);
-    bit_lsh64_mul_rel(val64 >> bits, bits);
+    bit64_shl_mul_rel(val64 >> bits, bits);
     assert((val64 >> bits) << bits == val64 / align64 * align64);
     assert(val64 & !sub((1u64 << bits), 1) == ((val64 >> bits) << bits)) by (bit_vector)
         requires
@@ -104,7 +104,7 @@ pub proof fn proof_align_up(val: nat, align: nat) -> (ret: (u64, u64, u64, u64))
     let ret = val + (align - val % align);
     let tmp = val64 | mask;
     let ret2 = add(tmp, 1);
-    bit_shl64_pow2_auto();
+    bit64_shl_values_auto();
     assert(val / align * align == val - val % align) by (nonlinear_arith)
         requires
             align != 0,

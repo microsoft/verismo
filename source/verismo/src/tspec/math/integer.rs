@@ -267,7 +267,7 @@ verus! {
         input > 1 ==> spec_fill_ones_exe(sub(input, 1)) < u64::MAX,
     {
         if input <= 1 {
-            bit_shl64_pow2_auto();
+            bit64_shl_values_auto();
             assert(spec_bit64_is_shl_by_bits(1));
             1
         } else {
@@ -333,16 +333,17 @@ verus! {
         ;
         assert(BIT64!(round) <= 32) by(bit_vector)
         requires round < 6;
-        let ret = (input | input >> nbits);
+        let ret = input | (input >> nbits);
         assert forall |b: u64|
             b <= h  && sub(h, b) < nbits2
         implies
             spec_has_bit_set(ret, b)
         by {
             bit64_or_auto();
+            bit64_and_auto();
             if b <= h  && sub(h, b) < nbits {
+                proof_bit64_has_bit_property(input, (input >> nbits),  b);
                 assert(spec_has_bit_set(input, b));
-                assert(spec_has_bit_set(ret, b));
             } else {
                 assert(spec_has_bit_set(input >> nbits, b)) by(bit_vector)
                 requires
@@ -351,7 +352,9 @@ verus! {
                     spec_has_bit_set(input, add(b, nbits)),
                     b <= h,
                     sub(h, add(b, nbits)) < nbits;
-                assert(spec_has_bit_set(ret, b));
+                assert(spec_has_bit_set(ret, b)) by {
+                    proof_bit64_has_bit_property((input >> nbits),  input, b);
+                }
             }
         }
         assert forall |b: u64|

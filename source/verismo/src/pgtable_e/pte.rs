@@ -1,6 +1,7 @@
 use super::*;
 use crate::addr_e::*;
 use crate::arch::addr_s::*;
+use crate::arch::pgtable::entry_p;
 use crate::debug::VPrintAtLevel;
 use crate::global::*;
 use crate::registers::{AnyRegTrait, RegisterPerm, RegisterPermValue};
@@ -8,12 +9,9 @@ use crate::snp::ghcb::*;
 use crate::snp::SnpCoreSharedMem;
 use crate::*;
 
-crate::macro_const_int! {
-    #[macro_export]
-    pub const L4_MAX_ADDR: usize = 0x1000_0000_0000_0000usize;
-}
-
 verus! {
+
+pub const L4_MAX_ADDR: usize = 0x1000_0000_0000_0000usize;
 
 pub fn vn_to_pn(page: u64, Tracked(page_perm): Tracked<&SnpPointsToRaw>) -> (ret: u64)
     requires
@@ -209,9 +207,9 @@ pub proof fn lemma_max_lvl_index(lvl: nat, addr: int) -> (ret: (nat, int))
 {
     let ret = lvl_index(lvl, addr);
     assert(spec_align_down(addr, lvl_to_size(lvl) as int) == 0) by {
-        assert(lvl_to_size(lvl) == L4_MAX_ADDR!());
-        assert(0 <= addr < L4_MAX_ADDR!());
-        assert(addr / L4_MAX_ADDR!() * L4_MAX_ADDR!() == 0);
+        assert(lvl_to_size(lvl) == L4_MAX_ADDR);
+        assert(0 <= addr < L4_MAX_ADDR);
+        assert(addr / (L4_MAX_ADDR as int) * L4_MAX_ADDR as int == 0);
     }
     ret
 }
@@ -287,11 +285,8 @@ pub proof fn proof_table_index(vaddr: u64, lvl: nat)
     ensures
         0 <= spec_table_index(vaddr, lvl) < PT_ENTRY_NUM,
         PT_ENTRY_NUM == 512,
-        PT_ENTRY_NUM == 512,
 {
-    assert(PT_ENTRY_NUM == 512) by {
-        assert(PT_ENTRY_NUM == 512) by (bit_vector);
-    }
+    entry_p::lemma_pt_entry_count();
     let addr_index = VAddrIndex { value: vaddr };
     addr_index.lemma_bound_index0();
     assert(0 <= addr_index.spec_index0() < PT_ENTRY_NUM);
@@ -316,7 +311,6 @@ fn next_addr(vaddr: u64) -> (ret: u64)
 fn table_index(vaddr: u64, lvl: u8) -> (ret: usize)
     ensures
         0 <= ret < PT_ENTRY_NUM,
-        PT_ENTRY_NUM == PT_ENTRY_NUM,
         PT_ENTRY_NUM == 512,
         (ret as int) == spec_table_index(vaddr, lvl as nat),
 {

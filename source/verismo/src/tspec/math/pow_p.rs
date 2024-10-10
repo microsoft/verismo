@@ -71,7 +71,7 @@ pub proof fn proof_pow2_to_bits(val: nat) -> (ret: u64)
         spec_bit64_is_pow_of_2(val as int) ==> ret == spec_pow2_to_bits(val as u64),
     decreases val,
 {
-    bit_shl64_pow2_auto();
+    bit64_shl_values_auto();
     let val64 = val as u64;
     let ret = spec_pow2_to_bits_exe(val);
     if spec_bit64_is_pow_of_2(val64 as int) && val > 1 {

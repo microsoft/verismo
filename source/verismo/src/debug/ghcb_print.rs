@@ -65,7 +65,7 @@ fn int2bytes(input: u64, base: u64) -> (ret: (Array<u8_t, 66>, usize))
     }
     let mut i: usize = 0;
     proof {
-        bit_shl64_pow2_auto();
+        bit64_shl_values_auto();
         assert(1u64 << 0u64 == 1u64) by (bit_vector);
         assert(n <= u64::MAX);
         assert(u64::MAX / (1u64 << 0u64) == u64::MAX);
@@ -85,7 +85,7 @@ fn int2bytes(input: u64, base: u64) -> (ret: (Array<u8_t, 66>, usize))
                     n >= 0,
                     base > 1,
             ;
-            bit_shl64_pow2_auto();
+            bit64_shl_values_auto();
             if i < 63 {
                 let pow1 = (1u64 << i as u64);
                 let pow2 = (1u64 << add(i as u64, 1u64));

@@ -15,18 +15,23 @@ verismo_simple! {
         pub next: usize_t,
         pub val: T,
     }
+}
 
-    pub tracked struct VSnpPointsToNode<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> {
-        pub next: SnpPointsTo<usize_t>,
-        pub val: SnpPointsTo<T>,
-    }
+verus! {
 
-    pub ghost struct SpecListItem<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> {
-        pub ptr: SnpPPtr<Node<T>>,
-        pub snp: SwSnpMemAttr,
-        pub val: T,
-    }
+pub tracked struct VSnpPointsToNode<T> {
+    pub next: SnpPointsTo<usize_t>,
+    pub val: SnpPointsTo<T>,
+}
 
+pub ghost struct SpecListItem<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> {
+    pub ptr: SnpPPtr<Node<T>>,
+    pub snp: SwSnpMemAttr,
+    pub val: T,
+}
+
+} // verus!
+verismo_simple! {
     // Cannot directly prove that the linked list is not a circle.
     // Cannot directly prove self.spec_index_of(nodeptr) is unique.
     // However, those properties are implicitly indicated
