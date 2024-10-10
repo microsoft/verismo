@@ -19,12 +19,18 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Install specified rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly-2023-12-22
+          target: x86_64-unknown-none
+          profile: minimal
+
       - name: fetch verus via metadata
+        working-directory: source
         run: |
             source ../tools/v-ci-setup.sh
             echo "VERUS_PATH=$(echo $VERUS_PATH)" >> $GITHUB_ENV
-        working-directory: source
-
 
       - uses: Swatinem/rust-cache@v2
         with:
