@@ -42,8 +42,8 @@ jobs:
 
       - name: Install depdendencies
         run: |
-            cargo install --path ../tools/cargo-v
-            cargo install --path ../tools/verus-rustc
+            cargo install --path tools/cargo-v
+            cargo install --path tools/verus-rustc
             cd source && cargo-v prepare-verus
   
       - name: Build
