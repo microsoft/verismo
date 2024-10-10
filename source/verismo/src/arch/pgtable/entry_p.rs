@@ -109,7 +109,7 @@ impl<T: AddrType> SpecPageTableEntry<T> {
         assert(PT_ENTRY_NUM!() == 512) by {
             bit_shl64_pow2_auto();
         };
-        assert(PAGE_SIZE!() === PT_ENTRY_NUM!() * PT_ENTRY_SIZE!());
+        assert(PAGE_SIZE!() === PT_ENTRY_NUM!() * PT_ENTRY_SIZE);
     }
 
     proof fn test_flags(entry: Self)

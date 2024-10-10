@@ -61,9 +61,12 @@ pub type GuestPTEntry = PageTableEntry<GuestPhy>;
 pub type SysPTEntry = PageTableEntry<SysPhy>;
 
 } // verus!
+verus! {
+
+pub const PT_ENTRY_SIZE: u64 = 8u64;
+
+} // verus!
 crate::macro_const! {
-    #[macro_export]
-    pub const PT_ENTRY_SIZE: u64 = 8u64;
     #[macro_export]
     pub const L3_OFFSET: u64 = 39u64;
     #[macro_export]

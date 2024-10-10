@@ -48,7 +48,7 @@ impl GuestPTRam {
                         Option::Some(
                             GPMem::from_range(
                                 next_pte.view().addr_for_idx(idx),
-                                PT_ENTRY_SIZE!() as nat,
+                                PT_ENTRY_SIZE as nat,
                             ),
                         )
                     } else {

@@ -108,7 +108,7 @@ impl<T: AddrType> SpecPageTableEntry<T> {
         recommends
             idx < PT_ENTRY_NUM!(),
     {
-        let offset = (idx * PT_ENTRY_SIZE!()) as int;
+        let offset = (idx * PT_ENTRY_SIZE) as int;
         self.spec_addr() + offset
     }
 }

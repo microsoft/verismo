@@ -17,7 +17,7 @@ impl GuestPTRam {
         let next_opt = lvl.parent_lvl();
         let idx = lvl.spec_table_index(gvn.to_addr()) as nat;
         if next_opt.is_None() {
-            Option::Some(GPMem::from_range(l0_entry.addr_for_idx(idx), PT_ENTRY_SIZE!() as nat))
+            Option::Some(GPMem::from_range(l0_entry.addr_for_idx(idx), PT_ENTRY_SIZE as nat))
         } else {
             let next_lvl = next_opt.get_Some_0();
             if next_lvl.as_int() < lvl.as_int() {
@@ -29,7 +29,7 @@ impl GuestPTRam {
                         Option::Some(
                             GPMem::from_range(
                                 next_pte.get_Some_0().addr_for_idx(idx),
-                                PT_ENTRY_SIZE!() as nat,
+                                PT_ENTRY_SIZE as nat,
                             ),
                         )
                     } else {
