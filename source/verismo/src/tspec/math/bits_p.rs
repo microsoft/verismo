@@ -292,7 +292,7 @@ macro_rules! mask_proof_for_bits_internal {
                 forall |a: u64| #![auto] (a|BIT_MASK!(bits)) == add(sub(a, (a&BIT_MASK!(bits))), BIT_MASK!(bits)),
                 forall |a: u64| #![auto] add(a & !(BIT_MASK!(bits)), BIT_MASK!(bits)) >= a,
         {
-            bit_shl64_auto();
+            bit64_shl_auto();
             bit_and64_auto();
             bit_or64_auto();
             $(
@@ -314,7 +314,7 @@ macro_rules! mask_proof_for_bits {
 seq_macro::seq!(N in 0..64 {
 verus!{
 #[verifier(bit_vector)]
-pub proof fn bit_shl64_auto()
+pub proof fn bit64_shl_auto()
     ensures
         forall |a: u64| #[trigger] (a<<0u64) == a,
         forall |a: u64| a < 64 ==> #[trigger] (1u64<<a) > 0,
@@ -330,7 +330,7 @@ pub proof fn bit_shl64_pow2_auto()
         BIT64!(N as u64) == POW2!(N),
         )*
 {
-    bit_shl64_auto()
+    bit64_shl_auto()
 }
 }
 }
@@ -552,6 +552,6 @@ macro_rules! lemma_bits64 {
         bit_xor64_auto();
         bit_not64_auto();
         bit_lsh64_auto();
-        bit_shl64_auto();
+        bit64_shl_auto();
     };
 }

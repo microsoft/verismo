@@ -199,7 +199,7 @@ verus! {
             }
         }
         lemma_fill_ones_bit_steps(input, 1, high_bit, 0);
-        bit_shl64_auto();
+        bit64_shl_auto();
 
         assert(ret == fill_ones(input)) by {
             reveal_with_fuel(_fill_ones, 7);
@@ -314,7 +314,7 @@ verus! {
         has_bits_until(ret.0, ret.1, h),
     {
         assert(0 < nbits < 64) by {
-            bit_shl64_auto();
+            bit64_shl_auto();
             assert(BIT64!(round) < BIT64!(6u64)) by(bit_vector)
             requires round < 6;
         }

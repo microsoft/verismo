@@ -39,7 +39,7 @@ impl PTLevel {
         ensures
             0 <= self.spec_table_index(vaddr) < PT_ENTRY_NUM!(),
     {
-        bits_p::bit_shl64_auto();
+        bits_p::bit64_shl_auto();
         proof_div_pos_neg_rel(vaddr.value(), self.spec_pgsize());
         proof_mod_range(vaddr.value() / self.spec_pgsize(), PT_ENTRY_NUM!() as int)
     }
@@ -114,7 +114,7 @@ impl<T: AddrType> SpecPageTableEntry<T> {
     {
         reveal_with_fuel(spec_nat_pow2, 64);
         // Fixme: z3-4.11.2 need below assert but z3-4.10.1 does not need it
-        bit_shl64_auto();
+        bit64_shl_auto();
         assert(spec_int_pow2(PteFlag::C.as_int()) == BIT64!(51u64));
         //assert(entry.contains_flag(PteFlag::C) == true);
         //assert(entry.spec_value()/spec_int_pow2(PteFlag::C.as_int()) % 2 == 1);
