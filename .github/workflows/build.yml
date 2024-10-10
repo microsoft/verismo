@@ -1,4 +1,4 @@
-name: Rust
+name: Verify
 
 on:
   push:
@@ -11,13 +11,28 @@ env:
 
 jobs:
   check:
-    name: Build checking
-    runs-on: self-hosted
+    name: verification
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v3
         with:
           submodules: recursive
+
+      - name: fetch verus via metadata
+        run: |
+            source ./tools/v-ci-setup.sh
+            echo "VERUS_PATH=$(echo $VERUS_PATH)" >> $GITHUB_ENV
+        working-directory: source
+
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-directories: ${{ env.VERUS_PATH }}/source/target-verus
+          workspaces: |
+            ${{ github.workspace }}/source -> target
+            ${{ env.VERUS_PATH }}/source -> target
+            ${{ env.VERUS_PATH }}/tools/vargo -> target
 
       - name: Install depdendencies
         run: |
@@ -27,3 +42,15 @@ jobs:
 
       - name: Build
         run: cd source/verismo && cargo v build
+
+      - name: Fmt
+        run: cargo fmt
+        working-directory: tools/cargo-v
+
+      - name: Fmt
+        run: cargo fmt
+        working-directory: tools/verus-rustc
+
+      - name: Fmt verus code
+        run: ./tools/fmt.sh
+

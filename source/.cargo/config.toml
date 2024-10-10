@@ -17,5 +17,4 @@ incremental = true
 debug-assertions = false
 
 [alias]
-vfmt = "run-script vfmt" # Format verus codes
 verify = "v build"
