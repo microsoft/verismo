@@ -4,7 +4,6 @@ use super::*;
 use crate::arch::addr_s::*;
 use crate::arch::entities::*;
 use crate::tspec::*;
-use crate::macro_def;
 
 #[macro_export]
 macro_rules! BIT64 {
@@ -25,7 +24,7 @@ pub type SysMap = MemMap<GuestPhy, SysPhy>;
 
 pub type GuestMap = MemMap<GuestVir, GuestPhy>;
 
-macro_def! {MAX_PT_LEVEL: PTLevel::L0}
+pub spec const MAX_PT_LEVEL: PTLevel = PTLevel::L0;
 
 #[derive(Eq, PartialEq, Structural, SpecIntEnum)]
 #[is_variant]
