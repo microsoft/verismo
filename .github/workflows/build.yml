@@ -21,7 +21,7 @@ jobs:
 
       - name: fetch verus via metadata
         run: |
-            source ./tools/v-ci-setup.sh
+            source ../tools/v-ci-setup.sh
             echo "VERUS_PATH=$(echo $VERUS_PATH)" >> $GITHUB_ENV
         working-directory: source
 
