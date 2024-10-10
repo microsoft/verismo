@@ -42,12 +42,12 @@ make verify
 or  
 
 ```
-cd source/verismo_main; cargo build --release;
+cd source/verismo_main; cargo verify --release;
 ```
 
 ### b. To verify a single module, which is useful for development:
 ```
-cd source/verismo; VERUS_MODULE=security::monitor cargo build --release;
+cd source/verismo; verismo_VERUS_ARGS="--verify-module security::monitor" cargo verify --release;
 ```
 
 ### c. Understand results:

@@ -12,19 +12,10 @@ TOOLS_DIR=$(realpath $SCRIPT_DIR)
 
 echo "building verus-rustc."
 (
-    cargo install --path $TOOLS_DIR/verus-rustc
-    cargo install --path $TOOLS_DIR/cargo-v
-    if [ ! -d "${TOOLS_DIR}/verus" ]; then
-    git clone https://github.com/ziqiaozhou/verus ${TOOLS_DIR}/verus
-    fi
-    cd ${TOOLS_DIR}/verus
-    git checkout 7c4a5274a4d74522f3965eb038bb7e22fa5eebef
-    cd source
-    source ../tools/activate
-    if [ ! -f "${TOOLS_DIR}/verus/source/z3" ]; then
-    ./tools/get-z3.sh
-    fi
-     vargo build --release
+  cargo install --path $TOOLS_DIR/cargo-v
+  cargo install --path $TOOLS_DIR/verus-rustc
+  cargo v prepare-verus
+  curl --proto '=https' --tlsv1.2 -LsSf https://github.com/verus-lang/verusfmt/releases/download/v0.4.3/verusfmt-installer.sh | sh
 )
 
 echo "add igvm deps"

@@ -1,4 +1,4 @@
-name: Rust
+name: Verify
 
 on:
   push:
@@ -11,7 +11,7 @@ env:
 
 jobs:
   check:
-    name: Build checking
+    name: verification
     runs-on: self-hosted
     steps:
       - name: Checkout
@@ -19,8 +19,42 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Install specified rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly-2023-12-22
+          target: x86_64-unknown-none
+          profile: minimal
+
+      - name: fetch verus via metadata
+        working-directory: source
+        run: |
+            source ../tools/v-ci-setup.sh
+            echo "VERUS_PATH=$(echo $VERUS_PATH)" >> $GITHUB_ENV
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-directories: ${{ env.VERUS_PATH }}/source/target-verus
+          workspaces: |
+            ${{ github.workspace }}/source -> target
+            ${{ env.VERUS_PATH }}/source -> target
+            ${{ env.VERUS_PATH }}/tools/vargo -> target
+
       - name: Install depdendencies
         run: ./tools/activate.sh
-
+  
       - name: Build
-        run: cd source/verismo && cargo v build
+        working-directory: source/verismo
+        run: cargo v build
+
+      - name: Fmt
+        run: cargo fmt
+        working-directory: tools/cargo-v
+
+      - name: Fmt
+        run: cargo fmt
+        working-directory: tools/verus-rustc
+
+      - name: Fmt verus code
+        run: ./tools/fmt.sh --check
+

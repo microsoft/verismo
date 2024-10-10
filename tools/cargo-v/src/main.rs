@@ -24,10 +24,10 @@ fn main() {
             build(&verus_meta, args);
         }
         "prepare-verus" => {
-            install(&verus_meta, false);
+            install_verus(&verus_meta, false);
         }
         "install-verus" => {
-            install(&verus_meta, true);
+            install_verus(&verus_meta, true);
         }
         "enable" => {
             println!("use cargo-v -- build directly.");
@@ -63,34 +63,18 @@ fn build(verus_meta: &VerusMetadata, args: &[String]) {
     let verus = verus_meta.verus();
     let verus_crates = verus_meta.find_verus_crates();
     // Run cargo build with additional arguments
-    let status = Command::new("cargo")
+    let mut cmd = Command::new("cargo");
+    let cmd = cmd
         .args(args)
         .env("VERUS", verus)
         .env("RUSTC", "verus-rustc")
         .env("RUSTUP_TOOLCHAIN", rust_version())
-        .env("VERUS_TARGETS", verus_crates.join(","))
-        .status()
-        .expect("Failed to execute cargo build");
+        .env("VERUS_TARGETS", verus_crates.join(","));
+    println!("{:?}", cmd);
+    let status = cmd.status().expect("Failed to execute cargo build");
 
     if !status.success() {
         eprintln!("cargo build failed with status: {}", status);
-    }
-}
-
-fn install(verus_meta: &VerusMetadata, global: bool) {
-    // Get the verus revision
-    install_verus(verus_meta, global);
-
-    let status = Command::new("cargo")
-        .arg("install")
-        .arg("--git")
-        .arg("https://github.com/microsoft/verismo/")
-        .arg("verus-rustc")
-        .status()
-        .expect("Failed to execute cargo install");
-
-    if !status.success() {
-        eprintln!("cargo install failed with status: {}", status);
     }
 }
 
