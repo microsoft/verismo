@@ -354,7 +354,7 @@ impl LinkedListAllocator {
         ensures
             self@.inv(),
             size.is_constant(),
-            ret.is_Some() ==> (MAXU64 - align as int) > (ret.get_Some_0().0 as int),
+            ret.is_Some() ==> (u64::MAX - align as int) > (ret.get_Some_0().0 as int),
             ret.is_Some() ==> valid_free_ptr(*size, ret.get_Some_0()),
             ret.is_Some() ==> *old(size) <= *size,
             ret.is_Some() ==> ret.get_Some_0().is_constant(),
@@ -405,7 +405,7 @@ impl LinkedListAllocator {
                 ret.is_Some() == ret_perm.is_Some(),
                 ret.is_Some() ==> ret.get_Some_0().is_constant(),
                 size.is_constant(),
-                ret.is_Some() ==> (MAXU64) - align as int > ret.get_Some_0() as int,
+                ret.is_Some() ==> (u64::MAX) - align as int > ret.get_Some_0() as int,
         {
             let ghost i = self.free_list.reverse_index(idx);
             let ghost prev_i = self.free_list.reverse_index(idx - 1);
@@ -428,7 +428,7 @@ impl LinkedListAllocator {
             assert(minsize == spec_size::<Node<usize_t>>());
             let start = node.val;
             let end = node_ptr.to_usize() + minsize;
-            if (MAXU64 as usize) - align > start {
+            if (u64::MAX as usize) - align > start {
                 let aligned_start: usize = align_up_by(start as u64, align as u64) as usize;
                 if start >= MIN_VERISMO_PADDR && end > aligned_start && end - aligned_start
                     > expect_size {

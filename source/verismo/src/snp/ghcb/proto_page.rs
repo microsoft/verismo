@@ -4,6 +4,12 @@ use crate::global::{spec_ALLOCATOR, spec_CONSOLE, spec_PT};
 use crate::pgtable_e::*;
 use crate::snp::mem::*;
 
+macro_rules! BIT8 {
+    ($x: expr) => {
+        (1u8 << ($x))
+    };
+}
+
 verismo_simple! {
 
 #[derive(SpecGetter, SpecSetter, Copy, VClone)]
@@ -234,8 +240,8 @@ proof fn lemma_bit8_set2(val: u8, b1: u8, b2: u8)
         0 <= b1 < 8,
         0 <= b2 < 8,
     ensures
-        b1 != b2 ==> (val & (1 << b1) != 0) == ((val | (1 << b2)) & (1 << b1) != 0),
-        (val | (1 << b2)) & (1 << b2) != 0,
+        b1 != b2 ==> (val & (1u8 << b1) != 0) == ((val | (1u8 << b2)) & (1u8 << b1) != 0),
+        (val | (1u8 << b2)) & (1u8 << b2) != 0,
 {
 }
 
@@ -244,22 +250,22 @@ proof fn lemma_bit8_setbit(val: u8, b1: u8)
     requires
         0 <= b1 < 8,
     ensures
-        (val | (1 << b1)) & (1 << b1) != 0,
+        (val | (1u8 << b1)) & (1u8 << b1) != 0,
 {
 }
 
 proof fn proof_bit8_setbit()
     ensures
-        forall|val: u8, b1: u8| 0 <= b1 < 8 ==> (val | (1 << b1)) & (1 << b1) != 0,
+        forall|val: u8, b1: u8| 0 <= b1 < 8 ==> (val | (1u8 << b1)) & (1u8 << b1) != 0,
         forall|val: u8, b1: u8, b2: u8|
-            0 <= b1 < 8 && 0 <= b2 < 8 ==> ((val | (1 << b2)) & (1 << b1) != 0) == ((val & (1 << b1)
-                != 0) || (b1 == b2)),
+            0 <= b1 < 8 && 0 <= b2 < 8 ==> ((val | (1u8 << b2)) & (1u8 << b1) != 0) == ((val & (1u8
+                << b1) != 0) || (b1 == b2)),
 {
-    assert forall|val: u8, b1: u8| 0 <= b1 < 8 implies (val | (1 << b1)) & (1 << b1) != 0 by {
+    assert forall|val: u8, b1: u8| 0 <= b1 < 8 implies (val | (1u8 << b1)) & (1u8 << b1) != 0 by {
         lemma_bit8_setbit(val, b1)
     }
-    assert forall|val: u8, b1: u8, b2: u8| 0 <= b1 < 8 && 0 <= b2 < 8 implies ((val | (1 << b2)) & (
-    1 << b1) != 0) == ((val & (1 << b1) != 0) || b1 == b2) by {
+    assert forall|val: u8, b1: u8, b2: u8| 0 <= b1 < 8 && 0 <= b2 < 8 implies ((val | (1u8 << b2))
+        & (1u8 << b1) != 0) == ((val & (1u8 << b1) != 0) || b1 == b2) by {
         lemma_bit8_set2(val, b1, b2);
     }
 }

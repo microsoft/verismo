@@ -265,7 +265,7 @@ impl<T: IsConstant + WellFormed + SpecSize, const N: usize_t> SnpPPtr<Array<T, N
                     0 <= i < N,
                     0 < unit,
             ;
-            assert(0 <= (i * unit) < MAXU64) by (nonlinear_arith)
+            assert(0 <= (i * unit) < u64::MAX) by (nonlinear_arith)
                 requires
                     0 <= i < 0x10000,
                     0 < unit < 0x10000,

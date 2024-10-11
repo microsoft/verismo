@@ -6,7 +6,7 @@ verus! {
 pub fn align_up_by(val: u64, align: u64) -> (ret: u64)
     requires
         spec_bit64_is_pow_of_2(align as int),
-        val + align <= MAXU64!(),
+        val + align <= u64::MAX,
     ensures
         (ret as int) % (align as int) == 0,
         ret as int == spec_align_up(val as int, align as int),

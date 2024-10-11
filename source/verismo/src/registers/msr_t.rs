@@ -1,5 +1,11 @@
 use super::*;
 
+macro_rules! BIT64 {
+    ($x: expr) => {
+        (1u64 << (($x) as u64))
+    };
+}
+
 verismo! {
 pub struct Msr {
     pub reg: u32,
@@ -272,23 +278,35 @@ impl AnyRegTrait<u64_s> for XCR0 {
 }
 }
 
-use crate::BIT64;
-crate::macro_const! {
-pub const CR4_OSFXSR: u64 = BIT64!(9u64);
-pub const CR4_OSXMMEXCPT: u64 = BIT64!(10u64);
-pub const CR4_OSXSAVE: u64 = BIT64!(18u64);
-pub const CR4_PAE: u64 = BIT64!(5u64);
+verus! {
+
+pub const CR4_OSFXSR: u64 = BIT64!(9);
+
+pub const CR4_OSXMMEXCPT: u64 = BIT64!(10);
+
+pub const CR4_OSXSAVE: u64 = BIT64!(18);
+
+pub const CR4_PAE: u64 = BIT64!(5);
 
 pub const XCR0_X87: u64 = BIT64!(0);
+
 pub const XCR0_SSE: u64 = BIT64!(1);
+
 pub const XCR0_AVX: u64 = BIT64!(2);
+
 pub const XCR0_YMM: u64 = BIT64!(2);
+
 pub const XCR0_BNDREG: u64 = BIT64!(3);
+
 pub const XCR0_BNDCSR: u64 = BIT64!(4);
+
 pub const XCR0_OPMASK: u64 = BIT64!(5);
+
 pub const XCR0_ZMM_HI256: u64 = BIT64!(6);
+
 pub const XCR0_HI16_ZMM: u64 = BIT64!(7);
-}
+
+} // verus!
 impl_reg64! {
     CR0, "cr0", Cr0,
     CR3, "cr3", Cr3,

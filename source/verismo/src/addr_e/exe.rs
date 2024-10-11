@@ -16,7 +16,7 @@ pub fn page_align_up(value: usize_t) -> (ret: usize_t)
         ret.is_constant() == value.is_constant(),
 {
     proof {
-        bit_shl64_pow2_auto();
+        bit64_shl_values_auto();
     }
     align_up_by(value as u64, PAGE_SIZE as u64) as usize
 }
@@ -35,7 +35,7 @@ verismo_simple! {
         value.is_constant() ==> ret.is_constant(),
     {
         proof {
-            bit_shl64_pow2_auto();
+            bit64_shl_values_auto();
         }
         let v: u64 = value.into();
         assert(v.wf());

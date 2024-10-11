@@ -410,7 +410,7 @@ impl SnpGuestChannel {
         }
         let mut req = self.req;
         let prev_msg_no: u64 = secret.os_area.msg_seqno_0.into();
-        if prev_msg_no == MAXU64 {
+        if prev_msg_no == u64::MAX {
             new_strlit(
                 "msg_no is too large for vmpl communication. Please reset secret\n.",
             ).leak_debug();

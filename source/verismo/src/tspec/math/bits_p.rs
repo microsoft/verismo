@@ -8,10 +8,9 @@ macro_rules! BIT {
     };
 }
 
-#[macro_export]
-macro_rules! BIT64 {
+macro_rules! BIT_MASK {
     ($x: expr) => {
-        (1u64 << (($x) as u64))
+        sub((1u64 << ($x)), 1)
     };
 }
 
@@ -221,58 +220,38 @@ macro_rules! POW2 {
     };
 }
 
-#[macro_export]
-macro_rules! BIT32 {
-    ($x: expr) => {
-        (1u32 << ($x))
-    };
-}
-
-#[macro_export]
-macro_rules! BIT16 {
-    ($x: expr) => {
-        (1u16 << ($x))
-    };
-}
-
-#[macro_export]
-macro_rules! BIT8 {
-    ($x: expr) => {
-        (1u8 << ($x))
-    };
-}
-
-#[macro_export]
-macro_rules! BIT_MASK {
-    ($x: expr) => {
-        sub((1u64 << ($x)), 1)
-    };
-}
-
 verus! {
 #[verifier(inline)]
 pub open spec fn spec_bit_set(val: u64, bit: u64) -> u64 {
-    val | BIT64!(bit)
+    val | (1u64 << bit)
 }
 
 #[verifier(inline)]
 pub open spec fn spec_bit_clear(val: u64, bit: u64) -> u64 {
-    val & (!BIT64!(bit))
+    val & (!(1u64 << bit))
 }
 
 #[verifier(inline)]
 pub open spec fn spec_has_bit_set(val: u64, bit: u64) -> bool {
-    #[trigger] BIT64!(bit) == val & BIT64!(bit)
-    //&&& 0 <= bit < 64
+    #[trigger] (1u64 << bit) == val & (1u64 << bit)
 }
 
 #[verifier(bit_vector)]
-pub proof fn proof_bit_check(val: u64, bit: u64)
+pub proof fn proof_bit64_clear_set_property(val: u64, bit: u64)
 requires
     bit < 64,
 ensures
     spec_has_bit_set(spec_bit_set(val, bit), bit),
     !spec_has_bit_set(spec_bit_clear(val, bit), bit),
+{}
+
+#[verifier(bit_vector)]
+pub proof fn proof_bit64_has_bit_property(val: u64, x: u64, bit: u64)
+requires
+    bit < 64,
+ensures
+    (spec_has_bit_set(val, bit) ==> spec_has_bit_set((val | x), bit)),
+    (!spec_has_bit_set(val, bit) ==> !spec_has_bit_set((val & x), bit)),
 {}
 }
 
@@ -288,15 +267,15 @@ macro_rules! mask_proof_for_bits_internal {
             requires
                 slow_bit_range_req(bits)
             ensures
-                forall |a: u64| #![auto] (a & BIT_MASK!(bits)) == a % BIT64!(bits),
+                forall |a: u64| #![auto] (a & BIT_MASK!(bits)) == a % (1u64 << bits),
                 forall |a: u64| #![auto] (a|BIT_MASK!(bits)) == add(sub(a, (a&BIT_MASK!(bits))), BIT_MASK!(bits)),
                 forall |a: u64| #![auto] add(a & !(BIT_MASK!(bits)), BIT_MASK!(bits)) >= a,
         {
-            bit_shl64_auto();
-            bit_and64_auto();
-            bit_or64_auto();
+            bit64_shl_auto();
+            bit64_and_auto();
+            bit64_or_auto();
             $(
-            assert(forall |a: u64| #![auto] (a & BIT_MASK!($N)) == a % BIT64!($N)) by(bit_vector);
+            assert(forall |a: u64| #![auto] (a & BIT_MASK!($N)) == a % (1u64 << $N)) by(bit_vector);
             assert(forall |a: u64| #![auto] (a|BIT_MASK!($N)) == add(sub(a, (a&BIT_MASK!($N))), BIT_MASK!($N))) by(bit_vector);
             assert(forall |a: u64| #![auto]  add(a & !(BIT_MASK!($N)), BIT_MASK!($N)) >= a) by(bit_vector);
             )*
@@ -311,61 +290,138 @@ macro_rules! mask_proof_for_bits {
     };
 }
 
-seq_macro::seq!(N in 0..64 {
-verus!{
-#[verifier(bit_vector)]
-pub proof fn bit_shl64_auto()
-    ensures
-        forall |a: u64| #[trigger] (a<<0u64) == a,
-        forall |a: u64| a < 64 ==> #[trigger] (1u64<<a) > 0,
-        forall |a: u64, b: u64| b < 64 ==> ((a & BIT64!(b) ==  BIT64!(b)) || (a & BIT64!(b) == 0)),
-        #(
-        BIT64!(N as u64) == POW2!(N),
-        )*
-{}
 
-pub proof fn bit_shl64_pow2_auto()
-    ensures
-        #(
-        BIT64!(N as u64) == POW2!(N),
-        )*
-{
-    bit_shl64_auto()
-}
-}
-}
+// Add more when necessary; We may add all between [0,64)
+mask_proof_for_bits!(
+    2u64,
+    3u64,
+    12u64,
 );
 
+#[macro_export]
+macro_rules! bit_or_properties {
+    ($typ:ty, $sname: ident, $pname: ident, $autopname: ident) => {
+        verus! {
+        #[verifier(inline)]
+        pub open spec fn $sname(a: $typ, b: $typ, ret: $typ) -> bool {
+            &&& ret == (a | b)
+            &&& ret == (b | a)
+            &&& 0 <= ret <= $typ::MAX
+            &&& ret & b == b
+            &&& ret >= a
+            &&& ret >= b
+            &&& ret & !b == a & !b
+        }
+
+        pub proof fn $pname(a: $typ, b: $typ)
+            ensures
+                $sname(a, b, (a|b)),
+        {
+            assert($sname(a, b, (a|b))) by(bit_vector);
+        }
+
+        pub proof fn $autopname()
+            ensures
+                forall|a: $typ, b: $typ| $sname(a, b, #[trigger](a|b)),
+                forall |a: u64| #[trigger] (a|a) == a,
+                forall |a: u64| #[trigger] (a| u64::MIN) == a,
+                forall |a: u64| #[trigger] (a| u64::MAX) == u64::MAX,
+        {
+            assert forall|a: $typ, b: $typ| $sname(a, b, #[trigger](a|b)) by {
+                $pname(a, b);
+            }
+            assert forall |a: u64| 
+                #[trigger] (a|a) == a
+            by {
+                assert(a|a == a) by (bit_vector);
+            }
+            assert forall |a: u64| 
+                #[trigger] (a|u64::MIN) == a
+            by {
+                assert(a|0 == a) by (bit_vector);
+            }
+            assert forall |a: u64| 
+                #[trigger] (a|u64::MAX) == u64::MAX
+            by {
+                assert((a|u64::MAX) == u64::MAX) by (bit_vector);
+            }
+           
+        }
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! bit_not_properties {
+    ($typ:ty, $sname: ident, $autopname: ident) => {
+        verus! {
+        #[verifier(inline)]
+        pub open spec fn $sname(a: $typ, ret: $typ) -> bool {
+            &&& ret == (!a)
+            &&& ret & a == 0
+            &&& ret == sub($typ::MAX, a)
+            &&& 0 <= ret <= $typ::MAX
+            &&& !ret == a
+        }
+
+        #[verifier(bit_vector)]
+        pub proof fn $autopname()
+            ensures
+                forall|a: $typ| $sname(a, #[trigger](!a)),
+                !($typ::MIN) == $typ::MAX,
+        {}
+        }
+    };
+}
+
+
+#[macro_export]
+macro_rules! bit_shl_properties {
+    ($typ:ty, $one: expr, $pvalname: ident, $autopname: ident) => {
+seq_macro::seq!(N in 0..64 {
+    verus!{
+    #[verifier(bit_vector)]
+    pub proof fn $autopname()
+        ensures
+            forall |a: $typ| #[trigger] (a<<0) == a,
+            forall |a: $typ| a < $typ::BITS ==> #[trigger] (($one) <<a ) > 0,
+            forall |a: $typ, b: $typ| b < $typ::BITS ==> ((a & ($one << b) ==  ($one << b)) || (a & ($one << b) == 0)),
+            #(
+                (N < $typ::BITS) ==> ($one << N) == POW2!(N),
+            )*
+    {}
+
+    pub proof fn $pvalname()
+        ensures
+            #(
+                (N < $typ::BITS) ==> ($one << N) == POW2!(N),
+            )*
+    {
+        $autopname()
+    }
+}});
+}
+}
+
+bit_or_properties! {u64, spec_bit64_or_properties, bit64_or_properties, bit64_or_auto}
+bit_not_properties! {u64, spec_bit64_not_properties, bit64_not_auto}
+bit_shl_properties!{u64, 1u64, bit64_shl_values_auto, bit64_shl_auto}
+
 verus! {
-    // Add more when necessary; We may add all between [0,64)
-    mask_proof_for_bits!(
-        2u64,
-        3u64,
-        12u64,
-    );
 
     #[verifier(bit_vector)]
-    pub const proof fn bit_and64_auto()
+    pub const proof fn bit64_and_auto()
         ensures
             forall |a: u64, b: u64| #[trigger] (a&b) == b&a ,
             forall |a: u64, b: u64, c:u64| #[trigger] ((a&b)&c) == a&(b&c),
             forall |a: u64| #[trigger] (a&a) == a,
             forall |a: u64| #[trigger] (a&0) == 0,
             forall |a: u64| #[trigger] (a& 0xffffffffffffffffu64) == a,
-            forall |a: u64, b: u64| #[trigger] (a&b) <= b,
+            forall |a: u64, b: u64| #[trigger] (a&b) <= b && (a&b) <= a,
             forall |a: u32, b: u32| #[trigger] (a&b) <= b,
             forall |a: u16, b: u16| #[trigger] (a&b) <= b,
             forall |a: u8, b: u8| #[trigger] (a&b) <= b,
     {}
-
-
-    /*
-    #[verifier(bit_vector)]
-    pub proof fn bit64_and_mask_mask_auto()
-        ensures
-            forall |a: u64, bits: u64| #![auto] 0<= bits < 64 ==> (a & BIT_MASK!(bits)) == a % BIT64!(bits)
-    {}
-    */
 
     #[verifier(bit_vector)]
     pub proof fn bit64_or_mask_auto()
@@ -374,34 +430,7 @@ verus! {
     {}
 
     #[verifier(bit_vector)]
-    pub proof fn bit_or64_auto()
-        ensures
-            forall |a: u64, b: u64, c: u64| (a & c == c) ==> ((a | b) & c == c),
-            forall |a: u64, b: u64| #[trigger] (a|b) == b|a,
-            forall |a: u64, b: u64, c:u64| #[trigger] ((a|b)|c) == a|(b|c),
-            forall |a: u64| #[trigger] (a|a) == a,
-            forall |a: u64| #[trigger] (a|0) == a,
-            forall |a: u64| #[trigger] (a| 0xffffffffffffffffu64) == 0xffffffffffffffffu64,
-            forall |a: u64, b: u64| #[trigger] (a|b) <= 0xffffffffffffffffu64,
-            //forall |a: u64, b: u64| #[trigger] (a|b) <= add(sub(a, a&b), b),
-            forall |a: u64, b: u64| #[trigger] (a|b) >= a,
-    {}
-
-    /*
-    //Resource limit (rlimit) exceeded
-    pub proof fn bit_or64_rel_add_auto()
-    ensures
-        forall |a: u64, b: u64| a < sub(0xffffffffffffffffu64, b) ==> #[trigger] (a|b) <= add(a, b),
-    {
-        assert forall |a: u64, b: u64|
-        #[trigger] (a|b) <= add(a, b)
-        by {
-            assert((a|b) <= add(a, b)) by(bit_vector)
-        }
-    }*/
-
-    #[verifier(bit_vector)]
-    pub proof fn bit_xor64_auto()
+    pub proof fn bit64_xor_auto()
         ensures
             forall |a: u64, b: u64| #[trigger] (a^b) == b^a,
             forall |a: u64, b: u64, c:u64| #[trigger] ((a^b)^c) == a^(b^c),
@@ -411,34 +440,19 @@ verus! {
     {}
 
     #[verifier(bit_vector)]
-    pub proof fn bit_not64_auto()
-        ensures
-            forall |a: u64| #[trigger] !(!a) == a,
-            forall |a: u64| #[trigger] (!a) & a == 0,
-            !0u64 == 0xffffffffffffffffu64,
-            forall |a: u64| #[trigger] (!a) == sub(MAXU64!(), a),
-    {}
-
-    #[verifier(bit_vector)]
     pub proof fn proof_bit_u64_not(a: u64)
     ensures
-        (!a) == sub(MAXU64!(), a)
+        (!a) == sub(u64::MAX, a)
     {}
 
     #[verifier(bit_vector)]
     pub proof fn proof_bit_usize_not(a: usize)
     ensures
-        (!a) == sub(MAXU64!() as usize, a)
+        (!a) == sub(u64::MAX as usize, a)
     {}
 
     #[verifier(bit_vector)]
-    pub proof fn bit_lsh64_auto()
-        ensures
-            forall |a: u64| #[trigger] (a>>0u64) == a,
-    {}
-
-    #[verifier(bit_vector)]
-    pub proof fn bit_property64_auto()
+    pub proof fn bit64_property_auto()
         ensures
             // absorb
             forall |a: u64, b: u64| #[trigger] (a & (a | b)) == a,
@@ -469,22 +483,22 @@ verus! {
 
 seq_macro::seq!(N in 0..64 {
 verus!{
-    pub proof fn bit_rsh64_div_rel(b: u64, a: u64) -> (ret: u64)
+    pub proof fn bit64_shr_div_rel(b: u64, a: u64) -> (ret: u64)
     requires
         a < 64,
     ensures
         ret == (b >> a),
-        ret * BIT64!(a) <= MAXU64!(),
-        (b>>a) == (b / BIT64!(a)),
+        ret * (1u64 << a) <= u64::MAX,
+        (b>>a) == (b / (1u64 << a)),
     {
         let ret = (b >> a);
         #(
             if a == N {
-                assert(ret == b / BIT64!(N as u64)) by(bit_vector)
+                assert(ret == b / (1u64 << N)) by(bit_vector)
                 requires ret == (b >> N);
-                assert(b <= MAXU64!());
-                bit_shl64_pow2_auto();
-                assert(b / POW2!(N) * POW2!(N) <= MAXU64!());
+                assert(b <= u64::MAX);
+                bit64_shl_values_auto();
+                assert(b / POW2!(N) * POW2!(N) <= u64::MAX);
             }
         )*
         ret
@@ -494,23 +508,23 @@ verus!{
 
 seq_macro::seq!(N in 0..64 {
     verus!{
-        pub proof fn bit_lsh64_mul_rel(b: u64, a: u64)
+        pub proof fn bit64_shl_mul_rel(b: u64, a: u64)
         requires
             a < 64,
-            b * BIT64!(a) <= MAXU64!(),
+            b * (1u64 << a) <= u64::MAX,
         ensures
-            (b<<a) == (b * BIT64!(a)),
+            (b<<a) == (b * (1u64 << a)),
         {
             #(
                  if a == N {
-                    assert((b<<N) == mul(b, BIT64!(N as u64))) by(bit_vector);
-                    bit_shl64_pow2_auto();
-                    assert(b * BIT64!(N as u64) <= MAXU64!());
+                    assert((b<<N) == mul(b, (1u64 << N))) by(bit_vector);
+                    bit64_shl_values_auto();
+                    assert(b * (1u64 << N) <= u64::MAX);
                     assert(mul(b, POW2!(N)) == b * POW2!(N));
-                    assert((b<<N) == b * BIT64!(N));
+                    assert((b<<N) == b * (1u64 << N));
                 }
             )*
-            assert((b<<a) == b * BIT64!(a));
+            assert((b<<a) == b * (1u64 << a));
 
         }
     }
@@ -518,7 +532,7 @@ seq_macro::seq!(N in 0..64 {
 
 seq_macro::seq!(N in 0..64 {
 verus!{
-    pub proof fn proof_bit_u64_and_rel_mod(a: u64, b: u64)
+    pub proof fn proof_bit64_and_rel_mod(a: u64, b: u64)
     requires
         spec_bit64_is_pow_of_2(b as int),
     ensures
@@ -546,12 +560,11 @@ verus!{
 #[macro_export]
 macro_rules! lemma_bits64 {
     () => {
-        bit_property64_auto();
-        bit_and64_auto();
-        bit_or64_auto();
-        bit_xor64_auto();
-        bit_not64_auto();
-        bit_lsh64_auto();
-        bit_shl64_auto();
+        bit64_property_auto();
+        bit64_and_auto();
+        bit64_or_auto();
+        bit64_xor_auto();
+        bit64_not_auto();
+        bit64_shl_auto();
     };
 }

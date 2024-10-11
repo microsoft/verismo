@@ -44,14 +44,15 @@ pub enum RflagBit {
     ID = 21,  // Able to use CPUID
 }
 
-} // verus!
-crate::macro_const! {
-    pub const MSR_GHCB_BASE: u32 = 0xc0010130u32;
-    pub const MSR_GS_BASE: u32 = 0xc0000101u32;
-    pub const MSR_EFER_BASE: u32 = 0xc0000080;
-    pub const MSR_SEV_STATUS: u32 = 0xc0010131u32;
-}
+pub const MSR_GHCB_BASE: u32 = 0xc0010130u32;
 
+pub const MSR_GS_BASE: u32 = 0xc0000101u32;
+
+pub const MSR_EFER_BASE: u32 = 0xc0000080;
+
+pub const MSR_SEV_STATUS: u32 = 0xc0010131u32;
+
+} // verus!
 impl RegName {
     verus! {
 

@@ -45,7 +45,7 @@ pub proof fn proof_test_bits2(v1: u64, v2: u64)
 verismo! {
     fn test_add (v1: u64_s, v2: u64_s) -> (ret: u64_s)
     requires
-        v1 + v2 <= MAXU64!(),
+        v1 + v2 <= u64::MAX,
     {
         v1.add(v2)
     }
@@ -63,7 +63,7 @@ verismo! {
 
     fn test2 (v1: u64_s, v2: u64_s) -> (ret: u64_s)
     requires
-        v1 * v2 <= MAXU64!(),
+        v1 * v2 <= u64::MAX,
     {
         let v = 11;
         assert(v1 >= 0);

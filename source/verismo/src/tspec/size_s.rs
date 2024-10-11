@@ -1,7 +1,6 @@
 use vstd::prelude::*;
 
 use super::*;
-use crate::BIT64;
 
 macro_rules! impl_spec_size_for_basic  {
     ($([$baset: ty, $size: literal]),* $(,)*) => {

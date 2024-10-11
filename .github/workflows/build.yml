@@ -48,11 +48,11 @@ jobs:
         run: cargo v build
 
       - name: Fmt
-        run: cargo fmt
+        run: cargo fmt --check
         working-directory: tools/cargo-v
 
       - name: Fmt
-        run: cargo fmt
+        run: cargo fmt --check
         working-directory: tools/verus-rustc
 
       - name: Fmt verus code

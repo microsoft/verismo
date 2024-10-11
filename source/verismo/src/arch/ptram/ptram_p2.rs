@@ -129,18 +129,19 @@ impl GuestPTRam {
                         assert(wgpmem.to_page() !== old_pte_gpa.to_page());
                         assert(wgpmem.disjoint(old_pte_gpa));
                     }
-                    assert(spec_size::<GuestPTEntry>() == PT_ENTRY_SIZE!());
-                    assert(wgpmem.len() == 0 || (wgpmem.len() == PT_ENTRY_SIZE!() as int
-                        && wgpmem.is_aligned(PT_ENTRY_SIZE!() as int)) || wgpmem.disjoint(
+                    assert(spec_size::<GuestPTEntry>() == 8);
+                    assert(PT_ENTRY_SIZE == 8);
+                    assert(wgpmem.len() == 0 || (wgpmem.len() == PT_ENTRY_SIZE as int
+                        && wgpmem.is_aligned(PT_ENTRY_SIZE as int)) || wgpmem.disjoint(
                         old_pte_gpa,
                     ));
-                    if (wgpmem.len() == PT_ENTRY_SIZE!() as int && wgpmem.is_aligned(
-                        PT_ENTRY_SIZE!() as int,
+                    if (wgpmem.len() == PT_ENTRY_SIZE as int && wgpmem.is_aligned(
+                        PT_ENTRY_SIZE as int,
                     )) {
                         GPMem::lemma_aligned_mem_eq_or_disjoint(
                             old_pte_gpa,
                             wgpmem,
-                            PT_ENTRY_SIZE!() as int,
+                            PT_ENTRY_SIZE as int,
                         );
                     }
                     if old_pte_gpa === wgpmem {

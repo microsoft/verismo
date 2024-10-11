@@ -65,16 +65,16 @@ fn int2bytes(input: u64, base: u64) -> (ret: (Array<u8_t, 66>, usize))
     }
     let mut i: usize = 0;
     proof {
-        bit_shl64_pow2_auto();
+        bit64_shl_values_auto();
         assert(1u64 << 0u64 == 1u64) by (bit_vector);
-        assert(n <= MAXU64!());
-        assert(MAXU64!() / (1u64 << 0u64) == MAXU64!());
+        assert(n <= u64::MAX);
+        assert(u64::MAX / (1u64 << 0u64) == u64::MAX);
     }
     while n > 0 && i < 64
         invariant
             0 <= i as int <= 64,
             1 < base as int <= 16,
-            i < 64 ==> n <= MAXU64 / (1u64 << i as u64),
+            i < 64 ==> n <= u64::MAX / (1u64 << i as u64),
             i == 64 ==> n == 0,
             n == 0 ==> i > 0,
             forall|k| 0 <= k < i ==> ascii_is_num(bytes@[k]),
@@ -85,17 +85,17 @@ fn int2bytes(input: u64, base: u64) -> (ret: (Array<u8_t, 66>, usize))
                     n >= 0,
                     base > 1,
             ;
-            bit_shl64_pow2_auto();
+            bit64_shl_values_auto();
             if i < 63 {
                 let pow1 = (1u64 << i as u64);
                 let pow2 = (1u64 << add(i as u64, 1u64));
                 assert(pow1 * 2 <= POW2!(63));
                 assert(pow2 == (pow1 * 2) as u64);
                 assert(pow1 * 2 == (pow1 * 2) as u64);
-                assert(MAXU64 / pow2 == MAXU64 / ((pow1 * 2) as u64));
-                assume(MAXU64!() / ((pow1 * 2) as u64) == MAXU64!() / pow1 / 2);  // TODO: add nonlinear proof
+                assert(u64::MAX / pow2 == u64::MAX / ((pow1 * 2) as u64));
+                assume(u64::MAX / ((pow1 * 2) as u64) == u64::MAX / pow1 / 2);  // TODO: add nonlinear proof
             }
-            assert(MAXU64!() / (1u64 << 63u64) / 2 == 0);
+            assert(u64::MAX / (1u64 << 63u64) / 2 == 0);
         }
         bytes.update(i, num_to_char((n % base) as u8));
         n = n / base;
@@ -124,7 +124,7 @@ fn bytes2u64(s: &[u8], start: usize_t, size: usize_t) -> (ret: u64_t)
     requires
         start < s@.len(),
         size <= s@.len() - start,
-        s@.len() < MAXU64,
+        s@.len() < u64::MAX,
         size < 8,
 {
     let mut ret: u64_t = 0;
@@ -134,7 +134,7 @@ fn bytes2u64(s: &[u8], start: usize_t, size: usize_t) -> (ret: u64_t)
             start <= i <= start + size,
             start + size <= s@.len(),
             size < 8,
-            s@.len() < MAXU64,
+            s@.len() < u64::MAX,
     {
         let c: u64 = (*slice_index_get(s, i)) as u64;
         let offset = (i - start) as u64;
@@ -148,7 +148,7 @@ fn str2u64(s: &StrSlice, start: usize_t, size: usize_t) -> (ret: u64_t)
     requires
         start < s@.len(),
         size <= s@.len() - start,
-        s@.len() < MAXU64,
+        s@.len() < u64::MAX,
         size < 8,
         s.is_ascii(),
 {
@@ -160,7 +160,7 @@ fn str2u64(s: &StrSlice, start: usize_t, size: usize_t) -> (ret: u64_t)
             start + size <= s@.len(),
             size < 8,
             s.is_ascii(),
-            s@.len() < MAXU64,
+            s@.len() < u64::MAX,
     {
         let c: u64 = s.get_ascii(i) as u64;
         let offset = (i - start) as u64;
@@ -177,7 +177,7 @@ fn ghcb_prints_with_lock<'a>(s: &StrSlice<'a>, Tracked(cc): Tracked<&mut SnpCore
     usize)
     requires
         old(cc).wf(),
-        s@.len() < MAXU64,
+        s@.len() < u64::MAX,
         s.is_ascii(),
     ensures
         cc.wf(),
@@ -205,7 +205,7 @@ fn ghcb_prints_with_lock2<'a>(
 ) -> (ret: (usize, Tracked<SnpPointsToRaw>))
     requires
         snpcore_console_wf(*old(snpcore), console),
-        s@.len() < MAXU64,
+        s@.len() < u64::MAX,
         s.is_ascii(),
     ensures
         snpcore_console_wf(*snpcore, ret.1@),
@@ -226,7 +226,7 @@ fn ghcb_prints_with_lock2<'a>(
     while index < n
         invariant
             n == s@.len(),
-            s@.len() < MAXU64,
+            s@.len() < u64::MAX,
             s.is_ascii(),
             index <= n,
             index.is_constant(),
@@ -262,7 +262,7 @@ fn ghcb_print_bytes_with_lock<'a>(s: &[u8_t], Tracked(cc): Tracked<&mut SnpCoreC
     usize)
     requires
         old(cc).wf(),
-        s@.len() < MAXU64,
+        s@.len() < u64::MAX,
     ensures
         ret == s@.len(),
         ret.is_constant(),
@@ -287,7 +287,7 @@ fn ghcb_print_bytes_with_lock2<'a>(
 ) -> (ret: (usize, Tracked<SnpPointsToRaw>))
     requires
         snpcore_console_wf(*old(snpcore), console),
-        s@.len() < MAXU64,
+        s@.len() < u64::MAX,
     ensures
         ret.0 == s@.len(),
         ret.0.is_constant(),
@@ -306,7 +306,7 @@ fn ghcb_print_bytes_with_lock2<'a>(
     while index < n
         invariant
             n == s@.len(),
-            s@.len() < MAXU64,
+            s@.len() < u64::MAX,
             index <= n,
             index.is_constant(),
             snpcore_console_wf(*snpcore, console),
@@ -339,7 +339,7 @@ verus! {
 
 impl<'a> VPrint for StrSlice<'a> {
     open spec fn early_print_requires(&self) -> bool {
-        &&& self@.len() < MAXU64 - 64
+        &&& self@.len() < u64::MAX - 64
         &&& self.is_ascii()
     }
 

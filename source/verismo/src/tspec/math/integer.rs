@@ -2,6 +2,12 @@ use vstd::prelude::*;
 
 use super::*;
 
+macro_rules! BIT64 {
+    ($x: expr) => {
+        (1u64 << (($x) as u64))
+    };
+}
+
 verus! {
     pub open spec fn has_bit_closure(input: u64) -> spec_fn(u64) -> bool {
         |b: u64| spec_has_bit_set(input, b)
@@ -174,7 +180,7 @@ verus! {
         input != 0,
     ensures
         ret == spec_fill_ones_exe(input),
-        (ret >> 1) < MAXU64!(),
+        (ret >> 1) < u64::MAX,
         (!ret & input) == 0,
         (ret & input) == input,
         ret / 2 < input,
@@ -199,13 +205,13 @@ verus! {
             }
         }
         lemma_fill_ones_bit_steps(input, 1, high_bit, 0);
-        bit_shl64_auto();
+        bit64_shl_auto();
 
         assert(ret == fill_ones(input)) by {
             reveal_with_fuel(_fill_ones, 7);
         }
         assert(ret == nbits_mask(add(high_bit,1)));
-        assert((ret >> 1) < MAXU64!()) by(bit_vector);
+        assert((ret >> 1) < u64::MAX) by(bit_vector);
         assert(ret >= 1) by(bit_vector)
         requires
             0 <= high_bit < 64,
@@ -258,10 +264,10 @@ verus! {
         spec_bit64_is_shl_by_bits(ret as u64),
         spec_is_next_power_of_two(input as nat, ret as nat),
         ret == spec_next_power_of_two_exe(input),
-        input > 1 ==> spec_fill_ones_exe(sub(input, 1)) < MAXU64!(),
+        input > 1 ==> spec_fill_ones_exe(sub(input, 1)) < u64::MAX,
     {
         if input <= 1 {
-            bit_shl64_pow2_auto();
+            bit64_shl_values_auto();
             assert(spec_bit64_is_shl_by_bits(1));
             1
         } else {
@@ -269,7 +275,7 @@ verus! {
             let fill_ones = lemma_fill_ones(input1);
             let high_bit = proof_get_highest_bit(input1);
             let ret = add(fill_ones, 1);
-            assert(fill_ones < MAXU64!()) by(bit_vector)
+            assert(fill_ones < u64::MAX) by(bit_vector)
             requires
                 0 < input1 < POW2!(63),
                 fill_ones/2 < input1;
@@ -277,7 +283,7 @@ verus! {
             requires
                 fill_ones == nbits_mask(add(high_bit, 1)),
                 ret == add(fill_ones, 1u64),
-                fill_ones < MAXU64!(),
+                fill_ones < u64::MAX,
                 0 <= high_bit < 64;
             ret
         }
@@ -314,7 +320,7 @@ verus! {
         has_bits_until(ret.0, ret.1, h),
     {
         assert(0 < nbits < 64) by {
-            bit_shl64_auto();
+            bit64_shl_auto();
             assert(BIT64!(round) < BIT64!(6u64)) by(bit_vector)
             requires round < 6;
         }
@@ -327,16 +333,17 @@ verus! {
         ;
         assert(BIT64!(round) <= 32) by(bit_vector)
         requires round < 6;
-        let ret = (input | input >> nbits);
+        let ret = input | (input >> nbits);
         assert forall |b: u64|
             b <= h  && sub(h, b) < nbits2
         implies
             spec_has_bit_set(ret, b)
         by {
-            bit_or64_auto();
+            bit64_or_auto();
+            bit64_and_auto();
             if b <= h  && sub(h, b) < nbits {
+                proof_bit64_has_bit_property(input, (input >> nbits),  b);
                 assert(spec_has_bit_set(input, b));
-                assert(spec_has_bit_set(ret, b));
             } else {
                 assert(spec_has_bit_set(input >> nbits, b)) by(bit_vector)
                 requires
@@ -345,7 +352,9 @@ verus! {
                     spec_has_bit_set(input, add(b, nbits)),
                     b <= h,
                     sub(h, add(b, nbits)) < nbits;
-                assert(spec_has_bit_set(ret, b));
+                assert(spec_has_bit_set(ret, b)) by {
+                    proof_bit64_has_bit_property((input >> nbits),  input, b);
+                }
             }
         }
         assert forall |b: u64|

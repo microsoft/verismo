@@ -121,7 +121,7 @@ impl GuestPTRam {
         let l0_entry = self.l0_entry(memid);
         let idx = lvl.spec_table_index(gvn.to_addr()) as nat;
         let pte_gpa_ok = self.map_entry_gpa_ok(memid, gvn, lvl);
-        assert(0 <= idx < PT_ENTRY_NUM!()) by {
+        assert(0 <= idx < PT_ENTRY_NUM) by {
             lvl.proof_table_index_range(gvn.to_addr());
         }
         assert(memtype(memid, pte_gpa_ok.get_Some_0().to_page()).is_pt(lvl)) by {
@@ -372,11 +372,11 @@ impl GuestPTRam {
                         assert(wgpmem.to_page() !== old_pte_gpa.to_page());
                         assert(wgpmem.disjoint(old_pte_gpa));
                     }
-                    assert(spec_size::<GuestPTEntry>() == PT_ENTRY_SIZE!());
-                    assert(wgpmem.len() == 0 || (wgpmem.len() == PT_ENTRY_SIZE!() as int && wgpmem.is_aligned(PT_ENTRY_SIZE!() as int)) || wgpmem.disjoint(old_pte_gpa));
-                    if (wgpmem.len() == PT_ENTRY_SIZE!() as int && wgpmem.is_aligned(PT_ENTRY_SIZE!() as int)) {
+                    assert(spec_size::<GuestPTEntry>() == PT_ENTRY_SIZE);
+                    assert(wgpmem.len() == 0 || (wgpmem.len() == PT_ENTRY_SIZE as int && wgpmem.is_aligned(PT_ENTRY_SIZE as int)) || wgpmem.disjoint(old_pte_gpa));
+                    if (wgpmem.len() == PT_ENTRY_SIZE as int && wgpmem.is_aligned(PT_ENTRY_SIZE as int)) {
                         GPMem::lemma_aligned_mem_eq_or_disjoint(old_pte_gpa,
-                            wgpmem, PT_ENTRY_SIZE!() as int);
+                            wgpmem, PT_ENTRY_SIZE as int);
                     }
                     if old_pte_gpa === wgpmem {
                         assert(enc) by {
@@ -449,14 +449,11 @@ impl GuestPTRam {
         assert(new_pt.inv_for_identity_map_ok(memid)) by {
             reveal(GuestPTRam::inv_for_identity_map_ok);
             assert forall|gvn: GVN|
-                gvn.is_valid() && new_pt.map_entry_ok(
-                    memid,
-                    gvn,
-                    MAX_PT_LEVEL!(),
-                ).is_Some() implies (#[trigger] new_pt.map_entry_ok(
+                gvn.is_valid() && new_pt.map_entry_ok(memid, gvn, MAX_PT_LEVEL).is_Some() implies (
+            #[trigger] new_pt.map_entry_ok(
                 memid,
                 gvn,
-                MAX_PT_LEVEL!(),
+                MAX_PT_LEVEL,
             )).get_Some_0().spec_ppn().value() === gvn.value() by {
                 Self::lemma_write_pte_inv_ppn_enc(
                     old_pt,
@@ -465,13 +462,10 @@ impl GuestPTRam {
                     memid,
                     memop,
                     gvn,
-                    MAX_PT_LEVEL!(),
+                    MAX_PT_LEVEL,
                 );
-                assert(old_pt.map_entry_ok(
-                    memid,
-                    gvn,
-                    MAX_PT_LEVEL!(),
-                ).get_Some_0().spec_ppn().value() === gvn.value());
+                assert(old_pt.map_entry_ok(memid, gvn, MAX_PT_LEVEL).get_Some_0().spec_ppn().value()
+                    === gvn.value());
             }
         }
         assert(new_pt.inv_encrypted_priv_mem_ok(memid)) by {
@@ -480,13 +474,13 @@ impl GuestPTRam {
                 gvn.is_valid() && (new_pt.need_c_bit(memid, gvn) && new_pt.map_entry_ok(
                     memid,
                     gvn,
-                    MAX_PT_LEVEL!(),
+                    MAX_PT_LEVEL,
                 ).is_Some()) implies #[trigger] new_pt.map_entry_ok(
                 memid,
                 gvn,
-                MAX_PT_LEVEL!(),
+                MAX_PT_LEVEL,
             ).get_Some_0().is_encrypted() by {
-                let pte_gpa = new_pt.map_entry_gpa_ok(memid, gvn, MAX_PT_LEVEL!()).get_Some_0();
+                let pte_gpa = new_pt.map_entry_gpa_ok(memid, gvn, MAX_PT_LEVEL).get_Some_0();
                 Self::lemma_write_pte_inv_ppn_enc(
                     old_pt,
                     new_pt,
@@ -494,9 +488,9 @@ impl GuestPTRam {
                     memid,
                     memop,
                     gvn,
-                    MAX_PT_LEVEL!(),
+                    MAX_PT_LEVEL,
                 );
-                assert(old_pt.map_entry_ok(memid, gvn, MAX_PT_LEVEL!()).get_Some_0().is_encrypted())
+                assert(old_pt.map_entry_ok(memid, gvn, MAX_PT_LEVEL).get_Some_0().is_encrypted())
             }
         }
         assert forall|gvn: GVN| gvn.is_valid() implies #[trigger] new_pt.inv_content_gpa_ok(

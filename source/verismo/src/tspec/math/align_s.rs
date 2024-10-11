@@ -6,15 +6,15 @@ verus! {
 pub proof fn lemam_bit_or_mask_bound(val: u64, align: u64) -> (mask: u64)
     requires
         spec_bit64_is_shl_by_bits(align),
-        val <= MAXU64!() - align,
+        val <= u64::MAX - align,
     ensures
         mask == sub(align, 1),
-        (val | mask) < MAXU64!(),
+        (val | mask) < u64::MAX,
 {
     let mask = sub(align, 1);
-    assert((val | mask) < MAXU64!()) by (bit_vector)
+    assert((val | mask) < u64::MAX) by (bit_vector)
         requires
-            val <= sub(MAXU64!(), align),
+            val <= sub(u64::MAX, align),
             mask == sub(align, 1),
             spec_bit64_is_shl_by_bits(align),
     ;
@@ -30,7 +30,7 @@ seq_macro::seq!(N in 0..64 {
                 val % align == (val & sub(align, 1)),
             {
                 #(
-                    assert(val % BIT64!(N as u64) == (val & sub(BIT64!(N as u64), 1))) by(bit_vector);
+                    assert(val % (1u64 << N) == (val & sub((1u64 << N), 1))) by(bit_vector);
                 )*
             }
         }
@@ -53,8 +53,8 @@ pub proof fn proof_align_down(val: nat, align: nat) -> (ret: (u64, u64, u64))
     let val64 = val as u64;
     let mask = sub(align as u64, 1);
     let ret = val - val % align;
-    let align64 = BIT64!(bits);
-    bit_shl64_pow2_auto();
+    let align64 = (1u64 << bits);
+    bit64_shl_values_auto();
     assert(val / align * align == val - val % align) by (nonlinear_arith)
         requires
             align != 0,
@@ -65,10 +65,10 @@ pub proof fn proof_align_down(val: nat, align: nat) -> (ret: (u64, u64, u64))
             val == val64,
             align == align as u64,
     ;
-    bit_rsh64_div_rel(val64, bits);
-    bit_lsh64_mul_rel(val64 >> bits, bits);
+    bit64_shr_div_rel(val64, bits);
+    bit64_shl_mul_rel(val64 >> bits, bits);
     assert((val64 >> bits) << bits == val64 / align64 * align64);
-    assert(val64 & !sub(BIT64!(bits), 1) == ((val64 >> bits) << bits)) by (bit_vector)
+    assert(val64 & !sub((1u64 << bits), 1) == ((val64 >> bits) << bits)) by (bit_vector)
         requires
             bits < 64,
     ;
@@ -79,7 +79,7 @@ pub proof fn proof_align_up(val: nat, align: nat) -> (ret: (u64, u64, u64, u64))
     requires
         spec_bit64_is_pow_of_2(align as int),
         val as u64 == val,
-        val + align <= MAXU64!(),
+        val + align <= u64::MAX,
     ensures
         ret.0 == sub(align as u64, 1),
         ret.1 == spec_pow2_to_bits(align as u64),
@@ -104,12 +104,12 @@ pub proof fn proof_align_up(val: nat, align: nat) -> (ret: (u64, u64, u64, u64))
     let ret = val + (align - val % align);
     let tmp = val64 | mask;
     let ret2 = add(tmp, 1);
-    bit_shl64_pow2_auto();
+    bit64_shl_values_auto();
     assert(val / align * align == val - val % align) by (nonlinear_arith)
         requires
             align != 0,
     ;
-    bit_rsh64_div_rel(val64, bits);
+    bit64_shr_div_rel(val64, bits);
     lemma_bit_and_mod_rel(val64, align64);
     assert(val % align == (val64 % align64));
     lemam_bit_or_mask_bound(val64, align64);

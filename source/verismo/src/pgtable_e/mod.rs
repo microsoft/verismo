@@ -12,4 +12,3 @@ use crate::ptr::*;
 use crate::registers::CR3;
 use crate::tspec::*;
 use crate::tspec_e::*;
-use crate::DEFINE_BIT_FIELD_GET;

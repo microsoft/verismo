@@ -6,15 +6,15 @@ use crate::arch::addr_s::GVA;
 use crate::linkedlist::{LinkedList, Node, SpecListItem};
 use crate::ptr::*;
 
-crate::macro_const! {
-    #[macro_export]
-    pub const MIN_ADDR_ALIGN: usize = 8usize;
-    #[macro_export]
-    pub const ORDER: usize = 32usize;
-    pub const ORDER_USIZE: usize = ORDER!() as usize;
-    //ORDER as usize;
-}
+verus! {
 
+pub const MIN_ADDR_ALIGN: usize = 8usize;
+
+pub const ORDER: usize = 32usize;
+
+pub const ORDER_USIZE: usize = 32usize;
+
+} // verus!
 verismo_simple! {
 pub struct BuddyAllocator {
     perms: Tracked<Map<(nat, nat), SnpPointsToRaw>>,
@@ -39,8 +39,8 @@ impl BuddyAllocator {
 
 impl SpecBuddyAllocator {
     pub open spec fn valid_bucket(bucket: nat) -> bool {
-        &&& bucket < ORDER!()
-        &&& spec_bit64(spec_cast_integer::<_, u64>(bucket)) >= MIN_ADDR_ALIGN!()
+        &&& bucket < ORDER
+        &&& spec_bit64(spec_cast_integer::<_, u64>(bucket)) >= MIN_ADDR_ALIGN
     }
 
     pub open spec fn wf_bucket(&self, bucket: nat) -> bool {
@@ -56,11 +56,11 @@ impl SpecBuddyAllocator {
             let perm = self.perms[(bucket, i)]@;
             let size: nat = spec_bit64(bucket as u64) as nat;
             &&& self.perms.contains_key((bucket, i))
-            &&& perm.wf_freemem((node_ptr.id() + MIN_ADDR_ALIGN!(), perm.size()))
+            &&& perm.wf_freemem((node_ptr.id() + MIN_ADDR_ALIGN, perm.size()))
             &&& node_snp === SwSnpMemAttr::spec_default()
             &&& node_ptr.not_null()
             &&& node_ptr.uptr.spec_valid_addr_with(size)
-            &&& perm.size() + MIN_ADDR_ALIGN!() == size
+            &&& perm.size() + MIN_ADDR_ALIGN == size
         } else {
             !self.perms.contains_key((bucket, i))
         }
@@ -102,8 +102,8 @@ impl SpecBuddyAllocator {
         &&& node_perm@.ptr_not_null_wf(nodeptr)
         &&& node_perm@.snp() === SwSnpMemAttr::spec_default()
         &&& nodeptr.uptr.spec_valid_addr_with(size)
-        &&& free_perm@.size() + MIN_ADDR_ALIGN!() == size
-        &&& free_perm@.wf_freemem((nodeptr.id() + MIN_ADDR_ALIGN!(), free_perm@.size()))
+        &&& free_perm@.size() + MIN_ADDR_ALIGN == size
+        &&& free_perm@.wf_freemem((nodeptr.id() + MIN_ADDR_ALIGN, free_perm@.size()))
         &&& free_perm@.snp() === SwSnpMemAttr::spec_default()
     }
 
@@ -220,8 +220,8 @@ impl SpecBuddyAllocator {
         &&& node_perm@.ptr_not_null_wf(nodeptr)
         &&& node_perm@.snp() === SwSnpMemAttr::spec_default()
         &&& nodeptr.uptr.spec_valid_addr_with(size)
-        &&& free_perm@.size() + MIN_ADDR_ALIGN!() == size
-        &&& free_perm@.wf_freemem((nodeptr.id() + MIN_ADDR_ALIGN!(), free_perm@.size()))
+        &&& free_perm@.size() + MIN_ADDR_ALIGN == size
+        &&& free_perm@.wf_freemem((nodeptr.id() + MIN_ADDR_ALIGN, free_perm@.size()))
         &&& free_perm@.snp() === SwSnpMemAttr::spec_default()
     }
 
@@ -371,7 +371,7 @@ verus! {
 pub open spec fn alloc_valid_size(old_size: usize, size: usize) -> bool {
     &&& size >= old_size
     &&& spec_bit64_is_pow_of_2(size as int)
-    &&& size >= MIN_ADDR_ALIGN!()
+    &&& size >= MIN_ADDR_ALIGN
     //&&& size % align == 0
 
 }
@@ -426,7 +426,7 @@ impl BuddyAllocator {
         let ghost old_self = *self;
         let ghost gbucket = bucket as nat;
         proof {
-            bit_shl64_pow2_auto();
+            bit64_shl_values_auto();
         }
         proof {
             assert(self@.wf_bucket(gbucket));
@@ -504,10 +504,10 @@ impl BuddyAllocator {
             start == self@.free_lists[bucket as int]@.last().ptr.id(),
     {
         let ghost old_self = *self;
-        let tracked (mut node_rperm, free_perm) = perm.trusted_split(MIN_ADDR_ALIGN!() as nat);
+        let tracked (mut node_rperm, free_perm) = perm.trusted_split(MIN_ADDR_ALIGN as nat);
         let tracked mut node_perm = node_rperm.trusted_into();
         proof {
-            bit_shl64_pow2_auto();
+            bit64_shl_values_auto();
         }
         let nodeptr = SnpPPtr::<Node<()>>::from_usize(start);
         nodeptr.replace(Tracked(&mut node_perm), Node::default());
@@ -586,7 +586,7 @@ impl BuddyAllocator {
             size.is_constant(),
     {
         proof {
-            bit_shl64_pow2_auto();
+            bit64_shl_values_auto();
         }
         let ghost old_size = *size;
         *size =
@@ -620,7 +620,7 @@ impl BuddyAllocator {
                 self@.inv(),
         {
             proof {
-                bit_shl64_pow2_auto();
+                bit64_shl_values_auto();
                 assert(self@.wf_bucket(i as nat));
             }
             if !self.free_lists.index(i).is_empty() && i > bucket {
@@ -642,7 +642,7 @@ impl BuddyAllocator {
                         size.is_constant(),
                 {
                     proof {
-                        bit_shl64_pow2_auto();
+                        bit64_shl_values_auto();
                     }
                     let ghost prev_self = *self;
                     if let Some((start1, tperm)) = self.pop(j) {
@@ -689,14 +689,14 @@ impl BuddyAllocator {
             spec_bit64_is_pow_of_2(size as int),
             size < (1usize << ORDER),
             size.is_constant(),
-            size > MIN_ADDR_ALIGN!(),
+            size > MIN_ADDR_ALIGN,
             addr % size == 0,
             old(self)@.inv(),
         ensures
             self@.inv(),
     {
         proof {
-            bit_shl64_pow2_auto();
+            bit64_shl_values_auto();
         }
         let mut current_bucket = pow2_to_bits(size as u64) as usize;
         let mut current_addr: usize = addr;
@@ -891,21 +891,21 @@ impl BuddyAllocator {
             self.is_constant(),/*self@.inv(),
         GVA::new(*start as int).is_valid_end(),
         GVA::new(*end as int).is_valid_end(),
-        spec_is_align_up_by_int(*old(start) as int, MIN_ADDR_ALIGN!() as int, *start as int),
-        spec_is_align_down_by_int(*old(end) as int, MIN_ADDR_ALIGN!() as int, *end as int),*/
+        spec_is_align_up_by_int(*old(start) as int, MIN_ADDR_ALIGN as int, *start as int),
+        spec_is_align_down_by_int(*old(end) as int, MIN_ADDR_ALIGN as int, *end as int),*/
 
     {
         let ghost oldstart = *start;
         let ghost oldend = *end;
         proof {
-            assert(spec_bit64_is_pow_of_2(MIN_ADDR_ALIGN!() as int));
+            assert(spec_bit64_is_pow_of_2(MIN_ADDR_ALIGN as int));
         }
         *start = align_up_by((*start) as u64, MIN_ADDR_ALIGN as u64) as usize;
         *end = align_down_by((*end).into(), MIN_ADDR_ALIGN.into()).into();
         let current_end = *end;
         let mut current_start = *start;
         proof {
-            assert(spec_size::<Node<()>>() == MIN_ADDR_ALIGN!());
+            assert(spec_size::<Node<()>>() == MIN_ADDR_ALIGN);
         }
         if (current_start >= current_end) {
             return ;
@@ -936,10 +936,10 @@ impl BuddyAllocator {
             let ghost old_self = *self;
             proof {
                 let ghost g_start = current_start as usize;
-                //assert(g_start & sub(MIN_ADDR_ALIGN!(), 1usize) == 0usize) by(bit_vector)
-                //requires g_start % MIN_ADDR_ALIGN!() == 0usize;
-                proof_bit_usize_and_rel_mod(g_start, MIN_ADDR_ALIGN!());
-                lemma_get_low_bits_via_bit_op(current_start as u64, MIN_ADDR_ALIGN!() as u64);
+                //assert(g_start & sub(MIN_ADDR_ALIGN, 1usize) == 0usize) by(bit_vector)
+                //requires g_start % MIN_ADDR_ALIGN == 0usize;
+                proof_bit_usize_and_rel_mod(g_start, MIN_ADDR_ALIGN);
+                lemma_get_low_bits_via_bit_op(current_start as u64, MIN_ADDR_ALIGN as u64);
                 proof_bit_usize_not(g_start);
                 lemma_prev_power_of_two(totalsize as u64);
             }
@@ -949,11 +949,11 @@ impl BuddyAllocator {
             } else {
                 prev_power_of_two(totalsize as u64) as usize
             };
-            let size = min((1usize << (ORDER!() - 1usize) as usize) as u64, size as u64) as usize;
+            let size = min((1usize << (ORDER - 1usize) as usize) as u64, size as u64) as usize;
             let tracked (mut cur_perm, mut remain_perm) = total_perm.trusted_split(size as nat);
             proof {
                 total_perm = remain_perm;
-                bit_shl64_pow2_auto();  // prove size is power of 2 and bucket is valid;
+                bit64_shl_values_auto();  // prove size is power of 2 and bucket is valid;
             }
             // Get the bucket id.
             let bucket = pow2_to_bits(size as u64) as usize;

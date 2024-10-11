@@ -6,12 +6,6 @@ pub type NoAdditional = ();
 
 impl_secure_type! {NoAdditional, pub type}
 
-crate::macro_const! {
-    #[macro_export]
-
-    pub const MAX_LEAK: u64 = 1u64;
-}
-
 impl<T> WellFormed for SpecSecType<T, NoAdditional> {
     #[verifier(inline)]
     open spec fn wf(&self) -> bool {

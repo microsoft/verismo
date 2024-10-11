@@ -12,7 +12,7 @@ pub fn pow2_to_bits(val: u64) -> (ret: u64)
         ret as u64 == spec_pow2_to_bits_exe(val as nat),
 {
     proof {
-        bit_shl64_auto();
+        bit64_shl_auto();
         proof_pow2_to_bits(val as nat);
     }
     if val > 1 {
