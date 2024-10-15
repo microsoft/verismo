@@ -129,8 +129,9 @@ fn main() -> std::io::Result<()> {
                 true,
             )?;
         } else if verus_targets.contains(&crate_name.as_str()) {
-            let lib_or_bin = if is_lib {"lib"} else {"bin"}; // bin and lib can share the same name.
-            let extra_str = env::var(format!("{}_{}_VERUS_ARGS", crate_name, lib_or_bin)).unwrap_or_default();
+            let lib_or_bin = if is_lib { "lib" } else { "bin" }; // bin and lib can share the same name.
+            let extra_str =
+                env::var(format!("{}_{}_VERUS_ARGS", crate_name, lib_or_bin)).unwrap_or_default();
             let extra: Vec<&str> = if !extra_str.is_empty() {
                 extra_str.split(" ").collect()
             } else {
