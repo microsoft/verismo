@@ -170,12 +170,7 @@ impl VerusMetadata {
         let mut ret = vec![];
         for p in &self.meta.packages {
             for d in &p.dependencies {
-                if d.name == "builtin"
-                    && d.source
-                        .as_ref()
-                        .expect("builtin should have source")
-                        .contains("verus")
-                {
+                if ["builtin_macros", "builtin", "vstd"].contains(&d.name.as_str()) {
                     ret.push(p.name.clone());
                     break;
                 }
@@ -185,12 +180,8 @@ impl VerusMetadata {
     }
 
     fn find_verus_dir(&self) -> Option<PathBuf> {
-        self.find_src_dir("builtin")
-    }
-
-    fn find_src_dir(&self, c: &str) -> Option<PathBuf> {
         for p in &self.meta.packages {
-            if p.name.as_str() == c {
+            if ["builtin_macros", "builtin", "vstd"].contains(&p.name.as_str()) {
                 for t in &p.targets {
                     let builtin_path = PathBuf::from(t.src_path.as_str());
                     if builtin_path.exists() {
