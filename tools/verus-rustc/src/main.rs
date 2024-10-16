@@ -105,7 +105,6 @@ fn main() -> std::io::Result<()> {
         format!("{} --cfg verus_keep_ghost --cfg span_locations", rust_flags);
     let verus_lib_cfg = ["--cfg".to_string(), "verus_keep_ghost".to_string()];
     let crate_name = get_value(&args, "--crate-name");
-    let is_lib = get_value(&args, "--crate-lib").is_some();
     debug!(
         "verus_targets = {:#?}, crate  = {:#?}",
         verus_targets, crate_name
@@ -129,9 +128,21 @@ fn main() -> std::io::Result<()> {
                 true,
             )?;
         } else if verus_targets.contains(&crate_name.as_str()) {
-            let lib_or_bin = if is_lib { "lib" } else { "bin" }; // bin and lib can share the same name.
-            let extra_str =
-                env::var(format!("{}_{}_VERUS_ARGS", crate_name, lib_or_bin)).unwrap_or_default();
+            let mut is_bin = false;
+            let mut is_lib = false;
+            if let Some(v) = get_value(&args, "--crate-type") {
+                is_bin = v.contains("bin");
+                is_lib = v.contains("lib");
+            }
+            let lib_or_bin = if is_lib {
+                "lib"
+            } else if is_bin {
+                "bin"
+            } else {
+                "unknown"
+            }; // bin and lib can share the same name.
+            let fname = format!("{}_{}_VERUS_ARGS", crate_name, lib_or_bin);
+            let extra_str = env::var(fname).unwrap_or_default();
             let extra: Vec<&str> = if !extra_str.is_empty() {
                 extra_str.split(" ").collect()
             } else {
