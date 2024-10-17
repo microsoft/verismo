@@ -12,7 +12,7 @@ env:
 jobs:
   check:
     name: verification
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -41,7 +41,7 @@ jobs:
             ${{ env.VERUS_PATH }}/tools/vargo -> target
 
       - name: Install depdendencies
-        run: ./tools/activate.sh
+        run: ./tools/vinstall.sh
   
       - name: Build
         working-directory: source/verismo
