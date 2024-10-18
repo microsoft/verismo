@@ -1,10 +1,9 @@
 name: Verify
 
 on:
-  push:
-    branches: [ "main" ]
+  workflow_dispatch:
   pull_request:
-    branches: [ "main" ]
+    branches: [ "verify" ]
 
 env:
   CARGO_TERM_COLOR: always
