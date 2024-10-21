@@ -14,6 +14,3 @@ debug-assertions = true
 [profile.release]
 incremental = true
 debug-assertions = false
-
-[alias]
-verify = "v build"

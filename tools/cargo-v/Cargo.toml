@@ -1,5 +1,5 @@
 [package]
-name = "cargo-v"
+name = "cargo-verify"
 version = "0.1.0"
 edition = "2021"
 
