@@ -116,7 +116,7 @@ fn main() -> std::io::Result<()> {
         if crate_name == "vstd" {
             args.extend(verus_lib_cfg);
             let mut verus_args = vec![
-                "--no-vstd".to_string(),
+                //"--no-vstd".to_string(),
                 "--no-verify".to_string(),
                 "--cfg".to_string(),
                 "erasure_macro_todo".to_string(),
@@ -201,6 +201,7 @@ fn run_verus_verify(
     }
     command.args(combined_args);
     command.env("RUSTFLAGS", rust_flags);
+    command.env("RUSTC_BOOTSTRAP", "1");
     command.env(
         "LD_LIBRARY_PATH",
         env::var("LD_LIBRARY_PATH").unwrap_or_default(),
@@ -226,6 +227,7 @@ fn run_rustc(args: &[String], rust_flags: &str) -> std::io::Result<()> {
     let mut command = Command::new("rustc");
     command.args(args);
     command.env("RUSTFLAGS", rust_flags);
+    command.env("RUSTC_BOOTSTRAP", "1");
     command.env(
         "LD_LIBRARY_PATH",
         env::var("LD_LIBRARY_PATH").unwrap_or_default(),
