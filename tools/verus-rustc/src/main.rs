@@ -18,7 +18,7 @@ fn get_value(args: &[String], param: &str) -> Option<String> {
 fn update_imports_exports(
     crate_name: &str,
     args: &[String],
-    verus_targets: &[&str],
+    verus_targets: &[String],
 ) -> Vec<String> {
     let mut iter = args.iter();
     let mut more_args = vec![];
@@ -27,7 +27,7 @@ fn update_imports_exports(
         if item == "--extern" {
             let val = iter.next().unwrap().to_string();
             if let Some(name) = val.split("=").next() {
-                if verus_targets.contains(&name) {
+                if verus_targets.contains(&name.to_string()) {
                     debug!("import {}", name);
                     more_args.extend([
                         "--import".to_string(),
@@ -67,7 +67,10 @@ fn main() -> std::io::Result<()> {
     // crate1,crate2,..
     let verus_target_str = env::var("VERUS_TARGETS").unwrap_or_default();
 
-    let verus_targets: Vec<&str> = verus_target_str.split(',').collect();
+    let verus_targets: Vec<String> = verus_target_str
+        .split(',')
+        .map(|c| c.replace("-", "_"))
+        .collect();
     let script = env::current_exe()?;
     let script_dir = script.parent().unwrap();
     let top_dir = script_dir.parent().unwrap();
@@ -113,7 +116,7 @@ fn main() -> std::io::Result<()> {
         if crate_name == "vstd" {
             args.extend(verus_lib_cfg);
             let mut verus_args = vec![
-                "--no-vstd".to_string(),
+                //"--no-vstd".to_string(),
                 "--no-verify".to_string(),
                 "--cfg".to_string(),
                 "erasure_macro_todo".to_string(),
@@ -127,7 +130,7 @@ fn main() -> std::io::Result<()> {
                 true,
                 true,
             )?;
-        } else if verus_targets.contains(&crate_name.as_str()) {
+        } else if verus_targets.contains(&crate_name) {
             let mut is_bin = false;
             let mut is_lib = false;
             if let Some(v) = get_value(&args, "--crate-type") {
@@ -162,11 +165,13 @@ fn main() -> std::io::Result<()> {
                 true,
             )?;
         } else {
-            args.extend(verus_lib_cfg);
+            if crate_name == "builtin" || crate_name == "builtin_macros" {
+                args.extend(verus_lib_cfg);
+            }
             run_rustc(&args, &rust_flags)?;
         }
     } else {
-        args.extend(verus_lib_cfg);
+        //args.extend(verus_lib_cfg);
         run_rustc(&args, &rust_flags)?;
     }
 
@@ -196,6 +201,7 @@ fn run_verus_verify(
     }
     command.args(combined_args);
     command.env("RUSTFLAGS", rust_flags);
+    command.env("RUSTC_BOOTSTRAP", "1");
     command.env(
         "LD_LIBRARY_PATH",
         env::var("LD_LIBRARY_PATH").unwrap_or_default(),
@@ -206,7 +212,7 @@ fn run_verus_verify(
         command.arg("--compile");
     }
 
-    debug!("cmd: {:?}", command);
+    debug!("verus cmd: {:?}", command);
 
     // Wait for the command to finish and get its status
     let status = command.status()?;
@@ -221,6 +227,7 @@ fn run_rustc(args: &[String], rust_flags: &str) -> std::io::Result<()> {
     let mut command = Command::new("rustc");
     command.args(args);
     command.env("RUSTFLAGS", rust_flags);
+    command.env("RUSTC_BOOTSTRAP", "1");
     command.env(
         "LD_LIBRARY_PATH",
         env::var("LD_LIBRARY_PATH").unwrap_or_default(),

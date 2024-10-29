@@ -29,34 +29,10 @@ fn main() {
         "install-verus" => {
             install_verus(&verus_meta, true);
         }
-        "enable" => {
-            println!("use cargo-v -- build directly.");
-            activate();
-        }
-        "disable" => {
-            deactivate();
-        }
         _ => {
-            panic!("{} not implemented", args[0]);
+            build(&verus_meta, args);
         }
     }
-}
-
-fn show_rust_version() {
-    let _ = Command::new("rustup")
-        .arg("override")
-        .arg("list")
-        .status()
-        .expect("Failed to execute command");
-    let _ = Command::new("rustup")
-        .arg("show")
-        .arg("active-toolchain")
-        .status()
-        .expect("Failed to execute command");
-}
-
-fn rust_version() -> String {
-    env::var("VERUS_RUST_VERSION").unwrap_or("nightly-2023-12-22".into())
 }
 
 fn build(verus_meta: &VerusMetadata, args: &[String]) {
@@ -68,42 +44,13 @@ fn build(verus_meta: &VerusMetadata, args: &[String]) {
         .args(args)
         .env("VERUS", verus)
         .env("RUSTC", "verus-rustc")
-        .env("RUSTUP_TOOLCHAIN", rust_version())
+        .env("RUSTUP_TOOLCHAIN", verus_meta.rust_version())
         .env("VERUS_TARGETS", verus_crates.join(","));
     println!("{:?}", cmd);
     let status = cmd.status().expect("Failed to execute cargo build");
 
     if !status.success() {
         eprintln!("cargo build failed with status: {}", status);
-    }
-}
-
-fn activate() {
-    let rust_version = rust_version();
-    // Set the rustup override and RUSTC variable
-    let status = Command::new("rustup")
-        .arg("override")
-        .arg("set")
-        .arg(rust_version)
-        .status()
-        .expect("Failed to execute rustup override");
-
-    if !status.success() {
-        eprintln!("rustup override set failed with status: {}", status);
-    }
-    show_rust_version();
-}
-
-fn deactivate() {
-    let status = Command::new("rustup")
-        .arg("override")
-        .arg("unset")
-        .arg("--path")
-        .arg(env::current_dir().expect("no current dir"))
-        .status()
-        .expect("Failed to execute rustup override unset");
-    if !status.success() {
-        eprintln!("rustup override unset failed with status: {}", status);
     }
 }
 
@@ -126,6 +73,7 @@ fn extract_features(args: &[String]) -> Vec<String> {
 struct VerusMetadata {
     meta: cargo_metadata::Metadata,
     verus_path: Option<PathBuf>,
+    rust_version: Option<String>,
 }
 
 impl VerusMetadata {
@@ -137,8 +85,10 @@ impl VerusMetadata {
                 .exec()
                 .expect("failed to get metadata"),
             verus_path: None,
+            rust_version: None,
         };
         ret.verus_path = ret.find_verus_dir();
+        ret.rust_version = Some(ret.set_rust_version());
         ret
     }
 
@@ -147,6 +97,44 @@ impl VerusMetadata {
             self.verus_path.clone().unwrap_or(PathBuf::from("verus")),
             PathBuf::from,
         )
+    }
+
+    fn rust_version(&self) -> String {
+        self.rust_version.clone().unwrap()
+    }
+
+    fn set_rust_version(&self) -> String {
+        let verus_rust_toolchain = self.verus_dir().join("rust-toolchain.toml");
+
+        // Read the rust-toolchain.toml file
+        let toolchain_content =
+            fs::read_to_string(&verus_rust_toolchain).expect("Failed to read rust-toolchain.toml");
+        // Check and update the toolchain version
+        let mut toolconfig: toml::Value =
+            toml::de::from_str::<toml::Value>(toolchain_content.as_str()).unwrap();
+        let customized_version = env::var("VERUS_RUST_VERSION");
+        match customized_version {
+            Ok(v) => {
+                *toolconfig
+                    .get_mut("toolchain")
+                    .unwrap()
+                    .get_mut("channel")
+                    .unwrap() = v.clone().into();
+                let _ = fs::write(
+                    &verus_rust_toolchain,
+                    toml::ser::to_string(&toolconfig).unwrap(),
+                );
+                v
+            }
+            _ => toolconfig
+                .get("toolchain")
+                .unwrap()
+                .get("channel")
+                .unwrap()
+                .to_string()
+                .replace("\"", "")
+                .replace("'", ""),
+        }
     }
 
     fn verus(&self) -> PathBuf {
@@ -208,7 +196,6 @@ impl VerusMetadata {
 fn install_verus(verus_meta: &VerusMetadata, install: bool) {
     // Construct the path to the dependency's source code
     let verus_dir = verus_meta.verus_dir();
-    let rust_version = env::var("VERUS_RUST_VERSION").unwrap_or("nightly-2023-12-22".into());
 
     println!("Building verus...");
 
@@ -222,23 +209,6 @@ fn install_verus(verus_meta: &VerusMetadata, install: bool) {
         );
     }
 
-    let verus_rust_toolchain = verus_dir.join("rust-toolchain.toml");
-
-    // Read the rust-toolchain.toml file
-    let toolchain_content =
-        fs::read_to_string(&verus_rust_toolchain).expect("Failed to read rust-toolchain.toml");
-    // Check and update the toolchain version
-    let mut toolconfig: toml::Value =
-        toml::de::from_str::<toml::Value>(toolchain_content.as_str()).unwrap();
-    *toolconfig
-        .get_mut("toolchain")
-        .unwrap()
-        .get_mut("channel")
-        .unwrap() = rust_version.into();
-    let _ = fs::write(
-        &verus_rust_toolchain,
-        toml::ser::to_string(&toolconfig).unwrap(),
-    );
     // Run additional commands in the verus directory
     if !verus_dir.join("source/z3").exists() {
         let status = Command::new("tools/get-z3.sh")
