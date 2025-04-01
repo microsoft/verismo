@@ -225,7 +225,7 @@ fn install_verus(verus_meta: &VerusMetadata, install: bool) {
         .env("PATH", env_path)
         .arg("-c")
         .arg(
-            "source ../tools/activate && vargo build --release --vstd-no-verify --vstd-no-verusfmt",
+            "source ../tools/activate && vargo build --release --vstd-no-verify --vstd-no-verusfmt && rm -rf target-verus/release/*/*.toml",
         )
         .current_dir(verus_dir.join("source"))
         .status()
