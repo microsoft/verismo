@@ -15,6 +15,8 @@ fn get_value(args: &[String], param: &str) -> Option<String> {
     None
 }
 
+pub const EXTRA_FILENAME: &str = "extra-filename=";
+
 fn update_imports_exports(
     crate_name: &str,
     args: &[String],
@@ -37,11 +39,11 @@ fn update_imports_exports(
             }
         } else if item == "-C" {
             let val = iter.next().unwrap().to_string();
-            if val.starts_with("metadata=") {
-                let extra = val.replace("metadata=", "");
+            if val.starts_with(EXTRA_FILENAME) {
+                let extra = val.replace(EXTRA_FILENAME, "");
                 more_args.extend([
                     "--export".to_string(),
-                    format!("{}/lib{}-{}.vir", out_dir, crate_name, extra).to_string(),
+                    format!("{}/lib{}{}.vir", out_dir, crate_name, extra).to_string(),
                 ]);
             }
         }
