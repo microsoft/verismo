@@ -10,6 +10,32 @@ fn check_status(status: std::process::ExitStatus) {
     }
 }
 
+const VERUS_CORE_LIBS: [&str; 7] = [
+    "vstd",
+    "builtin_macros",
+    "builtin",
+    "state_machines_macros",
+    "verus_builtin_macros",
+    "verus_builtin",
+    "verus_state_machines_macros",
+];
+
+const VERUS_BINS: [&str; 12] = [
+    "verus",
+    "rust_verify",
+    "z3",
+    "verus-root",
+    "libvstd.rlib",
+    "vstd.vir",
+    "libverus_state_machines_macros.so",
+    "libverus_builtin_macros.so",
+    "libverus_builtin.rlib",
+    "libstate_machines_macros.so",
+    "libbuiltin_macros.so",
+    "libbuiltin.rlib",
+];
+
+
 fn main() {
     // Install and activate
     let args: Vec<String> = env::args().collect();
@@ -158,7 +184,7 @@ impl VerusMetadata {
         let mut ret = vec![];
         for p in &self.meta.packages {
             for d in &p.dependencies {
-                if ["builtin_macros", "builtin", "vstd"].contains(&d.name.as_str()) {
+                if VERUS_CORE_LIBS.contains(&d.name.as_str()) {
                     ret.push(p.name.clone());
                     break;
                 }
@@ -169,7 +195,7 @@ impl VerusMetadata {
 
     fn find_verus_dir(&self) -> Option<PathBuf> {
         for p in &self.meta.packages {
-            if ["builtin_macros", "builtin", "vstd"].contains(&p.name.as_str()) {
+            if VERUS_CORE_LIBS.contains(&p.name.as_str()) {
                 for t in &p.targets {
                     let builtin_path = PathBuf::from(t.src_path.as_str());
                     if builtin_path.exists() {
@@ -243,18 +269,7 @@ fn install_verus(verus_meta: &VerusMetadata, install: bool) {
             panic!("{:#?} does not exist", install_dir);
         }
         // Copy the built binaries to the install directory
-        for binary in [
-            "verus",
-            "rust_verify",
-            "z3",
-            "verus-root",
-            "libvstd.rlib",
-            "vstd.vir",
-            "libstate_machines_macros.so",
-            "libbuiltin_macros.so",
-            "libbuiltin.rlib",
-        ]
-        .iter()
+        for binary in VERUS_BINS
         {
             let src = verus_dir.join("source/target-verus/release").join(binary);
             let dest = install_dir.join(binary);
