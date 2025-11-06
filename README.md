@@ -2,6 +2,14 @@
 
 This repo includes the code for VeriSMo project.
 
+# 🗞️ READ before using the code
+
+* The code here is a research prototype we built between 2022-2024 and will not be able to work with latest verus toolchain. We currently have no active plans to refactor it for newer versions;
+* While our approach outperforms traditional OS verification methods, it may still not achieve optimal performance in Verus due to limited proof engineering efforts.
+* We recommend using this repository as a reference to explore what is possible for low-level verified code (rust-based kernel). For production or ongoing development, please refer to the [Verus project](https://github.com/verus-lang/verus)
+ for the latest features and tooling.
+* The current implementation does not fully separate executable code from specification/proof code due to the old style of Verus code. However, we are actively exploring incremental verification of real-world systems. For example, [COCONUT-SVSM](https://github.com/coconut-svsm/svsm) is the first open-source project that successfully integrated Verus-based verification into an existing codebase without a full rewrite. You could expect it as a more developer-friendly Rust code with a better verification performance in the future.
+
 ## Files 📁
 
 - tools/ : includes verifier and compiler tools and scripts.
