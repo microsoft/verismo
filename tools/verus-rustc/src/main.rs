@@ -15,6 +15,13 @@ fn get_value(args: &[String], param: &str) -> Option<String> {
     None
 }
 
+const VERUS_BUILTIN_LIBS: [&str; 4] = [
+    "builtin_macros",
+    "builtin",
+    "verus_builtin_macros",
+    "verus_builtin",
+];
+
 pub const EXTRA_FILENAME: &str = "extra-filename=";
 
 fn update_imports_exports(
@@ -167,7 +174,7 @@ fn main() -> std::io::Result<()> {
                 true,
             )?;
         } else {
-            if crate_name == "builtin" || crate_name == "builtin_macros" {
+            if VERUS_BUILTIN_LIBS.contains(&crate_name.as_str()) {
                 args.extend(verus_lib_cfg);
             }
             run_rustc(&args, &rust_flags)?;
