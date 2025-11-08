@@ -35,7 +35,6 @@ const VERUS_BINS: [&str; 12] = [
     "libbuiltin.rlib",
 ];
 
-
 fn main() {
     // Install and activate
     let args: Vec<String> = env::args().collect();
@@ -269,8 +268,7 @@ fn install_verus(verus_meta: &VerusMetadata, install: bool) {
             panic!("{:#?} does not exist", install_dir);
         }
         // Copy the built binaries to the install directory
-        for binary in VERUS_BINS
-        {
+        for binary in VERUS_BINS {
             let src = verus_dir.join("source/target-verus/release").join(binary);
             let dest = install_dir.join(binary);
             if !src.exists() {
