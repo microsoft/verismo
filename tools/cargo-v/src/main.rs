@@ -63,6 +63,12 @@ fn main() {
 fn build(verus_meta: &VerusMetadata, args: &[String]) {
     let verus = verus_meta.verus();
     let verus_crates = verus_meta.find_verus_crates();
+    if let Some(lib_version) = verus_meta.use_prebuilt() {
+        let (verus_version, _) = verus_meta.verus_version();
+        if !verus_version.contains(&lib_version) {
+            panic!("Prebuilt verus tool version {} is too far away from the verus lib version {}x specified in Cargo.toml. Please run `cargo v install-verus` to update the prebuilt verus.", verus_version, lib_version);
+        }
+    }
     // Run cargo build with additional arguments
     let mut cmd = Command::new("cargo");
     let cmd = cmd
@@ -113,7 +119,7 @@ impl VerusMetadata {
             rust_version: None,
         };
         ret.verus_path = ret.find_verus_dir();
-        ret.rust_version = Some(ret.set_rust_version());
+        ret.rust_version = ret.set_rust_version();
         ret
     }
 
@@ -125,10 +131,27 @@ impl VerusMetadata {
     }
 
     fn rust_version(&self) -> String {
-        self.rust_version.clone().unwrap()
+        self.rust_version.clone().unwrap_or(self.verus_version().1)
     }
 
-    fn set_rust_version(&self) -> String {
+    fn verus_version(&self) -> (String, String) {
+        let output = Command::new(self.verus())
+            .arg("--version")
+            .output()
+            .expect("Failed to execute verus to get version");
+        let version_str = String::from_utf8_lossy(&output.stdout);
+        let version_parts: Vec<&str> = version_str.split("Version: ").collect();
+        let version = version_parts[1].split_whitespace().next().unwrap();
+        let rust_version_parts: Vec<&str> = version_str.split("Toolchain: ").collect();
+        let rust_version = rust_version_parts[1].split("-").next().unwrap();
+        return (version.to_string(), rust_version.to_string());
+    }
+
+    fn set_rust_version(&self) -> Option<String> {
+        if self.use_prebuilt().is_some() {
+            // get version via `verus --version`
+            return None;
+        }
         let verus_rust_toolchain = self.verus_dir().join("rust-toolchain.toml");
 
         // Read the rust-toolchain.toml file
@@ -138,7 +161,7 @@ impl VerusMetadata {
         let mut toolconfig: toml::Value =
             toml::de::from_str::<toml::Value>(toolchain_content.as_str()).unwrap();
         let customized_version = env::var("VERUS_RUST_VERSION");
-        match customized_version {
+        let v = match customized_version {
             Ok(v) => {
                 *toolconfig
                     .get_mut("toolchain")
@@ -159,17 +182,30 @@ impl VerusMetadata {
                 .to_string()
                 .replace("\"", "")
                 .replace("'", ""),
-        }
+        };
+        Some(v)
     }
 
     fn verus(&self) -> PathBuf {
         let ret = env::var("VERUS").map_or(
-            self.verus_path
-                .clone()
-                .expect("need to init VerusMetadata")
-                .join("source/target-verus/release/verus"),
+            if self.use_prebuilt().is_some() {
+                // which verus path
+                let output = Command::new("which")
+                    .arg("verus")
+                    .output()
+                    .expect("Failed to execute which verus");
+                let verus_path =
+                    String::from_utf8(output.stdout).expect("Failed to parse curl output as UTF-8");
+                PathBuf::from(verus_path.trim())
+            } else {
+                self.verus_path
+                    .clone()
+                    .expect("need to init VerusMetadata")
+                    .join("source/target-verus/release/verus")
+            },
             PathBuf::from,
         );
+
         if !ret.exists() {
             panic!(
                 "Please run `cargo v install-verus` to build verus first at {:?}",
@@ -190,6 +226,39 @@ impl VerusMetadata {
             }
         }
         ret
+    }
+
+    fn use_prebuilt(&self) -> Option<String> {
+        let mut year_month_days = vec![];
+        for p in &self.meta.packages {
+            let pname = p.name.as_str();
+            if VERUS_CORE_LIBS.contains(&pname) {
+                for t in &p.targets {
+                    let builtin_path = PathBuf::from(t.src_path.as_str());
+                    let path_str = builtin_path.as_os_str().to_str().unwrap();
+                    if path_str.contains("index.crates.io") {
+                        let version_parts: Vec<&str> = path_str.split(pname).collect();
+                        // -0.0.0-year-month-date-
+                        let version = version_parts[1].split("/").nth(0).unwrap();
+                        let version_parts = version.split("-").collect::<Vec<&str>>();
+                        let year = version_parts[2];
+                        let month = version_parts[3];
+                        let day = version_parts[4][0..1].to_string();
+                        year_month_days.push((year.to_string(), month.to_string(), day));
+                    }
+                }
+            }
+        }
+        if year_month_days.is_empty() {
+            return None;
+        }
+        year_month_days.sort();
+        Some(
+            year_month_days
+                .last()
+                .map(|(y, m, d)| format!("0.{y}.{m}.{d}"))
+                .unwrap(),
+        )
     }
 
     fn find_verus_dir(&self) -> Option<PathBuf> {
@@ -220,32 +289,93 @@ impl VerusMetadata {
 
 fn install_verus(verus_meta: &VerusMetadata, install: bool) {
     // Construct the path to the dependency's source code
-    let verus_dir = verus_meta.verus_dir();
-
-    println!("Building verus...");
-
-    // Check if the directory exists
-    if verus_dir.exists() {
-        println!("{:#?} already exists.", verus_dir);
+    let (tmp_dir, verus_bin_dir) = if let Some(version) = verus_meta.use_prebuilt() {
+        let repo = "verus-lang/verus";
+        let os = std::env::consts::OS;
+        let arch = std::env::consts::ARCH;
+        let arch = match arch {
+            "x86_64" => "x86",
+            "aarch64" => "arm64",
+            "arm64" => "arm64",
+            _ => {
+                panic!("Prebuilt verus is not available for architecture: {}", arch);
+            }
+        };
+        let arch_os = format!("{arch}-{os}");
+        let verus_bin_dir = format!("verus-{}", arch_os);
+        let tmp_dir = format!("tmp-{}", version);
+        let verus_zip = format!("{}.zip", verus_bin_dir);
+        let output = Command::new("curl")
+            .args(&[
+                "-s",
+                &format!("https://api.github.com/repos/{}/releases", repo),
+                "-H",
+                "User-Agent: rust-curl-script",
+            ])
+            .output()
+            .expect("Failed to execute curl to get releases");
+        let body = String::from_utf8(output.stdout).expect("Failed to parse curl output as UTF-8");
+        let download_url = body
+            .lines()
+            .find(|line| {
+                line.contains(&version)
+                    && line.contains(&arch_os)
+                    && line.contains("browser_download_url")
+            })
+            .and_then(|line| {
+                // Extract the JSON value of tag_name
+                let start = line
+                    .find(": \"")
+                    .expect("Failed to find start of download URL")
+                    + 3;
+                let end = line[start..]
+                    .find('"')
+                    .expect("Failed to find end of download URL")
+                    + start;
+                Some(&line[start..end])
+            })
+            .expect(&format!("Release not found for {}", version));
+        println!("Downloading verus from {}", download_url);
+        Command::new("curl")
+            .args(&["-L", "-o", &verus_zip, &download_url])
+            .status()
+            .expect("Failed to execute curl to download verus");
+        Command::new("unzip")
+            .args(&[&verus_zip, "-d", &tmp_dir])
+            .status()
+            .expect("Failed to execute unzip to extract verus");
+        Command::new("rm")
+            .arg(&verus_zip)
+            .status()
+            .expect("Failed to remove verus zip file");
+        (Some(tmp_dir.clone()), PathBuf::from(&tmp_dir).join(&verus_bin_dir))
     } else {
-        panic!(
+        let verus_dir = verus_meta.verus_dir();
+
+        println!("Building verus...");
+
+        // Check if the directory exists
+        if verus_dir.exists() {
+            println!("{:#?} already exists.", verus_dir);
+        } else {
+            panic!(
             "{:#?} does not exist. Please put builtin in Cargo.toml or download verus to $VERUS_PATH",
             &verus_dir
         );
-    }
+        }
 
-    // Run additional commands in the verus directory
-    if !verus_dir.join("source/z3").exists() {
-        let status = Command::new("tools/get-z3.sh")
-            .current_dir(verus_dir.join("source"))
-            .status()
-            .expect("Failed to run get-z3.sh");
-        check_status(status);
-    }
+        // Run additional commands in the verus directory
+        if !verus_dir.join("source/z3").exists() {
+            let status = Command::new("tools/get-z3.sh")
+                .current_dir(verus_dir.join("source"))
+                .status()
+                .expect("Failed to run get-z3.sh");
+            check_status(status);
+        }
 
-    // Activate the environment and build
-    let env_path = std::env::var("PATH").unwrap();
-    let status = Command::new("bash")
+        // Activate the environment and build
+        let env_path = std::env::var("PATH").unwrap();
+        let status = Command::new("bash")
         .env_clear()
         .env("PATH", env_path)
         .arg("-c")
@@ -255,8 +385,11 @@ fn install_verus(verus_meta: &VerusMetadata, install: bool) {
         .current_dir(verus_dir.join("source"))
         .status()
         .expect("Failed to build verus");
-    check_status(status);
+        check_status(status);
+        (None, verus_dir.join("source/target-verus/release"))
+    };
     if install {
+        println!("Installing verus binaries...");
         let cargo_home_dir = env::var("CARGO_HOME").map_or(
             PathBuf::from(format!("{}/.cargo/", env::var("HOME").unwrap())),
             PathBuf::from,
@@ -269,13 +402,20 @@ fn install_verus(verus_meta: &VerusMetadata, install: bool) {
         }
         // Copy the built binaries to the install directory
         for binary in VERUS_BINS {
-            let src = verus_dir.join("source/target-verus/release").join(binary);
+            let src = verus_bin_dir.join(binary);
             let dest = install_dir.join(binary);
             if !src.exists() {
                 continue;
             }
-            println!("copy {:#?} to {:#?}", src, dest);
+            println!("install {:#?}", dest);
             fs::copy(&src, &dest).expect("Failed to copy binary");
+        }
+        if let Some(tmp_dir) = &tmp_dir {
+            // make executable
+            Command::new("rm")
+                .args(&["-rf", tmp_dir])
+                .status()
+                .expect("Failed to remove verus zip file");
         }
     }
 }
