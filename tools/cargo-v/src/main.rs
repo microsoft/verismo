@@ -348,7 +348,10 @@ fn install_verus(verus_meta: &VerusMetadata, install: bool) {
             .arg(&verus_zip)
             .status()
             .expect("Failed to remove verus zip file");
-        (Some(tmp_dir.clone()), PathBuf::from(&tmp_dir).join(&verus_bin_dir))
+        (
+            Some(tmp_dir.clone()),
+            PathBuf::from(&tmp_dir).join(&verus_bin_dir),
+        )
     } else {
         let verus_dir = verus_meta.verus_dir();
 
