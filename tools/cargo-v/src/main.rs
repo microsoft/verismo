@@ -272,7 +272,7 @@ fn install_verus(verus_meta: &VerusMetadata, install: bool) {
             let src = verus_dir.join("source/target-verus/release").join(binary);
             let dest = install_dir.join(binary);
             if !src.exists() {
-                panic!("{:#?} not exists", src);
+                continue;
             }
             println!("copy {:#?} to {:#?}", src, dest);
             fs::copy(&src, &dest).expect("Failed to copy binary");
