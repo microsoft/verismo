@@ -139,6 +139,13 @@ impl VerusMetadata {
             .arg("--version")
             .output()
             .expect("Failed to execute verus to get version");
+        if output.status.code().unwrap() != 0 {
+            panic!(
+                "Failed to get verus version({}): {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
         let version_str = String::from_utf8_lossy(&output.stdout);
         let version_parts: Vec<&str> = version_str.split("Version: ").collect();
         let version = version_parts[1].split_whitespace().next().unwrap();
