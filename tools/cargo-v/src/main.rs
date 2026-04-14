@@ -20,7 +20,7 @@ const VERUS_CORE_LIBS: [&str; 7] = [
     "verus_state_machines_macros",
 ];
 
-const VERUS_BINS: [&str; 12] = [
+const VERUS_BINS: [&str; 13] = [
     "verus",
     "rust_verify",
     "z3",
@@ -33,6 +33,7 @@ const VERUS_BINS: [&str; 12] = [
     "libstate_machines_macros.so",
     "libbuiltin_macros.so",
     "libbuiltin.rlib",
+    "cargo-verus",
 ];
 
 fn main() {
