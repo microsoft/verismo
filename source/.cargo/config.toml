@@ -2,10 +2,17 @@
 build-std-features = ["compiler-builtins-mem"]
 build-std = ["core","alloc", "compiler_builtins"]
 unstable-options = true
+json-target-spec = true
 
 [build]
 target = "target.json"
 incremental = true
+rustflags = ["-Zunstable-options"]
+
+[env]
+RUSTC_BOOTSTRAP = { value = "1", force = true }
+CARGO_UNSTABLE_JSON_TARGET_SPEC = { value = "true", force = true }
+CARGO_UNSTABLE_UNSTABLE_OPTIONS = { value = "true", force = true }
 
 [profile.dev]
 incremental = true

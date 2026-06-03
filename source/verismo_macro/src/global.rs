@@ -20,8 +20,8 @@ pub fn parse_global(
 ) -> TokenStream {
     let input = parse_macro_input!(item as syn_verus::Item);
     let line = input.span().unwrap().start().line() as u64;
-    let file = input.span().unwrap().source_file().path();
-    let file = file.as_os_str().to_str().unwrap();
+    let file = input.span().unwrap().file();
+    let file = file.as_str();
     let fileid = string_to_u64(file);
     let unique_id = fileid / 0x10000 * 0x10000 + line;
     let specmem = quote! {crate::arch::addr::SpecMem<crate::arch::addr::GuestVir>};
