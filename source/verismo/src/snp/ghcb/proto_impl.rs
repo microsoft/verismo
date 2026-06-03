@@ -246,7 +246,7 @@ pub fn ghcb_change_page_state_via_pg_internal(
             ghcbpage_perm@.only_val_updated(old_ghcbpage_perm@),
             cs.inv(),
             cs.only_lock_reg_coremode_updated(oldcs, set![], set![]),
-            page_perms === old(page_perms),
+            *page_perms === *old(page_perms),
     {
         let mut ghcb = VBox::<GhcbPage>::from_raw(ghcb_ptr.to_usize(), Tracked(ghcbpage_perm));
         ghcb.box_update((GhcbSetSwScratchFn, scratch_paddr));

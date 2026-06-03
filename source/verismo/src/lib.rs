@@ -1,4 +1,6 @@
 #![no_std] // don't link the Rust standard library
+#![verifier::deprecated_postcondition_mut_ref_style(true)]
+#![allow(macro_expanded_macro_exports_accessed_by_absolute_paths)]
 #![allow(unused_variables)]
 #![allow(unused_imports)]
 #![allow(dead_code)]
@@ -16,7 +18,7 @@
 extern crate alloc;
 
 #[macro_use]
-mod tspec;
+pub mod tspec;
 #[macro_use]
 mod arch;
 mod primitives_e;

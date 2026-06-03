@@ -425,7 +425,7 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
             forall|k: int| 0 <= k < ret.0@.len() ==> cond_fn.ensures((ret.0@[k].ptr,), true),
             is_subseq_via_index(ret.0@, old(self)@, ret.1@),
             is_subseq_via_index(self@, old(self)@, ret.2@),
-            (ret.0@.len() == 0) ==> old(self) === self,
+            (ret.0@.len() == 0) ==> *old(self) === *self,
             ret.0@.len() == 1 ==> self@ =~~= old(self)@.remove(ret.1@[0]),
             ret.0.inv(),
     {
@@ -538,8 +538,8 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
                             old(self)@,
                             keep,
                             removeditems,
-                            &mut keep_idx,
-                            &mut removed_idx,
+                            keep_idx,
+                            removed_idx,
                             i,
                         );
                         if removed_idx.len() == 1 {

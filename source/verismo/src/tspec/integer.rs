@@ -48,7 +48,7 @@ impl<T1: IntValue> VSpecSub<T1, int> for T1 {
 }
 
 impl<T1: IntValue> VSpecEuclideanDiv<int, T1> for T1 {
-    open spec fn spec_euclidean_div(self, rhs: int) -> T1 {
+    open spec fn spec_euclidean_or_real_div(self, rhs: int) -> T1 {
         T1::from_int(self.as_int() / rhs)
     }
 }

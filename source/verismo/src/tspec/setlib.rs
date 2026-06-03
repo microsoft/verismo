@@ -333,7 +333,7 @@ pub proof fn lemma_setop_len<T1, T2, T3>(
     ret
 }
 
-pub proof fn lemma_seq_add_subrange<T>(s1: Seq<T>, s2: Seq<T>)
+pub axiom fn lemma_seq_add_subrange<T>(s1: Seq<T>, s2: Seq<T>)
     ensures
         (s1 + s2).subrange(s1.len() as int, (s1 + s2).len() as int) =~~= s2,
 ;

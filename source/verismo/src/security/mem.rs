@@ -633,7 +633,7 @@ pub fn osmem_check_and_get(osmem: &mut Vec<OSMemEntry>, ppage: usize, osperm: OS
     requires
         osmem_wf(old(osmem)@),
     ensures
-        ret.is_None() ==> old(osmem) === osmem,
+        ret.is_None() ==> *old(osmem) === *osmem,
         ret.is_Some() ==> osmem@ === old(osmem)@.remove(ret.get_Some_0().0 as int)
             && ret.get_Some_0().1 === old(osmem)@[ret.get_Some_0().0 as int] && 0
             <= ret.get_Some_0().0 < old(osmem)@.len(),

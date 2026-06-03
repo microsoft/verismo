@@ -236,7 +236,7 @@ pub fn ghcb_msr_proto(val: u64, Tracked(snpcore): Tracked<&mut SnpCore>) -> (ret
 } // verus!
 verus! {
 
-fn vc_terminate_s(reason_code: u64, Tracked(snpcore): Tracked<&mut SnpCore>) -> (ret: !)
+fn vc_terminate_s(reason_code: u64, Tracked(snpcore): Tracked<&mut SnpCore>) -> !
     requires
         (*old(snpcore)).inv_reg_cpu(),
         reason_code.is_constant(),
@@ -249,7 +249,7 @@ fn vc_terminate_s(reason_code: u64, Tracked(snpcore): Tracked<&mut SnpCore>) -> 
     }
 }
 
-pub fn vc_terminate(reason_code: u64_t, Tracked(snpcore): Tracked<&mut SnpCore>) -> (ret: !)
+pub fn vc_terminate(reason_code: u64_t, Tracked(snpcore): Tracked<&mut SnpCore>) -> !
     requires
         (*old(snpcore)).inv_reg_cpu(),
     ensures
@@ -262,7 +262,7 @@ pub fn vc_terminate(reason_code: u64_t, Tracked(snpcore): Tracked<&mut SnpCore>)
 pub fn early_vc_terminate_debug(
     reason_code: u64_t,
     Tracked(cc): Tracked<&mut SnpCoreConsole>,
-) -> (ret: !)
+) -> !
     requires
         old(cc).wf(),
     ensures
@@ -271,8 +271,7 @@ pub fn early_vc_terminate_debug(
     vc_terminate_s(reason_code, Tracked(&mut cc.snpcore))
 }
 
-pub fn vc_terminate_debug(reason_code: u64_t, Tracked(cs): Tracked<&mut SnpCoreSharedMem>) -> (ret:
-    !)
+pub fn vc_terminate_debug(reason_code: u64_t, Tracked(cs): Tracked<&mut SnpCoreSharedMem>) -> !
     requires
         old(cs).inv(),
     ensures

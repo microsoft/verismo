@@ -31,14 +31,14 @@ fn num_to_char(n: u8) -> (ret: u8)
 }
 
 #[verifier(external_body)]
-fn bytes_to_str<const N: usize_t, 'a>(arr: &'a Array<u8_t, N>) -> (ret: StrSlice<'a>)
+fn bytes_to_str<const N: usize_t, 'a>(arr: &'a Array<u8_t, N>) -> (ret: &'a str)
     ensures
         ret.is_ascii(),
         ret@.len() <= arr@.len(),
         forall|i| 0 <= i < ret@.len() ==> arr@[i] == ret@[i] as u8,
 {
     let slice = arr.array.as_slice();
-    StrSlice::from_rust_str(core::str::from_utf8(slice).unwrap())
+    core::str::from_utf8(slice).unwrap()
 }
 
 } // verus!
@@ -162,7 +162,7 @@ fn str2u64(s: &StrSlice, start: usize_t, size: usize_t) -> (ret: u64_t)
             s.is_ascii(),
             s@.len() < u64::MAX,
     {
-        let c: u64 = s.get_ascii(i) as u64;
+        let c: u64 = s.as_bytes()[i] as u64;
         let offset = (i - start) as u64;
         ret = ret | (c << (offset * 8));
         i = i + 1;
@@ -215,7 +215,7 @@ fn ghcb_prints_with_lock2<'a>(
         print_ensures_snp_c(*old(snpcore), (console), *snpcore, ret.1@),
 {
     let mut index: usize = 0;
-    let n = s.unicode_len();
+    let n = s.len();
     let ghost prevcore = *snpcore;
     let tracked perm = snpcore.regs.tracked_borrow(GHCB_REGID());
     fence();
@@ -337,7 +337,7 @@ fn ghcb_print_bytes_with_lock2<'a>(
 } // verus!
 verus! {
 
-impl<'a> VPrint for StrSlice<'a> {
+impl<'a> VPrint for &'a str {
     open spec fn early_print_requires(&self) -> bool {
         &&& self@.len() < u64::MAX - 64
         &&& self.is_ascii()

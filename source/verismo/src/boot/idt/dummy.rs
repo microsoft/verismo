@@ -92,7 +92,7 @@ impl IDTEntry {
     }
     }
 
-    verus! {
+    verus_impl! {
     pub fn from_addr_selector(addr: u64, gdt_selector: u16) -> (ret: Self)
     requires
         gdt_selector.is_constant(),

@@ -1,4 +1,5 @@
 #![no_std] // don't link the Rust standard library
+#![verifier::deprecated_postcondition_mut_ref_style(true)]
 #![no_main] // disable all Rust-level entry points
 #![feature(panic_info_message)]
 #![allow(unused)]
@@ -12,6 +13,7 @@ use builtin::*;
 use builtin_macros::*;
 use verismo::debug::VEarlyPrintAtLevel;
 use verismo::snp::ghcb::*;
+use verismo::tspec::new_strlit;
 use vstd::prelude::*;
 use vstd::string::*;
 
@@ -26,13 +28,9 @@ fn panic(info: &PanicInfo) -> ! {
             .err(Tracked::assume_new());
     }
 
-    match info.message() {
-        Some(msg) => {
-            if msg.as_str().is_some() {
-                StrSlice::from_rust_str(msg.as_str().unwrap()).err(Tracked::assume_new());
-            }
-        }
-        None => todo!(),
+    let msg = info.message();
+    if msg.as_str().is_some() {
+        msg.as_str().unwrap().err(Tracked::assume_new());
     }
 
     vc_terminate(SM_TERM_UNSUPPORTED, Tracked::assume_new());

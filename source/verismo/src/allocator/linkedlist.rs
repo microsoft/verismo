@@ -322,7 +322,8 @@ impl LinkedListAllocator {
         let Tracked(nodep) = self.free_list.remove(prev_ptr, Ghost(i));
         let tracked mut perm;
         proof {
-            perm = map_lib::tracked_seq_remove(self.perms.borrow_mut(), i as nat, self@.len() + 1);
+            let ghost len = self@.len();
+            perm = map_lib::tracked_seq_remove(self.perms.borrow_mut(), i as nat, len + 1);
             let tracked nodep = nodep.trusted_into_raw();
             perm = perm.trusted_join(nodep);
             assert forall|k: nat| k < self@.len() implies self@.wf_perm(k) by {

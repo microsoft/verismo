@@ -11,7 +11,7 @@ pub use align_s::*;
 #[macro_use]
 pub use bits_p::*;
 pub use cond_bound::*;
-pub use integer::*;
+pub use self::integer::*;
 pub use minmax_s::*;
 pub use nonlinear::*;
 pub use pow_p::*;

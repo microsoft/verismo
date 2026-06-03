@@ -21,7 +21,7 @@ mod mem;
 mod monitor;
 pub mod pcr;
 pub mod secret;
-pub use mem::*;
+pub use self::mem::*;
 pub use monitor::*;
 pub use secret::*;
 

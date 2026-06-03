@@ -44,7 +44,7 @@ pub open spec fn fn_vspec_mul<T1: VSpecMul<T2, T3>, T2, T3>() -> spec_fn(T1, T2)
 }
 
 pub open spec fn fn_vspec_div<T1: VSpecEuclideanDiv<T2, T3>, T2, T3>() -> spec_fn(T1, T2) -> T3 {
-    |v1: T1, v2: T2| VSpecEuclideanDiv::<T2, T3>::spec_euclidean_div(v1, v2)
+    |v1: T1, v2: T2| VSpecEuclideanDiv::<T2, T3>::spec_euclidean_or_real_div(v1, v2)
 }
 
 pub open spec fn fn_vspec_rem<T1: VSpecEuclideanMod<T2, T3>, T2, T3>() -> spec_fn(T1, T2) -> T3 {
@@ -55,7 +55,7 @@ pub open spec fn fn_vspec_euclidean_div<T1: VSpecEuclideanDiv<T2, T3>, T2, T3>()
     T1,
     T2,
 ) -> T3 {
-    |v1: T1, v2: T2| VSpecEuclideanDiv::<T2, T3>::spec_euclidean_div(v1, v2)
+    |v1: T1, v2: T2| VSpecEuclideanDiv::<T2, T3>::spec_euclidean_or_real_div(v1, v2)
 }
 
 pub open spec fn fn_vspec_euclidean_mod<T1: VSpecEuclideanMod::<T2, T3>, T2, T3>() -> spec_fn(
@@ -141,7 +141,7 @@ macro_rules! def_builtin_bop_spec_fns_sized {
             ],
             $t1, $t1, int}
         def_builtin_spec_fns!{[
-                [spec_euclidean_div, /], [spec_euclidean_mod, %],
+                [spec_euclidean_or_real_div, /], [spec_euclidean_mod, %],
                 [spec_div, /], [spec_rem, %]
                 ],
                 $t1, $t1, $t1}
@@ -152,7 +152,7 @@ macro_rules! def_builtin_bop_spec_fns_sized {
 macro_rules! def_builtin_bop_spec_fns_nat {
     () => {
         def_builtin_spec_fns! {[
-        [spec_add, +], [spec_mul, *], [spec_euclidean_div, /], [spec_euclidean_mod, %],
+        [spec_add, +], [spec_mul, *], [spec_euclidean_or_real_div, /], [spec_euclidean_mod, %],
         [spec_div, /], [spec_rem, %]
         ],
         nat, nat, nat}

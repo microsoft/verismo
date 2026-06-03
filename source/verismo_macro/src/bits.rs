@@ -65,7 +65,7 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         let set_mask: u64 = field_max_val << bit_start;
         fields_stream = quote! {
             #fields_stream
-            verus!{
+            verus_impl!{
             #[inline(always)]
             pub const fn #setter(&self, val: #fty) -> (ret: Self)
             requires
@@ -86,7 +86,7 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
                 ret
             }}
 
-            verus!{
+            verus_impl!{
             pub proof fn #bound_getter(&self) -> (ret: #fty)
             ensures
                 ret == self.#spec_getter(),
@@ -110,7 +110,7 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
             }
             }
 
-            verus!{
+            verus_impl!{
             pub open spec fn #spec_getter(&self) -> #fty {
                 let mask = #mask as #fty;
                 (self.value as #fty >> (#bit_start as #fty)) & mask
@@ -186,7 +186,7 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         verus!{
         impl #bitstruct {
-            verus! {
+            verus_impl! {
                 pub open spec fn inv(&self) -> bool {
                     0 <= (self.value as int) <= (#max_val as int)
                 }
@@ -199,7 +199,7 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
                 {}
             }
 
-            verus! {
+            verus_impl! {
                 pub const fn new(val: #valuetype) -> (ret: Self)
                 ensures
                     builtin::equal(ret, Self::spec_new(val)),
@@ -235,12 +235,12 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
             }
 
             #fields_stream
-            verus!{
+            verus_impl!{
             pub open spec fn view(&self) -> #specname {
                 #specfields
             }
             }
-            verus!{
+            verus_impl!{
             pub const fn value(&self) -> (ret: #valuetype)
             ensures
                 equal(ret, self.value),

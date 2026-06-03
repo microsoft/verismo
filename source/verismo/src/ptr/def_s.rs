@@ -27,10 +27,6 @@ impl<T: IsConstant + WellFormed + SpecSize> SnpPPtrWithPerm<T> {
     }
 }
 
-impl<V: IsConstant + WellFormed + SpecSize> core::marker::Copy for SnpPPtr<V> {
-
-}
-
 impl<V: IsConstant + WellFormed + SpecSize> Clone for SnpPPtr<V> {
     #[verifier(external_body)]
     fn clone(&self) -> (ret: Self)

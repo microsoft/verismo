@@ -7,7 +7,7 @@ verus! {
 
 // DO not use secret as index.
 impl<T, const N: IndexType> Array<T, N> {
-    verus! {
+    verus_impl! {
         #[inline(always)]
         pub fn const_len() -> (ret: usize_t)
         ensures
@@ -36,7 +36,7 @@ impl<T, const N: IndexType> Array<T, N> {
         }
     }
 
-    verus! {
+    verus_impl! {
         pub fn index2(&self, index: usize) -> (ret: &T)
         requires
             index < self@.len(),
@@ -49,7 +49,7 @@ impl<T, const N: IndexType> Array<T, N> {
 }
 
 impl<T, const N: IndexType> Array<T, N> {
-    verus! {
+    verus_impl! {
         pub fn update(&mut self, index: usize, elem: T) -> (ret: T)
         requires
             index < old(self).view().len(),
@@ -74,7 +74,7 @@ impl<T, const N: IndexType> Array<T, N> {
 }
 
 impl<T, const N: IndexType> Array<T, N> {
-    verus! {
+    verus_impl! {
         pub fn set(&mut self, index: usize_t, elem: T)
         requires
             index < old(self).view().len(),
@@ -86,7 +86,7 @@ impl<T, const N: IndexType> Array<T, N> {
         }
     }
 
-    verus! {
+    verus_impl! {
         pub fn set2(&mut self, index: usize, elem: T)
         requires
             index < old(self).view().len(),

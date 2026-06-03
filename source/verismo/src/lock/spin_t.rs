@@ -85,7 +85,7 @@ impl SpinLock {
             old(lockperm)@.is_unlocked(core@.cpu, self.id(), old(lockperm)@.points_to.range()),
         ensures
             ret.is_Some() ==> self.ensures_lock(old(lockperm)@, lockperm@, ret.get_Some_0()@@),
-            ret.is_None() ==> lockperm === old(lockperm),
+            ret.is_None() ==> *lockperm === *old(lockperm),
     {
         if self.unverified_trylock() {
             Some(Tracked::assume_new())

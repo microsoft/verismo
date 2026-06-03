@@ -49,7 +49,18 @@ pub use vstd::prelude::*;
 pub use vstd::slice::SliceAdditionalSpecFns;
 pub use vstd::std_specs::option::OptionAdditionalFns;
 pub use vstd::std_specs::result::ResultAdditionalSpecFns;
-pub use vstd::string::{StrSlice, *};
+pub use vstd::string::*;
+
+pub type StrSlice<'a> = &'a str;
+
+verus! {
+#[inline(always)]
+pub const fn new_strlit<'a>(s: &'a str) -> (ret: &'a str)
+    ensures ret == s,
+{
+    s
+}
+}
 pub use vstd::view::*;
 pub use wellformed::*;
 

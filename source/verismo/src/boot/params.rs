@@ -183,16 +183,16 @@ pub struct BootParams {
     pub acpi_rsdp_addr: u64, // 0x070
     pub _pad1: [u8; 0x50],
     pub _ext_cmd_line_ptr: u32, // 0xc8
-    pub _pad2_0: Array<u8, { 0x13c - 0xc8 - 4 }>,
+    pub _pad2_0: Array<u8, 112>, // 0x13c - 0xc8 - 4
     pub cc_blob_addr: u32, // 0x13c
-    pub _pad2_1: Array<u8, { 0x1e8 - 0x13c - 4 }>,
+    pub _pad2_1: Array<u8, 168>, // 0x1e8 - 0x13c - 4
     #[def_offset]
     pub e820_entries: u8, // 0x1e8
-    pub reserved_4: Array<u8, { 0x1f1 - 0x1e8 - 1 }>,
+    pub reserved_4: Array<u8, 8>, // 0x1f1 - 0x1e8 - 1
     pub hdr: SetupHeader, // 0x1f1
-    pub reserved_5: Array<u8, { 0x2d0 - 0x1f1 - 123 }>,
+    pub reserved_5: Array<u8, 100>, // 0x2d0 - 0x1f1 - 123
     #[def_offset]
     pub e820: E820Table, // 0x2d0
-    pub reserved_6: Array<u8, { 4096 - 0xcd0 }>,
+    pub reserved_6: Array<u8, 816>, // 4096 - 0xcd0
 }
 }

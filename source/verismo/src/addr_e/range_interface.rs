@@ -2,8 +2,8 @@ use super::*;
 
 verismo_simple! {
 
-pub open spec fn spec_valid_range(real: (usize_s, usize_s), max: usize_s) -> (usize_s, usize_s) {
-    let (start, size) = real;
+pub open spec fn spec_valid_range(r: (usize_s, usize_s), max: usize_s) -> (usize_s, usize_s) {
+    let (start, size) = r;
     let valid_start = if start < max {
         start
     } else {

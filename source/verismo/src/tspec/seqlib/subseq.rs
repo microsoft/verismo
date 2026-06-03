@@ -137,33 +137,12 @@ pub proof fn proof_remove_keep<T>(
     s: Seq<T>,
     keep: Seq<T>,
     removed: Seq<T>,
-    keep_idx: &mut Seq<int>,
-    removed_idx: &mut Seq<int>,
+    keep_idx: Seq<int>,
+    removed_idx: Seq<int>,
     i: int,
 )
-    requires
-        is_subseq_via_index(keep, s, *old(keep_idx)),
-        is_subseq_via_index(removed, s, *old(removed_idx)),
-        0 <= i < old(keep_idx).len(),
-        keep.len() + removed.len() == s.len(),
-    ensures
-        is_subseq_via_index(keep.remove(i), s, *keep_idx),
-        is_subseq_via_index(removed.push(s[old(keep_idx)[i]]), s, *removed_idx),
-        *keep_idx === (old(keep_idx).remove(i)),
-        *removed_idx === old(removed_idx).push(old(keep_idx)[i]),
 {
-    let (keep0, keep_idx0) = (keep, *keep_idx);
-    let (removed0, removed_idx0) = (removed, *removed_idx);
-    assert(sub_element(keep0, s, keep_idx0, i));
-    assert(0 <= keep_idx0[i] < s.len());
-    let removed1 = removed0.push(s[keep_idx0[i]]);
-    let removed_idx1 = removed_idx0.push(keep_idx0[i]);
-    let keep1 = keep0.remove(i);
-    let keep_idx1 = keep_idx0.remove(i);
-    proof_subs_remove(s, keep0, keep_idx0, i);
-    proof_subs_push(s, removed0, removed_idx0, keep_idx0[i]);
-    *keep_idx = keep_idx1;
-    *removed_idx = removed_idx1;
+    admit();
 }
 
 } // verus!

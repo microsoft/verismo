@@ -34,7 +34,7 @@ pub struct BootInfo {
     pub cmdline: [u8; 256],
     #[def_offset]
     pub ccblob: CCBlobSevInfo, // 40
-    pub reserved: [u8; {4096 - 48 - 256 - 256}], //4096 - 40 - 256 - 256 (32 * 8)
+    pub reserved: [u8; 3536], // 4096 - 48 - 256 - 256 (32 * 8)
 }
 
 #[repr(C, align(1))]

@@ -579,11 +579,6 @@ macro_rules! impl_exe_bops_for_stype {
                 type Output = Self;
                 #[inline(always)]
                 exec fn $fname(self, other: Self) -> (ret: Self)
-                requires
-                    self.wf_value(),
-                    other.wf_value(),
-                    (self@.val $op other@.val) as $baset == self@.val $op other@.val,
-                    other@.val $check $val
                 ensures
                     ret@ === (self@ $op other@).$use_cast(),
                     ret@.val == self@.val $op other@.val,
@@ -600,11 +595,6 @@ macro_rules! impl_exe_bops_for_stype {
 
             impl<M> core::ops::[<$trt Assign>]<SecType<$baset, M>> for SecType<$baset, M> {
                 fn [<$fname _assign>](&mut self, other: SecType<$baset, M>)
-                requires
-                    old(self).wf_value(),
-                    other.wf_value(),
-                    (old(self)@.val $op other@.val) as $baset == old(self)@.val $op other@.val,
-                    other@.val $check $val
                 ensures
                     (old(self) $op other)@.$use_cast() === self@,
                     (old(self).is_constant() && other.is_constant()) ==> self.is_constant(),
@@ -618,11 +608,6 @@ macro_rules! impl_exe_bops_for_stype {
                 type Output = Self;
                 #[inline(always)]
                 exec fn $fname(self, other: SecType<$baset, M>) -> (ret: Self)
-                requires
-                    other.wf_value(),
-                    other.is_constant(),
-                    (self $op other@.val) as $baset == self $op other@.val,
-                    other@.val $check $val
                 ensures
                     ret == self $op other@.val
                 {
@@ -634,10 +619,6 @@ macro_rules! impl_exe_bops_for_stype {
                 type Output = Self;
                 #[inline(always)]
                 exec fn $fname(self, other: $baset) -> (ret: Self)
-                requires
-                    self.wf_value(),
-                    (self@.val $op other) as $baset == self@.val $op other,
-                    other $check $val
                 ensures
                     (self@ $op SpecSecType::constant(other)).$use_cast() === ret@,
                     (self.is_constant()) ==> ret.is_constant(),
@@ -719,12 +700,9 @@ macro_rules! impl_exe_cast_to_sectype {
             // Required method
             //#[verifier(external_body)]
             fn into(self) -> (ret: $baset)
-            requires
-                self.wf_value(),
-                self.is_constant(),
             ensures
                 ret == self@.val,
-                ret === self.vspec_cast_to(),
+                ret === <Self as crate::tspec::cast::VTypeCast<$baset>>::vspec_cast_to(self),
             {
                 self.val as $baset
             }
@@ -733,11 +711,9 @@ macro_rules! impl_exe_cast_to_sectype {
             // Required method
             #[verifier(external_body)]
             fn into(self) -> (ret: SecType<$out, M>)
-            requires
-                self.wf_value(),
             ensures
-                ret === self.vspec_cast_to(),
-                ret@ === self@.vspec_cast_to(),
+                ret === <Self as crate::tspec::cast::VTypeCast<SecType<$out, M>>>::vspec_cast_to(self),
+                ret@ === <SpecSecType<$baset, M> as crate::tspec::cast::VTypeCast<SpecSecType<$out, M>>>::vspec_cast_to(self@),
                 ret.wf_value(),
                 self.is_constant() ==> ret.is_constant()
             {
@@ -751,11 +727,9 @@ macro_rules! impl_exe_cast_to_sectype {
         impl<M> core::convert::Into<$out> for SecType<$baset, M> {
             // Required method
             fn into(self) -> (ret: $out)
-            requires
-                self.wf_value(),
-                self.is_constant(),
             ensures
                 ret == self@.val as $out,
+                ret === <Self as crate::tspec::cast::VTypeCast<$out>>::vspec_cast_to(self),
             {
                 self.val as $out
             }
@@ -764,7 +738,7 @@ macro_rules! impl_exe_cast_to_sectype {
             // Required method
             fn into(self) -> (ret: SecType<$out, M>)
             ensures
-                ret === self.vspec_cast_to(),
+                ret === <$baset as crate::tspec::cast::VTypeCast<SecType<$out, M>>>::vspec_cast_to(self),
                 ret@ == SpecSecType::<$out, M>::constant(self as $out),
                 ret.is_constant(),
             {
@@ -779,10 +753,8 @@ macro_rules! impl_exe_cast_to_sectype {
     impl<M> core::convert::Into<SecType<$baset, M>> for $baset {
         // Required method
         fn into(self) -> (ret: SecType<$baset, M>)
-        requires
-            self.wf()
         ensures
-            ret === self.vspec_cast_to(),
+            ret === <$baset as crate::tspec::cast::VTypeCast<SecType<$baset, M>>>::vspec_cast_to(self),
             ret@ === SpecSecType::<$baset, M>::constant(self),
             ret.is_constant(),
         {
@@ -932,7 +904,7 @@ macro_rules! impl_spec_ops_for_stype {
         impl_binary_ops_trait!(SpecBitOr, $baset, $baset, $baset, spec_bitor);
         impl_binary_ops_trait!(SpecBitAnd, $baset, $baset, $baset, spec_bitand);
         impl_binary_ops_trait!(SpecBitXor, $baset, $baset, $baset, spec_bitxor);
-        impl_binary_ops_trait!(SpecEuclideanDiv, $baset, $baset, $baset, spec_euclidean_div);
+        impl_binary_ops_trait!(SpecEuclideanDiv, $baset, $baset, $baset, spec_euclidean_or_real_div);
         impl_binary_ops_trait!(SpecEuclideanMod, $baset, $baset, $baset, spec_euclidean_mod);
         impl_binary_ops_trait!(SpecShl, $baset, $baset, $baset, spec_shl);
         impl_binary_ops_trait!(SpecShr, $baset, $baset, $baset, spec_shr);
@@ -962,7 +934,7 @@ macro_rules! impl_ops_for_snat {
         impl_binary_ops_trait!(SpecAdd, $baset, $baset, nat, spec_add);
         impl_binary_ops_trait!(SpecSub, $baset, $baset, int, spec_sub);
         impl_binary_ops_trait!(SpecMul, $baset, $baset, nat, spec_mul);
-        impl_binary_ops_trait!(SpecEuclideanDiv, $baset, $baset, $baset, spec_euclidean_div);
+        impl_binary_ops_trait!(SpecEuclideanDiv, $baset, $baset, $baset, spec_euclidean_or_real_div);
         impl_binary_ops_trait!(SpecEuclideanMod, $baset, $baset, $baset, spec_euclidean_mod);
         )*
     }
@@ -979,7 +951,7 @@ macro_rules! impl_ops_for_sint {
         impl_binary_ops_trait!(SpecAdd, $baset, $baset, int, spec_add);
         impl_binary_ops_trait!(SpecSub, $baset, $baset, int, spec_sub);
         impl_binary_ops_trait!(SpecMul, $baset, $baset, int, spec_mul);
-        impl_binary_ops_trait!(SpecEuclideanDiv, $baset, $baset, $baset, spec_euclidean_div);
+        impl_binary_ops_trait!(SpecEuclideanDiv, $baset, $baset, $baset, spec_euclidean_or_real_div);
         impl_binary_ops_trait!(SpecEuclideanMod, $baset, $baset, $baset, spec_euclidean_mod);
         )*
     }

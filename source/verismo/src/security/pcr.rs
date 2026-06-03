@@ -17,7 +17,7 @@ verismo_simple! {
 pub struct ExtendPCRReq {
     #[def_offset]
     pub val: Array<u8, 64>,
-    pub reserved: [u8; {0x1000 - 64}],
+    pub reserved: [u8; 4032], // 0x1000 - 64
 }
 }
 

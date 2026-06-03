@@ -1200,8 +1200,22 @@ impl VisitMut for Visitor {
                     *expr = if self.inside_ghost > 0 {
                         quote_verbatim!(span, attrs => VTypeCast::<#ty>::vspec_cast_to(#src))
                     } else if !self.inside_external {
-                        self.replace_stype(&mut ty, true);
-                        quote_verbatim!(span, attrs => core::convert::Into::<#ty>::into(#src))
+                        // Keep primitive narrowing/widening casts as `as` to avoid
+                        // requiring nonexistent `Into<u8> for u64` impls. Only rewrite
+                        // when target is a non-primitive (so we route through the
+                        // project's Into impls for SecType, etc.).
+                        let ty_str = quote::ToTokens::to_token_stream(&*ty).to_string();
+                        let ty_trim = ty_str.replace(' ', "");
+                        let is_primitive = matches!(ty_trim.as_str(),
+                            "u8" | "u16" | "u32" | "u64" | "u128" | "usize"
+                            | "i8" | "i16" | "i32" | "i64" | "i128" | "isize"
+                            | "bool" | "char" | "f32" | "f64");
+                        if is_primitive {
+                            Expr::Cast(cast)
+                        } else {
+                            self.replace_stype(&mut ty, true);
+                            quote_verbatim!(span, attrs => core::convert::Into::<#ty>::into(#src))
+                        }
                     } else {
                         Expr::Cast(cast)
                     };
@@ -1324,7 +1338,7 @@ impl VisitMut for Visitor {
                         BinOp::Div(..) => {
                             let left = quote_spanned! { left.span() => (#left) };
                             if use_spec_traits {
-                                *expr = quote_verbatim!(span, attrs => #left.spec_euclidean_div(#right));
+                                *expr = quote_verbatim!(span, attrs => #left.spec_euclidean_or_real_div(#right));
                             } else if !is_inside_ghost {
                                 *expr = quote_verbatim!(span, attrs => #left.div(#right));
                             }
