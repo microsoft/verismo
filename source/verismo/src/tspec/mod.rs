@@ -75,7 +75,6 @@ pub open spec fn spec_unused<T>() -> T {
 } // verus!
 verus! {
 
-#[is_variant]
 pub enum ResultOrErr<RetValue, ErrorID> {
     Ok(RetValue),
     Error(ErrorID),
@@ -100,7 +99,6 @@ impl<RetValue, ErrorID> ResultOrErr<RetValue, ErrorID> {
 } // verus!
 verus! {
 
-#[is_variant]
 pub enum ResultWithErr<RetValue, ErrorID> {
     Ok(RetValue),
     Error(RetValue, ErrorID),

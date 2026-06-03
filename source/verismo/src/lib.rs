@@ -1,6 +1,8 @@
 #![no_std] // don't link the Rust standard library
 #![verifier::deprecated_postcondition_mut_ref_style(true)]
 #![allow(macro_expanded_macro_exports_accessed_by_absolute_paths)]
+#![allow(unexpected_cfgs)]
+#![allow(improper_ctypes_definitions)]
 #![allow(unused_variables)]
 #![allow(unused_imports)]
 #![allow(dead_code)]
@@ -12,7 +14,6 @@
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 #![feature(never_type)]
-#![feature(new_uninit)]
 #![feature(core_intrinsics)]
 
 extern crate alloc;

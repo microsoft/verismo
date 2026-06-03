@@ -15,7 +15,6 @@ pub struct SecType<T, M> {
     view: Ghost<SpecSecType<T, M>>,
 }
 
-#[is_variant]
 pub enum DataLabel {
     Symbol,
     Unknown,
@@ -93,7 +92,7 @@ impl<T: core::marker::Copy, M> core::marker::Copy for SecType<T, M> {
 
 impl<T, M> SecType<T, M> {
     /// Iff valset is full or the data is a trusted random val.
-    pub spec fn spec_new(val: SpecSecType<T, M>) -> Self;
+    pub uninterp spec fn spec_new(val: SpecSecType<T, M>) -> Self;
 
     pub open spec fn call_self(self) -> Self {
         self
@@ -109,7 +108,7 @@ impl<T, M> SecType<T, M> {
     #[verifier(external_body)]
     pub broadcast proof fn axiom_ext_equal(val: SecType<T, M>, val2: SecType<T, M>)
         ensures
-            (val@ === val2@) == (val === val2),
+            (#[trigger] val@ === #[trigger] val2@) == (val === val2),
     {
     }
 
@@ -117,7 +116,7 @@ impl<T, M> SecType<T, M> {
     #[verifier(external_body)]
     pub exec fn upgrade_secret(&mut self, Ghost(vmpl): Ghost<nat>)
         requires
-            old(self)@.valsets[vmpl] =~~= Set::full() || old(self)@.labels[vmpl].is_TrustedRandom(),
+            old(self)@.valsets[vmpl] =~~= Set::full() || old(self)@.labels[vmpl] is TrustedRandom,
         ensures
             self@ == old(self)@.spec_set_labels(old(self)@.labels.insert(vmpl, DataLabel::Secret)),
     {
@@ -145,18 +144,18 @@ impl<T, M> SecType<T, M> {
     pub exec fn declassify(
         &mut self,
     )/*requires
-            !old(self)@.labels[1].is_Secret(),
-            !old(self)@.labels[2].is_Secret(),
-            !old(self)@.labels[3].is_Secret(),
-            !old(self)@.labels[4].is_Secret(),*/
+            !old(self)@.labels[1] is Secret,
+            !old(self)@.labels[2] is Secret,
+            !old(self)@.labels[3] is Secret,
+            !old(self)@.labels[4] is Secret,*/
 
         requires
             old(self).wf_value(),
         ensures
-            self@.labels[1].is_Symbol(),
-            self@.labels[2].is_Symbol(),
-            self@.labels[3].is_Symbol(),
-            self@.labels[4].is_Symbol(),
+            self@.labels[1] is Symbol,
+            self@.labels[2] is Symbol,
+            self@.labels[3] is Symbol,
+            self@.labels[4] is Symbol,
             self@.is_constant(),
             self@ == old(self)@.spec_set_valsets(self@.valsets).spec_set_labels(self@.labels),
             self.wf_value(),
@@ -200,7 +199,7 @@ impl<T, M> IsConstant for SpecSecType<T, M> {
     open spec fn is_constant_to(&self, vmpl: nat) -> bool {
         &&& self.valsets[vmpl].len() == 1
         &&& self.valsets[vmpl] =~~= set![self.val]
-        &&& self.labels[vmpl].is_Symbol()
+        &&& self.labels[vmpl] is Symbol
         &&& self.wf_value()
     }
    open spec fn is_constant(&self) -> bool {
@@ -273,9 +272,9 @@ impl<T, M> SpecSecType<T, M> {
         labels: Map<nat, DataLabel>,
         vmpl: nat,
     ) -> bool {
-        //&&& valsets[vmpl] =~~= Set::full() ==> labels[vmpl].is_Symbol()
-        &&& labels[vmpl].is_TrustedRandom() ==> valsets[vmpl] =~~= Set::full()
-        &&& labels[vmpl].is_Secret() ==> valsets[vmpl] =~~= Set::full()
+        //&&& valsets[vmpl] =~~= Set::full() ==> labels[vmpl] is Symbol
+        &&& labels[vmpl] is TrustedRandom ==> valsets[vmpl] =~~= Set::full()
+        &&& labels[vmpl] is Secret ==> valsets[vmpl] =~~= Set::full()
         &&& labels.contains_key(vmpl)
         &&& valsets.contains_key(vmpl)
         &&& valsets[vmpl].len() > 0

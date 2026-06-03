@@ -21,12 +21,12 @@ pub fn e820_format<const N: usize_t>(
         e820_entries.is_constant(),
         e820_entries < old(e820tb)@.len(),
     ensures
-        ret.is_Some() ==> e820tb.is_constant(),
-        ret.is_Some() ==> (ret.get_Some_0()@.is_constant() && ret.get_Some_0()@.len() <= (
+        ret is Some ==> e820tb.is_constant(),
+        ret is Some ==> (ret->Some_0@.is_constant() && ret->Some_0@.len() <= (
         e820_entries as nat)),
-        ret.is_Some() ==> ret.get_Some_0()@ === e820tb@.take(ret.get_Some_0()@.len() as int),
-        ret.is_Some() ==> format_range_ensures(
-            ret.get_Some_0()@,
+        ret is Some ==> ret->Some_0@ === e820tb@.take(ret->Some_0@.len() as int),
+        ret is Some ==> format_range_ensures(
+            ret->Some_0@,
             old(e820tb)@.take(e820_entries as int),
             e820_entries as nat,
         ),

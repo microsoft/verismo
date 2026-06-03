@@ -29,9 +29,9 @@ impl MemDB {
         let gvmem = memop.to_mem();
         let op_memid = memop.to_memid();
         let guestmap = self.to_mem_map(op_memid);
-        let gpmem = gvmem.convert(guestmap.translate(gvmem.to_page()).get_Some_0());
+        let gpmem = gvmem.convert(guestmap.translate(gvmem.to_page())->Some_0);
         let enc = guestmap.is_encrypted(gvmem.to_page());
-        memop.translate_gpn(gpmem, enc.get_Some_0())
+        memop.translate_gpn(gpmem, enc->Some_0)
     }
 
     pub open spec fn op(&self, memop: MemOp<GuestVir>) -> ResultWithErr<
@@ -85,7 +85,7 @@ impl MemDB {
         let gpa_memop = self.to_gpop(memop);
         let op_memid = memop.to_memid();
         let sysmap = self.spec_sysmap()[op_memid];
-        if self.op(memop).is_Error() {
+        if self.op(memop) is Error {
             ByteStream::empty()
         } else {
             self.spec_vram().spec_ret_bytes(gpa_memop, sysmap)
@@ -104,14 +104,14 @@ impl MemDB {
         let gva = memop.to_mem();
         let sysmap = self.spec_sysmap()[memid];
         let guestmap = self.to_mem_map(memid);
-        let valid_gpa = guestmap.translate(gva.to_page()).is_Some();
+        let valid_gpa = guestmap.translate(gva.to_page()) is Some;
         let tlb_idx = TLBIdx(memid, gva.to_page());
         let gpa_memop = self.to_gpop(memop);
         if !valid_gpa {
             ResultWithErr::Error(*self, MemError::PageFault(memop))
         } else {
             let entry = guestmap[gva.to_page()];
-            let tmp = self.spec_set_tlb(self.tlb.load(tlb_idx, entry.get_Some_0()));
+            let tmp = self.spec_set_tlb(self.tlb.load(tlb_idx, entry->Some_0));
             // Update data related RAM or RMP
             match self.spec_vram().op(sysmap, gpa_memop) {
                 ResultWithErr::Ok(ret) => { ResultWithErr::Ok(tmp.spec_set_vram(ret)) },
@@ -130,7 +130,7 @@ impl MemDB {
             let memid = gvn_memid.memid;
             let gvn = gvn_memid.page;
             let psize = param.psize;
-            if memid.is_Hv() || memid.to_vmpl() != VMPL::VMPL0 {
+            if memid is Hv || memid.to_vmpl() != VMPL::VMPL0 {
                 ResultWithErr::Error(*self, MemError::RmpOp(RmpFault::Unsupported, op))
             } else if (psize == PageSize::Size2m) && !gvn.valid_as_size(psize) {
                 ResultWithErr::Error(*self, MemError::RmpOp(RmpFault::Input, op))
@@ -151,7 +151,7 @@ impl MemDB {
             let gvn = gvn_memid.page;
             let psize = param.psize;
             let vmpl = param.vmpl;
-            if memid.is_Hv() {
+            if memid is Hv {
                 ResultWithErr::Error(*self, MemError::RmpOp(RmpFault::Unsupported, op))
             } else if (psize == PageSize::Size2m) && !gvn.valid_as_size(psize) {
                 ResultWithErr::Error(*self, MemError::RmpOp(RmpFault::Input, op))
@@ -172,7 +172,7 @@ impl MemDB {
         if let MemOp::RmpOp(RmpOp::RmpUpdate(gvn_memid, param)) = op {
             let memid = gvn_memid.memid;
             let gvn = gvn_memid.page;
-            if !memid.is_Hv() {
+            if !(memid is Hv) {
                 ResultWithErr::Error(*self, MemError::RmpOp(RmpFault::Unsupported, op))
             } else {
                 self.op_by_gpn_memtype(op)

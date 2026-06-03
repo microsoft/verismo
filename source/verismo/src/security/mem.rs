@@ -567,7 +567,7 @@ pub fn osmem_find(osmem: &Vec<OSMemEntry>, vpage: usize) -> (ret: Option<usize>)
     requires
         osmem_wf(osmem@),
     ensures
-        ret.is_Some() ==> (0 <= ret.unwrap() < osmem.len()
+        ret is Some ==> (0 <= ret.unwrap() < osmem.len()
             && osmem[ret.unwrap() as int].spec_start() <= vpage
             < osmem[ret.unwrap() as int].spec_end()),
 {
@@ -633,11 +633,11 @@ pub fn osmem_check_and_get(osmem: &mut Vec<OSMemEntry>, ppage: usize, osperm: OS
     requires
         osmem_wf(old(osmem)@),
     ensures
-        ret.is_None() ==> *old(osmem) === *osmem,
-        ret.is_Some() ==> osmem@ === old(osmem)@.remove(ret.get_Some_0().0 as int)
-            && ret.get_Some_0().1 === old(osmem)@[ret.get_Some_0().0 as int] && 0
-            <= ret.get_Some_0().0 < old(osmem)@.len(),
-        ret.is_Some() ==> spec_ensure_check_osperm(ppage as int, osperm, ret.get_Some_0().1),
+        ret is None ==> *old(osmem) === *osmem,
+        ret is Some ==> osmem@ === old(osmem)@.remove(ret->Some_0.0 as int)
+            && ret->Some_0.1 === old(osmem)@[ret->Some_0.0 as int] && 0
+            <= ret->Some_0.0 < old(osmem)@.len(),
+        ret is Some ==> spec_ensure_check_osperm(ppage as int, osperm, ret->Some_0.1),
 {
     match osmem_find(osmem, ppage) {
         Some(i) if OSMemPerm::new(osmem[i].osperm.into()).is_super_of(&osperm) => {
@@ -659,12 +659,12 @@ pub fn osmem_check_and_get_page<T: IsConstant + SpecSize + WellFormed + VTypeCas
         old(cs).inv(),
     ensures
         osmem_wf(osmem@),
-        ret.is_Some() ==> ret.get_Some_0().0.wf(),
-        ret.is_Some() ==> ret.get_Some_0().0.is_page(),
-        ret.is_Some() ==> ret.get_Some_0().0.snp().encrypted(),
-        ret.is_Some() ==> ret.get_Some_0().0.snp().rmp@.spec_validated(),
-        ret.is_Some() ==> ret.get_Some_0().0.id() == (ppage as int).to_addr(),
-        ret.is_Some() ==> os_mem_valid_snp(ret.get_Some_0().1, ret.get_Some_0().0.snp()),
+        ret is Some ==> ret->Some_0.0.wf(),
+        ret is Some ==> ret->Some_0.0.is_page(),
+        ret is Some ==> ret->Some_0.0.snp().encrypted(),
+        ret is Some ==> ret->Some_0.0.snp().rmp@.spec_validated(),
+        ret is Some ==> ret->Some_0.0.id() == (ppage as int).to_addr(),
+        ret is Some ==> os_mem_valid_snp(ret->Some_0.1, ret->Some_0.0.snp()),
         cs.inv(),
         (*cs).only_lock_reg_updated((*old(cs)), set![], set![spec_PT().lockid()]),
 {
@@ -737,13 +737,13 @@ pub fn _osmem_add_ram_from_allocator(
             *snpcore === prevcore,
             allocator@.inv(),
             allocator.wf(),
-            range_mem.is_None() ==> (allocator@.len() == 0),
-            range_mem.is_Some() ==> range_mem.get_Some_0().1@@.wf_const_default(
-                (range_mem.get_Some_0().0.0 as int, range_mem.get_Some_0().0.1 as nat),
+            range_mem is None ==> (allocator@.len() == 0),
+            range_mem is Some ==> range_mem->Some_0.1@@.wf_const_default(
+                (range_mem->Some_0.0.0 as int, range_mem->Some_0.0.1 as nat),
             ),
         ensures
             osmem_wf(tmposmem@),
-            range_mem.is_None(),
+            range_mem is None,
             allocator@.inv(),
             allocator.wf(),
             allocator@.len() == 0,
@@ -901,8 +901,8 @@ pub fn osmem_add_ram_from_allocator(
     ensures
         osmem_wf((osmem)@),
         0 <= *(e820_size) <= e820@@.len(),
-        ret.is_Ok() ==> ret.get_Ok_0().only_val_updated(e820),
-        ret.is_Ok() ==> ret.get_Ok_0()@.is_constant(),
+        ret is Ok ==> ret->Ok_0.only_val_updated(e820),
+        ret is Ok ==> ret->Ok_0@.is_constant(),
         cs.inv(),
         cs.only_lock_reg_coremode_updated(*old(cs), set![], set![spec_ALLOCATOR_lockid()]),
 {
@@ -935,9 +935,9 @@ pub fn add_ram_from_allocator(
         0 <= *old(e820_size) <= old(e820)@.len(),
         old(cs).inv(),
     ensures
-        ret.is_Ok() ==> osmem_wf(ret.get_Ok_0()@),
+        ret is Ok ==> osmem_wf(ret->Ok_0@),
         0 <= *(e820_size) <= e820@.len(),
-        ret.is_Ok() ==> e820@.is_constant(),
+        ret is Ok ==> e820@.is_constant(),
         cs.inv(),
         cs.only_lock_reg_coremode_updated(*old(cs), set![], set![spec_ALLOCATOR_lockid()]),
 {

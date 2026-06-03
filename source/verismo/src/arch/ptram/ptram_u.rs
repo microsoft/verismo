@@ -34,17 +34,17 @@ impl GuestPTRam {
         let l0_entry = self.l0_entry(memid);
         let next_opt = lvl.parent_lvl();
         let idx = lvl.spec_table_index(gvn.to_addr()) as nat;
-        if next_opt.is_None() {
+        if next_opt is None {
             Option::Some(GPMem::from_range(l0_entry.addr_for_idx(idx), PT_ENTRY_SIZE as nat))
         } else {
-            let next_lvl = next_opt.get_Some_0();
+            let next_lvl = next_opt->Some_0;
             if next_lvl.as_int() < lvl.as_int() {
                 let next_pte_addrs = self.pgtb_walk_addrs_recursive_ok(memid, gvn, next_lvl);
-                if next_pte_addrs.is_Some() {
-                    let next_pte_gpmem = next_pte_addrs.get_Some_0();
+                if next_pte_addrs is Some {
+                    let next_pte_gpmem = next_pte_addrs->Some_0;
                     let next_pte = vram.get_enc_data_ok(AddrMemID { range: next_pte_gpmem, memid });
-                    if next_pte.is_Some() {
-                        let next_pte: GuestPTEntry = next_pte.get_Some_0();
+                    if next_pte is Some {
+                        let next_pte: GuestPTEntry = next_pte->Some_0;
                         Option::Some(
                             GPMem::from_range(
                                 next_pte.view().addr_for_idx(idx),
@@ -65,7 +65,7 @@ impl GuestPTRam {
     }
 
     pub open spec fn valid_access(&self, memid: MemID, gpa: GPMem, sysmap: SysMap) -> bool {
-        self.spec_ram().read_bytes(AddrMemID { range: gpa, memid }, true, sysmap).is_Ok()
+        self.spec_ram().read_bytes(AddrMemID { range: gpa, memid }, true, sysmap) is Ok
     }
 
     pub open spec fn l0_entry(&self, memid: MemID) -> SpecGuestPTEntry {
@@ -86,16 +86,16 @@ impl GuestPTRam {
     pub open spec fn inv_dom_ok(&self, memid: MemID) -> bool {
         //let rmp = self.spec_ram().spec_rmp();
         /*&&& (forall |spn|
-                self.ram.dom().contains(spn) === (memtype(memid, (#[trigger]rmp[spn]).view().spec_gpn()).is_PTE() && rmp.dom().contains(spn)))*/
+                self.ram.dom().contains(spn) === (memtype(memid, (#[trigger]rmp[spn]).view().spec_gpn()) is PTE && rmp.dom().contains(spn)))*/
         self.spec_ram().inv()
     }
 
     pub open spec fn inv_content_gpa_ok(&self, memid: MemID, gvn: GVN) -> bool {
         forall|lvl: PTLevel|
-            (!lvl.is_L0() && (#[trigger] self.map_entry_ok(memid, gvn, lvl)).is_Some()) ==> memtype(
+            (!(lvl is L0) && (#[trigger] self.map_entry_ok(memid, gvn, lvl)) is Some) ==> memtype(
                 memid,
-                self.map_entry_ok(memid, gvn, lvl).get_Some_0().spec_ppn(),
-            ).is_pt(lvl.child_lvl().get_Some_0())
+                self.map_entry_ok(memid, gvn, lvl)->Some_0.spec_ppn(),
+            ).is_pt(lvl.child_lvl()->Some_0)
     }
 
     #[verifier(opaque)]
@@ -104,20 +104,20 @@ impl GuestPTRam {
         &&& self.inv_for_identity_map_ok(memid)
         &&& self.inv_encrypted_priv_mem_ok(memid)
         &&& memtype(memid, self.l0_entry(memid).spec_ppn()).is_pt(PTLevel::L3)
-        &&& memid.is_Guest()
+        &&& memid is Guest
     }
 
     #[verifier(opaque)]
     pub open spec fn inv_for_identity_map_ok(&self, memid: MemID) -> bool {
         &&& (forall|gvn: GVN|
-            (gvn.is_valid() && (#[trigger] self.map_entry_ok(memid, gvn, PTLevel::L0)).is_Some())
-                ==> self.map_entry_ok(memid, gvn, PTLevel::L0).get_Some_0().spec_ppn().value()
+            (gvn.is_valid() && (#[trigger] self.map_entry_ok(memid, gvn, PTLevel::L0)) is Some)
+                ==> self.map_entry_ok(memid, gvn, PTLevel::L0)->Some_0.spec_ppn().value()
                 === gvn.value())
     }
 
     pub open spec fn need_c_bit(&self, memid: MemID, gvn: GVN) -> bool {
         let rmp = self.spec_ram().spec_rmp();
-        let entry = self.map_entry_ok(memid, gvn, PTLevel::L0).get_Some_0();
+        let entry = self.map_entry_ok(memid, gvn, PTLevel::L0)->Some_0;
         memtype(
             memid,
             entry.spec_ppn(),
@@ -134,11 +134,11 @@ impl GuestPTRam {
                 memid,
                 gvn,
                 PTLevel::L0,
-            ).is_Some()) ==> #[trigger] self.map_entry_ok(
+            ) is Some) ==> #[trigger] self.map_entry_ok(
                 memid,
                 gvn,
                 PTLevel::L0,
-            ).get_Some_0().is_encrypted())
+            )->Some_0.is_encrypted())
     }
 
     pub open spec fn map_entry_gpa_ok(&self, memid: MemID, gvn: GVN, lvl: PTLevel) -> Option<
@@ -161,13 +161,13 @@ impl GuestPTRam {
         GuestPTEntry,
     > {
         let pte_gpa = self.map_entry_gpa_ok(memid, gvn, lvl);
-        if pte_gpa.is_Some() {
-            let pte_gpa = pte_gpa.get_Some_0();
+        if pte_gpa is Some {
+            let pte_gpa = pte_gpa->Some_0;
             let entry = self.spec_ram().get_enc_data_ok::<GuestPTEntry>(
                 AddrMemID { range: pte_gpa, memid },
             );
-            if entry.is_Some() {
-                Option::Some(entry.get_Some_0())
+            if entry is Some {
+                Option::Some(entry->Some_0)
             } else {
                 Option::None
             }
@@ -178,8 +178,8 @@ impl GuestPTRam {
 
     pub open spec fn to_mem_map_ok(&self, memid: MemID) -> MemMap<GuestVir, GuestPhy> {
         let map = Map::new(
-            |gvn: GVN| gvn.is_valid() && self.map_entry_ok(memid, gvn, PTLevel::L0).is_Some(),
-            |gvn: GVN| self.map_entry_ok(memid, gvn, PTLevel::L0).get_Some_0(),
+            |gvn: GVN| gvn.is_valid() && self.map_entry_ok(memid, gvn, PTLevel::L0) is Some,
+            |gvn: GVN| self.map_entry_ok(memid, gvn, PTLevel::L0)->Some_0,
         );
         MemMap { db: map }
     }

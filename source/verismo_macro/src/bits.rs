@@ -146,7 +146,7 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #emptyspec
             }
 
-            pub open spec fn new(val: #valuetype) -> #specname;
+            pub uninterp spec fn new(val: #valuetype) -> #specname;
 
             #[verifier(external_body)]
             pub broadcast proof fn axiom_new(val: #bitstruct)
@@ -154,7 +154,7 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
                 builtin::equal(#[trigger]Self::new(val.value), #[trigger]val.view())
             {}
 
-            pub open spec fn to_value(&self) -> #bitstruct;
+            pub uninterp spec fn to_value(&self) -> #bitstruct;
 
             #[verifier(external_body)]
             pub broadcast proof fn axiom_into(self)
@@ -214,7 +214,7 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
 
                 pub broadcast proof fn lemma_new_eq(self)
                 ensures
-                    builtin::equal(Self::spec_new(self.value), self)
+                    builtin::equal(#[trigger] Self::spec_new(self.value), self)
                 {}
 
                 pub const fn empty() -> (ret: Self)

@@ -74,6 +74,10 @@ pub fn init_verify(verus_libs: &[&str]) {
     targets.extend(verus_libs);
     println!("cargo:rustc-env=VERUS_TARGETS={}", targets.join(","));
     for (key, value) in std::env::vars() {
+        // Skip RUSTC_BOOTSTRAP — cargo rejects setting it from build scripts.
+        if key == "RUSTC_BOOTSTRAP" {
+            continue;
+        }
         // You can filter or modify which ones to pass to rustc
         println!("cargo:rustc-env={}={}", key, value);
     }

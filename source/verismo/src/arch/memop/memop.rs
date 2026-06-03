@@ -7,7 +7,7 @@ verus! {
 impl<AddrT: AddrType> MemOp<AddrT> {
     #[verifier(inline)]
     pub open spec fn is_PValidate(&self) -> bool {
-        self.is_RmpOp() && self.get_RmpOp_0().is_Pvalidate()
+        self is RmpOp && self->RmpOp_0 is Pvalidate
     }
 
     pub open spec fn to_addr_memid(&self) -> AddrMemID<AddrT> {
@@ -44,7 +44,7 @@ impl<AddrT: AddrType> MemOp<AddrT> {
 
     #[verifier(inline)]
     pub open spec fn use_gmap(&self) -> bool {
-        self.is_Read() || self.is_Write() || self.is_RmpOp()
+        self is Read || self is Write || self is RmpOp
     }
 
     pub open spec fn is_valid(&self) -> bool {

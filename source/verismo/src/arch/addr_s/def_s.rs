@@ -89,7 +89,6 @@ crate::macro_const_int! {
     pub const BLOCK_SIZE: usize = 1usize;
 }
 
-#[is_variant]
 #[derive(Copy, Clone, PartialEq, Eq, SpecIntEnum)]
 pub enum PageSize {
     Size4k = 0,

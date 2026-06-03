@@ -13,10 +13,10 @@ impl<VT: AddrType, PT: AddrType> MemMap<VT, PT> {
         requires
             self.is_one_to_one_map(),
             vpage1 !== vpage2,
-            self.translate(vpage1).is_Some(),
-            self.translate(vpage2).is_Some(),
+            self.translate(vpage1) is Some,
+            self.translate(vpage2) is Some,
         ensures
-            self.translate(vpage1).get_Some_0() !== self.translate(vpage2).get_Some_0(),
+            self.translate(vpage1)->Some_0 !== self.translate(vpage2)->Some_0,
     {
         reveal(MemMap::is_one_to_one_map);
     }
@@ -34,7 +34,7 @@ impl<VT: AddrType, PT: AddrType> MemMap<VT, PT> {
     {
         let smem1 = self.translate_addr_seq(vmem1);
         let smem2 = self.translate_addr_seq(vmem2);
-        if self.translate(vmem1.to_page()).is_None() || self.translate(vmem2.to_page()).is_None() {
+        if self.translate(vmem1.to_page()) is None || self.translate(vmem2.to_page()) is None {
             assert(smem1.len() == 0 || smem2.len() == 0);
             assert(smem1.disjoint(smem2));
         } else {
@@ -67,28 +67,28 @@ impl<VT: AddrType, PT: AddrType> MemMap<VT, PT> {
     {
         reveal(MemMap::is_identity_map);
         reveal(MemMap::is_one_to_one_map);
-        assert forall|vpage: SpecPage<VT>| (#[trigger] self.translate(vpage)).is_Some() implies (
-        self.reverse(self.translate(vpage).get_Some_0()).is_Some() && self.reverse(
-            self.translate(vpage).get_Some_0(),
-        ).get_Some_0() =~= vpage) by {
-            assert(self.translate(vpage).get_Some_0().as_int() === vpage.as_int());
-            assert(self.reverse(self.translate(vpage).get_Some_0()).is_Some());
-            let p = self.reverse(self.translate(vpage).get_Some_0()).get_Some_0();
-            assert(self.translate(p).get_Some_0().value() =~= p.value());
+        assert forall|vpage: SpecPage<VT>| (#[trigger] self.translate(vpage)) is Some implies (
+        self.reverse(self.translate(vpage)->Some_0) is Some && self.reverse(
+            self.translate(vpage)->Some_0,
+        )->Some_0 =~= vpage) by {
+            assert(self.translate(vpage)->Some_0.as_int() === vpage.as_int());
+            assert(self.reverse(self.translate(vpage)->Some_0) is Some);
+            let p = self.reverse(self.translate(vpage)->Some_0)->Some_0;
+            assert(self.translate(p)->Some_0.value() =~= p.value());
         }
-        assert forall|ppage: SpecPage<PT>| (#[trigger] self.reverse(ppage)).is_Some() implies (
-        self.translate(self.reverse(ppage).get_Some_0()).is_Some() && self.translate(
-            self.reverse(ppage).get_Some_0(),
-        ).get_Some_0() === ppage) by {}
+        assert forall|ppage: SpecPage<PT>| (#[trigger] self.reverse(ppage)) is Some implies (
+        self.translate(self.reverse(ppage)->Some_0) is Some && self.translate(
+            self.reverse(ppage)->Some_0,
+        )->Some_0 === ppage) by {}
     }
 
     pub proof fn lemma_valid_translate(&self, page: SpecPage<VT>)
         requires
             page.is_valid(),
             self.is_valid(),
-            self.translate(page).is_Some(),
+            self.translate(page) is Some,
         ensures
-            self.translate(page).get_Some_0().is_valid(),
+            self.translate(page)->Some_0.is_valid(),
     {
     }
 }

@@ -27,7 +27,7 @@ impl<T1: WellFormed, T2: WellFormed, T3: WellFormed> WellFormed for (T1, T2, T3)
 impl<T: WellFormed> WellFormed for Option<T> {
     #[verifier(inline)]
     open spec fn wf(&self) -> bool {
-        self.is_Some() ==> self.get_Some_0().wf()
+        self is Some ==> self->Some_0.wf()
     }
 }
 

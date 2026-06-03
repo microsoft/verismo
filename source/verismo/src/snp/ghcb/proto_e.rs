@@ -302,7 +302,7 @@ proof fn trusted_ghcb_change_page_state(
         old(perm)@.wf(),
     ensures
         perm@.range() === old(perm)@.range(),
-        perm@.snp().ensures_rmpupdate(old(perm)@.snp(), op.is_Shared(), op.is_Unsmash()),
+        perm@.snp().ensures_rmpupdate(old(perm)@.snp(), op is Shared, op is Unsmash),
         perm@.wf(),
 {
 }

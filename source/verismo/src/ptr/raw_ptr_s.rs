@@ -14,7 +14,7 @@ impl IsSnpPPtr for SnpPointsToBytes {
 }
 
 impl SnpPointsToRaw {
-    pub open spec fn view(&self) -> SnpPointsToBytes;
+    pub uninterp spec fn view(&self) -> SnpPointsToBytes;
 }
 
 impl SnpPointsToBytes {

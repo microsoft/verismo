@@ -28,7 +28,7 @@ impl<T: ToSecSeq> VTypeCast<SecSeqByte> for Vec<T> {
 }
 
 impl<T: SpecSize> SpecSize for Vec<T> {
-    open spec fn spec_size_def() -> nat;
+    uninterp spec fn spec_size_def() -> nat;
 }
 
 pub struct PushParam<T> {

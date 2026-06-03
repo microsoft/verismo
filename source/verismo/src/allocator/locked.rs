@@ -24,8 +24,8 @@ impl VSpinLock<VeriSMoAllocator> {
             spec_bit64_is_pow_of_2(align as int),
         ensures
             self.lock_alloc_requires(coreid@.cpu, res.1@@),
-            res.0.is_Ok() ==> talloc_valid_ptr(size, res.0.get_Ok_0()) && (
-            res.0.get_Ok_0().0 as int) % (align as int) == 0,
+            res.0 is Ok ==> talloc_valid_ptr(size, res.0->Ok_0) && (
+            res.0->Ok_0.0 as int) % (align as int) == 0,
     {
         let tracked alloc_lockperm = alloc_lockperm;
         (new_strlit("\n new")).leak_debug();
@@ -63,7 +63,7 @@ impl VSpinLock<VeriSMoAllocator> {
         ensures
             alloc_lockperm0.contains_key(0),
             self.lock_alloc_requires(coreid@.cpu, alloc_lockperm0[0]@),
-            res.is_Ok() ==> talloc_valid_ptr(size, res.get_Ok_0()) && (res.get_Ok_0().0 as int) % (
+            res is Ok ==> talloc_valid_ptr(size, res->Ok_0) && (res->Ok_0.0 as int) % (
             align as int) == 0,
     {
         let tracked alloc_perm = alloc_lockperm0.tracked_remove(0);

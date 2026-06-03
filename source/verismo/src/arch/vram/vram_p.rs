@@ -11,15 +11,15 @@ impl VRamDB {
         sysmap: SysMap,
     )
         requires
-            op.is_Read() || op.is_Write(),
-            self.op(sysmap, op).is_Ok(),
+            op is Read || op is Write,
+            self.op(sysmap, op) is Ok,
             op.to_enc(),
         ensures
             rmp_has_gpn_memid(&self.rmp, op.to_mem().to_page(), op.to_memid()),
     {
         reveal(VRamDB::op);
-        let spn = sysmap.translate(op.to_mem().to_page()).get_Some_0();
-        if op.is_Write() {
+        let spn = sysmap.translate(op.to_mem().to_page())->Some_0;
+        if op is Write {
             rmp_proof_check_access_rmp_has_gpn_memid(
                 &self.rmp,
                 op.to_memid(),
@@ -29,7 +29,7 @@ impl VRamDB {
                 spn,
             );
         }
-        if op.is_Read() {
+        if op is Read {
             rmp_proof_check_access_rmp_has_gpn_memid(
                 &self.rmp,
                 op.to_memid(),
@@ -43,7 +43,7 @@ impl VRamDB {
 
     pub proof fn lemma_read_no_change(&self, op: MemOp<GuestPhy>, sysmap: SysMap)
         requires
-            op.is_Read(),
+            op is Read,
             op.is_valid(),
         ensures
             &self.op(sysmap, op).to_result() === self,
@@ -53,7 +53,7 @@ impl VRamDB {
 
     pub proof fn lemma_error_no_change(&self, op: MemOp<GuestPhy>, sysmap: SysMap)
         requires
-            self.op(sysmap, op).is_Error(),
+            self.op(sysmap, op) is Error,
             op.is_valid(),
         ensures
             &self.op(sysmap, op).to_result() === self,
@@ -66,31 +66,31 @@ impl VRamDB {
             self.inv(),
             self.inv_sw(op.to_memid()),
             op.is_valid(),
-            op.is_Read() || op.is_Write(),
-            self.op(sysmap, op).is_Ok() || self.op(sysmap, op).get_Error_1().is_RmpOp(),
-            op.is_Read() ==> op.get_Read_1(),
-            op.is_Write() ==> op.get_Write_1(),
+            op is Read || op is Write,
+            self.op(sysmap, op) is Ok || self.op(sysmap, op)->Error_1 is RmpOp,
+            op is Read ==> op->Read_1,
+            op is Write ==> op->Write_1,
         ensures
-            sysmap.translate(op.to_mem().to_page()).is_Some(),
+            sysmap.translate(op.to_mem().to_page()) is Some,
             rmp_has_gpn_memid(&self.spec_rmp(), op.to_mem().to_page(), op.to_memid()),
             rmp_reverse(&self.spec_rmp(), op.to_memid(), op.to_mem().to_page())
-                === sysmap.translate(op.to_mem().to_page()).get_Some_0(),
+                === sysmap.translate(op.to_mem().to_page())->Some_0,
     {
         reveal(VRamDB::op);
         reveal(RmpEntry::check_access);
         reveal(rmp_inv);
         let spn = sysmap.translate(op.to_mem().to_page());
-        assert(spn.is_Some()) by {
-            if spn.is_None() {
-                if op.is_Read() {
-                    assert(self.op(sysmap, op).is_Error());
+        assert(spn is Some) by {
+            if spn is None {
+                if op is Read {
+                    assert(self.op(sysmap, op) is Error);
                 }
-                if op.is_Write() {
-                    assert(self.op(sysmap, op).is_Error());
+                if op is Write {
+                    assert(self.op(sysmap, op) is Error);
                 }
             }
         }
-        let spn = spn.get_Some_0();
+        let spn = spn->Some_0;
         assert(self.spec_rmp()[spn].view().spec_validated());
         assert(rmp_reverse(&self.spec_rmp(), op.to_memid(), self.spec_rmp()[spn].view().spec_gpn())
             === spn) by {
@@ -103,11 +103,11 @@ impl VRamDB {
             0 <= i < gpmem.len(),
             gpmem.is_valid(),
         ensures
-            self.get_enc_bytes_ok(AddrMemID { memid, range: gpmem }).is_Some()
-                === self.get_enc_byte_ok(memid, gpmem[i]).is_Some(),
-            self.get_enc_bytes_ok(AddrMemID { memid, range: gpmem }).is_Some()
-                ==> self.get_enc_bytes_ok(AddrMemID { memid, range: gpmem }).get_Some_0()[i]
-                === self.get_enc_byte_ok(memid, gpmem[i]).get_Some_0(),
+            self.get_enc_bytes_ok(AddrMemID { memid, range: gpmem }) is Some
+                === self.get_enc_byte_ok(memid, gpmem[i]) is Some,
+            self.get_enc_bytes_ok(AddrMemID { memid, range: gpmem }) is Some
+                ==> self.get_enc_bytes_ok(AddrMemID { memid, range: gpmem })->Some_0[i]
+                === self.get_enc_byte_ok(memid, gpmem[i])->Some_0,
     {
         gpmem.proof_same_page();
     }
@@ -123,22 +123,22 @@ impl VRamDB {
     )
         requires
             self.inv(),
-            memop.is_Write(),
+            memop is Write,
             memop.is_valid(),
             gpmem.is_valid(),
             gpmem.len() > 0,
             self.inv_sw(memid),
-            self.op(sysmap, memop).is_Ok(),
+            self.op(sysmap, memop) is Ok,
             other === &self.op(sysmap, memop).to_result(),
             gpmem === memop.to_mem(),
-            memop.to_memid().to_asid() === memid.to_asid() || !memop.get_Write_1(),
+            memop.to_memid().to_asid() === memid.to_asid() || !memop->Write_1,
         ensures
-            (other.get_enc_bytes_ok(AddrMemID { memid, range: gpmem }).is_Some()
-                && memop.get_Write_1()) ==> (other.get_enc_bytes_ok(
+            (other.get_enc_bytes_ok(AddrMemID { memid, range: gpmem }) is Some
+                && memop->Write_1) ==> (other.get_enc_bytes_ok(
                 AddrMemID { memid, range: gpmem },
-            ).get_Some_0() === memop.get_Write_2()),
-            (other.get_enc_bytes_ok(AddrMemID { memid, range: gpmem }).is_Some()
-                && !memop.get_Write_1()) ==> {
+            )->Some_0 === memop->Write_2),
+            (other.get_enc_bytes_ok(AddrMemID { memid, range: gpmem }) is Some
+                && !memop->Write_1) ==> {
                 other.get_enc_bytes_ok(AddrMemID { memid, range: gpmem }) === self.get_enc_bytes_ok(
                     AddrMemID { memid, range: gpmem },
                 )
@@ -148,27 +148,27 @@ impl VRamDB {
         let gpmem_id = AddrMemID { memid, range: gpmem };
         let read1 = self.get_enc_bytes_ok(gpmem_id);
         let read2 = other.get_enc_bytes_ok(gpmem_id);
-        let w_enc = memop.get_Write_1();
+        let w_enc = memop->Write_1;
         //self.lemma_inv_dom(other, sysmap, memop);
         reveal(VRamDB::op);
-        assert(read2.is_Some() === read1.is_Some());
-        if gpmem === memop.to_mem() && read2.is_Some() && w_enc {
-            assert forall|i| 0 <= i < gpmem.len() implies read2.get_Some_0()[i]
-                === #[trigger] memop.get_Write_2()[i] by {
+        assert(read2 is Some === read1 is Some);
+        if gpmem === memop.to_mem() && read2 is Some && w_enc {
+            assert forall|i| 0 <= i < gpmem.len() implies read2->Some_0[i]
+                === #[trigger] memop->Write_2[i] by {
                 self.lemma_write_effect_in_range(other, sysmap, memop, memid, gpmem[i]);
                 other.proof_read_enc_byte_to_bytes(memid, gpmem, i);
             }
-            assert(memop.get_Write_2() =~~= (read2.get_Some_0()));
+            assert(memop->Write_2 =~~= (read2->Some_0));
         }
-        if gpmem === memop.to_mem() && read2.is_Some() && !w_enc {
-            assert forall|i| 0 <= i < gpmem.len() implies read2.get_Some_0()[i]
-                === #[trigger] read1.get_Some_0()[i] by {
+        if gpmem === memop.to_mem() && read2 is Some && !w_enc {
+            assert forall|i| 0 <= i < gpmem.len() implies read2->Some_0[i]
+                === #[trigger] read1->Some_0[i] by {
                 if 0 <= i < gpmem.len() {
                     self.lemma_write_effect_in_range(other, sysmap, memop, memid, gpmem[i]);
                     other.proof_read_enc_byte_to_bytes(memid, gpmem, i);
                 }
             }
-            assert(read1.get_Some_0() =~~= (read2.get_Some_0()));
+            assert(read1->Some_0 =~~= (read2->Some_0));
         }
     }
 
@@ -184,16 +184,16 @@ impl VRamDB {
             self.inv(),
             memid.is_vmpl0(),
             memop.is_valid(),
-            memop.is_Write(),
+            memop is Write,
             gpmem.is_valid(),
             gpmem.len() > 0,
             self.inv_sw(memid),
-            self.op(sysmap, memop).is_Ok(),
+            self.op(sysmap, memop) is Ok,
             other === &self.op(sysmap, memop).to_result(),
             gpmem.disjoint(
                 memop.to_mem(),
             ),
-    //memop.to_memid().to_asid() === memid.to_asid() || !memop.get_Write_1(),
+    //memop.to_memid().to_asid() === memid.to_asid() || !memop->Write_1,
 
         ensures
             other.get_enc_bytes_ok(AddrMemID { memid, range: gpmem }) === self.get_enc_bytes_ok(
@@ -204,24 +204,24 @@ impl VRamDB {
         let gpmem_id = AddrMemID { memid, range: gpmem };
         let read1 = self.get_enc_bytes_ok(gpmem_id);
         let read2 = other.get_enc_bytes_ok(gpmem_id);
-        let w_enc = memop.get_Write_1();
+        let w_enc = memop->Write_1;
         //self.lemma_inv_dom(other, sysmap, memop);
         reveal(VRamDB::op);
-        assert(read2.is_Some() === read1.is_Some());
-        if read2.is_Some() {
-            assert forall|i| 0 <= i < gpmem.len() implies read2.get_Some_0()[i]
-                === read1.get_Some_0()[i] by {
+        assert(read2 is Some === read1 is Some);
+        if read2 is Some {
+            assert forall|i| 0 <= i < gpmem.len() implies read2->Some_0[i]
+                === read1->Some_0[i] by {
                 if 0 <= i < gpmem.len() {
                     other.proof_read_enc_byte_to_bytes(memid, gpmem, i);
                     self.proof_read_enc_byte_to_bytes(memid, gpmem, i);
-                    if memop.to_memid().to_asid() === memid.to_asid() || !memop.get_Write_1() {
+                    if memop.to_memid().to_asid() === memid.to_asid() || !memop->Write_1 {
                         self.lemma_write_effect_out_range(other, sysmap, memop, memid, gpmem[i]);
                     } else {
                         self.lemma_write_byte_other_vm(other, sysmap, memop, memid, gpmem[i]);
                     }
                 }
             }
-            assert(read1.get_Some_0() =~~= (read2.get_Some_0()));
+            assert(read1->Some_0 =~~= (read2->Some_0));
         }
     }
 
@@ -237,14 +237,14 @@ impl VRamDB {
             self.inv(),
             memid.is_vmpl0(),
             memop.is_valid(),
-            memop.is_Write(),
+            memop is Write,
             gpmem.is_valid(),
             gpmem.len() > 0,
             self.inv_sw(memid),
-            self.op(sysmap, memop).is_Ok(),
+            self.op(sysmap, memop) is Ok,
             other === &self.op(sysmap, memop).to_result(),
-            (memop.to_memid().to_asid() !== memid.to_asid() && memop.get_Write_1())
-                || !memop.get_Write_1(),
+            (memop.to_memid().to_asid() !== memid.to_asid() && memop->Write_1)
+                || !memop->Write_1,
         ensures
             other.get_enc_bytes_ok(AddrMemID { memid, range: gpmem }) === self.get_enc_bytes_ok(
                 AddrMemID { memid, range: gpmem },
@@ -254,13 +254,13 @@ impl VRamDB {
         let gpmem_id = AddrMemID { memid, range: gpmem };
         let read1 = self.get_enc_bytes_ok(gpmem_id);
         let read2 = other.get_enc_bytes_ok(gpmem_id);
-        let w_enc = memop.get_Write_1();
+        let w_enc = memop->Write_1;
         //self.lemma_inv_dom(other, sysmap, memop);
         reveal(VRamDB::op);
-        assert(read2.is_Some() === read1.is_Some());
-        if read2.is_Some() {
-            assert forall|i| 0 <= i < gpmem.len() implies read2.get_Some_0()[i]
-                === read1.get_Some_0()[i] by {
+        assert(read2 is Some === read1 is Some);
+        if read2 is Some {
+            assert forall|i| 0 <= i < gpmem.len() implies read2->Some_0[i]
+                === read1->Some_0[i] by {
                 if 0 <= i < gpmem.len() {
                     other.proof_read_enc_byte_to_bytes(memid, gpmem, i);
                     self.proof_read_enc_byte_to_bytes(memid, gpmem, i);
@@ -271,7 +271,7 @@ impl VRamDB {
                     }
                 }
             }
-            assert(read1.get_Some_0() =~~= (read2.get_Some_0()));
+            assert(read1->Some_0 =~~= (read2->Some_0));
         }
     }
 
@@ -288,18 +288,18 @@ impl VRamDB {
             self.inv_memid_int(memid),
             gpa.is_valid(),
             memop.is_valid(),
-            memop.is_Write(),
+            memop is Write,
             memid.is_vmpl0(),
             !memop.to_memid().is_sm(memid),
             memtype(memid, gpa.to_page()).is_sm_int(),
         ensures
-            self.op(sysmap, memop).to_result().get_enc_byte_ok(memid, gpa).is_Some() ==> self.op(
+            self.op(sysmap, memop).to_result().get_enc_byte_ok(memid, gpa) is Some ==> self.op(
                 sysmap,
                 memop,
             ).to_result().get_enc_byte_ok(memid, gpa) === self.get_enc_byte_ok(memid, gpa),
     {
         let new = self.op(sysmap, memop).to_result();
-        if self.op(sysmap, memop).is_Ok() {
+        if self.op(sysmap, memop) is Ok {
             if memop.to_mem().contains(gpa) {
                 self.lemma_write_sm_int_ok(memid, memop, sysmap);
                 self.lemma_write_byte_othervm_or_shared(&new, sysmap, memop, memid, gpa);
@@ -322,18 +322,18 @@ impl VRamDB {
             self.inv(),
             gpa.is_valid(),
             memop.is_valid(),
-            memop.is_Write(),
+            memop is Write,
             memid.is_vmpl0(),
             self.inv_sw(memid),
-            self.op(sysmap, memop).is_Ok(),
+            self.op(sysmap, memop) is Ok,
             other === &self.op(sysmap, memop).to_result(),
-            (memop.to_memid().to_asid() !== memid.to_asid() && memop.get_Write_1())
-                || !memop.get_Write_1(),
+            (memop.to_memid().to_asid() !== memid.to_asid() && memop->Write_1)
+                || !memop->Write_1,
         ensures
-            other.get_enc_byte_ok(memid, gpa).is_Some() ==> other.get_enc_byte_ok(memid, gpa)
+            other.get_enc_byte_ok(memid, gpa) is Some ==> other.get_enc_byte_ok(memid, gpa)
                 === self.get_enc_byte_ok(memid, gpa),
     {
-        let w_enc = memop.get_Write_1();
+        let w_enc = memop->Write_1;
         if w_enc {
             self.lemma_write_byte_other_vm(other, sysmap, memop, memid, gpa);
         } else {
@@ -354,25 +354,25 @@ impl VRamDB {
             self.inv(),
             self.inv_sw(memid),
             memop.is_valid(),
-            memop.is_Write(),
+            memop is Write,
             gpa.is_valid(),
-            self.op(sysmap, memop).is_Ok(),
+            self.op(sysmap, memop) is Ok,
             other === &self.op(sysmap, memop).to_result(),
             (memop.to_memid().to_asid() !== memid.to_asid()),
         ensures
             other.get_enc_byte_ok(memid, gpa) === self.get_enc_byte_ok(memid, gpa),
     {
         reveal(VRamDB::op);
-        assert(other.get_enc_byte_ok(memid, gpa).is_Some() === self.get_enc_byte_ok(
+        assert(other.get_enc_byte_ok(memid, gpa) is Some === self.get_enc_byte_ok(
             memid,
             gpa,
-        ).is_Some());
-        let w_asid = if memop.get_Write_1() {
+        ) is Some);
+        let w_asid = if memop->Write_1 {
             memop.to_memid().to_asid()
         } else {
             ASID_FOR_HV!()
         };
-        if self.get_enc_byte_ok(memid, gpa).is_Some() {
+        if self.get_enc_byte_ok(memid, gpa) is Some {
             let rspn = rmp_reverse(&self.spec_rmp(), memid, gpa.to_page());
             let rspa = gpa.convert(rspn);
             assert(self.spec_rmp()[rspn].inv()) by {
@@ -402,7 +402,7 @@ impl VRamDB {
             self.spec_sram().lemma_write_unchange_byte_any_enc(
                 w_asid,
                 wspmem,
-                memop.get_Write_2(),
+                memop->Write_2,
                 memid.to_asid(),
                 rspa,
             );
@@ -424,10 +424,10 @@ impl VRamDB {
             self.inv_sw(memid),
             gpa.is_valid(),
             memop.is_valid(),
-            memop.is_Write(),
-            self.op(sysmap, memop).is_Ok(),
+            memop is Write,
+            self.op(sysmap, memop) is Ok,
             other === &self.op(sysmap, memop).to_result(),
-            (memop.to_memid().to_asid() !== memid.to_asid() && memop.get_Write_1()),
+            (memop.to_memid().to_asid() !== memid.to_asid() && memop->Write_1),
         ensures
     //other.read_bytes(AddrMemID{range: gpa, memid}, renc, rsysmap) === self.read_bytes(AddrMemID{range: gpa, memid}, renc, rsysmap),
 
@@ -435,13 +435,13 @@ impl VRamDB {
                 AddrMemID { range: SpecMem::from_range(gpa, 1), memid },
                 renc,
                 rsysmap,
-            ).is_Ok() ==> (other.get_byte(memid, gpa, renc, rsysmap) === self.get_byte(
+            ) is Ok ==> (other.get_byte(memid, gpa, renc, rsysmap) === self.get_byte(
                 memid,
                 gpa,
                 renc,
                 rsysmap,
             )),
-            other.get_enc_byte_ok(memid, gpa).is_Some() ==> other.get_enc_byte_ok(memid, gpa)
+            other.get_enc_byte_ok(memid, gpa) is Some ==> other.get_enc_byte_ok(memid, gpa)
                 === self.get_enc_byte_ok(memid, gpa),
     {
         reveal(VRamDB::op);
@@ -453,8 +453,8 @@ impl VRamDB {
         let rspn = rmp_reverse(&rmp, memid, gpa.to_page());
         let rspa = gpa.convert(rspn);
         let AddrMemID { range, memid: w_memid } = memop.to_addr_memid();
-        let data = memop.get_Write_2();
-        let w_enc = memop.get_Write_1();
+        let data = memop->Write_2;
+        let w_enc = memop->Write_1;
         let wspmem = sysmap.translate_addr_seq(range);
         let rspa_by_sysmap = rsysmap.translate_addr(gpa);
         assert(rmp === other.spec_rmp());
@@ -466,7 +466,7 @@ impl VRamDB {
             AddrMemID { range: SpecMem::from_range(gpa, 1), memid },
             renc,
             rsysmap,
-        ).is_Ok() {
+        ) is Ok {
             assume(other.get_byte(memid, gpa, renc, rsysmap) === self.get_byte(
                 memid,
                 gpa,
@@ -491,30 +491,30 @@ impl VRamDB {
             gpa.is_valid(),
             memid.is_vmpl0(),
             memop.is_valid(),
-            memop.is_Write(),
-            self.op(sysmap, memop).is_Ok(),
+            memop is Write,
+            self.op(sysmap, memop) is Ok,
             other === &self.op(sysmap, memop).to_result(),
-            !memop.get_Write_1(),
+            !memop->Write_1,
         ensures
-    //other.get_enc_byte_ok(memid, gpa).is_Some() ==>
+    //other.get_enc_byte_ok(memid, gpa) is Some ==>
 
             other.get_enc_byte_ok(memid, gpa) === self.get_enc_byte_ok(memid, gpa),
-            (memop.to_mem().contains(gpa) && !other.get_enc_byte_ok(memid, gpa).is_Some()) ==> (
-            other.get_byte(memop.to_memid(), gpa, memop.get_Write_1(), sysmap).get_Some_0()
-                === memop.get_Write_2()[gpa.value() - memop.to_mem().first().value()]),
+            (memop.to_mem().contains(gpa) && !(other.get_enc_byte_ok(memid, gpa) is Some)) ==> (
+            other.get_byte(memop.to_memid(), gpa, memop->Write_1, sysmap)->Some_0
+                === memop->Write_2[gpa.value() - memop.to_mem().first().value()]),
     {
         if let MemOp::Write(gpa_id, w_enc, bytes) = memop {
             let gpmem_id = memop.to_addr_memid();
             if gpmem_id.range.contains(gpa) {
                 self.lemma_write_effect_in_range(other, sysmap, memop, memid, gpa);
-                if other.get_enc_byte_ok(memid, gpa).is_Some() {
-                    assert(other.get_enc_byte_ok(memid, gpa).get_Some_0() === self.get_enc_byte_ok(
+                if other.get_enc_byte_ok(memid, gpa) is Some {
+                    assert(other.get_enc_byte_ok(memid, gpa)->Some_0 === self.get_enc_byte_ok(
                         memid,
                         gpa,
-                    ).get_Some_0());
+                    )->Some_0);
                 } else {
-                    assert(other.get_byte(memid, gpa, false, sysmap).get_Some_0()
-                        === memop.get_Write_2()[gpa.value() - memop.to_mem().first().value()]);
+                    assert(other.get_byte(memid, gpa, false, sysmap)->Some_0
+                        === memop->Write_2[gpa.value() - memop.to_mem().first().value()]);
                 }
             } else {
                 self.lemma_write_effect_out_range(other, sysmap, memop, memid, gpa);
@@ -535,24 +535,24 @@ impl VRamDB {
             self.inv_sw(memid),
             gpa.is_valid(),
             memop.is_valid(),
-            memop.is_Write(),
+            memop is Write,
             memop.to_mem().contains(gpa),
-            self.op(sysmap, memop).is_Ok(),
+            self.op(sysmap, memop) is Ok,
             other === &self.op(sysmap, memop).to_result(),
-            memop.to_memid().to_asid() === memid.to_asid() || !memop.get_Write_1(),
+            memop.to_memid().to_asid() === memid.to_asid() || !memop->Write_1,
         ensures
-            other.get_byte(memid, gpa, false, sysmap).is_Some(),
-            (other.get_enc_byte_ok(memid, gpa).is_Some() && memop.get_Write_1()) ==> (
-            other.get_enc_byte_ok(memid, gpa).get_Some_0() === memop.get_Write_2()[gpa.value()
+            other.get_byte(memid, gpa, false, sysmap) is Some,
+            (other.get_enc_byte_ok(memid, gpa) is Some && memop->Write_1) ==> (
+            other.get_enc_byte_ok(memid, gpa)->Some_0 === memop->Write_2[gpa.value()
                 - memop.to_mem().first().value()]),
-            !(other.get_enc_byte_ok(memid, gpa).is_Some() && memop.get_Write_1()) ==> (
-            other.get_byte(memop.to_memid(), gpa, memop.get_Write_1(), sysmap).get_Some_0()
-                === memop.get_Write_2()[gpa.value() - memop.to_mem().first().value()]),
-            (!other.get_enc_byte_ok(memid, gpa).is_Some() && !memop.get_Write_1()) ==> {
-                other.get_byte(memid, gpa, false, sysmap).get_Some_0()
-                    === memop.get_Write_2()[gpa.value() - memop.to_mem().first().value()]
+            !(other.get_enc_byte_ok(memid, gpa) is Some && memop->Write_1) ==> (
+            other.get_byte(memop.to_memid(), gpa, memop->Write_1, sysmap)->Some_0
+                === memop->Write_2[gpa.value() - memop.to_mem().first().value()]),
+            (!(other.get_enc_byte_ok(memid, gpa) is Some) && !memop->Write_1) ==> {
+                other.get_byte(memid, gpa, false, sysmap)->Some_0
+                    === memop->Write_2[gpa.value() - memop.to_mem().first().value()]
             },
-            !memop.get_Write_1() ==> {
+            !memop->Write_1 ==> {
                 other.get_enc_byte_ok(memid, gpa) === self.get_enc_byte_ok(memid, gpa)
             },
     {
@@ -564,14 +564,14 @@ impl VRamDB {
         let rspa = gpa.convert(rspn);
         assert(rspn =~= rspa.to_page());
         let AddrMemID { range, memid: w_memid } = memop.to_addr_memid();
-        let data = memop.get_Write_2();
-        let w_enc = memop.get_Write_1();
+        let data = memop->Write_2;
+        let w_enc = memop->Write_1;
         let wspmem = sysmap.translate_addr_seq(range);
         assert(gpa.to_page() === range.to_page());
         reveal(RmpEntry::check_access);
         reveal(rmp_inv);
         assert(rmp[wspmem.to_page()].inv());
-        if other.get_enc_byte_ok(memid, gpa).is_Some() && w_enc {
+        if other.get_enc_byte_ok(memid, gpa) is Some && w_enc {
             assert(rmp[rspn].inv());
             assert(w_memid.to_asid() === memid.to_asid());
             assert(wspmem.contains(rspa)) by {
@@ -579,7 +579,7 @@ impl VRamDB {
                 assert(range.to_page() === gpa.to_page());
                 assert(wspmem.to_page() === rspa.to_page());
             }
-            assert(self.get_enc_byte_ok(memid, gpa).is_Some());
+            assert(self.get_enc_byte_ok(memid, gpa) is Some);
             self.spec_sram().lemma_write_change_byte(memid.to_asid(), wspmem, data, rspa);
         } else {
             let w_asid = if w_enc {
@@ -588,20 +588,20 @@ impl VRamDB {
                 ASID_FOR_HV!()
             };
             let rspa_by_sysmap = sysmap.translate_addr(gpa);
-            assert(rspa_by_sysmap.is_Some());
-            let rspa_by_sysmap = rspa_by_sysmap.get_Some_0();
+            assert(rspa_by_sysmap is Some);
+            let rspa_by_sysmap = rspa_by_sysmap->Some_0;
             let read_byte_sysmap = other.get_byte(w_memid, gpa, w_enc, sysmap);
-            assert(read_byte_sysmap.is_Some());
+            assert(read_byte_sysmap is Some);
             if !w_enc {
                 let read_byte = other.get_byte(memid, gpa, false, sysmap);
-                assert(read_byte.is_Some());
-                if other.get_enc_byte_ok(memid, gpa).is_Some() {
+                assert(read_byte is Some);
+                if other.get_enc_byte_ok(memid, gpa) is Some {
                     assert(rmp[rspn].inv());
                     assert(!rmp[wspmem.to_page()].view().spec_assigned());
                     assert(rmp[rspn].view().spec_validated());
                     assert(wspmem.to_page() !== rspn);
                     //self.spec_sram().lemma_write_unchange_byte_any_enc(w_asid, wspmem, data, memid.to_asid(), rspa);
-                    //assert(other.get_enc_byte_ok(memid, gpa).get_Some_0() === self.get_enc_byte_ok(memid, gpa).get_Some_0());
+                    //assert(other.get_enc_byte_ok(memid, gpa)->Some_0 === self.get_enc_byte_ok(memid, gpa)->Some_0);
                 }
             }
             if wspmem.to_page() !== rspn {
@@ -619,7 +619,7 @@ impl VRamDB {
             self.spec_sram().lemma_write_change_byte(w_asid, wspmem, data, rspa_by_sysmap);
             assert(other.spec_sram().read_one_byte(w_asid, rspa_by_sysmap)
                 === data[rspa_by_sysmap.value() - wspmem.first().value()]);
-            assert(read_byte_sysmap.get_Some_0() === data[rspa_by_sysmap.value()
+            assert(read_byte_sysmap->Some_0 === data[rspa_by_sysmap.value()
                 - wspmem.first().value()]);
         }
     }
@@ -638,14 +638,14 @@ impl VRamDB {
             memid.is_vmpl0(),
             gpa.is_valid(),
             memop.is_valid(),
-            memop.is_Write(),
-            self.op(sysmap, memop).is_Ok(),
+            memop is Write,
+            self.op(sysmap, memop) is Ok,
             other === &self.op(sysmap, memop).to_result(),
             !memop.to_mem().contains(gpa),
         ensures
             (other.get_enc_byte_ok(memid, gpa) === self.get_enc_byte_ok(memid, gpa)),
     {
-        if memop.to_memid().to_asid() === memid.to_asid() || !memop.get_Write_1() {
+        if memop.to_memid().to_asid() === memid.to_asid() || !memop->Write_1 {
             self.lemma_write_effect_out_range_same_vm(other, sysmap, memop, memid, gpa);
         } else {
             self.lemma_write_byte_other_vm(other, sysmap, memop, memid, gpa);
@@ -664,11 +664,11 @@ impl VRamDB {
             self.inv(),
             self.inv_sw(memid),
             memop.is_valid(),
-            memop.is_Write(),
-            self.op(sysmap, memop).is_Ok(),
+            memop is Write,
+            self.op(sysmap, memop) is Ok,
             other === &self.op(sysmap, memop).to_result(),
             !memop.to_mem().contains(gpa),
-            memop.to_memid().to_asid() === memid.to_asid() || !memop.get_Write_1(),
+            memop.to_memid().to_asid() === memid.to_asid() || !memop->Write_1,
         ensures
             (other.get_enc_byte_ok(memid, gpa) === self.get_enc_byte_ok(memid, gpa)),
     {
@@ -676,13 +676,13 @@ impl VRamDB {
         reveal(VRamDB::op_write);
         let rmp = self.spec_rmp();
         assert(rmp === other.spec_rmp());
-        let w_enc = memop.get_Write_1();
+        let w_enc = memop->Write_1;
         let w_gpmem = memop.to_mem();
         let w_memid = memop.to_memid();
-        let data = memop.get_Write_2();
+        let data = memop->Write_2;
         let wspmem = sysmap.translate_addr_seq(w_gpmem);
         wspmem.proof_same_page();
-        if self.get_enc_byte_ok(memid, gpa).is_Some() {
+        if self.get_enc_byte_ok(memid, gpa) is Some {
             assert(rmp_has_gpn_memid(&rmp, gpa.to_page(), memid));
             let rspn = rmp_reverse(&rmp, memid, gpa.to_page());
             let rspa = gpa.convert(rspn);
@@ -728,7 +728,7 @@ impl VRamDB {
                 assume(other.get_enc_byte_ok(memid, gpa) === self.get_enc_byte_ok(memid, gpa));
             }
         } else {
-            assert(self.get_enc_byte_ok(memid, gpa).is_None());
+            assert(self.get_enc_byte_ok(memid, gpa) is None);
         }
     }
 
@@ -750,9 +750,9 @@ impl VRamDB {
         match memop {
             MemOp::RmpOp(rmpop) => {
                 let spn = sysmap.translate(rmpop.get_gpn());
-                if spn.is_Some() {
-                    rmp_proof_op_dom_inv(&self.spec_rmp(), rmpop.set_spn(spn.get_Some_0()));
-                    rmp_proof_op_inv(&self.spec_rmp(), rmpop.set_spn(spn.get_Some_0()));
+                if spn is Some {
+                    rmp_proof_op_dom_inv(&self.spec_rmp(), rmpop.set_spn(spn->Some_0));
+                    rmp_proof_op_inv(&self.spec_rmp(), rmpop.set_spn(spn->Some_0));
                 }
             },
             MemOp::Write(gpa_id, enc, data) => {
@@ -761,7 +761,7 @@ impl VRamDB {
                 } else {
                     ASID_FOR_HV!()
                 };
-                if self.op(sysmap, memop).is_Ok() {
+                if self.op(sysmap, memop) is Ok {
                     let spa = sysmap.translate_addr_seq(memop.to_mem());
                     self.spec_sram().lemma_write_inv(use_asid, spa, data);
                     assert(new.inv());
@@ -794,11 +794,11 @@ impl VRamDB {
         match memop {
             MemOp::RmpOp(rmpop) => {
                 let spn = sysmap.translate(rmpop.get_gpn());
-                if spn.is_Some() {
-                    rmp_proof_inv_sw(&self.spec_rmp(), rmpop.set_spn(spn.get_Some_0()), memid);
+                if spn is Some {
+                    rmp_proof_inv_sw(&self.spec_rmp(), rmpop.set_spn(spn->Some_0), memid);
                     rmp_proof_inv_memid_int(
                         &self.spec_rmp(),
-                        rmpop.set_spn(spn.get_Some_0()),
+                        rmpop.set_spn(spn->Some_0),
                         memid,
                     );
                 }
@@ -811,8 +811,8 @@ impl VRamDB {
         requires
             memop.is_valid(),
         ensures
-            !self.op(sysmap, memop).is_Ok() ==> self.op(sysmap, memop).to_result() === *self,
-            self.op(sysmap, memop).to_result() !== *self ==> self.op(sysmap, memop).is_Ok(),
+            !(self.op(sysmap, memop) is Ok) ==> self.op(sysmap, memop).to_result() === *self,
+            self.op(sysmap, memop).to_result() !== *self ==> self.op(sysmap, memop) is Ok,
     {
         reveal(VRamDB::op);
         reveal(VRamDB::op_read);
@@ -829,13 +829,13 @@ impl VRamDB {
     )
         requires
             memop.is_valid(),
-            memop.is_Write(),
+            memop is Write,
             memop.to_mem() === rgpa_id.range,  // same gpa + memid
             memop.to_memid() === rgpa_id.memid,  // same gpa + memid
-            memop.get_Write_1() === enc,  // same enc
-            self.op(sysmap, memop).is_Ok(),
+            memop->Write_1 === enc,  // same enc
+            self.op(sysmap, memop) is Ok,
         ensures
-            memop.get_Write_2() === self.op(sysmap, memop).to_result().get_bytes(
+            memop->Write_2 === self.op(sysmap, memop).to_result().get_bytes(
                 rgpa_id,
                 enc,
                 sysmap,
@@ -843,7 +843,7 @@ impl VRamDB {
     {
         reveal(VRamDB::op);
         reveal(VRamDB::op_write);
-        let data = memop.get_Write_2();
+        let data = memop->Write_2;
         let new_vram = self.op(sysmap, memop).to_result();
         let gpmem = memop.to_mem();
         let memid = memop.to_memid();
@@ -862,16 +862,16 @@ impl VRamDB {
             enc,
             gpa_id.range.is_valid(),
             self.inv_sw(gpa_id.memid),
-            self.op(sysmap, MemOp::Read(gpa_id, enc)).is_Ok(),
+            self.op(sysmap, MemOp::Read(gpa_id, enc)) is Ok,
         ensures
-            self.get_enc_bytes_ok(gpa_id).is_Some(),
-            self.get_enc_bytes_ok(gpa_id).get_Some_0() === self.read_bytes(
+            self.get_enc_bytes_ok(gpa_id) is Some,
+            self.get_enc_bytes_ok(gpa_id)->Some_0 === self.read_bytes(
                 gpa_id,
                 enc,
                 sysmap,
             ).to_result(),
-            sysmap.translate(gpa_id.range.to_page()).is_Some(),
-            sysmap.translate(gpa_id.range.to_page()).get_Some_0() === rmp_reverse(
+            sysmap.translate(gpa_id.range.to_page()) is Some,
+            sysmap.translate(gpa_id.range.to_page())->Some_0 === rmp_reverse(
                 &self.spec_rmp(),
                 gpa_id.memid,
                 gpa_id.range.to_page(),
@@ -886,16 +886,16 @@ impl VRamDB {
             enc,
             gpa_id.range.is_valid(),
             self.inv_sw(gpa_id.memid),
-            self.read_bytes(gpa_id, enc, sysmap).is_Ok(),
+            self.read_bytes(gpa_id, enc, sysmap) is Ok,
         ensures
-            self.get_enc_bytes_ok(gpa_id).is_Some(),
-            self.get_enc_bytes_ok(gpa_id).get_Some_0() === self.read_bytes(
+            self.get_enc_bytes_ok(gpa_id) is Some,
+            self.get_enc_bytes_ok(gpa_id)->Some_0 === self.read_bytes(
                 gpa_id,
                 enc,
                 sysmap,
             ).to_result(),
-            sysmap.translate(gpa_id.range.to_page()).is_Some(),
-            sysmap.translate(gpa_id.range.to_page()).get_Some_0() =~= rmp_reverse(
+            sysmap.translate(gpa_id.range.to_page()) is Some,
+            sysmap.translate(gpa_id.range.to_page())->Some_0 =~= rmp_reverse(
                 &self.spec_rmp(),
                 gpa_id.memid,
                 gpa_id.range.to_page(),
@@ -905,7 +905,7 @@ impl VRamDB {
         let AddrMemID { range: gpmem, memid } = gpa_id;
         let gpn = gpmem.to_page();
         let spmem = rmp_reverse_mem(&rmp, memid, gpmem);
-        assert(sysmap.translate(gpn).is_Some());
+        assert(sysmap.translate(gpn) is Some);
         assert(sysmap.translate_addr_seq(gpmem) === spmem) by {
             assert(self.inv_sw(gpa_id.memid));
             reveal(RmpEntry::check_access);
@@ -928,16 +928,16 @@ impl VRamDB {
             rmp_inv_sw(&self.rmp, gpa_id.memid),
         ensures
             (self.read_bytes(gpa_id, enc, sysmap1) === self.read_bytes(gpa_id, enc, sysmap2))
-                || self.read_bytes(gpa_id, enc, sysmap1).is_Error() || self.read_bytes(
+                || self.read_bytes(gpa_id, enc, sysmap1) is Error || self.read_bytes(
                 gpa_id,
                 enc,
                 sysmap2,
-            ).is_Error(),
+            ) is Error,
     {
-        if self.read_bytes(gpa_id, enc, sysmap1).is_Ok() {
+        if self.read_bytes(gpa_id, enc, sysmap1) is Ok {
             self.lemma_read_enc_byte_ok(sysmap1, gpa_id, enc);
         }
-        if self.read_bytes(gpa_id, enc, sysmap2).is_Ok() {
+        if self.read_bytes(gpa_id, enc, sysmap2) is Ok {
             self.lemma_read_enc_byte_ok(sysmap2, gpa_id, enc);
         }
     }
@@ -949,14 +949,14 @@ impl VRamDB {
             other.inv(),
             self.model1_eq(other, gpa_id.memid) || self.model2_eq(other),
         ensures
-            other.get_enc_bytes_ok(gpa_id).is_None() ==> self.get_enc_bytes_ok(gpa_id).is_None(),
+            other.get_enc_bytes_ok(gpa_id) is None ==> self.get_enc_bytes_ok(gpa_id) is None,
     {
         let gpa = gpa_id.range;
         let memid = gpa_id.memid;
         assert(rmp_inv_sw(&self.rmp, gpa_id.memid)) by {
             rmp_lemma_model_eq_inv(&self.rmp, &other.rmp, gpa_id.memid);
         }
-        if other.get_enc_bytes_ok(gpa_id).is_None() {
+        if other.get_enc_bytes_ok(gpa_id) is None {
             assert(!rmp_has_gpn_memid(&other.spec_rmp(), gpa.to_page(), memid));
             assert(!rmp_has_gpn_memid(&self.spec_rmp(), gpa.to_page(), memid)) by {
                 assert(self.spec_rmp().dom() === other.spec_rmp().dom());
@@ -982,23 +982,23 @@ impl VRamDB {
             self.inv(),
             self.inv_memid_int(memid),
             memtype(memid, memop.to_addr_memid().range.to_page()).is_sm_int(),
-            self.op(sysmap, memop).is_Ok(),
+            self.op(sysmap, memop) is Ok,
             memop.is_valid(),
-            memop.is_Write(),
+            memop is Write,
             memid.is_vmpl0(),
         ensures
             memop.to_memid().is_sm(memid) || memop.to_memid().to_asid() !== memid.to_asid()
-                || !memop.get_Write_1(),
+                || !memop->Write_1,
     {
         reveal(RmpEntry::check_access);
         reveal(VRamDB::op);
         let rmp = self.spec_rmp();
-        if memop.get_Write_1() {
+        if memop->Write_1 {
             let gpn = memop.to_page();
             let op_memid = memop.to_memid();
             let spn = sysmap.translate(gpn);
-            assert(spn.is_Some());
-            let spn = spn.get_Some_0();
+            assert(spn is Some);
+            let spn = spn->Some_0;
             assert(rmp[spn].view().check_vmpl(op_memid.to_vmpl(), Perm::Write));
             assert(rmp[spn].view().spec_gpn() === gpn);
             assert(rmp[spn].view().spec_asid() === op_memid.to_asid());
@@ -1021,12 +1021,12 @@ impl VRamDB {
         requires
             rmp_inv_sw(&self.rmp, memid),
             self.inv(),
-            self.op(sysmap, memop).is_Ok(),
+            self.op(sysmap, memop) is Ok,
             memop.is_valid(),
-            memop.is_Write(),
-            memop.get_Write_1(),
+            memop is Write,
+            memop->Write_1,
         ensures
-            self.get_enc_bytes_ok(memop.to_addr_memid()).is_Some(),
+            self.get_enc_bytes_ok(memop.to_addr_memid()) is Some,
     {
         reveal(RmpEntry::check_access);
         reveal(VRamDB::op);
@@ -1041,9 +1041,9 @@ impl VRamDB {
             memtype(gpa_id.memid, gpa_id.range.to_page()).is_sm_int(),
             self.model1_eq(other, gpa_id.memid),
         ensures
-            self.get_enc_bytes_ok(gpa_id).is_Some() ==> self.get_enc_bytes_ok(gpa_id)
+            self.get_enc_bytes_ok(gpa_id) is Some ==> self.get_enc_bytes_ok(gpa_id)
                 === other.get_enc_bytes_ok(gpa_id),
-            other.get_enc_bytes_ok(gpa_id).is_None() ==> self.get_enc_bytes_ok(gpa_id).is_None(),
+            other.get_enc_bytes_ok(gpa_id) is None ==> self.get_enc_bytes_ok(gpa_id) is None,
     {
         reveal(RmpEntry::check_access);
         self.lemma_read_enc_ok_valid_model_eq(other, gpa_id);
@@ -1062,7 +1062,7 @@ impl VRamDB {
         let spmem2 = rmp_reverse_mem(&other.rmp, memid, gpa);
         let read_bytes1 = self.get_enc_bytes_ok(gpa_id);
         let read_bytes2 = other.get_enc_bytes_ok(gpa_id);
-        if self.get_enc_bytes_ok(gpa_id).is_Some() {
+        if self.get_enc_bytes_ok(gpa_id) is Some {
             assert(self.rmp[spn1].view().spec_validated());
             assert(other.rmp[spn2].view().spec_validated());
             assert(self.rmp[spn1].view() === other.rmp[spn1].view());
@@ -1114,9 +1114,9 @@ impl VRamDB {
             gpa_id.range.is_valid(),
             self.model2_eq(other),
         ensures
-            self.get_enc_bytes_ok(gpa_id).is_Some() ==> self.get_enc_bytes_ok(gpa_id)
+            self.get_enc_bytes_ok(gpa_id) is Some ==> self.get_enc_bytes_ok(gpa_id)
                 === other.get_enc_bytes_ok(gpa_id),
-            other.get_enc_bytes_ok(gpa_id).is_None() ==> self.get_enc_bytes_ok(gpa_id).is_None(),
+            other.get_enc_bytes_ok(gpa_id) is None ==> self.get_enc_bytes_ok(gpa_id) is None,
     {
         reveal(RmpEntry::check_access);
         self.lemma_read_enc_ok_valid_model_eq(other, gpa_id);
@@ -1131,7 +1131,7 @@ impl VRamDB {
         let spmem2 = rmp_reverse_mem(&other.rmp, memid, gpa);
         let read_bytes1 = self.get_enc_bytes_ok(gpa_id);
         let read_bytes2 = other.get_enc_bytes_ok(gpa_id);
-        if self.get_enc_bytes_ok(gpa_id).is_Some() {
+        if self.get_enc_bytes_ok(gpa_id) is Some {
             assert(self.rmp[spn1].view().spec_validated());
             assert(other.rmp[spn2].view().spec_validated());
             assert(self.rmp[spn1].view() === other.rmp[spn1].view());
@@ -1188,10 +1188,10 @@ impl VRamDB {
                 memid,
                 gpa,
             ),
-            memid.to_vmpl().is_VMPL0(),
+            memid.to_vmpl() is VMPL0,
             op.to_memid().is_sm(memid),
         ensures
-            op.is_Write() || (op.is_RmpOp()),
+            op is Write || (op is RmpOp),
     {
         reveal(VRamDB::op);
     }

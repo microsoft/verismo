@@ -303,9 +303,9 @@ pub fn enc_payload(
         payload_perm@.wf_default((payload_addr as int, len as nat)),
     ensures
         cs.inv(),
-        ret.0.is_Ok() ==> ret.0.get_Ok_0().wf(),
-        ret.0.is_Ok() ==> ret.0.get_Ok_0()@.is_constant(),
-        ret.0.is_Ok() ==> ret.0.get_Ok_0().snp() === SwSnpMemAttr::spec_default(),
+        ret.0 is Ok ==> ret.0->Ok_0.wf(),
+        ret.0 is Ok ==> ret.0->Ok_0@.is_constant(),
+        ret.0 is Ok ==> ret.0->Ok_0.snp() === SwSnpMemAttr::spec_default(),
         payload_perm == ret.1@,
         cs.only_lock_reg_coremode_updated(*old(cs), set![], set![spec_ALLOCATOR_lockid()]),
 {

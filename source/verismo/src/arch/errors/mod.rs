@@ -3,7 +3,6 @@ use crate::tspec::*;
 
 verus! {
 
-#[is_variant]
 pub enum MemError<Param> {
     Others(Param),  // vaddr, memid
     NoRam(Param),  // vaddr, memid
@@ -13,7 +12,6 @@ pub enum MemError<Param> {
     RmpOp(RmpFault, Param),
 }
 
-#[is_variant]
 pub enum RmpFault {
     Unsupported,
     Size,

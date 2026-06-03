@@ -24,7 +24,7 @@ pub fn asm_global(input: TokenStream) -> TokenStream {
     let asm_str = format!("lea rax, [rip + {}]", varname.to_string());
     let asm_tokens = quote! {
         verus!{
-            pub spec fn #spec_func_name() -> int;
+            pub uninterp spec fn #spec_func_name() -> int;
         }
         verus!{
             #[verifier(external_body)]

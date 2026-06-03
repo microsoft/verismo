@@ -55,13 +55,13 @@ impl VRamDB {
         let is_last_entry = new_pte@.is_present() || memtype(
             memid,
             gpmem.to_page(),
-        ).get_PTE_0().is_L0();
+        )->PTE_0 is L0;
         let need_c_bit = (memtype(memid, target_gpn).need_c_bit() && is_last_entry);
-        &&& if old_pte.is_Some() && gpmem.len() > 0 {
-            let old_pte = old_pte.get_Some_0();
+        &&& if old_pte is Some && gpmem.len() > 0 {
+            let old_pte = old_pte->Some_0;
             &&& enc
             &&& gpmem_id.range.is_aligned(ptesize)
-            &&& memtype(memid, gpmem.to_page()).is_PTE()
+            &&& memtype(memid, gpmem.to_page()) is PTE
             &&& gpmem_id.range.len() == ptesize
             &&& target_gpn === old_pte@.spec_ppn()
             &&& need_c_bit ==> new_pte@.is_encrypted()
@@ -80,7 +80,7 @@ impl VRamDB {
         let memty = memtype(memid, range.to_page());
         if memty.need_c_bit() {
             &&& enc
-            &&& if memty.is_PTE() {
+            &&& if memty is PTE {
                 self.pte_write_requires_nosysmap(AddrMemID { range, memid }, true, data)
             } else {
                 true
@@ -154,8 +154,8 @@ impl VRamDB {
             Perm::Read,
             rspa.to_page(),
         );
-        ||| rmpcheck_w.is_Error()
-        ||| rmpcheck_r.is_Error()
+        ||| rmpcheck_w is Error
+        ||| rmpcheck_r is Error
         ||| self.spec_sram().disjoint_write_read_requires(use_asid, spa, rspa)
     }
 
@@ -194,8 +194,8 @@ impl VRamDB {
         T,
     > {
         let bytes = self.get_enc_bytes_ok(gpmem_id);
-        if bytes.is_Some() {
-            Option::Some(stream_to_data(bytes.get_Some_0()))
+        if bytes is Some {
+            Option::Some(stream_to_data(bytes->Some_0))
         } else {
             Option::None
         }
@@ -210,8 +210,8 @@ impl VRamDB {
         } else {
             ASID_FOR_HV!()
         };
-        if spa.is_Some() {
-            Option::Some(self.sram.read_one_byte(use_asid, spa.get_Some_0()))
+        if spa is Some {
+            Option::Some(self.sram.read_one_byte(use_asid, spa->Some_0))
         } else {
             Option::None
         }
@@ -234,7 +234,7 @@ impl VRamDB {
         enc: bool,
         sysmap: SysMap,
     ) -> ResultOrErr<ByteStream, MemError<()>> {
-        recommends(gpmem_id.memid.is_Guest());
+        recommends(gpmem_id.memid is Guest);
         let op = ();
         let gpa = gpmem_id.range;
         let memid = gpmem_id.memid;
@@ -246,9 +246,9 @@ impl VRamDB {
         } else {
             ASID_FOR_HV!()
         };
-        if spn.is_Some() {
-            let rmpcheck = rmp_check_access(&rmp, memid, enc, gpa, Perm::Read, spn.get_Some_0());
-            if rmpcheck.is_Ok() {
+        if spn is Some {
+            let rmpcheck = rmp_check_access(&rmp, memid, enc, gpa, Perm::Read, spn->Some_0);
+            if rmpcheck is Ok {
                 let data = self.get_bytes(gpmem_id, enc, sysmap);
                 ResultOrErr::Ok(data)
             } else {
@@ -273,7 +273,7 @@ impl VRamDB {
         Self,
         MemError<()>,
     > {
-        recommends(gpmem_id.memid.is_Guest());
+        recommends(gpmem_id.memid is Guest);
         match self.read_bytes(gpmem_id, enc, sysmap) {
             ResultOrErr::Ok(_) => ResultWithErr::Ok(*self),
             ResultOrErr::Error(err) => ResultWithErr::Error(*self, err),
@@ -288,7 +288,7 @@ impl VRamDB {
         sysmap: SysMap,
     ) -> ResultWithErr<Self, MemError<()>>
         recommends
-            gpa_id.memid.is_Guest(),
+            gpa_id.memid is Guest,
     {
         let gpa = gpa_id.addr;
         let gpmem = gpa.to_mem(data.len());
@@ -303,13 +303,13 @@ impl VRamDB {
             ASID_FOR_HV!()
         };
         if spa_seq.is_valid() {
-            let spn = spn.get_Some_0();
+            let spn = spn->Some_0;
             let rmpcheck = rmp_check_access(&rmp, memid, enc, gpmem, Perm::Write, spn);
-            if rmpcheck.is_Ok() {
+            if rmpcheck is Ok {
                 let new = self.spec_set_sram(self.spec_sram().write_raw(use_asid, spa_seq, data));
                 ResultWithErr::Ok(new)
             } else {
-                ResultWithErr::Error(*self, rmpcheck.get_Error_0().with_param(()))
+                ResultWithErr::Error(*self, rmpcheck->Error_0.with_param(()))
             }
         } else {
             ResultWithErr::Error(*self, MemError::NestedPF(()))
@@ -321,8 +321,8 @@ impl VRamDB {
         MemError<RmpOp<GuestPhy>>,
     > {
         let spn = sysmap.translate(rmpop.get_gpn());
-        if spn.is_Some() {
-            let spn = spn.get_Some_0();
+        if spn is Some {
+            let spn = spn->Some_0;
             let spa_rmpop = rmpop.set_spn(spn);
             match rmp_op(&self.spec_rmp(), spa_rmpop) {
                 ResultWithErr::Ok(newrmp) => ResultWithErr::Ok(self.spec_set_rmp(newrmp)),

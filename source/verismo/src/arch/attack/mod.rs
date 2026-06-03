@@ -13,6 +13,6 @@ pub trait Model2Eq {
     spec fn model2_eq(&self, other: &Self) -> bool;
 }
 
-pub spec fn spec_attack() -> bool;
+pub uninterp spec fn spec_attack() -> bool;
 
 } // verus!

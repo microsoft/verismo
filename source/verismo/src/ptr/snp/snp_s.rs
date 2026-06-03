@@ -34,8 +34,8 @@ impl SwSnpMemAttr {
             perms: rmp_perm_init(),
         };
         let newrmp = RmpEntry { val: hidden };
-        &&& prev.rmp.rmpupdate(newrmp).is_Ok()
-        &&& self.rmp === prev.rmp.rmpupdate(newrmp).get_Ok_0()
+        &&& prev.rmp.rmpupdate(newrmp) is Ok
+        &&& self.rmp === prev.rmp.rmpupdate(newrmp)->Ok_0
         &&& *self === prev.spec_set_rmp(self.rmp)
     }
 
@@ -67,7 +67,7 @@ impl SwSnpMemAttr {
         let vmsa: VmsaPage = memperm.bytes().vspec_cast_to();
         let vmpl = vmsa.vmpl;
         &&& self.requires_rmpadjust_mem(vaddr, is_2m, attr, newcore)
-        &&& attr.is_vmsa() ==> vmpl.spec_eq(newcore.get_Some_0()@.vmpl)
+        &&& attr.is_vmsa() ==> vmpl.spec_eq(newcore->Some_0@.vmpl)
     }
 
     pub open spec fn requires_rmpadjust_mem(
@@ -79,8 +79,8 @@ impl SwSnpMemAttr {
     ) -> bool {
         &&& is_2m % 2 == 0  // Only support 4k page
         &&& 1 <= attr.spec_vmpl() <= 3
-        &&& attr.is_vmsa() ==> newcore.is_Some()
-        &&& !attr.is_vmsa() ==> newcore.is_None()
+        &&& attr.is_vmsa() ==> newcore is Some
+        &&& !attr.is_vmsa() ==> newcore is None
         &&& self.rmp@.spec_validated()  // need to be validated before rmpadjust, otherwises it will never return.
         &&& self.wf()
     }
@@ -109,7 +109,7 @@ impl HwSnpMemAttr {
             vmid >= 1,
     {
         let memid = MemID::Guest((vmid - 1) as nat, VMPL::VMPL0);
-        &&& self.rmp.check_access_no_addr_check(memid, self.encrypted(), perm).is_Ok()
+        &&& self.rmp.check_access_no_addr_check(memid, self.encrypted(), perm) is Ok
         &&& self.encrypted() ==> self.valid_memmap(vaddr, size)
     }
 
@@ -138,7 +138,7 @@ impl HwSnpMemAttr {
             is_vmsa,
             perms,
         );
-        let size = (if psize.is_Size4k() {
+        let size = (if psize is Size4k {
             PAGE_SIZE!()
         } else {
             0x2000_000
@@ -148,9 +148,9 @@ impl HwSnpMemAttr {
             if let ResultWithErr::Error(_, memerr) = ret {
                 let arch: Archx64 = arbitrary();
                 let memop: MemOp<GuestVir> = choose|memop: MemOp<GuestVir>|
-                    memop.is_RmpOp() && memop.get_RmpOp_0().is_RmpAdjust();
+                    memop is RmpOp && memop->RmpOp_0 is RmpAdjust;
                 let op = choose|op: Archx64Op|
-                    op.to_memid() === memid && op.is_MemOp() && op.get_MemOp_0() === memop;
+                    op.to_memid() === memid && op is MemOp && op->MemOp_0 === memop;
                 let (trap, trans) = Archx64::handle_mem_err_fn(MemError::from_err(memerr, memop));
                 if !trap {
                     &&& rax == trans(arch, op).spec_regdb()[op.cpu_memid()].spec_index(RegName::Rax)
@@ -185,7 +185,7 @@ impl HwSnpMemAttr {
         let memid = MemID::Guest((vmid - 1) as nat, VMPL::VMPL0);
         let page = GVA::new(vaddr).to_page();
         let ret = self.rmp.pvalidate(memid, psize, self.rmp@.gpn, val);
-        let size = if psize.is_Size4k() {
+        let size = if psize is Size4k {
             PAGE_SIZE!()
         } else {
             0x2000_000
@@ -195,9 +195,9 @@ impl HwSnpMemAttr {
             if let ResultWithErr::Error(_, memerr) = ret {
                 let arch: Archx64 = arbitrary();
                 let memop: MemOp<GuestVir> = choose|memop: MemOp<GuestVir>|
-                    memop.is_RmpOp() && memop.get_RmpOp_0().is_Pvalidate();
+                    memop is RmpOp && memop->RmpOp_0 is Pvalidate;
                 let op = choose|op: Archx64Op|
-                    op.to_memid() === memid && op.is_MemOp() && op.get_MemOp_0() === memop;
+                    op.to_memid() === memid && op is MemOp && op->MemOp_0 === memop;
                 let (trap, trans) = Archx64::handle_mem_err_fn(MemError::from_err(memerr, memop));
                 if !trap {
                     &&& rax == trans(arch, op).spec_regdb()[op.cpu_memid()].spec_index(RegName::Rax)
@@ -274,7 +274,7 @@ impl SnpMemAttr {
                 let psize = if is_2m % 2 == 0 {PageSize::Size4k} else {PageSize::Size4k};
                 let validated = val % 2 == 1;
                 assert(new.hw.rmp === self.hw.rmp.pvalidate(memid, psize, self.hw.rmp@.gpn, validated).to_result());
-                assert(self.hw.rmp.pvalidate(memid, psize, self.hw.rmp@.gpn, validated).is_Ok());
+                assert(self.hw.rmp.pvalidate(memid, psize, self.hw.rmp@.gpn, validated) is Ok);
                 assert(new.hw.rmp !== self.hw.rmp);
                 assert(self.hw.hvupdate_rel(self.sw));
                 assert(new.hw.rmp@.is_valid());

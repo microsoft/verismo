@@ -7,9 +7,9 @@ impl MemDB {
         let gvmem = memop.to_mem();
         let op_memid = memop.to_memid();
         let guestmap = self.to_mem_map_ok(op_memid);
-        let gpmem = gvmem.convert(guestmap.translate(gvmem.to_page()).get_Some_0());
+        let gpmem = gvmem.convert(guestmap.translate(gvmem.to_page())->Some_0);
         let enc = guestmap.is_encrypted(gvmem.to_page());
-        memop.translate_gpn(gpmem, enc.get_Some_0())
+        memop.translate_gpn(gpmem, enc->Some_0)
     }
 
     pub open spec fn vop_requires(&self, memop: MemOp<GuestVir>) -> bool {
@@ -17,7 +17,7 @@ impl MemDB {
         let gp_memop = self.to_gpop_ok(memop);
         let gmap = self.to_mem_map_ok(memop.to_memid());
         let sysmap = self.spec_sysmap()[memop.to_memid()];
-        if gmap.translate(gvn).is_Some() {
+        if gmap.translate(gvn) is Some {
             self.spec_vram().gpmemop_requires(gp_memop, sysmap)
         } else {
             true
@@ -31,7 +31,7 @@ impl MemDB {
         &&& self.spec_tlb().inv_encrypted_priv_mem(memid)
         &&& self.spec_vram().inv()
         &&& self.spec_vram().inv_sw(memid)
-        &&& memid.is_Guest()
+        &&& memid is Guest
     }
 
     pub open spec fn to_mem_map_ok(&self, memid: MemID) -> MemMap<GuestVir, GuestPhy> {

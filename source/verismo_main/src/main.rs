@@ -1,7 +1,7 @@
 #![no_std] // don't link the Rust standard library
 #![verifier::deprecated_postcondition_mut_ref_style(true)]
 #![no_main] // disable all Rust-level entry points
-#![feature(panic_info_message)]
+#![allow(unexpected_cfgs)]
 #![allow(unused)]
 
 #[cfg(target_os = "none")]

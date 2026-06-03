@@ -28,7 +28,7 @@ impl RmpEntry {
     pub proof fn lemma_hvtrans_inv(entry: RmpEntry, op: RmpOp<SysPhy>) -> (next: RmpEntry)
         requires
             entry.inv(),
-            op.is_RmpUpdate(),
+            op is RmpUpdate,
         ensures
             next === entry.trans(op).to_result(),
             next.inv(),
@@ -52,7 +52,7 @@ impl RmpEntry {
         requires
             entry.inv(),
             entry@.inv_hvupdate_rel(prev_entry@),
-            op.is_RmpUpdate(),
+            op is RmpUpdate,
         ensures
             next === entry.trans(op).to_result(),
             next.inv(),

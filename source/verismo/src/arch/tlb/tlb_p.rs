@@ -16,9 +16,9 @@ impl TLB {
         assert forall|gvn: GVN|
             gvn.is_valid() && memtype(
                 memid,
-                memmap.translate(gvn).get_Some_0(),
+                memmap.translate(gvn)->Some_0,
             ).need_c_bit() implies #[trigger] memmap.is_encrypted_or_none(gvn) by {
-            if memmap.translate(gvn).is_Some() {
+            if memmap.translate(gvn) is Some {
                 assert(other.to_mem_map(memid).is_encrypted_or_none(gvn));
             }
         }

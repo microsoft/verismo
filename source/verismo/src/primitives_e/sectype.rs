@@ -40,7 +40,7 @@ pub broadcast proof fn axiom_size_from_cast_secbytes_def<T: SpecSize + VTypeCast
     val: T,
 )
     ensures
-        T::spec_size_def() == VTypeCast::<SecSeqByte>::vspec_cast_to(val).len(),
+        #[trigger] T::spec_size_def() == VTypeCast::<SecSeqByte>::vspec_cast_to(val).len(),
 {
 }
 
@@ -68,7 +68,7 @@ pub proof fn proof_sectype_cast_eq<T1: VTypeCast<T2>, T2: VTypeCast<T1>, M>(v: S
 }
 
 impl<T> VTypeCast<SecSeqByte> for Option<T> {
-    open spec fn vspec_cast_to(self) -> SecSeqByte;
+    uninterp spec fn vspec_cast_to(self) -> SecSeqByte;
 }
 
 impl<T> VTypeCast<SecSeqByte> for Tracked<T> {

@@ -4,7 +4,6 @@ verus! {
 
 pub const GHCB_VERSION_1: u16 = 1;
 
-#[is_variant]
 #[derive(SpecIntEnum, Copy, Clone)]
 pub enum PageOps {
     Private = 1,
@@ -164,7 +163,7 @@ pub open spec fn ensure_page_perm_change_state(
     ppage: int,
     op: PageOps,
 ) -> bool {
-    &&& memperm@.snp().ensures_rmpupdate(prev_memperm@.snp(), op.is_Shared(), op.is_Unsmash())
+    &&& memperm@.snp().ensures_rmpupdate(prev_memperm@.snp(), op is Shared, op is Unsmash)
     &&& (memperm)@.wf_range(prev_memperm@.range())
     &&& ppage == (memperm)@.ppage()
 }

@@ -50,7 +50,6 @@ pub type RmpUpdateParam = RmpEntry;
 
 pub type RmpMap = Map<SPN, RmpEntry>;
 
-#[is_variant]
 pub ghost enum RmpOp<AddrT> {
     RmpAdjust(PageID<AddrT>, RmpAdjustParam),
     Pvalidate(PageID<AddrT>, PvalidateParam),

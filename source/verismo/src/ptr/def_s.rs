@@ -85,7 +85,7 @@ verismo_simple! {
 verus! {
 
 impl<T: IsConstant + WellFormed + SpecSize> SnpPointsTo<T> {
-    pub open spec fn view(&self) -> SnpPointsToData<T>;
+    pub uninterp spec fn view(&self) -> SnpPointsToData<T>;
 }
 
 } // verus!

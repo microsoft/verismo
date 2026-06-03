@@ -29,7 +29,7 @@ impl<T: IsConstant> IsConstant for VBox<T> {
     }
 }
 
-pub closed spec fn spec_box_size() -> nat;
+pub uninterp spec fn spec_box_size() -> nat;
 
 impl<T> SpecSize for VBox<T> {
     open spec fn spec_size_def() -> nat {
@@ -38,7 +38,7 @@ impl<T> SpecSize for VBox<T> {
 }
 
 impl<T> VTypeCast<SecSeqByte> for VBox<T> {
-    closed spec fn vspec_cast_to(self) -> SecSeqByte;
+    uninterp spec fn vspec_cast_to(self) -> SecSeqByte;
 }
 
 impl<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> VBox<T> {
@@ -132,11 +132,11 @@ impl<T: IsConstant + WellFormed> WellFormed for VBox<T> {
 }
 
 impl<T> VBox<T> {
-    pub closed spec fn view(&self) -> T;
+    pub uninterp spec fn view(&self) -> T;
 
-    pub closed spec fn id(&self) -> int;
+    pub uninterp spec fn id(&self) -> int;
 
-    pub closed spec fn snp(&self) -> SwSnpMemAttr;
+    pub uninterp spec fn snp(&self) -> SwSnpMemAttr;
 
     pub open spec fn spec_eq(self, other: Self) -> bool {
         &&& self.id() == other.id()
@@ -361,7 +361,7 @@ impl<T: IsConstant + WellFormed + SpecSize> VBox<T> {
         -> (res: VBox<T>)
     requires
         perm@.wf_not_null_at(ptr as int),
-        perm@.value().is_Some(),
+        perm@.value() is Some,
     ensures
         res@ === perm@.get_value(),
         res.id() == perm@.id(),
@@ -382,7 +382,7 @@ impl<T: IsConstant + WellFormed + SpecSize> VBox<T> {
     ensures
         ptr_perm.0.is_constant(),
         ptr_perm.1@@.get_value() === self@,
-        ptr_perm.1@@.value().is_Some(),
+        ptr_perm.1@@.value() is Some,
         ptr_perm.1@@.wf_not_null_at(ptr_perm.0.id()),
         ptr_perm.1@@.snp() === self.snp(),
         self.id() == ptr_perm.0.id(),

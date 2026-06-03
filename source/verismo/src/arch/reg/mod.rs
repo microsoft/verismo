@@ -4,7 +4,6 @@ use crate::tspec::*;
 
 verus! {
 
-#[is_variant]
 pub enum RegName {
     // register fields
     Rflags,
@@ -28,7 +27,6 @@ pub enum RegName {
 }
 
 #[derive(SpecIntEnum)]
-#[is_variant]
 pub enum RflagBit {
     CF = 0,  // Carry flag
     R1 = 1,

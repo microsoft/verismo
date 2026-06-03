@@ -11,7 +11,7 @@ verus!{
         ret@.len() == ORDER_USIZE as nat,
         forall |i: int| 0 <= i < ret@.len() as int ==> ret@[i]@.len() == 0,
         forall |i: int| 0 <= i < ret@.len() as int ==> ret@[i].inv(),
-        //forall |i: int| 0 <= i < ret@.len() as int ==> ret@[i].is_Some(),
+        //forall |i: int| 0 <= i < ret@.len() as int ==> ret@[i] is Some,
         forall |i: int| 0 <= i < ret@.len() as int ==> ret@[i].is_constant(),
         ret.is_constant()
         {

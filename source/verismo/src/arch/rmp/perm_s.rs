@@ -3,7 +3,6 @@ use crate::tspec::*;
 
 verus! {
 
-#[is_variant]
 pub enum Perm {
     Read,
     Write,
@@ -87,7 +86,7 @@ pub open spec fn rmp_perm_init() -> RmpPerm {
     Map::new(
         |vmpl: VMPL| true,
         |vmpl: VMPL|
-            if vmpl.is_VMPL0() {
+            if vmpl is VMPL0 {
                 PagePerm::full()
             } else {
                 PagePerm::empty()
@@ -112,7 +111,7 @@ pub open spec fn rmp_perm_is_valid(p: RmpPerm) -> bool {
 #[verifier(external_body)]
 pub broadcast proof fn rmp_perm_track_dom(p: RmpPerm, vmpl: VMPL)
     ensures
-        p.dom().contains(vmpl),
+        #[trigger] p.dom().contains(vmpl),
 {
 }
 

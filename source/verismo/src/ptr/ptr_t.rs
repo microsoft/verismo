@@ -15,7 +15,7 @@ verismo! {
         pub fn _take(&self, Tracked(perm): Tracked<&mut SnpPointsTo<V>>) -> (v: V)
             requires
                 old(perm)@.ptr_not_null_wf(*self),
-                old(perm)@.value.is_Some(),
+                old(perm)@.value is Some,
             ensures
                 perm@.spec_write_rel(old(perm)@, None),
                 old(perm)@.spec_read_rel(v),
@@ -32,7 +32,7 @@ verismo! {
         pub fn _put(&self, Tracked(perm): Tracked<&mut SnpPointsTo<V>>, in_v: V)
             requires
                 old(perm)@.ptr_not_null_wf(*self),
-                old(perm)@.value().is_None(),
+                old(perm)@.value() is None,
             ensures
                 perm@.spec_write_rel(old(perm)@, Some(in_v)),
         {
@@ -69,7 +69,7 @@ verismo! {
         pub fn _borrow<'a>(&self, Tracked(perm): Tracked<&'a SnpPointsTo<V>>) -> (v: &'a V)
             requires
                 perm@.wf_not_null_at(self.id()) || perm@.is_wf_pte(self.id()),
-                perm@.value.is_Some(),
+                perm@.value is Some,
                 perm@.snp().is_vmpl0_private()
             ensures
                 perm@.spec_read_rel(*v),
@@ -86,7 +86,7 @@ verismo! {
         pub fn _copy<'a>(&self, Tracked(perm): Tracked<&'a SnpPointsTo<V>>) -> (v: V)
             requires
                 perm@.wf_not_null_at(self.id()) || perm@.is_wf_pte(self.id()),
-                perm@.value.is_Some(),
+                perm@.value is Some,
             ensures
                 perm@.spec_read_rel(v),
         {

@@ -31,7 +31,7 @@ impl<T2, T1: VTypeCast<T2>> SpecInto<T2> for T1 {
 #[verifier(external_body)]
 pub broadcast proof fn axiom_cast_to_seq_unique<T: VTypeCast<SecSeqByte>>(val: T)
     ensures
-        val === VTypeCast::<SecSeqByte>::vspec_cast_to(val).vspec_cast_to(),
+        #[trigger] val === VTypeCast::<SecSeqByte>::vspec_cast_to(val).vspec_cast_to(),
 {
 }
 
@@ -40,7 +40,7 @@ broadcast proof fn axiom_into_conversion_bytes<T1: VTypeCast<SecSeqByte> + IsCon
     b: SecSeqByte,
 )
     ensures
-        VTypeCast::<T1>::vspec_cast_to(b).vspec_cast_to() =~~= b,
+        #[trigger] VTypeCast::<T1>::vspec_cast_to(b).vspec_cast_to() =~~= b,
 {
 }
 

@@ -3,7 +3,6 @@ use crate::*;
 
 verus! {
 
-#[is_variant]
 pub enum MemID {
     Guest(nat, VMPL),
     Hv,
@@ -35,7 +34,7 @@ impl MemID {
     }
 
     pub open spec fn is_vmpl0(&self) -> bool {
-        self.to_vmpl().is_VMPL0() && self.is_Guest()
+        self.to_vmpl() is VMPL0 && self is Guest
     }
 
     pub open spec fn to_asid(&self) -> ASID {
@@ -51,7 +50,7 @@ impl MemID {
 
     pub open spec fn to_vmpl(&self) -> VMPL
     recommends
-        self.is_Guest()
+        self is Guest
     {
         match *self {
             MemID::Guest(_, vmpl) => {

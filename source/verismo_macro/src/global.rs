@@ -43,7 +43,7 @@ pub fn parse_global(
                     #[verifier(inline)]
                     pub open spec fn #addr_ident() -> #specmem
                     {Self::raw_vmem(spec_cast_integer::<_, int>(#unique_id), #non_zero)}
-                    pub spec fn #ident() -> crate::verismo::data::VData<#ty>;
+                    pub uninterp spec fn #ident() -> crate::verismo::data::VData<#ty>;
                     #[verifier(external_body)]
                     pub broadcast proof fn #axiom_ident()
                     ensures

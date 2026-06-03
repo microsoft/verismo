@@ -6,7 +6,7 @@ impl<V: IsConstant + WellFormed + SpecSize> WellFormed for SnpPointsToData<V> {
     open spec fn wf(&self) -> bool {
         &&& self.snp.wf()
         &&& !self.snp().is_pte
-        &&& self.value().is_Some() ==> self.wf_value(self.value().get_Some_0())
+        &&& self.value() is Some ==> self.wf_value(self.value()->Some_0)
     }
 }
 
@@ -47,16 +47,16 @@ impl<V: IsConstant + WellFormed + SpecSize> SnpPointsToData<V> {
 
     #[verifier(inline)]
     pub open spec fn get_value(&self) -> V {
-        self.value().get_Some_0()
+        self.value()->Some_0
     }
 
     pub open spec fn is_assigned(&self) -> bool {
-        self.snp().is_vmpl0_private() ==> self.value().is_Some()
+        self.snp().is_vmpl0_private() ==> self.value() is Some
     }
 
     pub open spec fn is_valid_private(&self) -> bool {
         &&& self.snp().is_vmpl0_private()
-        &&& self.value().is_Some()
+        &&& self.value() is Some
     }
 
     // hv-shared memory only holds non-secret data (guessing space = 1)
@@ -74,14 +74,14 @@ impl<V: IsConstant + WellFormed + SpecSize> SnpPointsToData<V> {
         &&& self.wf_not_null_at(ptr)
         &&& self.snp() === SwSnpMemAttr::spec_default()
         &&& self.get_value().is_constant()
-        &&& self.value().is_Some()
+        &&& self.value() is Some
     }
 
     pub open spec fn wf_shared(&self, ptr: int) -> bool {
         &&& self.wf_not_null_at(ptr)
         &&& self.snp() === SwSnpMemAttr::shared()
         &&& self.get_value().is_constant()
-        &&& self.value().is_Some()
+        &&& self.value() is Some
     }
 
     // wf_pte cannot use SnpPPtr::replace or put.
@@ -91,8 +91,8 @@ impl<V: IsConstant + WellFormed + SpecSize> SnpPointsToData<V> {
         &&& self.pptr() === ptr
         &&& self.snp() === SwSnpMemAttr::spec_default_pte()
         &&& self.get_value().is_constant()
-        &&& self.value().is_Some()
-        &&& self.wf_value(self.value().get_Some_0())
+        &&& self.value() is Some
+        &&& self.wf_value(self.value()->Some_0)
     }
 
     pub open spec fn wf_not_null_at(&self, ptr: int) -> bool {

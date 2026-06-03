@@ -58,7 +58,7 @@ pub type PtePerms = Map<(nat, int), PtePerm>;
 } // verus!
 verus! {
 
-pub closed spec fn static_cr3_value() -> int;
+pub uninterp spec fn static_cr3_value() -> int;
 
 pub open spec fn top_lvl_idx() -> (nat, int) {
     (PAGE_TABLE_LEVELS as nat, 0)

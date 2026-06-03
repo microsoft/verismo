@@ -73,7 +73,7 @@ pub open spec fn bool_from_stream(data: ByteStream) -> bool {
 }
 
 //#[verifier(inline)]
-pub open spec fn char_from_stream(data: ByteStream) -> char;
+pub uninterp spec fn char_from_stream(data: ByteStream) -> char;
 
 //#[verifier(inline)]
 pub open spec fn u8_from_stream(data: ByteStream) -> u8 {

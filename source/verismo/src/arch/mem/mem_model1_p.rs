@@ -12,10 +12,10 @@ impl MemDB {
         memop: MemOp<GuestVir>,
     )
         requires
-            memop.is_Read(),
+            memop is Read,
             old_memdb.inv(memid),
             self.model1_eq(old_memdb, memid),
-            self.op(memop).is_Ok(),
+            self.op(memop) is Ok,
             self.to_mem_map(memid).is_encrypted_or_none(memop.to_page()),
         ensures
             self.ret(memop) === old_memdb.ret(memop),
@@ -40,21 +40,21 @@ impl MemDB {
             gvn,
         ) by {
             assert forall|lvl: PTLevel|
-                (!lvl.is_L0() && (#[trigger] new_pt.map_entry_ok(
+                (!(lvl is L0) && (#[trigger] new_pt.map_entry_ok(
                     memid,
                     gvn,
                     lvl,
-                )).is_Some()) implies memtype(
+                )) is Some) implies memtype(
                 memid,
-                new_pt.map_entry_ok(memid, gvn, lvl).get_Some_0().spec_ppn(),
-            ).is_pt(lvl.child_lvl().get_Some_0()) by {
+                new_pt.map_entry_ok(memid, gvn, lvl)->Some_0.spec_ppn(),
+            ).is_pt(lvl.child_lvl()->Some_0) by {
                 new_pt.lemma_map_entry_model1_eq(&old_pt, memid, gvn, lvl);
-                assert(old_pt.map_entry_ok(memid, gvn, lvl).is_Some());
+                assert(old_pt.map_entry_ok(memid, gvn, lvl) is Some);
                 assert(old_pt.inv_content_gpa_ok(memid, gvn));
                 assert(memtype(
                     memid,
-                    old_pt.map_entry_ok(memid, gvn, lvl).get_Some_0().spec_ppn(),
-                ).is_pt(lvl.child_lvl().get_Some_0()));
+                    old_pt.map_entry_ok(memid, gvn, lvl)->Some_0.spec_ppn(),
+                ).is_pt(lvl.child_lvl()->Some_0));
             }
         }
         assert(new_pt.inv_for_identity_map_ok(memid)) by {
@@ -64,13 +64,13 @@ impl MemDB {
                     memid,
                     gvn,
                     PTLevel::L0,
-                )).is_Some() implies new_pt.map_entry_ok(
+                )) is Some implies new_pt.map_entry_ok(
                 memid,
                 gvn,
                 PTLevel::L0,
-            ).get_Some_0().spec_ppn().value() === gvn.value() by {
+            )->Some_0.spec_ppn().value() === gvn.value() by {
                 new_pt.lemma_map_entry_model1_eq(&old_pt, memid, gvn, PTLevel::L0);
-                assert(old_pt.map_entry_ok(memid, gvn, PTLevel::L0).get_Some_0().spec_ppn().value()
+                assert(old_pt.map_entry_ok(memid, gvn, PTLevel::L0)->Some_0.spec_ppn().value()
                     === gvn.value());
             }
         }
@@ -81,11 +81,11 @@ impl MemDB {
                     memid,
                     gvn,
                     PTLevel::L0,
-                ).is_Some()) implies #[trigger] new_pt.map_entry_ok(
+                ) is Some) implies #[trigger] new_pt.map_entry_ok(
                 memid,
                 gvn,
                 PTLevel::L0,
-            ).get_Some_0().is_encrypted() by {
+            )->Some_0.is_encrypted() by {
                 new_pt.lemma_map_entry_model1_eq(&old_pt, memid, gvn, PTLevel::L0);
             }
         }

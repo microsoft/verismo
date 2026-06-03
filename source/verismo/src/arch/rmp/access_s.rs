@@ -72,7 +72,7 @@ impl RmpEntry {
     /// PSP will reset other fields automatically
     pub open spec fn _rmpupdate(&self, entry: RmpEntry) -> ResultWithErr<RmpEntry, MemError<()>> {
         let new = entry.view();
-        if new.spec_size().is_Size2m() {
+        if new.spec_size() is Size2m {
             ResultWithErr::Error(*self, MemError::RmpOp(RmpFault::Perm, ()))
         } else if !new.spec_assigned() && (new.spec_immutable() || new.spec_asid()
             !== ASID_FOR_HV!()) {
@@ -160,7 +160,7 @@ impl RmpEntry {
     ) -> ResultWithErr<RmpEntry, MemError<()>>
         recommends
             memid.to_asid() == self.view().spec_asid(),
-            memid.is_Guest(),
+            memid is Guest,
     {
         if vmpl.as_int() <= memid.to_vmpl().as_int() {
             ResultWithErr::Error(*self, MemError::RmpOp(RmpFault::Perm, ()))
@@ -191,7 +191,7 @@ impl RmpEntry {
         gpn: GPN,
         val: bool,
     ) -> ResultWithErr<RmpEntry, MemError<()>> {
-        if !memid.to_vmpl().is_VMPL0() {
+        if !(memid.to_vmpl() is VMPL0) {
             ResultWithErr::Error(*self, MemError::RmpOp(RmpFault::Perm, ()))
         } else if self.view().fault_rmp_update(memid.to_asid(), gpn, psize) {
             ResultWithErr::Error(*self, MemError::NestedPF(()))

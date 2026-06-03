@@ -64,7 +64,7 @@ pub fn gen_shared_globals(input: TokenStream) -> TokenStream {
                 );
 
                 funcs.push(quote! {
-                    pub closed spec fn #spec_fn() -> VSpinLock<#type_ident>;
+                    pub uninterp spec fn #spec_fn() -> VSpinLock<#type_ident>;
                     #[verifier(inline)]
                     pub open spec fn #memrange_fn() -> (int, nat) {
                         g_range(#name::#variant_name)
@@ -80,7 +80,7 @@ pub fn gen_shared_globals(input: TokenStream) -> TokenStream {
                         g_range(#name::#variant_name).1 == spec_size::<#type_ident>(),
                         builtin::equal(#spec_fn().ptr_range(), #memrange_fn()),
                         builtin::equal(#spec_fn().lockid(), #lockid_fn()),
-                        #spec_fn().is_constant(),
+                        #[trigger] #spec_fn().is_constant(),
                     {
                     }
 
@@ -121,15 +121,13 @@ pub fn gen_shared_globals(input: TokenStream) -> TokenStream {
         }
         verus!{
         #[verifier(external_body)]
-        pub broadcast proof fn axiom_global_auto()
+        pub broadcast proof fn axiom_global_auto(v1: #name, v2: #name)
         ensures
-            forall |v1: #name, v2: #name|
-                builtin::imply(!builtin::equal(v1, v2),
-                g_range(v1).0 != g_range(v2).0
+            builtin::imply(!builtin::equal(v1, v2),
+                #[trigger] g_range(v1).0 != #[trigger] g_range(v2).0
             ),
-            forall |v1: #name, v2: #name|
-                builtin::imply(!builtin::equal(v1, v2),
-                range_disjoint_(#[trigger]g_range(v1), #[trigger]g_range(v2))),
+            builtin::imply(!builtin::equal(v1, v2),
+                range_disjoint_(#[trigger] g_range(v1), #[trigger] g_range(v2))),
         {}
         #(#funcs)*
         }

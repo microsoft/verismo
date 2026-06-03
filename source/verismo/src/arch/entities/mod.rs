@@ -16,7 +16,6 @@ pub type ASID = nat;
 pub type CPU = nat;
 
 #[derive(PartialEq, Eq, SpecIntEnum, Copy, Clone)]
-#[is_variant]
 pub enum VMPL {
     VMPL0,
     VMPL1,

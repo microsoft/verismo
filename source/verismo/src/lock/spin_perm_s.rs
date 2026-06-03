@@ -68,7 +68,7 @@ impl LockPermToRaw {
 }
 
 impl LockPermRaw {
-    pub spec fn view(&self) -> LockPermToRaw;
+    pub uninterp spec fn view(&self) -> LockPermToRaw;
 
     #[verifier(external_body)]
     pub proof fn trusted_bind_new<T: VTypeCast<SecSeqByte>>(
@@ -93,7 +93,7 @@ impl LockPermRaw {
         tracked points_to: SnpPointsTo<T>,
     )
         requires
-            points_to@.value().is_Some(),
+            points_to@.value() is Some,
             points_to@.wf_not_null_at(points_to@.id()) || (points_to@.wf() && spec_size::<T>()
                 == 0),
             inv(points_to@.get_value()),

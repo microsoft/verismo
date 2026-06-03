@@ -46,7 +46,7 @@ impl RmpOp<GuestPhy> {
     }
 
     pub open spec fn inv(&self) -> bool {
-        self.is_Pvalidate() ==> self.get_Pvalidate_1().gpn === self.to_page_memid().page
+        self is Pvalidate ==> self->Pvalidate_1.gpn === self.to_page_memid().page
     }
 
     pub open spec fn set_spn(&self, page: SpecPage<SysPhy>) -> RmpOp<SysPhy> {
@@ -98,7 +98,7 @@ impl RmpOp<SysPhy> {
         &&& self.op_requires_stateless()
         &&& match *self {
             RmpOp::Pvalidate(PageID { page, memid }, PvalidateParam { gpn, psize, val }) => {
-                !rmp_has_gpn_memid(rmp, gpn, memid) || !memid.to_vmpl().is_VMPL0()
+                !rmp_has_gpn_memid(rmp, gpn, memid) || !(memid.to_vmpl() is VMPL0)
             },
             _ => { true },
         }

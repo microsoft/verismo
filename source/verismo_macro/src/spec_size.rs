@@ -227,7 +227,7 @@ pub fn verismo_defoffset_expand(input: proc_macro::TokenStream) -> proc_macro::T
                 #[verifier(external_body)]
                 pub broadcast proof fn #axiom_field(&self)
                 ensures
-                    builtin::equal(self.#getter(), field_at(*self, Self::#spec_field_offset()))
+                    builtin::equal(#[trigger] self.#getter(), field_at(*self, Self::#spec_field_offset()))
                 {}
             };
             offset_counts = offset_counts + 1;

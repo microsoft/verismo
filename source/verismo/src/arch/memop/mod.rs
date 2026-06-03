@@ -10,7 +10,6 @@ use crate::tspec::*;
 
 verus! {
 
-#[is_variant]
 /// Memory Operation for GVA, GPA, and SPA.
 /// When AddrT = GuestVir, encrypt: bool is not unused and so just set it to false by default
 pub enum MemOp<AddrT> {

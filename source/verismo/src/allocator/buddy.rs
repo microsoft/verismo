@@ -44,7 +44,7 @@ impl SpecBuddyAllocator {
     }
 
     pub open spec fn wf_bucket(&self, bucket: nat) -> bool {
-        //&&& self.free_lists[bucket as int].is_Some()
+        //&&& self.free_lists[bucket as int] is Some
         &&& self.free_lists[bucket as int].inv()
         &&& self.free_lists[bucket as int].is_constant()
     }
@@ -128,7 +128,7 @@ impl SpecBuddyAllocator {
             SpecListItem {
                 ptr: nodeptr,
                 snp: node_perm@.snp(),
-                val: node_perm@.value().get_Some_0().val,
+                val: node_perm@.value()->Some_0.val,
             },
         )
     }
@@ -160,7 +160,7 @@ impl SpecBuddyAllocator {
                     assert(self.free_lists[b as int] === old_self.free_lists[b as int]);
                 }*/
                     assert(old_self.wf_bucket(b));
-                    //assert(self.free_lists[b as int].is_Some());
+                    //assert(self.free_lists[b as int] is Some);
                     //assert(self.free_lists[b as int].wf());
                     //assert(self.free_lists[b as int].is_constant());
                 }
@@ -263,7 +263,7 @@ impl SpecBuddyAllocator {
             SpecListItem {
                 ptr: nodeptr,
                 snp: node_perm@.snp(),
-                val: node_perm@.value().get_Some_0().val,
+                val: node_perm@.value()->Some_0.val,
             },
         )  //
         //&&& newlist@ =~~= list@.subrange(0, idx as int).push(SpecListItem {ptr: nodeptr, snp: node_perm@.snp()}) + list@.subrange(idx as int, list@.len() as int)
@@ -295,7 +295,7 @@ impl SpecBuddyAllocator {
             SpecListItem {
                 ptr: nodeptr,
                 snp: node_perm@.snp(),
-                val: node_perm@.value().get_Some_0().val,
+                val: node_perm@.value()->Some_0.val,
             },
         );
         let right = list@.subrange(idx as int, list@.len() as int);
@@ -386,7 +386,7 @@ impl BuddyAllocator {
             forall|i: int|
                 0 <= i < ORDER_USIZE as int ==> ret@.free_lists[i]@.len()
                     == 0,
-    //forall |i: int| 0 <= i < ORDER_USIZE as int ==> ret@.free_lists[i].is_Some(),
+    //forall |i: int| 0 <= i < ORDER_USIZE as int ==> ret@.free_lists[i] is Some,
 
     {
         let mut free_lists = new_array_linked_list32();
@@ -396,7 +396,7 @@ impl BuddyAllocator {
             assert forall|bucket: nat| bucket < ret@.free_lists.len() implies ret@.wf_bucket(
                 bucket,
             ) by {
-                //assert(ret@.free_lists[bucket as int].is_Some());
+                //assert(ret@.free_lists[bucket as int] is Some);
                 assert(ret@.free_lists[bucket as int].inv());
                 assert(ret@.free_lists[bucket as int].is_constant());
             }
@@ -412,13 +412,13 @@ impl BuddyAllocator {
             SpecBuddyAllocator::valid_bucket(bucket as nat),
         ensures
             self@.inv(),
-            ret.is_Some() ==> {
-                ret.get_Some_0().1@@.wf_freemem(
-                    (ret.get_Some_0().0 as int, spec_bit64(bucket as u64) as nat),
+            ret is Some ==> {
+                ret->Some_0.1@@.wf_freemem(
+                    (ret->Some_0.0 as int, spec_bit64(bucket as u64) as nat),
                 )
             },
-            ret.is_Some() ==> self@.spec_pop_or_push_element(old(self)@, bucket as nat),
-            ret.is_None() ==> {
+            ret is Some ==> self@.spec_pop_or_push_element(old(self)@, bucket as nat),
+            ret is None ==> {
                 &&& old(self)@ =~~= self@
                 &&& self@.free_lists[bucket as int]@.len() == 0
             },
@@ -459,7 +459,7 @@ impl BuddyAllocator {
                     assert(old_list@.last() === SpecListItem {
                         ptr: nodeptr,
                         snp: tnode_perm@@.snp(),
-                        val: tnode_perm@@.value().get_Some_0().val,
+                        val: tnode_perm@@.value()->Some_0.val,
                     });
                     assert(old_list@.drop_last() =~~= list@);
                     old_self@.proof_add_one_to_bucket(
@@ -475,8 +475,8 @@ impl BuddyAllocator {
                 let tracked ret_perm = node_rperm.trusted_join(free_perm);
                 let ret = Some((nodeptr.to_usize(), Tracked(ret_perm)));
                 proof {
-                    assert(ret.get_Some_0().1.is_constant());
-                    assert(ret.get_Some_0().1.wf());
+                    assert(ret->Some_0.1.is_constant());
+                    assert(ret->Some_0.1.wf());
                 }
                 return ret
             },
@@ -538,10 +538,10 @@ impl BuddyAllocator {
             old(self)@.inv(),
         ensures
             self@.inv(),
-            ret.is_Some() ==> alloc_valid_ptr(size, ret.get_Some_0()),
-            ret.is_Some() ==> ret.get_Some_0().is_constant(),
-            ret.is_Some() ==> (spec_align_up(ret.get_Some_0().0 as int, align as int), size as nat)
-                === (ret.get_Some_0().0 as int, size as nat),
+            ret is Some ==> alloc_valid_ptr(size, ret->Some_0),
+            ret is Some ==> ret->Some_0.is_constant(),
+            ret is Some ==> (spec_align_up(ret->Some_0.0 as int, align as int), size as nat)
+                === (ret->Some_0.0 as int, size as nat),
     {
         let old_size = size;
         let mut size = size;
@@ -580,8 +580,8 @@ impl BuddyAllocator {
             old(self)@.inv(),
         ensures
             self@.inv(),
-            ret.is_Some() ==> valid_free_ptr(*size, ret.get_Some_0()),
-            ret.is_Some() ==> alloc_valid_size(*old(size), *size),
+            ret is Some ==> valid_free_ptr(*size, ret->Some_0),
+            ret is Some ==> alloc_valid_size(*old(size), *size),
             *size % align == 0,
             size.is_constant(),
     {
@@ -606,15 +606,15 @@ impl BuddyAllocator {
                 spec_bit64(bucket as u64) == size as int,
                 size >= old_size,
                 self@.inv(),
-                !ret.is_Some(),
+                !(ret is Some),
                 i.is_constant(),
                 ret.is_constant(),
                 self.is_constant(),
                 bucket.is_constant(),
                 size.is_constant(),
             ensures
-                ret.is_Some() ==> valid_free_ptr(size, ret.get_Some_0()),
-                ret.is_Some() ==> alloc_valid_size(old_size, size),
+                ret is Some ==> valid_free_ptr(size, ret->Some_0),
+                ret is Some ==> alloc_valid_size(old_size, size),
                 ret.is_constant(),
                 self.is_constant(),
                 self@.inv(),

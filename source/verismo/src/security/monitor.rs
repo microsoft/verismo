@@ -105,15 +105,15 @@ impl<'a> MonitorHandle<'a> {
         &&& self.gvca_page.wf()
         &&& self.vmsa.is_vmsa_page()
         &&& self.secret.wf_mastersecret()
-        &&& self.gvca_page.is_Some() ==> self.wf_registered()
+        &&& self.gvca_page is Some ==> self.wf_registered()
     }
 
     pub closed spec fn wf_registered(&self) -> bool {
-        let snp = self.gvca_page.get_Some_0().snp();
+        let snp = self.gvca_page->Some_0.snp();
         &&& self.handle.wf()
         &&& self.guest_channel.wf()
-        &&& self.gvca_page.is_Some()
-        &&& self.gvca_page.get_Some_0().is_page()
+        &&& self.gvca_page is Some
+        &&& self.gvca_page->Some_0.is_page()
         &&& !snp.is_confidential_to(1)
         &&& snp.is_confidential_to(2)
         &&& snp.is_confidential_to(3)
@@ -235,7 +235,6 @@ impl GvcaHeader {
 } // verus!
 verus! {
 
-#[is_variant]
 #[derive(SpecIntEnum)]
 pub enum VmplReqOp {
     WakupAp = 0xffff_fffe,
@@ -351,7 +350,7 @@ impl<'a> MonitorHandle<'a> {
             self.wf(),
             old(cs).inv_stage_verismo(),
         ensures
-            ret.is_Ok() ==> ret.get_Ok_0().wf(),
+            ret is Ok ==> ret->Ok_0.wf(),
             cs.inv_stage_verismo(),
             cs.only_lock_reg_coremode_updated(
                 *old(cs),
@@ -411,8 +410,8 @@ impl<'a> MonitorHandle<'a> {
             old(cs).inv_stage_verismo(),
             npages > 0,
         ensures
-            ret.is_Ok() ==> ret.get_Ok_0().0.wf(),
-            ret.is_Ok() ==> ret.get_Ok_0().1 <= npages,
+            ret is Ok ==> ret->Ok_0.0.wf(),
+            ret is Ok ==> ret->Ok_0.1 <= npages,
             cs.inv_stage_verismo(),
             cs.only_lock_reg_coremode_updated(
                 *old(cs),
@@ -602,10 +601,10 @@ impl<'a> MonitorHandle<'a> {
         #[verusfmt::skip]
         proof {
             assert(richos_vmsa_invfn()(vmsa_vec)) by {
-                assert forall|i| 0 <= i < vmsa_vec.len() implies
-                    (vmsa_vec[i].is_Some() ==> is_richos_vmsa_box(#[trigger] vmsa_vec[i].get_Some_0()))
+                assert forall|i| 0 <= i < vmsa_vec.len() && vmsa_vec[i] is Some implies
+                    is_richos_vmsa_box(#[trigger] vmsa_vec[i]->Some_0)
                 by {
-                    if vmsa_vec[i].is_Some() {
+                    if vmsa_vec[i] is Some {
                         assert(i == cpu || prev_vmsa_vec[i] === vmsa_vec[i]);
                     }
                 }
@@ -708,7 +707,7 @@ impl<'a> MonitorHandle<'a> {
 
     fn handle_attest(self, Tracked(cs): Tracked<&mut SnpCoreSharedMem>) -> (ret: Self)
         requires
-            self.gvca_page.is_Some(),
+            self.gvca_page is Some,
             old(cs).inv_stage_verismo(),
             old(cs).inv_stage_pcr(),
             self.wf(),
@@ -749,10 +748,10 @@ impl<'a> MonitorHandle<'a> {
         requires
             old(cs).inv_stage_verismo(),
             self.wf(),
-            self.gvca_page.is_Some(),
+            self.gvca_page is Some,
         ensures
             ret.wf(),
-            ret.gvca_page.is_Some(),
+            ret.gvca_page is Some,
             cs.inv_stage_verismo(),
             cs.only_lock_reg_coremode_updated(
                 *old(cs),
@@ -805,7 +804,7 @@ impl<'a> MonitorHandle<'a> {
             1 <= vmpl < 4,
             self.wf(),
         ensures
-            ret.is_Ok() ==> ret.get_Ok_0().wf(),
+            ret is Ok ==> ret->Ok_0.wf(),
             cs.inv_stage_verismo(),
     //cs.only_lock_reg_coremode_updated(*old(cs), set![], set![spec_OSMEM_lockid(), spec_PT_lockid()]),
 

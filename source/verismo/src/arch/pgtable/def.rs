@@ -51,7 +51,6 @@ pub type GuestMap = MemMap<GuestVir, GuestPhy>;
 pub spec const MAX_PT_LEVEL: PTLevel = PTLevel::L0;
 
 #[derive(Eq, PartialEq, Structural, SpecIntEnum)]
-#[is_variant]
 pub enum PteFlag {
     P = 0,  // Present
     W = 1,  // Write
@@ -84,7 +83,7 @@ pub type GuestPTEntry = PageTableEntry<GuestPhy>;
 
 pub type SysPTEntry = PageTableEntry<SysPhy>;
 
-pub spec fn spec_page_frame_bits() -> u64;
+pub uninterp spec fn spec_page_frame_bits() -> u64;
 
 #[inline]
 #[verifier(external_body)]

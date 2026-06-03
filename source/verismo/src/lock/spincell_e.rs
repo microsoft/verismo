@@ -101,7 +101,7 @@ impl<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> VSpinLock<T>
     ) -> bool {
         &&& (lockperm).is_locked(cpu, self.lockid(), self.ptr_range())
         &&& (lockperm).invfn.inv(memperm.get_value())
-        &&& memperm.value.is_Some()
+        &&& memperm.value is Some
         &&& memperm.wf_at(self.lockid())
         &&& self.is_constant()
     }

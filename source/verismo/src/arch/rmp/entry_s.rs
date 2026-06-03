@@ -53,7 +53,7 @@ impl HiddenRmpEntryForPSP {
             self.spec_validated()
         } else {
             &&& self.spec_validated()
-            &&& self.spec_perms()[VMPL::spec_from_int(vmpl).get_Some_0()] =~= PagePerm::empty()
+            &&& self.spec_perms()[VMPL::spec_from_int(vmpl)->Some_0] =~= PagePerm::empty()
         }
     }
 
