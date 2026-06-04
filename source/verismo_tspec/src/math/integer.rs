@@ -9,8 +9,14 @@ macro_rules! BIT64 {
 }
 
 verus! {
-    pub open spec fn has_bit_closure(input: u64) -> spec_fn(u64) -> bool {
-        |b: u64| spec_has_bit_set(input, b)
+    pub struct HasBitPred {
+        pub input: u64,
+    }
+
+    impl U64Predicate for HasBitPred {
+        open spec fn call(&self, b: u64) -> bool {
+            spec_has_bit_set(self.input, b)
+        }
     }
 
     #[verifier(inline)]
@@ -64,7 +70,7 @@ seq_macro::seq!(N in 0..64 {
 
 verus! {
     pub open spec fn is_highest_bit(input: u64, bit: u64) -> bool {
-        is_upper_bound_satisfy_cond(has_bit_closure(input), bit, 63)
+        is_upper_bound_satisfy_cond(&HasBitPred { input }, bit, 63)
     }
 
     #[verifier(inline)]
@@ -116,22 +122,22 @@ verus! {
         0 <= ret < 64,
     {
         let high_bit = choose |b: u64| is_highest_bit(input, b);
-        let cond_fn = has_bit_closure(input);
+        let cond = HasBitPred { input };
         let exist_high_bit = exists |b: u64| is_highest_bit(input, b);
-        let exist_has_bit = exists |b: u64| #[trigger]cond_fn(b) && b <= 63 ;
+        let exist_has_bit = exists |b: u64| #[trigger] cond.call(b) && b <= 63 ;
         if  !exist_high_bit {
-            assert forall |b: u64| !#[trigger]is_upper_bound_satisfy_cond(cond_fn, b, 63) by{
+            assert forall |b: u64| !#[trigger]is_upper_bound_satisfy_cond(&cond, b, 63) by{
                 assert(!is_highest_bit(input, b));
-                assert(is_highest_bit(input, b) === is_upper_bound_satisfy_cond(cond_fn, b, 63));
-                assert(!is_upper_bound_satisfy_cond(cond_fn, b, 63));
+                assert(is_highest_bit(input, b) === is_upper_bound_satisfy_cond(&cond, b, 63));
+                assert(!is_upper_bound_satisfy_cond(&cond, b, 63));
             }
-            assert(!exists |b: u64| is_upper_bound_satisfy_cond(cond_fn, b, 63));
-            proof_has_conditional_upper_bound(cond_fn, 63);
+            assert(!exists |b: u64| is_upper_bound_satisfy_cond(&cond, b, 63));
+            proof_has_conditional_upper_bound(&cond, 63);
             assert(!exist_has_bit);
             assert forall |b: u64| 0 <= b < 64
             implies !spec_has_bit_set(input, b)
             by{
-                assert(!cond_fn(b));
+                assert(!cond.call(b));
             }
             lemma_zeroval_bits(input);
         }
@@ -199,7 +205,7 @@ verus! {
             by {
                 assert(is_highest_bit(input, high_bit));
                 if spec_has_bit_set(input, b) {
-                    assert(has_bit_closure(input)(b) && b <= 63);
+                    assert(HasBitPred { input }.call(b) && b <= 63);
                     assert(b <= high_bit);
                 }
             }
