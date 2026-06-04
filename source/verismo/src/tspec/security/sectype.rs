@@ -1228,6 +1228,11 @@ macro_rules! impl_secure_type {
 
 verus! {
 
+// `pub type NoAdditional = ()` is the default empty memory-attribute parameter
+// used by all sectype aliases (u64_s, u32_s, SecSeqByte, …). Defining it here
+// (rather than in `primitives_e`) keeps `tspec` self-contained.
+pub type NoAdditional = ();
+
 // `wf()` returns `true` because `wf_value()` is already a
 // `#[verifier::type_invariant]` on `SecType` (see line 182).  Duplicating that
 // obligation here would force every callsite — including the auto-generated
@@ -1235,11 +1240,191 @@ verus! {
 // type system already guarantees. Callers that need `wf_value()` inside a
 // proof can surface it directly via `use_type_invariant(&v)`.
 //
-// NOTE: This inherent method shadows the `WellFormed::wf` trait impl in
-// `primitives_e/sectype.rs`; both must agree.
+// NOTE: This inherent method shadows the `WellFormed::wf` trait impl below;
+// both must agree.
 impl<T> SecType<T, ()> {
     pub open spec fn wf(&self) -> bool {
         true
+    }
+}
+
+// `WellFormed` trait impls for `SecType`/`SpecSecType` mirror the inherent
+// `wf()` above and return `true` for the same reason: `wf_value()` is the
+// canonical `#[verifier::type_invariant]`, not `wf()`.
+impl<T> WellFormed for SpecSecType<T, NoAdditional> {
+    #[verifier(inline)]
+    open spec fn wf(&self) -> bool {
+        true
+    }
+}
+
+impl<T> WellFormed for SecType<T, NoAdditional> {
+    #[verifier(inline)]
+    open spec fn wf(&self) -> bool {
+        true
+    }
+}
+
+} // verus!
+
+impl_secure_type! {NoAdditional, pub type}
+
+verus! {
+
+pub trait ToSecSeq {
+    spec fn sec_bytes(self) -> SecSeqByte where Self: core::marker::Sized;
+}
+
+pub trait FromSecSeq<T> {
+    spec fn from_sec_bytes(self) -> T where T: core::marker::Sized, Self: core::marker::Sized;
+}
+
+impl<T: VTypeCast<SecSeqByte>> ToSecSeq for T {
+    #[verifier(inline)]
+    open spec fn sec_bytes(self) -> SecSeqByte {
+        VTypeCast::<SecSeqByte>::vspec_cast_to(self)
+    }
+}
+
+#[verifier(external_body)]
+pub broadcast proof fn axiom_size_from_cast_secbytes_def<T: SpecSize + VTypeCast<SecSeqByte>>(
+    val: T,
+)
+    ensures
+        T::spec_size_def() == (#[trigger] VTypeCast::<SecSeqByte>::vspec_cast_to(val)).len(),
+        VTypeCast::<SecSeqByte>::vspec_cast_to(val).len() == size_of::<T>(),
+{
+}
+
+impl<T: ToSecSeq> FromSecSeq<T> for SecSeqByte {
+    open spec fn from_sec_bytes(self) -> T {
+        choose|v: T| v.sec_bytes() =~~= self
+    }
+}
+
+impl<T: VTypeCast<SecSeqByte>> VTypeCast<T> for SecSeqByte {
+    open spec fn vspec_cast_to(self) -> T {
+        self.from_sec_bytes()
+    }
+}
+
+#[verifier(external_body)]
+pub proof fn proof_sectype_cast_eq<T1: VTypeCast<T2>, T2: VTypeCast<T1>, M>(v: SecType<T1, M>)
+    requires
+        forall|basev: T1|
+            VTypeCast::<T1>::vspec_cast_to(VTypeCast::<T2>::vspec_cast_to(basev)) === basev,
+    ensures
+        VTypeCast::<SecType<T1, M>>::vspec_cast_to(VTypeCast::<SecType<T2, M>>::vspec_cast_to(v))
+            === v,
+{
+}
+
+impl<T> VTypeCast<SecSeqByte> for Option<T> {
+    uninterp spec fn vspec_cast_to(self) -> SecSeqByte;
+}
+
+impl<T> VTypeCast<SecSeqByte> for Tracked<T> {
+    open spec fn vspec_cast_to(self) -> SecSeqByte {
+        Seq::empty()
+    }
+}
+
+// ============================================================================
+// `Seq<T>` WellFormed / IsConstant / sec-bytes (moved from primitives_e/seq.rs)
+// ============================================================================
+
+impl<T: WellFormed> WellFormed for Seq<T> {
+    open spec fn wf(&self) -> bool {
+        &&& forall|i: int| 0 <= i < self.len() ==> (#[trigger] self[i]).wf()
+    }
+}
+
+impl<T: IsConstant + WellFormed> IsConstant for Seq<T> {
+    open spec fn is_constant(&self) -> bool {
+        &&& forall|i: int| 0 <= i < self.len() ==> (#[trigger] self[i]).is_constant()
+        &&& self.wf()
+    }
+
+    open spec fn is_constant_to(&self, vmpl: nat) -> bool {
+        &&& forall|i: int| 0 <= i < self.len() ==> (#[trigger] self[i]).is_constant_to(vmpl)
+        &&& self.wf()
+    }
+}
+
+pub open spec fn recursive_sec_bytes<T: ToSecSeq>(s: Seq<T>) -> SecSeqByte
+    decreases s.len(),
+{
+    if s.len() > 0 {
+        let prevs = s.subrange(0, s.len() - 1);
+        if prevs.len() < s.len() {
+            recursive_sec_bytes(prevs) + s.last().sec_bytes()
+        } else {
+            Seq::empty()
+        }
+    } else {
+        Seq::empty()
+    }
+}
+
+impl<T: ToSecSeq> VTypeCast<SecSeqByte> for Seq<T> {
+    open spec fn vspec_cast_to(self) -> SecSeqByte {
+        recursive_sec_bytes(self)
+    }
+}
+
+} // verus!
+
+#[macro_use]
+macro_rules! def_basic_tosecseq {
+($basetype: ty) => {
+    verus!{
+    impl VTypeCast<SecSeqByte> for $basetype {
+        open spec fn vspec_cast_to(self) -> SecSeqByte {
+            let seq: Seq<u8> = self.vspec_cast_to();
+            Seq::new(
+                seq.len(),
+                |i| SpecSecType::constant(seq[i])
+            )
+        }
+    }
+    }
+}
+}
+
+def_basic_tosecseq!{u8}
+def_basic_tosecseq!{usize}
+def_basic_tosecseq!{u16}
+def_basic_tosecseq!{u32}
+def_basic_tosecseq!{u64}
+
+verus! {
+
+pub trait ValSetSize {
+    spec fn valset_size(self, vmpl: nat) -> nat where Self: core::marker::Sized
+        recommends
+            1 <= vmpl <= 4,
+    ;
+}
+
+pub open spec fn valset_size(s: SecSeqByte, vmpl: nat) -> nat
+    decreases s.len(),
+{
+    if s.len() == 0 {
+        1
+    } else {
+        valset_size(s.subrange(0, s.len() - 1), vmpl) * s.last().valsets[vmpl].len()
+    }
+}
+
+impl ValSetSize for SecSeqByte {
+    open spec fn valset_size(self, vmpl: nat) -> nat {
+        valset_size(self, vmpl)
+    }
+}
+
+impl<T: IsFullSecret> IsFullSecret for Seq<T> {
+    open spec fn is_fullsecret_to(&self, vmpl: nat) -> bool {
+        forall|i| 0 <= i < self.len() ==> #[trigger] self[i].is_fullsecret_to(vmpl)
     }
 }
 

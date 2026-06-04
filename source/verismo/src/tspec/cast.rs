@@ -1,5 +1,7 @@
 use super::*;
-use crate::tspec_e::{axiom_size_from_cast_secbytes_def, SecSeqByte};
+// `axiom_size_from_cast_secbytes_def` and `SecSeqByte` now live in
+// `tspec::security::sectype` (moved from `primitives_e/sectype.rs`).
+// `use super::*;` already pulls them in via the `tspec` re-exports.
 verus! {
 
 broadcast use axiom_const_forall;
