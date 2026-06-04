@@ -565,7 +565,8 @@ macro_rules! impl_exe_bops_for_stype {
                 open spec fn [<obeys_ $fname _spec>]() -> bool { true }
                 #[verifier::inline]
                 open spec fn [<$fname _req>](self, rhs: SecType<$baset, M>) -> bool {
-                    &&& (self@.val $op rhs@.val) as $baset == self@.val $op rhs@.val
+                    &&& (self@.val $op rhs@.val) >= $baset::MIN
+                    &&& (self@.val $op rhs@.val) <= $baset::MAX
                     &&& rhs@.val $check $val
                 }
                 #[verifier::inline]
@@ -578,7 +579,8 @@ macro_rules! impl_exe_bops_for_stype {
                 open spec fn [<obeys_ $fname _spec>]() -> bool { true }
                 open spec fn [<$fname _req>](self, rhs: SecType<$baset, M>) -> bool {
                     &&& rhs.is_constant()
-                    &&& (self $op rhs@.val) as $baset == self $op rhs@.val
+                    &&& (self $op rhs@.val) >= $baset::MIN 
+                    &&& (self $op rhs@.val) <= $baset::MAX 
                     &&& rhs@.val $check $val
                 }
 
@@ -590,7 +592,8 @@ macro_rules! impl_exe_bops_for_stype {
             impl<M> vstd::std_specs::ops::[<$trt SpecImpl>]<$baset> for SecType<$baset, M> {
                 open spec fn [<obeys_ $fname _spec>]() -> bool { true }
                 open spec fn [<$fname _req>](self, rhs: $baset) -> bool {
-                    &&& (self@.val $op rhs) as $baset == self@.val $op rhs
+                    &&& (self@.val $op rhs) >= $baset::MIN 
+                    &&& (self@.val $op rhs) <= $baset::MAX
                     &&& rhs $check $val
                 }
                 #[verifier::inline]
@@ -601,10 +604,11 @@ macro_rules! impl_exe_bops_for_stype {
 
             impl<M> core::ops::$trt<SecType<$baset, M>> for SecType<$baset, M> {
                 type Output = Self;
+                #[verifier::spinoff_prover]
                 fn $fname(self, other: Self) -> (ret: Self)
                 ensures
                     ret@ === (self@ $op other@).$use_cast(),
-                    ret@.val == self@.val $op other@.val,
+                    ret@.val == (self@.val $op other@.val),
                     (self.is_constant() && other.is_constant()) ==> ret.is_constant(),
                     ret == SecType::spec_new((self@ $op other@).$use_cast())
                 {
@@ -612,22 +616,26 @@ macro_rules! impl_exe_bops_for_stype {
                     proof {
                         use_type_invariant(&self);
                         use_type_invariant(&other);
-                        assert((self@.val $op other@.val) as $baset == self@.val $op other@.val);
+                        assert((self@.val $op other@.val) >= $baset::MIN);
+                        assert((self@.val $op other@.val) <= $baset::MAX);
                         self@.proof_bop_new(other@, [<fn_spec_ $fname _ $baset _ $baset _ $specout>]());
                         let ret: SpecSecType<$baset, M> = (self@ $op other@).proof_uop_valset(fn_vspec_cast_to());
                     }
                     let ghost view: SpecSecType<$baset, M> = (self@ $op other@).$use_cast();
-                    SecType {
+                    let ret = SecType {
                         val: self.val $op other.val,
                         view: Ghost(view),
-                    }
+                    };
+                    assert(ret == SecType::<$baset, M>::spec_new((self@ $op other@).$use_cast()));
+                    ret
                 }
             }
 
             impl<M> core::ops::[<$trt Assign>]<SecType<$baset, M>> for SecType<$baset, M> {
+                #[verifier::spinoff_prover]
                 fn [<$fname _assign>](&mut self, other: SecType<$baset, M>)
                 requires
-                    (old(self)@.val $op other@.val) as $baset == old(self)@.val $op other@.val,
+                    $baset::MIN as int <= (old(self)@.val $op other@.val) <= $baset::MAX as int,
                     other@.val $check $val,
                 ensures
                     (*old(self) $op other)@.$use_cast() === self@,
@@ -641,9 +649,10 @@ macro_rules! impl_exe_bops_for_stype {
             impl<M> core::ops::$trt<SecType<$baset, M>> for $baset {
                 type Output = Self;
                 #[inline(always)]
+                #[verifier::spinoff_prover]
                 exec fn $fname(self, other: SecType<$baset, M>) -> (ret: Self)
                 ensures
-                    ret == self $op other@.val,
+                    ret == (self $op other@.val),
                 {
                     broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal;
                     SecType::constant(self).$fname(other).reveal_value()
@@ -653,6 +662,7 @@ macro_rules! impl_exe_bops_for_stype {
             impl<M> core::ops::$trt<$baset> for SecType<$baset, M> {
                 type Output = Self;
                 #[inline(always)]
+                #[verifier::spinoff_prover]
                 exec fn $fname(self, other: $baset) -> (ret: Self)
                 ensures
                     (self@ $op SpecSecType::constant(other)).$use_cast() === ret@,
@@ -700,6 +710,7 @@ macro_rules! impl_exe_not_for_stype {
             }
 
             #[inline(always)]
+            #[verifier::spinoff_prover]
             exec fn $fname(self) -> (ret: Self)
             {
                 proof {
@@ -711,6 +722,7 @@ macro_rules! impl_exe_not_for_stype {
 
         impl<M> SecType<$baset, M> {
             #[inline(always)]
+            #[verifier::spinoff_prover]
             exec fn [<_ $fname>](self) -> (ret: Self)
             ensures
                 ret@ === self@.[<spec_ $fname>](),
@@ -1055,8 +1067,7 @@ impl_exe_cast_to_sectype!(u16, [usize, u64, u32, u8]);
 impl_exe_cast_to_sectype!(u8, [usize, u64, u32, u16]);
 impl_exe_cast_to_sectype!(usize, [u64, u32, u16, u8]);
 impl_exe_default!(u8, u16, u32, u64, usize);
-impl_exe_ops_for_stype! {u8, u16, u32, u64}
-impl_exe_ops_for_stype! {usize}
+impl_exe_ops_for_stype! {u8, u16, u32, u64, usize}
 
 impl_exe_not_for_stype!(bool, [[not, !, Not]]);
 impl_spec_ops_for_stype! {u8, u16, u32, u64, usize}
