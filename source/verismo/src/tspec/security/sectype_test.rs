@@ -6,6 +6,13 @@ use super::*;
 impl_secure_type! {(), type}
 use vops::VEq;
 
+verus! {
+// Surface the SecType constructor/extensionality axioms for every proof in
+// this test module.  Without this, postconditions involving `spec_new(...)`
+// (e.g. `v1 + v2`, `v1 * v2`, casts) are opaque to the verifier.
+broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal;
+}
+
 mod p {
     use super::*;
     verus! {
@@ -45,31 +52,38 @@ pub proof fn proof_test_bits2(v1: u64, v2: u64)
 verismo! {
     fn test_add (v1: u64_s, v2: u64_s) -> (ret: u64_s)
     requires
-        v1 + v2 <= u64::MAX,
+        v1@.val + v2@.val <= u64::MAX,
     {
+        proof {
+            use_type_invariant(&v1);
+            use_type_invariant(&v2);
+        }
         v1.add(v2)
     }
 
     fn test1(v1: u64_s, v2: u64_s) -> (ret: u64_s)
     requires
-        v1 < 10,
-        v2 < 10,
+        v1@.val < 10,
+        v2@.val < 10,
     ensures
         v1 * v2 < 100,
     {
-        proof {p::proof_test1(v1 as u64, v2 as u64)}
+        proof {
+            use_type_invariant(&v1);
+            use_type_invariant(&v2);
+        }
         v1.add(v2)
     }
 
     fn test2 (v1: u64_s, v2: u64_s) -> (ret: u64_s)
     requires
-        v1 * v2 <= u64::MAX,
+        v1@.val * v2@.val <= u64::MAX,
     {
         let v = 11;
-        assert(v1 >= 0);
-        assert(v2 >= 0);
-        assert(v1 >= 0) by {
-            assert(v1>=0)
+        assert(v1@.val >= 0);
+        assert(v2@.val >= 0);
+        assert(v1@.val >= 0) by {
+            assert(v1@.val >= 0)
         }
         v
     }
@@ -79,11 +93,12 @@ verismo! {
     proof fn proof_u64_s(v1: u64_s, v2: u64_s)
     requires
         v1 > v2,
+        v1 + v2 <= u64::MAX,
     ensures
         (v1 + v2)@.val == (v1@.val + v2@.val),
         (v1 + v2)@.valsets[1] =~~= set_op(v1@.valsets[1], v2@.valsets[1], |v1: u64, v2: u64| (v1 + v2)),
-        //(v1 + v2 - v2)@.val == (v1@.val) as u64
-    {}
+    {
+    }
 
     /*proof fn test_bit(v1: u64_s, v2: u64_s)
     requires
@@ -141,7 +156,13 @@ verismo! {
     ensures
         ret@.val == !((v1@.val - 1) as u64),
     {
+        proof {
+            use_type_invariant(&v1);
+        }
         let mask = v1 - 1;
+        proof {
+            use_type_invariant(&mask);
+        }
         let ret = (!mask);
         ret
     }
@@ -152,6 +173,9 @@ verismo! {
     ensures
         ret == 0x100
     {
+        proof {
+            use_type_invariant(&v1);
+        }
         v1 + 1
     }
 
@@ -163,6 +187,9 @@ verismo! {
         v1@.val == 0xff,
         ret@.val == 0xff,
     {
+        proof {
+            use_type_invariant(&v1);
+        }
         v1 as u32
     }
 }

@@ -6,17 +6,23 @@ pub type NoAdditional = ();
 
 impl_secure_type! {NoAdditional, pub type}
 
+// `WellFormed` for `SecType`/`SpecSecType` returns `true` because
+// `wf_value()` is already declared as `#[verifier::type_invariant]` on
+// `SecType` (see `tspec/security/sectype.rs`). Duplicating that obligation
+// in `wf()` would force every callsite to manually re-prove a fact the
+// type system already guarantees. Callers that need `wf_value()` inside a
+// proof can surface it directly via `use_type_invariant(&v)`.
 impl<T> WellFormed for SpecSecType<T, NoAdditional> {
     #[verifier(inline)]
     open spec fn wf(&self) -> bool {
-        self.wf_value()
+        true
     }
 }
 
 impl<T> WellFormed for SecType<T, NoAdditional> {
     #[verifier(inline)]
     open spec fn wf(&self) -> bool {
-        self.wf_value()
+        true
     }
 }
 

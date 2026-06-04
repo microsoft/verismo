@@ -1228,9 +1228,18 @@ macro_rules! impl_secure_type {
 
 verus! {
 
+// `wf()` returns `true` because `wf_value()` is already a
+// `#[verifier::type_invariant]` on `SecType` (see line 182).  Duplicating that
+// obligation here would force every callsite — including the auto-generated
+// pre/postconditions inserted by `verismo!` — to manually re-prove a fact the
+// type system already guarantees. Callers that need `wf_value()` inside a
+// proof can surface it directly via `use_type_invariant(&v)`.
+//
+// NOTE: This inherent method shadows the `WellFormed::wf` trait impl in
+// `primitives_e/sectype.rs`; both must agree.
 impl<T> SecType<T, ()> {
     pub open spec fn wf(&self) -> bool {
-        self.wf_value()
+        true
     }
 }
 
