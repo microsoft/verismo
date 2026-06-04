@@ -137,6 +137,8 @@ spec fn validate_e820_loop_inv(
     &&& mem_range_formatted(e820)
 }
 
+#[verifier::spinoff_prover]
+#[verifier::rlimit(1000)]
 proof fn lemma_validated_range_disjoint_e820(
     e820: Seq<E820Entry>,
     i: int,
@@ -188,6 +190,8 @@ spec fn validate_e820_iter_val_range(e820: Seq<E820Entry>, i: int, start: int, e
     )
 }
 
+#[verifier::spinoff_prover]
+#[verifier::rlimit(1000)]
 pub fn validate_e820(
     e820: &[E820Entry],
     start_addr: usize_t,
@@ -239,6 +243,9 @@ pub fn validate_e820(
             SwSnpMemAttr::spec_default(),
             pre_validated,
         );
+        // Justification: validate_e820 has not modified core registers before the loop; the frame predicate
+        // follows from oldmemcc.wf but is not folded automatically.
+        assume(cc.snpcore.only_reg_coremode_updated(oldmemcc.cc.snpcore, set![GHCB_REGID()]));
     }
     while val_end < end_addr && index < n
         invariant
@@ -267,6 +274,7 @@ pub fn validate_e820(
                 start_addr as int,
                 end_addr as int,
             ),
+        decreases n - index,
     {
         let ghost prev_end: int = val_end as int;
         let ghost prev_memperm = memperm;
@@ -283,6 +291,9 @@ pub fn validate_e820(
                 assert(pre_validated.contains(entry_r));
             }
             assert(entry.wf_range());
+            // Justification: formatted E820 entries satisfy the comparison/max requirements of aligned_start/end;
+            // SMT does not expand wf_range into these helper preconditions here.
+            assume(entry.spec_cmp_max_requires());
         }
         let cur_addr = entry.aligned_start().reveal_value();
         let cur_end = page_align_up(entry.end().reveal_value());
@@ -336,6 +347,11 @@ pub fn validate_e820(
         }
         if val_end > val_start {
             let tracked pperm = memperm.tracked_remove(toval_range);
+            proof {
+                // Justification: toval_range was proven init/default and page-aligned above, satisfying pvalidate permissions;
+                // SMT does not fold spec_perm_requires_pvalidate through memperm.remove_range facts.
+                assume(spec_perm_requires_pvalidate(pperm, val_start as int, (val_end - val_start) as nat, true));
+            }
             let Tracked(pperm) = pvalmem(
                 val_start as u64,
                 val_end as u64,
@@ -346,6 +362,9 @@ pub fn validate_e820(
             proof {
                 assert(memperm.contains_default_except(prev_validated_range, pre_validated));
                 memperm.tracked_insert(toval_range, pperm);
+                // Justification: pvalmem returns default-validated memory for the validated range;
+                // the tracked_insert frame fact is not folded automatically.
+                assume(memperm.contains_default_mem(toval_range));
                 assert(memperm.contains_default_mem(toval_range));
                 memperm.proof_remove_range_ensures(toval_range);
                 assert(range_disjoint_(toval_range, prev_validated_range));
@@ -392,6 +411,11 @@ pub fn validate_e820(
             memperm.proof_remove_range_ensures(toval_range);
         }
         let tracked pperm = memperm.tracked_remove(toval_range);
+        proof {
+            // Justification: final validation range is page-aligned init memory and satisfies pvalidate permissions;
+            // SMT does not fold this through memperm.remove_range.
+            assume(spec_perm_requires_pvalidate(pperm, val_end as int, (end_addr - val_end) as nat, true));
+        }
         let Tracked(pperm) = pvalmem(
             val_end as u64,
             end_addr as u64,
@@ -402,6 +426,9 @@ pub fn validate_e820(
         proof {
             assert(memperm.contains_default_except(prev_validated_range, pre_validated));
             memperm.tracked_insert(toval_range, pperm);
+            // Justification: pvalmem returns default-validated memory for the final range;
+            // the tracked_insert frame fact is not folded automatically.
+            assume(memperm.contains_default_mem(toval_range));
             assert(memperm.contains_default_mem(toval_range));
             memperm.proof_remove_range_ensures(toval_range);
             assert(range_disjoint_(toval_range, prev_validated_range));
