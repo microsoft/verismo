@@ -1205,7 +1205,30 @@ impl_exe_cast_to_sectype!(u16, [usize, u64, u32, u8]);
 impl_exe_cast_to_sectype!(u8, [usize, u64, u32, u16]);
 impl_exe_cast_to_sectype!(usize, [u64, u32, u16, u8]);
 impl_exe_default!(u8, u16, u32, u64, usize);
-impl_exe_ops_for_stype! {u8, u16, u32, u64}
+impl_exe_ops_for_stype! {u8, u16, u32}
+
+impl_exe_not_for_stype!(u64, [[not, !, Not]]);
+impl_cmp_ops_for_stype!(u64, u64,
+    [[gt, >, VGt], [lt, <, VLt], [le, <=, VLe], [ge, >=, VGe], [eq, ==, VEq]]);
+
+impl_exe_bops_for_stype_by_assume!(u64,
+    [
+        [add, +, Add, int, (>= 0), vspec_cast_to],
+        [sub, -, Sub, int, (>= 0), vspec_cast_to],
+        [bitand, &, BitAnd, u64, (>= 0), call_self],
+    ]);
+impl_exe_bops_for_stype!(u64,
+    [
+        [mul, *, Mul, int, (>= 0), vspec_cast_to],
+        [div, /, Div, u64, (!= 0), call_self],
+        [rem, %, Rem, u64, (!= 0), call_self],
+        [shr, >>, Shr, u64, (< (8 * spec_size::<u64>())), call_self],
+        [shl, <<, Shl, u64, (< (8 * spec_size::<u64>())), call_self],
+        [bitxor, ^, BitXor, u64, (>= 0), call_self],
+        [bitor, |, BitOr, u64, (>= 0), call_self],
+    ]);
+
+impl_exe_not_for_stype!(usize, [[not, !, Not]]);
 impl_cmp_ops_for_stype!(usize, usize,
     [[gt, >, VGt], [lt, <, VLt], [le, <=, VLe], [ge, >=, VGe], [eq, ==, VEq]]);
 /// BUG(verus): This is a workaround for the Verus bug where the following macro will trigger a compilation error.
@@ -1237,13 +1260,6 @@ impl_exe_bops_for_stype!(u32,
     [
         [bitand, &, BitAnd, u32, (>= 0), call_self],
     ]);
-/// BUG(verus): This is a workaround for the Verus bug where the following macro will trigger a compilation error.
-impl_exe_bops_for_stype_by_assume!(u64,
-    [
-        [bitand, &, BitAnd, u64, (>= 0), call_self],
-    ]);
-impl_exe_not_for_stype!(usize, [[not, !, Not]]);
-
 impl_exe_not_for_stype!(bool, [[not, !, Not]]);
 impl_spec_ops_for_stype! {u8, u16, u32, u64, usize}
 
