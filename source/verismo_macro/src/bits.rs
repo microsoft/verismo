@@ -131,7 +131,7 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     }
     let vis = &s.vis;
-    let max_val: u128 = (1 << max_bits) - 1;
+    let max_val: u128 = (1u128 << (max_bits + 1)) - 1;
     //println!("max_val = {} max_bits ={}", max_val, max_bits);
     let expanded = quote! {
         verus!{
@@ -205,7 +205,11 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
                     builtin::equal(ret, Self::spec_new(val)),
                     builtin::equal(ret.view(), #specname::new(val)),
                 {
-                    #bitstruct { value:val}
+                    let ret = #bitstruct { value: val };
+                    proof {
+                        broadcast use #specname::axiom_new;
+                    }
+                    ret
                 }
 
                 pub open spec fn spec_new(val: #valuetype) -> (ret: Self) {
