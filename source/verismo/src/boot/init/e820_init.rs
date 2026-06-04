@@ -232,7 +232,7 @@ spec fn validate_e820_iter_val_range(e820: Seq<E820Entry>, i: int, start: int, e
 }
 
 #[verifier::spinoff_prover]
-#[verifier::rlimit(100)]
+#[verifier::rlimit(10)]
 pub fn validate_e820(
     e820: &[E820Entry],
     start_addr: usize_t,
