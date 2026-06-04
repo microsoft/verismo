@@ -127,6 +127,7 @@ impl<'a> MonitorHandle<'a> {
     }
 }
 
+#[verifier::exec_allows_no_decreases_clause]
 pub fn run_richos(
     handle: GhcbHyperPageHandle,
     guest_channel: SnpGuestChannel,
@@ -359,6 +360,7 @@ impl<'a> MonitorHandle<'a> {
                 set![],
                 set![spec_OSMEM_lockid(), spec_PT_lockid()],
             ),
+        decreases npages,
     {
         if npages == 0 {
             return Ok(self);
@@ -413,7 +415,7 @@ impl<'a> MonitorHandle<'a> {
             npages > 0,
         ensures
             ret is Ok ==> ret->Ok_0.0.wf(),
-            ret is Ok ==> ret->Ok_0.1 <= npages,
+            ret is Ok ==> 0 < ret->Ok_0.1 <= npages,
             cs.inv_stage_verismo(),
             cs.only_lock_reg_coremode_updated(
                 *old(cs),
@@ -448,6 +450,11 @@ impl<'a> MonitorHandle<'a> {
         }
         let entry_start: usize = entry.start_page.into();
         let entry_end: usize = entry.end();
+        proof {
+            assert(entry.spec_start() <= gpn < entry.spec_end());
+            assert(entry_end == entry.spec_end());
+            assert(gpn < entry_end);
+        }
         let expected_gpn_end = gpn + npages as usize;
         let npages = if entry_end > expected_gpn_end {
             npages as usize
