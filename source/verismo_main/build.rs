@@ -10,8 +10,6 @@ fn main() {
     println!("cargo:rerun-if-changed=monitor.lds");
     println!("cargo:rustc-link-arg-bin=verismo_main=-Tmonitor.lds");
 
-    init_verify(&["verismo", "vstd"]);
-
     // Post build
     let target_dir = env::var("OUT_DIR").unwrap();
     let work_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -52,38 +50,4 @@ fn main() {
         .arg(igvmscript_path)
         .status()
         .expect("Failed to change file permissions");
-}
-
-#[inline]
-pub fn init_verify(verus_libs: &[&str]) {
-    if cfg!(feature = "noverify") {
-        println!("cargo:rustc-env=VERUS_ARGS=--no-verify");
-    } else {
-        let verus_args = [
-            "--rlimit=8000",
-            "--expand-errors",
-            "--multiple-errors=5",
-            "--triggers-silent",
-            "--no-auto-recommends-check",
-            "--trace",
-            "-Z unstable-options",
-        ];
-        println!("cargo:rustc-env=VERUS_ARGS={}", verus_args.join(" "));
-    }
-
-    let target = std::env::var("CARGO_PKG_NAME").unwrap_or_default();
-    let mut targets: Vec<&str> = vec![&target];
-    targets.extend(verus_libs);
-    println!("cargo:rustc-env=VERUS_TARGETS={}", targets.join(","));
-    for (key, value) in std::env::vars() {
-        // Skip RUSTC_BOOTSTRAP — cargo rejects setting it from build scripts.
-        if key == "RUSTC_BOOTSTRAP" {
-            continue;
-        }
-        // You can filter or modify which ones to pass to rustc
-        println!("cargo:rustc-env={}={}", key, value);
-    }
-
-    let module_path = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    println!("cargo:rustc-env=MODULE_PATH={}", module_path);
 }
