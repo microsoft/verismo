@@ -113,7 +113,6 @@ impl VRamDB {
     }
 
     /// TODO: function body check has been running for 2 seconds
-    #[verifier(external_body)]
     pub proof fn lemma_write_enc_bytes_effect_same_read(
         &self,
         other: &Self,
@@ -152,12 +151,7 @@ impl VRamDB {
         let w_enc = memop->Write_1;
         //self.lemma_inv_dom(other, sysmap, memop);
         reveal(VRamDB::op);
-        // Justification: write operations preserve whether an unrelated encrypted read is available;
-        // SMT loses this through RMP/SRAM update expansion.
-        assume(read2 is Some === read1 is Some);
         assert(read2 is Some === read1 is Some);
-        // Justification: write operations do not change the RMP domain; op_write only updates SRAM bytes.
-        assume(self.rmp.dom() === self.op(sysmap, memop).to_result().rmp.dom());
         if gpmem === memop.to_mem() && read2 is Some && w_enc {
             assert forall|i| 0 <= i < gpmem.len() implies read2->Some_0[i]
                 === #[trigger] memop->Write_2[i] by {
@@ -178,7 +172,6 @@ impl VRamDB {
         }
     }
 
-    #[verifier(external_body)]
     pub proof fn lemma_write_enc_bytes_effect_disjoint_read(
         &self,
         other: &Self,
@@ -214,12 +207,7 @@ impl VRamDB {
         let w_enc = memop->Write_1;
         //self.lemma_inv_dom(other, sysmap, memop);
         reveal(VRamDB::op);
-        // Justification: write operations preserve whether an unrelated encrypted read is available;
-        // SMT loses this through RMP/SRAM update expansion.
-        assume(read2 is Some === read1 is Some);
         assert(read2 is Some === read1 is Some);
-        // Justification: write operations do not change the RMP domain; op_write only updates SRAM bytes.
-        assume(self.rmp.dom() === self.op(sysmap, memop).to_result().rmp.dom());
         if read2 is Some {
             assert forall|i| 0 <= i < gpmem.len() implies read2->Some_0[i]
                 === read1->Some_0[i] by {
@@ -237,7 +225,6 @@ impl VRamDB {
         }
     }
 
-    #[verifier(external_body)]
     pub proof fn lemma_write_bytes_effect_by_other_vm_or_shared(
         &self,
         other: &Self,
@@ -270,12 +257,7 @@ impl VRamDB {
         let w_enc = memop->Write_1;
         //self.lemma_inv_dom(other, sysmap, memop);
         reveal(VRamDB::op);
-        // Justification: write operations preserve whether an unrelated encrypted read is available;
-        // SMT loses this through RMP/SRAM update expansion.
-        assume(read2 is Some === read1 is Some);
         assert(read2 is Some === read1 is Some);
-        // Justification: write operations do not change the RMP domain; op_write only updates SRAM bytes.
-        assume(self.rmp.dom() === self.op(sysmap, memop).to_result().rmp.dom());
         if read2 is Some {
             assert forall|i| 0 <= i < gpmem.len() implies read2->Some_0[i]
                 === read1->Some_0[i] by {
@@ -319,9 +301,6 @@ impl VRamDB {
         let new = self.op(sysmap, memop).to_result();
         if self.op(sysmap, memop) is Ok {
             if memop.to_mem().contains(gpa) {
-                // Justification: when gpa is inside memop.to_mem, both addresses are on the same guest page,
-                // so the memtype premise transfers to memop.to_mem().to_page().
-                assume(memtype(memid, memop.to_addr_memid().range.to_page()).is_sm_int());
                 self.lemma_write_sm_int_ok(memid, memop, sysmap);
                 self.lemma_write_byte_othervm_or_shared(&new, sysmap, memop, memid, gpa);
             } else {
@@ -362,7 +341,6 @@ impl VRamDB {
         }
     }
 
-    #[verifier(external_body)]
     pub proof fn lemma_write_byte_other_vm(
         &self,
         other: &Self,
@@ -385,12 +363,6 @@ impl VRamDB {
             other.get_enc_byte_ok(memid, gpa) === self.get_enc_byte_ok(memid, gpa),
     {
         reveal(VRamDB::op);
-        // Justification: writes by another VM do not change this VM's RMP ownership/validation for gpa;
-        // SMT loses the availability equivalence through op_write expansion.
-        assume(other.get_enc_byte_ok(memid, gpa) is Some === self.get_enc_byte_ok(
-            memid,
-            gpa,
-        ) is Some);
         assert(other.get_enc_byte_ok(memid, gpa) is Some === self.get_enc_byte_ok(
             memid,
             gpa,
@@ -417,9 +389,6 @@ impl VRamDB {
                 let wspn = wspmem.to_page();
                 let base_addr = wspn.to_addr().as_int();
                 assert(base_addr <= wspmem.first().as_int() < base_addr + PAGE_SIZE!());
-                // Justification: translated write memory is contained within its translated page;
-                // SpecMem::proof_same_page is not triggered for last() in this arithmetic proof.
-                assume(base_addr <= wspmem.last().as_int() < base_addr + PAGE_SIZE!());
                 assert(base_addr <= wspmem.last().as_int() < base_addr + PAGE_SIZE!());
                 // The following proofs are unstable. Keep those assertions to help solver.
                 assert(!(rspn =~= wspn));
@@ -430,10 +399,6 @@ impl VRamDB {
                 assert((rbase_addr <= base_addr - PAGE_SIZE!()) || (rbase_addr >= base_addr
                     + PAGE_SIZE!()));
             }
-            // Justification: translated write range is valid/in-bounds for successful VRamDB writes;
-            // RAM helper preconditions are not recovered from op_write expansion here.
-            assume(wspmem.is_valid());
-            assume(wspmem.last().as_int() < self.spec_sram().len());
             self.spec_sram().lemma_write_unchange_byte_any_enc(
                 w_asid,
                 wspmem,
@@ -484,8 +449,6 @@ impl VRamDB {
         reveal(RmpEntry::check_access);
         reveal(rmp_inv);
         let rmp = self.spec_rmp();
-        // Justification: write op updates SRAM but preserves RMP; generated setter/constructor axiom does not trigger here.
-        assume(rmp === other.spec_rmp());
         assert(rmp === other.spec_rmp());
         let rspn = rmp_reverse(&rmp, memid, gpa.to_page());
         let rspa = gpa.convert(rspn);
@@ -559,7 +522,6 @@ impl VRamDB {
         }
     }
 
-    #[verifier(external_body)]
     pub proof fn lemma_write_effect_in_range(
         &self,
         other: &Self,
@@ -597,8 +559,6 @@ impl VRamDB {
         reveal(VRamDB::op);
         reveal(VRamDB::op_write);
         let rmp = self.spec_rmp();
-        // Justification: write op updates SRAM but preserves RMP; generated setter/constructor axiom does not trigger here.
-        assume(rmp === other.spec_rmp());
         assert(rmp === other.spec_rmp());
         let rspn = rmp_reverse(&rmp, memid, gpa.to_page());
         let rspa = gpa.convert(rspn);
@@ -647,11 +607,7 @@ impl VRamDB {
             if wspmem.to_page() !== rspn {
                 assert(0 <= rspa.as_int() - rspn.as_int() * (PAGE_SIZE as int) < (
                 PAGE_SIZE as int));
-                // Justification: translated write range is valid/in-bounds for successful VRamDB writes;
-            // RAM helper preconditions are not recovered from op_write expansion here.
-            assume(wspmem.is_valid());
-            assume(wspmem.last().as_int() < self.spec_sram().len());
-            self.spec_sram().lemma_write_unchange_byte_any_enc(
+                self.spec_sram().lemma_write_unchange_byte_any_enc(
                     w_asid,
                     wspmem,
                     data,
@@ -696,7 +652,6 @@ impl VRamDB {
         }
     }
 
-    #[verifier(external_body)]
     pub proof fn lemma_write_effect_out_range_same_vm(
         &self,
         other: &Self,
@@ -720,8 +675,6 @@ impl VRamDB {
         reveal(VRamDB::op);
         reveal(VRamDB::op_write);
         let rmp = self.spec_rmp();
-        // Justification: write op updates SRAM but preserves RMP; generated setter/constructor axiom does not trigger here.
-        assume(rmp === other.spec_rmp());
         assert(rmp === other.spec_rmp());
         let w_enc = memop->Write_1;
         let w_gpmem = memop.to_mem();
@@ -746,16 +699,9 @@ impl VRamDB {
                 if wspmem.to_page() === rspa.to_page() {
                     assert(!wspmem.contains(rspa));
                     assert(memid.to_asid() === w_memid.to_asid());
-                    // Justification: same-VM out-of-range write has a valid in-bounds translated write range.
-                    assume(wspmem.is_valid());
-                    assume(wspmem.last().as_int() < self.spec_sram().len());
                     self.spec_sram().lemma_write_unchange_byte(memid.to_asid(), wspmem, data, rspa);
                 } else {
-                    // Justification: translated write range is valid/in-bounds for successful VRamDB writes;
-            // RAM helper preconditions are not recovered from op_write expansion here.
-            assume(wspmem.is_valid());
-            assume(wspmem.last().as_int() < self.spec_sram().len());
-            self.spec_sram().lemma_write_unchange_byte_any_enc(
+                    self.spec_sram().lemma_write_unchange_byte_any_enc(
                         w_memid.to_asid(),
                         wspmem,
                         data,
@@ -772,11 +718,7 @@ impl VRamDB {
                     }
                 }
                 assert(wspmem.to_page() !== rspa.to_page());
-                // Justification: translated write range is valid/in-bounds for successful VRamDB writes;
-            // RAM helper preconditions are not recovered from op_write expansion here.
-            assume(wspmem.is_valid());
-            assume(wspmem.last().as_int() < self.spec_sram().len());
-            self.spec_sram().lemma_write_unchange_byte_any_enc(
+                self.spec_sram().lemma_write_unchange_byte_any_enc(
                     w_memid.to_asid(),
                     wspmem,
                     data,
@@ -790,7 +732,6 @@ impl VRamDB {
         }
     }
 
-    #[verifier(external_body)]
     pub proof fn proof_op_inv(&self, sysmap: SysMap, memop: MemOp<GuestPhy>)
         requires
             self.inv(),
@@ -831,7 +772,6 @@ impl VRamDB {
         let new = self.op(sysmap, memop).to_result();
     }
 
-    #[verifier(external_body)]
     pub proof fn proof_op_inv_sw(&self, sysmap: SysMap, memop: MemOp<GuestPhy>, memid: MemID)
         requires
             self.inv(),
@@ -914,18 +854,7 @@ impl VRamDB {
         } else {
             ASID_FOR_HV!()
         };
-        // Justification: successful VRamDB write implies the translated system range is valid and in RAM bounds;
-        // SMT does not recover this from op_write/read-check expansion.
-        assume(spa.is_valid());
-        assume(spa.last().as_int() < self.spec_sram().len());
         self.spec_sram().proof_read_write(use_asid, spa, data);
-        // Justification: proof_read_write establishes read-after-write consistency through the translated range;
-        // the final get_bytes expression requires refolding VRamDB::op/sysmap translation.
-        assume(memop->Write_2 === self.op(sysmap, memop).to_result().get_bytes(
-            rgpa_id,
-            enc,
-            sysmap,
-        ));
     }
 
     pub proof fn lemma_read_op_enc_bytes_ok(&self, sysmap: SysMap, gpa_id: GPAMemID, enc: bool)
@@ -1146,9 +1075,6 @@ impl VRamDB {
                 assert(bytes1 === bytes2) by {
                     assert forall|i: int| 0 <= i < spmem1.len() implies bytes1[i] === bytes2[i] by {
                         let spa = spmem1[i];
-                        // Justification: every byte address in rmp_reverse_mem lies on the reversed SPN;
-                        // SpecMem indexing does not trigger the page invariant in this quantified context.
-                        assume(spa.to_page() =~= spn1);
                         assert(spa.to_page() =~= spn1);
                         let rmpentry1 = self.rmp[spa.to_page()].view();
                         let rmpentry2 = other.rmp[spa.to_page()].view();
@@ -1169,10 +1095,6 @@ impl VRamDB {
                             VMPL::VMPL3,
                             Perm::Write,
                         ));
-                        // Justification: model1_eq preserves encrypted SRAM bytes for validated pages owned by memid;
-                        // index bounds and RMP permission facts are not reassembled automatically here.
-                        assume(self.spec_sram().spec_data()[spa.value()]
-                            === other.spec_sram().spec_data()[spa.value()]);
                         assert(self.spec_sram().spec_data()[spa.value()]
                             === other.spec_sram().spec_data()[spa.value()]) by {
                             assert(self.model1_eq(other, memid));
@@ -1222,17 +1144,11 @@ impl VRamDB {
                 assert(bytes1 === bytes2) by {
                     assert forall|i: int| 0 <= i < spmem1.len() implies bytes1[i] === bytes2[i] by {
                         let spa = spmem1[i];
-                        // Justification: every byte address in rmp_reverse_mem lies on the reversed SPN;
-                        // SpecMem indexing does not trigger the page invariant in this quantified context.
-                        assume(spa.to_page() =~= spn1);
                         assert(spa.to_page() =~= spn1);
                         let rmpentry1 = self.rmp[spa.to_page()].view();
                         let rmpentry2 = other.rmp[spa.to_page()].view();
                         assert(rmpentry1.spec_validated() && rmpentry2.spec_validated());
                         assert(rmpentry1 === rmpentry2);
-                        // Justification: model2_eq preserves all SRAM bytes; sequence index bounds are not surfaced here.
-                        assume(self.spec_sram().spec_data()[spa.value()]
-                            === other.spec_sram().spec_data()[spa.value()]);
                         assert(self.spec_sram().spec_data()[spa.value()]
                             === other.spec_sram().spec_data()[spa.value()]) by {
                             assert(self.model2_eq(other));
