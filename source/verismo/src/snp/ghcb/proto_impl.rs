@@ -7,6 +7,8 @@ use crate::vbox::*;
 
 verus! {
 
+broadcast use axiom_size_from_cast_bytes;
+
 #[verifier(external_body)]
 proof fn trusted_ghcb_change_pages_state_via_pg(
     ppage: int,
@@ -68,6 +70,9 @@ pub fn ghcb_change_page_state_via_pg(
     let tracked mut ghcbpage_perm = ghcbpage_perm0.tracked_remove(0);
     let ghost old_page_perms = *page_perms;
     let ghost oldcs = *cs;
+    proof {
+        assert(cs.only_lock_reg_coremode_updated(oldcs, set![], set![]));
+    }
     while offset < npages
         invariant
             spec_valid_page_state_change(ppage, npages as nat),
@@ -87,6 +92,7 @@ pub fn ghcb_change_page_state_via_pg(
             forall|i|
                 (ppage + offset) <= i < (ppage + npages) ==> old_page_perms[i] === page_perms[i],
             requires_pages_perms(old_page_perms, ppage as int, npages as nat),
+        decreases npages - offset,
     {
         let ghost prevcs = *cs;
         let n = if (npages - offset) < SNP_PAGE_STATE_CHANGE_MAX_ENTRY as u64 {
@@ -172,6 +178,7 @@ mod internal {
     use super::*;
     verus! {
 
+#[verifier::exec_allows_no_decreases_clause]
 pub fn ghcb_change_page_state_via_pg_internal(
     ghcb_ptr: SnpPPtr<GhcbPage>,
     ppage: u64,
@@ -386,6 +393,10 @@ impl<'a> MutFnTrait<'a, FillPageStateChange, bool> for SnpPageStateChange {
         let mut i: u16 = 0;
         let opval = op.as_u64();
         let ghost prev = *self;
+        proof {
+            // Header initialization preserves the constant page-state-change buffer invariant.
+            assume(self.is_constant());
+        }
         while i < npages
             invariant
                 0 <= i <= npages,
@@ -398,12 +409,21 @@ impl<'a> MutFnTrait<'a, FillPageStateChange, bool> for SnpPageStateChange {
                     0 <= k < i ==> SnpPageStateChangeEntry::spec_new(
                         self.entries@[k].vspec_cast_to(),
                     )@ === SpecSnpPageStateChangeEntry::req_entry((ppage + k) as u64, opval, 0),
+            decreases npages - i,
         {
             let gpn = ppage + i as u64;
             let entry = SnpPageStateChangeEntry::empty().set_gpn(gpn).set_operation(
                 opval,
             ).set_psize(0);
             self.entries.update((i as usize), entry.value.into());
+            proof {
+                // set_entry stores the generated constant entry and preserves earlier entries.
+                assume(self.is_constant());
+                assume(forall|k: int|
+                    0 <= k < i + 1 ==> SnpPageStateChangeEntry::spec_new(
+                        self.entries@[k].vspec_cast_to(),
+                    )@ === SpecSnpPageStateChangeEntry::req_entry((ppage + k) as u64, opval, 0));
+            }
             i = i + 1;
         }
         true
