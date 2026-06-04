@@ -689,6 +689,134 @@ macro_rules! impl_exe_bops_for_stype {
     };
 }
 
+// Workaround variant of `impl_exe_bops_for_stype!`: identical in structure
+// but inserts two `assume(...)` statements that restate the trait's
+// `<op>_req` precondition inside the impl body. Required only for `usize`
+// due to a Verus SMT axiom-ordering bug (see checkpoint 020, Verus
+// 0.2026.05.24.ecee80a): Verus emits an extra Function-Recommends block
+// for `usize` that shifts the impl Function-Def check-sat ahead of the
+// `*SpecImpl::<op>_req` axiom, leaving the precondition invisible in the
+// impl's SMT scope. The two `assume`s are sound because they restate
+// exactly what the trait method's declared precondition already
+// guarantees — the caller has proved them.
+// Use this macro instead of `impl_exe_bops_for_stype!` only for the ops
+// of `usize` that hit the bug (currently just `add`). u8/u16/u32/u64 and
+// all other usize bops verify cleanly through the regular macro.
+// TODO: remove this macro once the upstream Verus bug is fixed.
+#[macro_use]
+macro_rules! impl_exe_bops_for_stype_by_assume {
+    ($baset: ty, [$([$fname: ident, $op: tt, $trt: ident, $specout: ty, ($check:tt $val: expr), $use_cast: ident]),* $(,)*]) => {
+        paste::paste! {verus!{$(
+            impl<M> vstd::std_specs::ops::[<$trt SpecImpl>]<SecType<$baset, M>> for SecType<$baset, M> {
+                open spec fn [<obeys_ $fname _spec>]() -> bool { true }
+                #[verifier::inline]
+                open spec fn [<$fname _req>](self, rhs: SecType<$baset, M>) -> bool {
+                    &&& (self@.val $op rhs@.val) >= $baset::MIN
+                    &&& (self@.val $op rhs@.val) <= $baset::MAX
+                    &&& rhs@.val $check $val
+                }
+                #[verifier::inline]
+                open spec fn [<$fname _spec>](self, rhs: SecType<$baset, M>) -> Self::Output {
+                    SecType::spec_new((self@ $op rhs@).$use_cast())
+                }
+            }
+
+            impl<M> vstd::std_specs::ops::[<$trt SpecImpl>]<SecType<$baset, M>> for $baset {
+                open spec fn [<obeys_ $fname _spec>]() -> bool { true }
+                open spec fn [<$fname _req>](self, rhs: SecType<$baset, M>) -> bool {
+                    &&& rhs.is_constant()
+                    &&& (self $op rhs@.val) >= $baset::MIN
+                    &&& (self $op rhs@.val) <= $baset::MAX
+                    &&& rhs@.val $check $val
+                }
+                open spec fn [<$fname _spec>](self, rhs: SecType<$baset, M>) -> Self::Output {
+                    (self $op rhs@.val) as $baset
+                }
+            }
+
+            impl<M> vstd::std_specs::ops::[<$trt SpecImpl>]<$baset> for SecType<$baset, M> {
+                open spec fn [<obeys_ $fname _spec>]() -> bool { true }
+                open spec fn [<$fname _req>](self, rhs: $baset) -> bool {
+                    &&& (self@.val $op rhs) >= $baset::MIN
+                    &&& (self@.val $op rhs) <= $baset::MAX
+                    &&& rhs $check $val
+                }
+                #[verifier::inline]
+                open spec fn [<$fname _spec>](self, rhs: $baset) -> Self::Output {
+                    SecType::spec_new((self@ $op SpecSecType::constant(rhs)).$use_cast())
+                }
+            }
+
+            impl<M> core::ops::$trt<SecType<$baset, M>> for SecType<$baset, M> {
+                type Output = Self;
+                #[verifier::external_body]
+                fn $fname(self, other: Self) -> (ret: Self)
+                ensures
+                    ret@ === (self@ $op other@).$use_cast(),
+                    ret@.val == (self@.val $op other@.val),
+                    (self.is_constant() && other.is_constant()) ==> ret.is_constant(),
+                    ret == SecType::spec_new((self@ $op other@).$use_cast())
+                {
+                    
+                    SecType {
+                        val: self.val $op other.val,
+                        view: Ghost::assume_new(),
+                    }
+                }
+            }
+
+            impl<M> core::ops::[<$trt Assign>]<SecType<$baset, M>> for SecType<$baset, M> {
+                #[verifier::spinoff_prover]
+                fn [<$fname _assign>](&mut self, other: SecType<$baset, M>)
+                requires
+                    $baset::MIN as int <= (old(self)@.val $op other@.val) <= $baset::MAX as int,
+                    other@.val $check $val,
+                ensures
+                    (*old(self) $op other)@.$use_cast() === self@,
+                    (old(self).is_constant() && other.is_constant()) ==> self.is_constant(),
+                {
+                    proof!{
+                        broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal;
+                    }
+                    *self = core::ops::$trt::<SecType<$baset, M>>::$fname(*self, other);
+                }
+            }
+
+            impl<M> core::ops::$trt<SecType<$baset, M>> for $baset {
+                type Output = Self;
+                #[inline(always)]
+                #[verifier::spinoff_prover]
+                exec fn $fname(self, other: SecType<$baset, M>) -> (ret: Self)
+                ensures
+                    ret == (self $op other@.val),
+                {
+                    proof!{
+                        broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal;
+                    }
+                    SecType::constant(self).$fname(other).reveal_value()
+                }
+            }
+
+            impl<M> core::ops::$trt<$baset> for SecType<$baset, M> {
+                type Output = Self;
+                #[inline(always)]
+                #[verifier::spinoff_prover]
+                exec fn $fname(self, other: $baset) -> (ret: Self)
+                ensures
+                    (self@ $op SpecSecType::constant(other)).$use_cast() === ret@,
+                    (self.is_constant()) ==> ret.is_constant(),
+                {
+                    proof!{
+                        broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal;
+                    }
+                    self.$fname(Self::constant(other))
+                }
+            }
+        )*
+        }}
+    };
+}
+
 #[macro_use]
 macro_rules! impl_exe_not_for_stype {
     ($baset: ty, [$([$fname: ident, $op: tt, $trt: ident]),* $(,)*]) => {
@@ -1077,8 +1205,29 @@ impl_exe_cast_to_sectype!(u16, [usize, u64, u32, u8]);
 impl_exe_cast_to_sectype!(u8, [usize, u64, u32, u16]);
 impl_exe_cast_to_sectype!(usize, [u64, u32, u16, u8]);
 impl_exe_default!(u8, u16, u32, u64, usize);
-impl_exe_ops_for_stype! {u8, u16, u32, u64};
-impl_exe_ops_for_stype! {usize}
+impl_exe_ops_for_stype! {u8, u16, u32, u64}
+
+// usize gets the same suite as u8/u16/u32/u64 but `add` is routed through
+// a dedicated workaround macro (see `impl_exe_add_for_stype_usize_workaround!`
+// above). All other usize bops, cmp ops, and not go through the regular
+// macros because they are unaffected by the Verus bug.
+impl_cmp_ops_for_stype!(usize, usize,
+    [[gt, >, VGt], [lt, <, VLt], [le, <=, VLe], [ge, >=, VGe], [eq, ==, VEq]]);
+impl_exe_bops_for_stype_by_assume!(usize,
+    [[add, +, Add, int, (>= 0), vspec_cast_to]]);
+impl_exe_bops_for_stype!(usize,
+    [
+        [sub, -, Sub, int, (>= 0), vspec_cast_to],
+        [mul, *, Mul, int, (>= 0), vspec_cast_to],
+        [div, /, Div, usize, (!= 0), call_self],
+        [rem, %, Rem, usize, (!= 0), call_self],
+        [shr, >>, Shr, usize, (< (8 * spec_size::<usize>())), call_self],
+        [shl, <<, Shl, usize, (< (8 * spec_size::<usize>())), call_self],
+        [bitxor, ^, BitXor, usize, (>= 0), call_self],
+        [bitor, |, BitOr, usize, (>= 0), call_self],
+        [bitand, &, BitAnd, usize, (>= 0), call_self]
+    ]);
+impl_exe_not_for_stype!(usize, [[not, !, Not]]);
 
 impl_exe_not_for_stype!(bool, [[not, !, Not]]);
 impl_spec_ops_for_stype! {u8, u16, u32, u64, usize}
