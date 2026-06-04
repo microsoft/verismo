@@ -179,6 +179,7 @@ impl<T, M> SecType<T, M> {
         self.val
     }
 
+    #[verifier::type_invariant]
     pub closed spec fn wf_value(&self) -> bool {
         &&& self@.wf_value()
         &&& self.val === self@.val
@@ -212,6 +213,11 @@ impl<T, M> IsConstant for SpecSecType<T, M> {
 }
 
 impl<T, M> SpecSecType<T, M> {
+    broadcast proof fn lemma_is_constant(&self) 
+    ensures
+        #[trigger] self.is_constant() <==> (self._is_constant() && self.wf_value()),
+    {
+    }
     pub proof fn proof_constant(&self)
         requires
             self.is_constant(),
@@ -321,7 +327,7 @@ impl<T, M> SpecSecType<T, M> {
         ensures
             ret === self.bop_new(rhs, op),
             ret.wf_value(),
-            self._is_constant() && rhs._is_constant() ==> ret._is_constant(),
+            self.is_constant() && rhs.is_constant() ==> ret.is_constant(),
     {
         let ret = self.bop_new(rhs, op);
         assert forall|i| 1 <= i <= 4 implies ret.valsets[i].len() <= self.valsets[i].len()
@@ -343,6 +349,7 @@ impl<T, M> SpecSecType<T, M> {
                 }
             }
         }
+        broadcast use SpecSecType::lemma_is_constant;
         ret
     }
 
@@ -354,7 +361,7 @@ impl<T, M> SpecSecType<T, M> {
         ensures
             ret === self.uop_new(op),
             ret.wf_value(),
-            self._is_constant() ==> ret._is_constant(),
+            self.is_constant() ==> ret.is_constant(),
     {
         self.proof_bop_new::<T, T2>(SpecSecType::constant(arbitrary()), uop_to_bop(op))
     }
@@ -551,27 +558,63 @@ macro_rules! impl_cmp_ops_for_stype {
 macro_rules! impl_exe_bops_for_stype {
     ($baset: ty, [$([$fname: ident, $op: tt, $trt: ident, $specout: ty, ($check:tt $val: expr), $use_cast: ident]),* $(,)*]) => {
         paste::paste! {verus!{$(
-            impl<M> SecType<$baset, M> {
-                #[inline(always)]
-                fn [<_ $fname>](self, other: Self) -> (ret: Self)
-                requires
-                    self.wf_value(),
-                    (self@.val $op other@.val) as $baset == self@.val $op other@.val,
-                    other@.val $check $val,
+            // Declare *SpecImpl FIRST so trait postcondition resolves.
+            // Preconditions go in *_req; obeys_*_spec=true makes the trait's
+            // automatic postcondition works.
+            impl<M> vstd::std_specs::ops::[<$trt SpecImpl>]<SecType<$baset, M>> for SecType<$baset, M> {
+                open spec fn [<obeys_ $fname _spec>]() -> bool { true }
+                #[verifier::inline]
+                open spec fn [<$fname _req>](self, rhs: SecType<$baset, M>) -> bool {
+                    &&& (self@.val $op rhs@.val) as $baset == self@.val $op rhs@.val
+                    &&& rhs@.val $check $val
+                }
+                #[verifier::inline]
+                open spec fn [<$fname _spec>](self, rhs: SecType<$baset, M>) -> Self::Output {
+                    SecType::spec_new((self@ $op rhs@).$use_cast())
+                }
+            }
+
+            impl<M> vstd::std_specs::ops::[<$trt SpecImpl>]<SecType<$baset, M>> for $baset {
+                open spec fn [<obeys_ $fname _spec>]() -> bool { true }
+                open spec fn [<$fname _req>](self, rhs: SecType<$baset, M>) -> bool {
+                    &&& rhs.is_constant()
+                    &&& (self $op rhs@.val) as $baset == self $op rhs@.val
+                    &&& rhs@.val $check $val
+                }
+
+                open spec fn [<$fname _spec>](self, rhs: SecType<$baset, M>) -> Self::Output {
+                    (self $op rhs@.val) as $baset
+                }
+            }
+
+            impl<M> vstd::std_specs::ops::[<$trt SpecImpl>]<$baset> for SecType<$baset, M> {
+                open spec fn [<obeys_ $fname _spec>]() -> bool { true }
+                open spec fn [<$fname _req>](self, rhs: $baset) -> bool {
+                    &&& (self@.val $op rhs) as $baset == self@.val $op rhs
+                    &&& rhs $check $val
+                }
+                #[verifier::inline]
+                open spec fn [<$fname _spec>](self, rhs: $baset) -> Self::Output {
+                    SecType::spec_new((self@ $op SpecSecType::constant(rhs)).$use_cast())
+                }
+            }
+
+            impl<M> core::ops::$trt<SecType<$baset, M>> for SecType<$baset, M> {
+                type Output = Self;
+                fn $fname(self, other: Self) -> (ret: Self)
                 ensures
                     ret@ === (self@ $op other@).$use_cast(),
-                    (self $op other)@ === (self@ $op other@),
                     ret@.val == self@.val $op other@.val,
-                    //ret@ === (self $op other)@.vspec_cast_to(),
+                    (self.is_constant() && other.is_constant()) ==> ret.is_constant(),
+                    ret == SecType::spec_new((self@ $op other@).$use_cast())
                 {
+                    broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal;
                     proof {
-                        assert(VTypeCast::<SpecSecType<$baset, M>>::vspec_cast_to((self $op other)@) ===
-                        VTypeCast::<SpecSecType<$baset, M>>::vspec_cast_to(self@ $op other@)) by {
-                            assert(self $op other === SecType::spec_new(self@ $op other@));
-                            let v1 = (self $op other)@;
-                            let v2 = self@ $op other@;
-                            assert(v1 === v2);
-                        }
+                        use_type_invariant(&self);
+                        use_type_invariant(&other);
+                        assert((self@.val $op other@.val) as $baset == self@.val $op other@.val);
+                        self@.proof_bop_new(other@, [<fn_spec_ $fname _ $baset _ $baset _ $specout>]());
+                        let ret: SpecSecType<$baset, M> = (self@ $op other@).proof_uop_valset(fn_vspec_cast_to());
                     }
                     let ghost view: SpecSecType<$baset, M> = (self@ $op other@).$use_cast();
                     SecType {
@@ -581,31 +624,16 @@ macro_rules! impl_exe_bops_for_stype {
                 }
             }
 
-            impl<M> core::ops::$trt<SecType<$baset, M>> for SecType<$baset, M> {
-                type Output = Self;
-                #[inline(always)]
-                exec fn $fname(self, other: Self) -> (ret: Self)
-                ensures
-                    ret@ === (self@ $op other@).$use_cast(),
-                    ret@.val == self@.val $op other@.val,
-                    (self.is_constant() && other.is_constant()) ==> ret.is_constant(),
-                    ret.wf_value(),
-                {
-                    proof {
-                        self@.proof_bop_new(other@, [<fn_spec_ $fname _ $baset _ $baset _ $specout>]());
-                        let ret: SpecSecType<$baset, M> = (self@ $op other@).proof_uop_valset(fn_vspec_cast_to());
-                    }
-                    self.[<_ $fname>](other)
-                }
-            }
-
             impl<M> core::ops::[<$trt Assign>]<SecType<$baset, M>> for SecType<$baset, M> {
                 fn [<$fname _assign>](&mut self, other: SecType<$baset, M>)
+                requires
+                    (old(self)@.val $op other@.val) as $baset == old(self)@.val $op other@.val,
+                    other@.val $check $val,
                 ensures
-                    (old(self) $op other)@.$use_cast() === self@,
+                    (*old(self) $op other)@.$use_cast() === self@,
                     (old(self).is_constant() && other.is_constant()) ==> self.is_constant(),
-                    self.wf_value(),
                 {
+                    broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal;
                     *self = core::ops::$trt::<SecType<$baset, M>>::$fname(*self, other);
                 }
             }
@@ -615,8 +643,9 @@ macro_rules! impl_exe_bops_for_stype {
                 #[inline(always)]
                 exec fn $fname(self, other: SecType<$baset, M>) -> (ret: Self)
                 ensures
-                    ret == self $op other@.val
+                    ret == self $op other@.val,
                 {
+                    broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal;
                     SecType::constant(self).$fname(other).reveal_value()
                 }
             }
@@ -628,8 +657,8 @@ macro_rules! impl_exe_bops_for_stype {
                 ensures
                     (self@ $op SpecSecType::constant(other)).$use_cast() === ret@,
                     (self.is_constant()) ==> ret.is_constant(),
-                    ret.wf_value(),
                 {
+                    broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal;
                     self.$fname(Self::constant(other))
                 }
             }
@@ -704,6 +733,8 @@ macro_rules! impl_exe_cast_to_sectype {
         verus!{
         impl<M> vstd::std_specs::convert::FromSpecImpl<SecType<$baset, M>> for $baset {
             open spec fn obeys_from_spec() -> bool { false }
+
+            #[verifier::inline]
             open spec fn from_spec(v: SecType<$baset, M>) -> $baset {
                 v@.val
             }
@@ -718,6 +749,8 @@ macro_rules! impl_exe_cast_to_sectype {
         }
         $(impl<M> vstd::std_specs::convert::FromSpecImpl<SecType<$baset, M>> for SecType<$out, M> {
             open spec fn obeys_from_spec() -> bool { false }
+
+            #[verifier::inline]
             open spec fn from_spec(v: SecType<$baset, M>) -> SecType<$out, M> {
                 SecType::spec_new(SpecSecType::constant(v@.val as $out))
             }
@@ -1015,13 +1048,16 @@ impl<T> SecType<T, ()> {
 }
 
 } // verus!
+
 impl_exe_cast_to_sectype!(u64, [usize, u32, u16, u8]);
 impl_exe_cast_to_sectype!(u32, [usize, u64, u16, u8]);
 impl_exe_cast_to_sectype!(u16, [usize, u64, u32, u8]);
 impl_exe_cast_to_sectype!(u8, [usize, u64, u32, u16]);
 impl_exe_cast_to_sectype!(usize, [u64, u32, u16, u8]);
 impl_exe_default!(u8, u16, u32, u64, usize);
-impl_exe_ops_for_stype! {u8, u16, u32, u64, usize}
+impl_exe_ops_for_stype! {u8, u16, u32, u64}
+impl_exe_ops_for_stype! {usize}
+
 impl_exe_not_for_stype!(bool, [[not, !, Not]]);
 impl_spec_ops_for_stype! {u8, u16, u32, u64, usize}
 
