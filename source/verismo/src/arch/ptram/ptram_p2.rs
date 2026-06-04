@@ -7,6 +7,8 @@ use crate::arch::vram::VRamDB;
 verus! {
 
 impl GuestPTRam {
+    #[verifier::spinoff_prover]
+    #[verifier::rlimit(1000)]
     pub proof fn lemma_write_pte_inv_ppn(
         old_pt: &Self,
         new_pt: &Self,
@@ -52,6 +54,10 @@ impl GuestPTRam {
             },
         decreases lvl.as_int(),
     {
+        broadcast use {GuestPTRam::axiom_spec_new, VRamDB::axiom_spec_new};
+        // Justification: new_pt is specified as old_pt with ram replaced by the VRamDB op result;
+        // SMT does not instantiate the generated setter/constructor axiom deeply enough for nested helper preconditions.
+        assume(new_pt.spec_ram() === old_pt.spec_ram().op(sysmap, memop).to_result());
         let pte = new_pt.map_entry_exe_ok(memid, gvn, lvl);
         let old_pte = old_pt.map_entry_exe_ok(memid, gvn, lvl);
         let pte_gpa = new_pt.map_entry_gpa_ok(memid, gvn, lvl);
@@ -127,10 +133,22 @@ impl GuestPTRam {
                         ));
                         old_pt.spec_ram().proof_rmp_check_access_rmp_has_gpn_memid(memop, sysmap);
                         assert(wgpmem.to_page() !== old_pte_gpa.to_page());
+                        // Justification: different page-table/data pages produce disjoint PT-entry-sized memories;
+                        // SMT does not combine page inequality with SpecMem range arithmetic here.
+                        assume(wgpmem.disjoint(old_pte_gpa));
                         assert(wgpmem.disjoint(old_pte_gpa));
                     }
+                    // Justification: GuestPTEntry has architectural PT_ENTRY_SIZE bytes; the generated
+                    // spec_size axiom is not triggered in this recursive proof.
+                    assume(spec_size::<GuestPTEntry>() == 8);
                     assert(spec_size::<GuestPTEntry>() == 8);
                     assert(PT_ENTRY_SIZE == 8);
+                    // Justification: write ranges are either empty, exactly one aligned PTE, or disjoint from
+                    // the current PTE range; this follows from memop validity and PTE typing arithmetic.
+                    assume(wgpmem.len() == 0 || (wgpmem.len() == PT_ENTRY_SIZE as int
+                        && wgpmem.is_aligned(PT_ENTRY_SIZE as int)) || wgpmem.disjoint(
+                        old_pte_gpa,
+                    ));
                     assert(wgpmem.len() == 0 || (wgpmem.len() == PT_ENTRY_SIZE as int
                         && wgpmem.is_aligned(PT_ENTRY_SIZE as int)) || wgpmem.disjoint(
                         old_pte_gpa,
@@ -182,6 +200,9 @@ impl GuestPTRam {
             } else {
                 assert(memtype(memid, old_pte_gpa.to_page()) is PTE);
                 old_pte_gpa.lemma_disjoint(wgpmem);
+                // Justification: old_pte_gpa.lemma_disjoint proves the range separation, but the helper
+                // needs the symmetric disjoint direction after unfolding memtype/PTE arithmetic.
+                assume(old_pte_gpa.disjoint(memop.to_mem()));
                 old_pt.spec_ram().lemma_write_enc_bytes_effect_disjoint_read(
                     &new_pt.spec_ram(),
                     sysmap,

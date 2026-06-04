@@ -1,6 +1,7 @@
 use super::*;
 use crate::tspec::*;
 use crate::*;
+use vstd::arithmetic::mul::{lemma_mul_inequality, lemma_mul_strict_inequality_converse};
 
 #[macro_export]
 /// Ensure dummy holder does not take effect when comparing
@@ -290,6 +291,7 @@ impl<T> SpecMem<T> {
             self.last().to_page() == self.to_page(),
             self.first().to_page() == self.to_page(),
     {
+        self.axiom_inv();
         let first_value = self.first().value();
         assert(first_value == self.to_page().to_addr().value() + self.offset());
         assert((self.to_page().to_addr().value() + self.offset()) / PAGE_SIZE!()
@@ -407,15 +409,51 @@ impl<T> SpecMem<T> {
         ensures
             mem1 === mem2 || mem1.disjoint(mem2),
     {
-        if !(mem1 =~= mem2) {
-            assert(!(mem1.first() =~= mem2.first()));
-            assert forall|i| 0 <= i < mem1.len() implies !#[trigger] mem2.contains(mem1[i]) by {
-                assert forall|j| 0 <= j < mem2.len() implies !(mem2[j] =~= mem1[i]) by {
-                    assert(mem2.first() != mem1.first());
-                    assert(mem2[j] == mem2.first() + j);
-                    assert(mem1[j] == mem1.first() + j);
-                }
+        if mem1 !== mem2 {
+            let f1 = mem1.first().as_int();
+            let f2 = mem2.first().as_int();
+            if f1 == f2 {
+                broadcast use SpecAddr::axiom_equal;
+                assert(mem1.first() === mem2.first());
+                assert(mem1.size == mem2.size);
+                assert(mem1 === mem2);
             }
+            assert(f1 != f2);
+            assert(f1 % align == 0);
+            assert(f2 % align == 0);
+            let k1 = proof_div_mod_rel(f1, align);
+            let k2 = proof_div_mod_rel(f2, align);
+            assert(k1 * align == f1);
+            assert(k2 * align == f2);
+            assert(k1 * 8 == f1);
+            assert(k2 * 8 == f2);
+            assert(mem1.len() as int == align);
+            assert(mem2.len() as int == align);
+            assert(mem1.len() as int == 8);
+            assert(mem2.len() as int == 8);
+            if f1 < f2 {
+                assert(k1 * 8 < k2 * 8);
+                lemma_mul_strict_inequality_converse(k1, k2, 8);
+                assert(k1 < k2);
+                assert(k1 + 1 <= k2);
+                lemma_mul_inequality(k1 + 1, k2, 8);
+                assert((k1 + 1) * 8 == k1 * 8 + 8) by (nonlinear_arith);
+                assert(k1 * 8 + 8 <= k2 * 8);
+                assert(f1 + 8 <= f2);
+                assert(f1 + mem1.len() as int <= f2);
+            } else {
+                assert(f2 < f1);
+                assert(k2 * 8 < k1 * 8);
+                lemma_mul_strict_inequality_converse(k2, k1, 8);
+                assert(k2 < k1);
+                assert(k2 + 1 <= k1);
+                lemma_mul_inequality(k2 + 1, k1, 8);
+                assert((k2 + 1) * 8 == k2 * 8 + 8) by (nonlinear_arith);
+                assert(k2 * 8 + 8 <= k1 * 8);
+                assert(f2 + 8 <= f1);
+                assert(f2 + mem2.len() as int <= f1);
+            }
+            assert(mem1.disjoint(mem2));
         }
     }
 }

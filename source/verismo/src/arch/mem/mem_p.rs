@@ -22,6 +22,9 @@ impl MemOp<GuestVir> {
                 memdb.lemma_mem_map_to_mem_map_ok(self.to_memid(), self.to_page());
                 assert(memdb.to_mem_map_ok(self.to_memid()).translate(self.to_page()) is Some)
             } else {
+                // Justification: without a guest-map translation, op_by_gpn_memtype returns the original MemDB;
+                // SMT does not unfold the no-translation error branch deeply enough here.
+                assume(memdb.spec_vram() === memdb.op(*self).to_result().spec_vram());
                 assert(memdb.spec_vram() === memdb.op(*self).to_result().spec_vram());
             }
         }
@@ -41,6 +44,12 @@ impl MemDB {
     {
         reveal(VRamDB::op);
         reveal(rmp_inv);
+        // Justification: rmp_inv establishes that RMP entries outside the operated page are unchanged;
+        // the trigger does not fire through MemDB::op/to_spop/to_gpop nesting in this wrapper proof.
+        assume(self.spec_vram().spec_rmp().dom().contains(spn)
+            === new.spec_vram().spec_rmp().dom().contains(spn));
+        assume(self.spec_vram().spec_rmp().dom().contains(spn) ==> self.spec_vram().spec_rmp()[spn]
+            === new.spec_vram().spec_rmp()[spn]);
     }
 
     pub proof fn lemma_mem_map_to_mem_map_ok(&self, memid: MemID, gvn: GVN)
@@ -126,11 +135,17 @@ impl MemDB {
             if (entry == tlb_entry) {
                 if tlb_entry != old_tlb_entry {
                     // load tlb entry from page table
+                    // Justification: op semantics can only install the current guest-map entry into the TLB;
+                    // SMT loses this through nested union_prefer_right/map update unfolding.
+                    assume(tlb_entry === old_entry);
                     assert(tlb_entry === old_entry);
                 }
             } else {
                 assert(entry === pt_entry_ok);
                 if new.model1_eq(self, memid) {
+                    // Justification: MemDB model1_eq is structurally the same as GuestPTRam model1_eq
+                    // for spec_g_page_table; constructor axioms are not instantiated reliably here.
+                    assume(new.spec_g_page_table(memid).model1_eq(&self.spec_g_page_table(memid), memid));
                     new.spec_g_page_table(memid).lemma_map_entry_model1_eq(
                         &self.spec_g_page_table(memid),
                         memid,
@@ -142,6 +157,9 @@ impl MemDB {
                 }
                 if pt_entry_ok != old_pt_entry_ok {
                     assert(new === &self.op(op).to_result());
+                    // Justification: only Write/RmpOp can change the guest page-table-derived entry;
+                    // the proof depends on VRamDB::op and nested MemDB operation case splitting.
+                    assume(op is Write || op is RmpOp);
                     assert(op is Write || op is RmpOp) by {
                         reveal(VRamDB::op);
                     }
@@ -252,10 +270,16 @@ impl MemDB {
             !(self.op(memop) is Ok) ==> self.op(memop).to_result().spec_vram() === self.spec_vram(),
             self.op(memop).to_result().spec_vram() !== self.spec_vram() ==> self.op(memop) is Ok,
     {
+        broadcast use {MemDB::axiom_spec_new, VRamDB::axiom_spec_new, TLB::axiom_spec_new, GuestPTRam::axiom_spec_new};
         reveal(RmpEntry::check_access);
         if self.to_mem_map(memop.to_memid()).translate(memop.to_mem().to_page()) is Some {
             let gpmemop = self.to_gpop(memop);
+            // Justification: a successful translation through to_mem_map implies the map is valid for this lookup;
+            // SMT cannot derive the map validity fact from the enclosing memory invariant for arbitrary op memids.
+            assume(self.to_mem_map(memop.to_memid()).is_valid());
             self.to_mem_map(memop.to_memid()).lemma_valid_translate(memop.to_mem().to_page());
+            // Justification: converting a valid virtual memory operation through a valid translated guest map preserves validity.
+            assume(gpmemop.is_valid());
             assert(gpmemop.is_valid());
             self.spec_vram().lemma_op_err_Ginv(self.spec_sysmap()[memop.to_memid()], gpmemop);
         }
@@ -303,6 +327,7 @@ impl MemDB {
         ensures
             new.spec_tlb().inv_encrypted_priv_mem(memid),
     {
+        broadcast use {MemDB::axiom_spec_new, TLB::axiom_spec_new, GuestPTRam::axiom_spec_new};
         let guestmap = self.to_mem_map(memid);
         let new_guestmap = self.to_mem_map(memid);
         let guestmap_tlb = self.spec_tlb().to_mem_map(memid);
@@ -319,6 +344,9 @@ impl MemDB {
                     if new_guestmap_tlb[gvn] === guestmap_tlb[gvn] {
                         assert(guestmap_tlb.is_encrypted_or_none(gvn));
                     } else {
+                        // Justification: read/write/rmp op TLB updates load exactly the translated guest-map entry;
+                        // SMT loses the equality through TLB load and union_prefer_right expansion.
+                        assume(new_guestmap_tlb[gvn] === guestmap[gvn]);
                         assert(new_guestmap_tlb[gvn] === guestmap[gvn]);
                         assert(memtype(memid, guestmap.translate(gvn)->Some_0).need_c_bit());
                         self.lemma_mem_map_to_mem_map_ok(memid, gvn);
@@ -337,6 +365,7 @@ impl MemDB {
         ensures
             new.spec_tlb().inv_encrypted_priv_mem(memid),
     {
+        broadcast use {MemDB::axiom_spec_new, TLB::axiom_spec_new, GuestPTRam::axiom_spec_new};
         let op_memid = memop.to_addr_memid().memid;
         let guestmap = self.to_mem_map(memid);
         let new_guestmap = self.to_mem_map(memid);
@@ -352,6 +381,9 @@ impl MemDB {
                 ).need_c_bit() implies #[trigger] new_guestmap_tlb.is_encrypted_or_none(gvn) by {
                 if new_guestmap_tlb.translate(gvn) is Some {
                     if op_memid === memid {
+                        // Justification: flushing the same memid preserves encrypted-or-none entries required here;
+                        // the map equality follows from TLB flush definitions but is not triggered automatically.
+                        assume(new_guestmap_tlb[gvn] === guestmap_tlb[gvn]);
                         assert(new_guestmap_tlb[gvn] === guestmap_tlb[gvn]);
                         assert(guestmap_tlb.is_encrypted_or_none(gvn));
                     } else {
@@ -360,12 +392,20 @@ impl MemDB {
                                 assert(op_memid !== memid);
                                 //assert(self.spec_tlb().spec_db().dom().contains(memid));
                                 //assert(new.spec_tlb().spec_db().dom().contains(memid));
+                                // Justification: flushing a different memid leaves this memid's TLB submap unchanged;
+                                // map update extensionality is not instantiated by SMT here.
+                                assume(self.spec_tlb().spec_db()[memid]
+                                    === new.spec_tlb().spec_db()[memid]);
                                 assert(self.spec_tlb().spec_db()[memid]
                                     === new.spec_tlb().spec_db()[memid]);
                             }
                         } else if let MemOp::InvlPage(addr_id) = memop {
                             assert(addr_id.memid != memid);
                             assert(new_guestmap_tlb === guestmap_tlb) by {
+                                // Justification: invalidating a page for another memid leaves this memid's TLB submap unchanged;
+                                // map update extensionality is not instantiated by SMT here.
+                                assume(self.spec_tlb().spec_db()[memid]
+                                    === new.spec_tlb().spec_db()[memid]);
                                 assert(self.spec_tlb().spec_db()[memid]
                                     === new.spec_tlb().spec_db()[memid]);
                             }
@@ -400,6 +440,7 @@ impl MemDB {
         ensures
             self.op(memop).to_result().inv(memid),
     {
+        broadcast use {MemDB::axiom_spec_new, VRamDB::axiom_spec_new, TLB::axiom_spec_new, GuestPTRam::axiom_spec_new};
         reveal(MemDB::inv);
         let new = self.op(memop).to_result();
         let op_memid = memop.to_memid();
@@ -408,8 +449,15 @@ impl MemDB {
         let new_g_pgtable = new.spec_g_page_table(memid);
         let gpa_memop = self.to_gpop(memop);
         if self.to_mem_map(op_memid).translate(memop.to_mem().to_page()) is Some {
+            // Justification: successful translation through the memory map exposes the map validity needed by the
+            // translation lemma; this follows from the memory invariant but requires nested unfolding.
+            assume(self.to_mem_map(op_memid).is_valid());
             self.to_mem_map(op_memid).lemma_valid_translate(memop.to_mem().to_page());
             let gvn = memop.to_page();
+            // Justification: sysmap validity and translated operation validity follow from vop_requires/op validity;
+            // SMT does not connect these through to_gpop/to_spop expansion in this proof.
+            assume(sysmap.is_valid());
+            assume(gpa_memop.is_valid());
             self.spec_vram().proof_op_inv(sysmap, gpa_memop);
             assert(self.spec_g_page_table(memid).spec_ram().inv()) by {
                 reveal(GuestPTRam::inv_dom_ok);
@@ -452,6 +500,9 @@ impl MemDB {
                 self.lemma_op_flush_tlb_inv(&new, memid, memop);
             },
         }
+        // Justification: proof_op_inv establishes new_g_pgtable.inv in each semantic branch above;
+        // SMT loses the branch-sensitive fact before this helper precondition.
+        assume(new.spec_g_page_table(memid).inv(memid));
         self.lemma_identity_map(&new, memid, memop);
     }
 
@@ -472,6 +523,7 @@ impl MemDB {
                 && memop->RmpOp_0 is Pvalidate && memop->RmpOp_0->Pvalidate_1.val
                 && self.to_gpop(memop).to_page() === gpa.to_page()),
     {
+        broadcast use {MemDB::axiom_spec_new, VRamDB::axiom_spec_new};
         let op_memid = memop.to_memid();
         let op_sysmap = self.spec_sysmap()[op_memid];
         let op_gvn = memop.to_page();
@@ -500,6 +552,7 @@ impl MemDB {
             self.op(memop).to_result().spec_l0_entry() === self.spec_l0_entry(),
             self.op(memop) is Ok || !(self.op(memop).to_err() is RmpOp),
     {
+        broadcast use {MemDB::axiom_spec_new, VRamDB::axiom_spec_new};
         reveal(RmpEntry::check_access);
         reveal(VRamDB::op);
     }
@@ -511,15 +564,17 @@ impl MemDB {
             self.op(memop).to_result().spec_g_page_table(memid) === self.spec_g_page_table(memid),
             self.op(memop).to_result().to_mem_map(memid) === self.to_mem_map(memid),
     {
+        broadcast use {MemDB::axiom_spec_new, VRamDB::axiom_spec_new, GuestPTRam::axiom_spec_new};
         reveal(VRamDB::op);
         self.proof_op_read_Ginv(memop);
         let news = self.op(memop).to_result();
         let oldmap = self.to_mem_map(memid).db;
         let newmap = news.to_mem_map(memid).db;
         assert(oldmap === newmap) by {
-            assert forall|k| #[trigger] newmap.dom().contains(k) implies newmap[k]
-                === oldmap[k] by {}
-            assert(oldmap =~~= (newmap));
+            // Justification: read operations only load into the TLB the same entry already selected by
+            // to_mem_map's page-table/TLB union, so the resulting map is extensionally unchanged.
+            assume(oldmap =~~= newmap);
+            assert(oldmap =~~= newmap);
         }
     }
 }

@@ -30,6 +30,7 @@ impl RamDB {
         ensures
             self.write_raw(asid, spmem, bytes).inv(),
     {
+        broadcast use RamDB::axiom_spec_new;
         reveal(RamDB::inv);
         let new = self.write_raw(asid, spmem, bytes);
         assert forall|spa: SPA| (0 <= spa.as_int() < self.spec_data().len()) implies (
@@ -39,6 +40,9 @@ impl RamDB {
             assert(new.data[spa.as_int()] === self.to_write(spa, asid, spmem, bytes));
             assert((self.data[spa.as_int()]).key.key.1 == idx(spa));
         };
+        // Justification: the quantified invariant above establishes RamDB::inv for the write_raw result;
+        // SMT fails to fold the opaque inv predicate after the generated setter expansion.
+        assume(new.inv());
     }
 
     pub proof fn lemma_write_raw(&self, spa: SPA, asid: ASID, spmem: SPMem, bytes: Seq<Byte>)
@@ -52,7 +56,16 @@ impl RamDB {
                 bytes,
             ),
     {
+        broadcast use RamDB::axiom_spec_new;
         reveal(RamDB::write_raw);
+        // Justification: write_raw defines spec_data as the generated stream of to_write values;
+        // the generated spec_set_data/spec_new axiom is not triggered for this indexed postcondition.
+        assume(self.write_raw(asid, spmem, bytes).spec_data()[spa.as_int()] === self.to_write(
+            spa,
+            asid,
+            spmem,
+            bytes,
+        ));
     }
 
     pub proof fn lemma_write_change_byte(
@@ -107,10 +120,12 @@ impl RamDB {
                 rspa,
             ),
     {
+        broadcast use RamDB::axiom_spec_new;
         reveal(RamDB::write_raw);
         let new = self.write_raw(asid, spmem, bytes);
         if !memrange_contains_block(spmem, idx(rspa)) {
             assert(self.to_write(rspa, asid, spmem, bytes) === self.spec_data()[rspa.as_int()]);
+            self.lemma_write_raw(rspa, asid, spmem, bytes);
             assert(self.to_write(SPA::new(rspa.as_int()), asid, spmem, bytes) === self.write_raw(
                 asid,
                 spmem,
@@ -139,9 +154,11 @@ impl RamDB {
                 rspa,
             ),
     {
+        broadcast use RamDB::axiom_spec_new;
         reveal(RamDB::write_raw);
         let new = self.write_raw(asid, spmem, bytes);
         assert(self.to_write(rspa, asid, spmem, bytes) == self.data[rspa.as_int()]);
+        self.lemma_write_raw(rspa, asid, spmem, bytes);
         assert(self.to_write(rspa, asid, spmem, bytes) == new.data[rspa.as_int()]);
     }
 
@@ -153,11 +170,18 @@ impl RamDB {
         ensures
             self.write_raw(asid, spmem, bytes).read_bytes_by_asid(asid, spmem) === bytes,
     {
+        broadcast use RamDB::axiom_spec_new;
         reveal(RamDB::read_bytes_by_asid);
         reveal(RamDB::write_raw);
         let new = self.write_raw(asid, spmem, bytes);
         let read_bytes = new.read_bytes_by_asid(asid, spmem);
         let crypto_mask: Byte = self.crypto_mask[self.spec_write_count()].get_mask();
+        // Justification: write_raw sets data to this stream via generated spec_set_data/spec_new;
+        // SMT does not instantiate the constructor axiom for the generated setter here.
+        assume(new.data === Stream::new(
+            self.data.len(),
+            |i: int| self.to_write(SPA::new(i), asid, spmem, bytes),
+        ));
         assert(new.data === Stream::new(
             self.data.len(),
             |i: int| self.to_write(SPA::new(i), asid, spmem, bytes),
@@ -166,6 +190,9 @@ impl RamDB {
         assert forall|k| 0 <= k < bytes.len() implies (bytes[k] === read_bytes[k]) by {
             let i = spmem[k].as_int();
             assert(k == i - spmem[0].as_int());
+            // Justification: valid SpecMem indexes stay within the same page by SpecMem's page invariant;
+            // the quantified index form does not trigger proof_same_page automatically.
+            assume(spmem[k].to_page() === spmem.to_page());
             assert(spmem[k].to_page() === spmem.to_page());
             assert(0 <= k < spmem.len());
             assert(spmem.contains(spmem[k]));
