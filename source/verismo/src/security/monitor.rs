@@ -35,6 +35,7 @@ pub fn fill_vec<T>(vec: &mut Vec<Option<T>>, n: usize)
             n >= oldvec.len(),
             forall|i| 0 <= i < oldvec.len() ==> vec[i] === oldvec[i],
             forall|i| oldvec.len() <= i < vec.len() ==> vec[i] === None,
+        decreases n - vec.len(),
     {
         let ghost prev_vec = *vec;
         vec.push(None);
@@ -58,6 +59,7 @@ fn create_lock_entries(priv_req: &LockKernReq) -> (ret: Vec<(usize, usize)>)
                 0 <= k < i ==> entries[k].0 === priv_req@[k].start.vspec_cast_to() && entries[k].1
                     == priv_req@[k].end@.val - priv_req@[k].start@.val,
             forall|k| 0 <= k < i ==> entries[k].0.spec_valid_pn_with(entries[k].1 as nat),
+        decreases 256 - i,
     {
         let val = priv_req.index(i);
         let mut end = val.end;
