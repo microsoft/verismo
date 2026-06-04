@@ -10,6 +10,7 @@ pub fn pow2_to_bits(val: u64) -> (ret: u64)
         0 <= (ret as int) < 64,
         ret as u64 == spec_pow2_to_bits(val as u64),
         ret as u64 == spec_pow2_to_bits_exe(val as nat),
+    decreases val,
 {
     proof {
         bit64_shl_auto();
