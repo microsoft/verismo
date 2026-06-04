@@ -81,6 +81,7 @@ impl<T: Copy, const N: IndexType> Array<T, N> {
                         < Self::spec_len() ==> self@[k] === old(self)@[k],
                 i.is_constant(),
                 j.is_constant(),
+            decreases j as int,
         {
             assert(i <= j);
             assert(j < Self::spec_len());
@@ -102,6 +103,7 @@ impl<T: Copy, const N: IndexType> Array<T, N> {
                 i.is_constant(),
                 0 <= (i as int) <= self@.len(),
                 forall|j: int| 0 <= j < (i as int) ==> self@[j] === elem,
+            decreases self@.len() - i as int,
         {
             self.set(i, elem);
             i = i + 1;
