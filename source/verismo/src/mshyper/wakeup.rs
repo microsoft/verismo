@@ -357,6 +357,7 @@ impl GhcbHyperPageHandle {
                 spec_ap_ids_wf_lowerbound(ap_ids, BSP as int, cpu as int),
                 secret.wf_mastersecret(),
                 gdt.is_constant(),
+            decreases cpu_count - cpu,
         {
             if cpu != BSP as u32 {
                 proof {
@@ -444,6 +445,7 @@ impl GhcbHandle {
                 snpcore.inv(),
                 snpcore.only_reg_coremode_updated(oldsnpcore, set![GHCB_REGID()]),
                 vmsa.is_vmsa_page(),
+            decreases 1nat,
         {
             let mut check_error = vmsa.copy_guest_error_code();
             check_error.declassify();
