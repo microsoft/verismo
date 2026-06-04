@@ -275,9 +275,9 @@ macro_rules! mask_proof_for_bits_internal {
             bit64_and_auto();
             bit64_or_auto();
             $(
-            assert(forall |a: u64| #![auto] (a & BIT_MASK!($N)) == a % (1u64 << $N)) by(bit_vector);
-            assert(forall |a: u64| #![auto] (a|BIT_MASK!($N)) == add(sub(a, (a&BIT_MASK!($N))), BIT_MASK!($N))) by(bit_vector);
-            assert(forall |a: u64| #![auto]  add(a & !(BIT_MASK!($N)), BIT_MASK!($N)) >= a) by(bit_vector);
+            assert(forall |a: u64| #![trigger (a & BIT_MASK!($N))] (a & BIT_MASK!($N)) == a % (1u64 << $N)) by(bit_vector);
+            assert(forall |a: u64| #![trigger (a|BIT_MASK!($N))] (a|BIT_MASK!($N)) == add(sub(a, (a&BIT_MASK!($N))), BIT_MASK!($N))) by(bit_vector);
+            assert(forall |a: u64| #![trigger (a & !(BIT_MASK!($N)))] add(a & !(BIT_MASK!($N)), BIT_MASK!($N)) >= a) by(bit_vector);
             )*
         }
     }
@@ -426,7 +426,7 @@ verus! {
     #[verifier(bit_vector)]
     pub proof fn bit64_or_mask_auto()
         ensures
-            forall |a: u64, bits: u64| #![auto] 0<= bits < 64 ==> (add(a|BIT_MASK!(bits), 1)) & BIT_MASK!(bits) == 0,
+            forall |a: u64, bits: u64| #![trigger ((add(a|BIT_MASK!(bits), 1)) & BIT_MASK!(bits))] 0<= bits < 64 ==> (add(a|BIT_MASK!(bits), 1)) & BIT_MASK!(bits) == 0,
     {}
 
     #[verifier(bit_vector)]
