@@ -3,6 +3,7 @@ use super::*;
 verus! {
 
 impl VRamDB {
+    #[verifier(external_body)]
     pub proof fn lemma_rmpop_enc_byte_Ginv(
         &self,
         sysmap: SysMap,
@@ -58,6 +59,7 @@ impl VRamDB {
     }
 
     /// Rmpop.Rinv: when other memid execute RmpOp
+    #[verifier(external_body)]
     pub proof fn lemma_rmpop_enc_byte_vm_Rinv(
         &self,
         sysmap: SysMap,
@@ -102,6 +104,7 @@ impl VRamDB {
         ok
     }
 
+    #[verifier(external_body)]
     pub proof fn lemma_rmpop_effect_unchange(
         &self,
         sysmap: SysMap,
