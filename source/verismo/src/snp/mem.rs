@@ -246,7 +246,7 @@ impl GhcbHandle {
                 assert(page_perms.contains_key(i));
             }
             assert forall|i: int|
-                start_page <= i < start_page + npages implies page_perms.contains_key(i)
+                start_page <= i < start_page + npages implies #[trigger] page_perms.contains_key(i)
                 && page_perms[i]@.wf_range((i.to_addr(), PAGE_SIZE as nat)) by {
                 assert(page_perms.contains_key(i));
                 assert(old_page_perms.contains_key(i));
@@ -328,7 +328,7 @@ impl GhcbHandle {
         let ghost prevcs = (*cs);
         proof {
             assert forall|i: int|
-                start_page <= i < start_page + npages implies page_perms.contains_key(i)
+                start_page <= i < start_page + npages implies #[trigger] page_perms.contains_key(i)
                 && page_perms[i]@.wf_range((i.to_addr(), PAGE_SIZE as nat)) by {
                 assert(page_perms.contains_key(i));
                 assert(old_page_perms.contains_key(i));
