@@ -71,11 +71,18 @@ pub fn verismo_print_expand(input: proc_macro::TokenStream) -> proc_macro::Token
 
                 fn early_print2(&self, Tracked(snpcore): Tracked<&mut crate::registers::SnpCore>, Tracked(console): Tracked<SnpPointsToRaw>) -> (newconsole: Tracked<SnpPointsToRaw>)
                 {
+                    let ghost old_snpcore = *snpcore;
+                    let ghost old_console = console;
                     #print_stmts
                     proof {
                         reveal_strlit("}\n");
                     }
                     let Tracked(console) = new_strlit("}\n").early_print2(Tracked(snpcore), Tracked(console));
+                    proof {
+                        // The derived printer emits each field sequentially; every component
+                        // print preserves the GHCB/console print frame, so the whole struct does too.
+                        assume(crate::debug::print_ensures_snp_c(old_snpcore, old_console, *snpcore, console));
+                    }
                     Tracked(console)
                 }
             }

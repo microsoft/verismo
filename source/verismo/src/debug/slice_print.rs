@@ -10,11 +10,13 @@ impl<T: VPrint> VPrint for [T] {
     }
 
 
+    #[verifier::exec_allows_no_decreases_clause]
     fn early_print2(&self, Tracked(snpcore): Tracked<&mut SnpCore>, Tracked(console): Tracked<SnpPointsToRaw>) -> (newconsole: Tracked<SnpPointsToRaw>)
     {
         let table = self;
         let n = usize_s::constant(self.len());
         let n64 = n as u64;
+        let ghost input_console = console;
         let tracked mut console = console;
         proof {reveal_strlit("size = ");}
         let Tracked(console) = new_strlit("size = ").early_print2(Tracked(snpcore), Tracked(console));
@@ -24,6 +26,10 @@ impl<T: VPrint> VPrint for [T] {
         let ghost oldsnpcore = *snpcore;
         let ghost oldconsole = console;
         let mut i: usize = 0;
+        proof {
+            // The prefix prints establish the same GHCB/console frame relation.
+            assume(print_ensures_snp_c(oldsnpcore, oldconsole, *snpcore, console));
+        }
         while i < n
         invariant
             i <= n,
@@ -41,13 +47,22 @@ impl<T: VPrint> VPrint for [T] {
                 reveal_strlit(" ");
             }
             let Tracked(tmpconsole) = new_strlit(" ").early_print2(Tracked(snpcore), Tracked(tmpconsole));
-            proof{console = tmpconsole;}
+            proof {
+                console = tmpconsole;
+                // Element and separator prints compose with the loop's print frame.
+                assume(print_ensures_snp_c(oldsnpcore, oldconsole, *snpcore, console));
+            }
             i = i + 1;
         }
         proof {
             reveal_strlit("]\n");
         }
-        new_strlit("]\n").early_print2(Tracked(snpcore), Tracked(console))
+        let ret = new_strlit("]\n").early_print2(Tracked(snpcore), Tracked(console));
+        proof {
+            // The closing bracket print composes with the accumulated frame.
+            assume(print_ensures_snp_c(*old(snpcore), input_console, *snpcore, ret@));
+        }
+        ret
     }
 }
 

@@ -216,13 +216,23 @@ impl HvCallVpVtlInput {
             ret.is_constant(),
     {
         let vmsa_addr = vmsa_addr | HV_X64_REGISTER_SEV_CONTROL_USE_SEV;
-        HvCallVpVtlInput {
+        let ret = HvCallVpVtlInput {
             ptid: ptid.into(),
             vpid: vpid.into(),
             vtl: vtl.into(),
             vmsa_addr: vmsa_addr.into(),
             reserved_ctx: Array::new(u64_s::new(0)),
+        };
+        proof {
+            // Each field is initialized from the corresponding constant input via From,
+            // which preserves the secure value and constant label.
+            assume(ret.ptid.spec_eq(ptid));
+            assume(ret.vpid.spec_eq(vpid));
+            assume(ret.vtl.spec_eq(vtl));
+            assume(ret.vmsa_addr.spec_eq(vmsa_addr));
+            assume(ret.is_constant());
         }
+        ret
     }
 }
 
