@@ -55,6 +55,8 @@ pub struct SnpCpuidTable {
 
 verus! {
 
+broadcast use axiom_size_from_cast_bytes;
+
 impl SnpCpuidTable {
     pub proof fn lemma_size() -> (ret: nat)
         ensures
@@ -149,6 +151,7 @@ pub fn process_cpuid(eax: u32, ecx: u32, xcr0: u64, xss: u64, cpuid_table: &[Snp
             ret is Some ==> cpuid_table@[i as int].eax_in@.val == eax
                 && cpuid_table@[i as int].ecx_in@.val == ecx && ret->Some_0
                 === cpuid_table@[i as int].rets,
+        decreases n - i,
     {
         let leaf = slice_index_get(cpuid_table, i);
         if (eax == leaf.eax_in.into()) && (ecx == leaf.ecx_in.into()) {
