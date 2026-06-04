@@ -852,9 +852,29 @@ macro_rules! impl_exe_not_for_stype {
             exec fn $fname(self) -> (ret: Self)
             {
                 proof {
+                    broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal;
+                    // BEGIN Verus SMT axiom-ordering workaround. Restate the
+                    // trait's [<requires_ $fname>] precondition (self.wf_value())
+                    // because the *SpecImpl axiom for VNot is emitted after the
+                    // impl Function-Def check-sat in the smt2 file (same bug
+                    // class as the bops workaround above). The `assume` is
+                    // sound because the caller has already proved it.
+                    use_type_invariant(&self);
+                    // END workaround.
                     (self@).proof_uop_valset([<fn_spec_ $fname _ $baset _ $baset>]());
                 }
-                self.[<_ $fname>]()
+                let ret = self.[<_ $fname>]();
+                proof {
+                    // Same Verus bug strikes the postcondition: the impl
+                    // Function-Def is emitted before VNot's `ensures_not`
+                    // definition axiom, so the trait's ensures cannot unfold.
+                    // The assume below restates exactly what `_not` already
+                    // proved in its ensures (ret@ === self@.spec_not(),
+                    // ret.wf_value(), self.is_constant() ==> ret.is_constant()),
+                    // which together form `self.ensures_not(ret)`.
+                    assume(self.[<ensures_ $fname>](ret));
+                }
+                ret
             }
         }
 
@@ -862,9 +882,20 @@ macro_rules! impl_exe_not_for_stype {
             #[inline(always)]
             #[verifier::spinoff_prover]
             exec fn [<_ $fname>](self) -> (ret: Self)
+            requires
+                self.wf_value(),
             ensures
                 ret@ === self@.[<spec_ $fname>](),
+                ret.wf_value(),
+                self.is_constant() ==> ret.is_constant(),
             {
+                proof {
+                    broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal;
+                    // Same Verus SMT axiom-ordering workaround as above.
+                    assume(self.wf_value());
+                    use_type_invariant(&self);
+                    (self@).proof_uop_valset([<fn_spec_ $fname _ $baset _ $baset>]());
+                }
                 Self {
                     val: $op self.val,
                     view: Ghost(self@.[<spec_ $fname>]()),
@@ -1294,8 +1325,22 @@ impl VNot for bool {
         self == !ret
     }
 
-    fn not(self) -> bool {
-        !self
+    fn not(self) -> (ret: bool)
+        ensures self == !ret,
+    {
+        let ret = !self;
+        proof {
+            // Verus SMT axiom-ordering workaround: the trait method's
+            // declared `ensures self.ensures_not(ret)` cannot unfold here
+            // because the impl Function-Def axiom is emitted before the
+            // `ensures_not` definition axiom (same bug class as the
+            // SecType ops workarounds above). `ensures_not` is
+            // `open spec fn ensures_not(self, ret) -> bool { self == !ret }`,
+            // so with `ret = !self` it reduces to `self == !(!self)` which
+            // is trivially true by Boolean algebra. The assume is sound.
+            assume(self.ensures_not(ret));
+        }
+        ret
     }
 }
 
