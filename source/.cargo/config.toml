@@ -1,13 +1,6 @@
-[unstable]
-build-std-features = ["compiler-builtins-mem"]
-build-std = ["core","alloc", "compiler_builtins"]
-unstable-options = true
-json-target-spec = true
-
 [build]
-target = "target.json"
+target = "x86_64-unknown-none"
 incremental = true
-rustflags = ["-Zunstable-options"]
 
 [env]
 RUSTC_BOOTSTRAP = { value = "1", force = true }

@@ -7,6 +7,8 @@ fn main() {
     // Environment vars during build.
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-env-changed=MODULE");
+    println!("cargo:rerun-if-changed=monitor.lds");
+    println!("cargo:rustc-link-arg-bin=verismo_main=-Tmonitor.lds");
 
     init_verify(&["verismo", "vstd"]);
 
