@@ -199,6 +199,7 @@ verismo_simple! {
             forall |i: int| 0 <= i < idx as int ==>
                 prev_end as int >= (#[trigger]hv_mem_tb@[i]).range().end(),
             memcc.memperm.contains_init_except(range(prev_end as int, VM_MEM_SIZE!()), pre_validated),
+        decreases len - idx,
         {
             let entry = slice_index_get(hv_mem_tb, idx as usize_t);
             let start_gpn = entry.starting_gpn as usize;
