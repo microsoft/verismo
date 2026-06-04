@@ -219,10 +219,10 @@ impl HwSnpMemAttr {
 
     pub proof fn reveal_use_rflags()
         ensures
-            forall|rflags: u64| bits_p::spec_bit_set(rflags, RflagBit::CF.as_int() as u64) != 0,
+            forall|rflags: u64| #[trigger] bits_p::spec_bit_set(rflags, RflagBit::CF.as_int() as u64) != 0,
     {
         assert forall|rflags: u64|
-            bits_p::spec_bit_set(rflags, RflagBit::CF.as_int() as u64) != 0 by {
+            #[trigger] bits_p::spec_bit_set(rflags, RflagBit::CF.as_int() as u64) != 0 by {
             let b = RflagBit::CF.as_int() as u64;
             bit_set_non_zero(rflags, b);
         }
