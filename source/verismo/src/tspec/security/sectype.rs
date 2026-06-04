@@ -1088,7 +1088,7 @@ macro_rules! impl_exe_ops_for_stype {
                     [shl, <<, Shl, $baset, (< (8 * spec_size::<$baset>())), call_self],
                     [bitxor, ^, BitXor, $baset, (>= 0), call_self],
                     [bitor, |, BitOr, $baset, (>= 0), call_self],
-                    [bitand, &, BitAnd, $baset, (>= 0), call_self]
+                    //[bitand, &, BitAnd, $baset, (>= 0), call_self],
                 ]);
             impl_exe_not_for_stype!($baset, [[not, !, Not]]);
         )*
@@ -1206,18 +1206,16 @@ impl_exe_cast_to_sectype!(u8, [usize, u64, u32, u16]);
 impl_exe_cast_to_sectype!(usize, [u64, u32, u16, u8]);
 impl_exe_default!(u8, u16, u32, u64, usize);
 impl_exe_ops_for_stype! {u8, u16, u32, u64}
-
-// usize gets the same suite as u8/u16/u32/u64 but `add` is routed through
-// a dedicated workaround macro (see `impl_exe_add_for_stype_usize_workaround!`
-// above). All other usize bops, cmp ops, and not go through the regular
-// macros because they are unaffected by the Verus bug.
 impl_cmp_ops_for_stype!(usize, usize,
     [[gt, >, VGt], [lt, <, VLt], [le, <=, VLe], [ge, >=, VGe], [eq, ==, VEq]]);
+/// BUG(verus): This is a workaround for the Verus bug where the following macro will trigger a compilation error.
 impl_exe_bops_for_stype_by_assume!(usize,
-    [[add, +, Add, int, (>= 0), vspec_cast_to]]);
+    [
+        [add, +, Add, int, (>= 0), vspec_cast_to],
+        [sub, -, Sub, int, (>= 0), vspec_cast_to],
+    ]);
 impl_exe_bops_for_stype!(usize,
     [
-        [sub, -, Sub, int, (>= 0), vspec_cast_to],
         [mul, *, Mul, int, (>= 0), vspec_cast_to],
         [div, /, Div, usize, (!= 0), call_self],
         [rem, %, Rem, usize, (!= 0), call_self],
@@ -1225,7 +1223,24 @@ impl_exe_bops_for_stype!(usize,
         [shl, <<, Shl, usize, (< (8 * spec_size::<usize>())), call_self],
         [bitxor, ^, BitXor, usize, (>= 0), call_self],
         [bitor, |, BitOr, usize, (>= 0), call_self],
-        [bitand, &, BitAnd, usize, (>= 0), call_self]
+        [bitand, &, BitAnd, usize, (>= 0), call_self],
+    ]);
+impl_exe_bops_for_stype!(u8,
+    [
+        [bitand, &, BitAnd, u8, (>= 0), call_self],
+    ]);
+impl_exe_bops_for_stype!(u16,
+    [
+        [bitand, &, BitAnd, u16, (>= 0), call_self],
+    ]);
+impl_exe_bops_for_stype!(u32,
+    [
+        [bitand, &, BitAnd, u32, (>= 0), call_self],
+    ]);
+/// BUG(verus): This is a workaround for the Verus bug where the following macro will trigger a compilation error.
+impl_exe_bops_for_stype_by_assume!(u64,
+    [
+        [bitand, &, BitAnd, u64, (>= 0), call_self],
     ]);
 impl_exe_not_for_stype!(usize, [[not, !, Not]]);
 
