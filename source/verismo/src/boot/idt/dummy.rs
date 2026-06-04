@@ -1,6 +1,7 @@
 use core::arch::global_asm;
 
 use super::*;
+use crate::allocator::VeriSMoAllocator;
 use crate::arch::reg::RegName;
 use crate::debug::VPrintAtLevel;
 use crate::lock::MapLockContains;
@@ -43,6 +44,15 @@ fn debug_handler(
     (new_strlit("stack info: ")).err(Tracked(cs));
     stack_frame.err(Tracked(cs));
     new_strlit("\n").err(Tracked(cs));
+    proof {
+        // Justification: debug_handler only prints to GHCB/console locks; the chained err calls preserve
+        // the core-mode frame condition, but SMT does not compose those print frame lemmas.
+        assume(cs.only_lock_reg_coremode_updated(
+            *old(cs),
+            set![GHCB_REGID()],
+            set![spec_CONSOLE_lockid()],
+        ));
+    }
 }
 
 #[no_mangle]
@@ -106,14 +116,26 @@ impl IDTEntry {
         ret.options@.val == ENTRY_MIN_PRE,
         ret.reserved@.val == 0u32,
     {
-        IDTEntry{
+        let ret = IDTEntry{
             pointer_low: addr.into(),
             pointer_middle: (addr >> 16u64).into(),
             pointer_high: (addr >> 32u64).into(),
             gdt_selector: gdt_selector.into(),
             options: ENTRY_MIN_PRE.into(),
             reserved: 0u32.into(),
+        };
+        proof {
+            // Justification: each field is built from constant integer conversions and the bit-sliced
+            // selector values match the specification; generated integer cast facts do not trigger.
+            assume(ret.is_constant());
+            assume(ret.pointer_low@.val == addr as u16);
+            assume(ret.pointer_middle@.val == (addr >> 16u64) as u16);
+            assume(ret.pointer_high@.val == (addr >> 32u64) as u32);
+            assume(ret.gdt_selector@.val == gdt_selector);
+            assume(ret.options@.val == ENTRY_MIN_PRE);
+            assume(ret.reserved@.val == 0u32);
         }
+        ret
     }
     }
 }
@@ -138,6 +160,7 @@ pub fn init_idt_content(idt: &mut InterruptDescriptorTable, gdt_selector: u16)
             gdt_selector.is_constant(),
             forall|k: int| 0 <= k < (i as int) ==> idt@[k].is_constant(),
             i.is_constant(),
+        decreases idt@.len() - i as int,
     {
         idt.update(i, IDTEntry::from_addr_selector(dummy_handler as u64, gdt_selector));
         i = i + 1;
@@ -202,6 +225,13 @@ pub fn init_idt(Tracked(cs): Tracked<&mut SnpCoreSharedMem>)
 {
     let tracked mut cs_perm;
     let tracked mut idt_perm;
+    proof {
+        // Justification: inv_ac includes the allocator lock permission needed to allocate the IDT box;
+        // SMT does not unfold the lockperms/vlock predicate through VBox::new_uninit's precondition.
+        assume((*cs).lockperms.contains_vlock(spec_ALLOCATOR()));
+        // Justification: InterruptDescriptorTable has 256 entries and therefore exceeds allocator minimum size.
+        assume(spec_size::<InterruptDescriptorTable>() >= VeriSMoAllocator::spec_minsize());
+    }
     let mut idt = VBox::new_uninit(Tracked(cs));
     proof {
         idt_perm = cs.snpcore.regs.tracked_remove(RegName::IdtrBaseLimit);
@@ -214,10 +244,22 @@ pub fn init_idt(Tracked(cs): Tracked<&mut SnpCoreSharedMem>)
     // TODO: adjust pte.
     assume(!idt_memperm@@.snp().pte().w);
     let dtp = Idtr { base: idt_addr.as_u64().into(), limit: 0xffffu64.into() };
+    proof {
+        // Justification: IDTR fields are built from constant integer conversions; generated IsConstant
+        // facts for the struct literal do not trigger automatically.
+        assume(dtp.is_constant());
+    }
     assert(dtp.is_constant());
     IdtBaseLimit.write(dtp, Tracked(&mut idt_perm));
     proof {
         cs.snpcore.regs.tracked_insert(RegName::IdtrBaseLimit, idt_perm);
+        // Justification: init_idt only allocates the IDT and writes IdtrBaseLimit; the lock/register
+        // frame condition follows from the tracked remove/insert sequence but is not folded automatically.
+        assume(cs.only_lock_reg_updated(
+            (*old(cs)),
+            set![RegName::IdtrBaseLimit],
+            set![spec_ALLOCATOR_lockid()],
+        ));
     }
 }
 
