@@ -943,18 +943,18 @@ macro_rules! impl_exe_cast_to_sectype {
 
             #[verifier::inline]
             open spec fn from_spec(v: SecType<$baset, M>) -> SecType<$out, M> {
-                SecType::spec_new(SpecSecType::constant(v@.val as $out))
+                v.vspec_cast_to()
             }
         }
         impl<M> core::convert::From<SecType<$baset, M>> for SecType<$out, M> {
             #[verifier(external_body)]
             fn from(value: SecType<$baset, M>) -> (ret: SecType<$out, M>)
                 ensures
-                    ret === SecType::spec_new(SpecSecType::constant(value@.val as $out)),
+                    ret === value.vspec_cast_to(),
             {
                 SecType{
                     val: value.val as $out,
-                    view: Ghost(SpecSecType::constant(value.val as $out)),
+                    view: Ghost(value@.vspec_cast_to()),
                 }
             }
         }
