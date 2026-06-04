@@ -119,6 +119,7 @@ impl<'a, 'b> MutFnTrait<'a, BootUpdate<'b>, u8> for BootParams {
                 e820_entries <= e820@.len(),
                 self.e820@.take(i as int) =~~= e820@.take(i as int),
                 *self === oldself.spec_set_e820(self.e820),
+            decreases e820_entries - i,
         {
             proof {
                 assert(self.e820@.update(i as int, e820[i as int]).take(i as int + 1)
@@ -617,7 +618,9 @@ pub fn load_bzimage_to_vmsa(
         Tracked(&mut cs.snpcore),
     );
     let mut i = 0;
-    while i < osmem.len() {
+    while i < osmem.len()
+        decreases osmem.len() - i,
+    {
         osmem[i].leak_debug();
         i = i + 1;
     }
