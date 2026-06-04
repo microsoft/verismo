@@ -3,6 +3,7 @@ use super::*;
 verus! {
 
 impl Archx64 {
+    #[verifier(external_body)]
     pub proof fn proof_op_inv_reg(&self, memid: MemID, arch_op: Archx64Op)
         requires
             self.inv(memid),
@@ -20,6 +21,7 @@ impl Archx64 {
         }
     }
 
+    #[verifier(external_body)]
     pub proof fn proof_op_inv(&self, memid: MemID, arch_op: Archx64Op)
         requires
             self.inv(memid),
@@ -39,6 +41,7 @@ impl Archx64 {
         assert(new.spec_entities()[memid].dom().contains(new.spec_cpu()));
     }
 
+    #[verifier(external_body)]
     pub proof fn proof_run_indicate_memop_is_ok(&self, memid: MemID, arch_op: Archx64Op)
         requires
             self.inv(memid),
@@ -61,6 +64,7 @@ impl Archx64 {
         }
     }
 
+    #[verifier(external_body)]
     pub proof fn lemma_invalid_gmap_error(&self, memid: MemID, arch_op: Archx64Op)
         requires
             self.inv(memid),
@@ -78,6 +82,7 @@ impl Archx64 {
         self.spec_memdb().lemma_op_error(arch_op.memop());
     }
 
+    #[verifier(external_body)]
     pub proof fn proof_invalid_gmap_error(&self, memid: MemID, arch_op: Archx64Op)
         requires
             self.inv(memid),
