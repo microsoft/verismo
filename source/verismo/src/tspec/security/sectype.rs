@@ -602,6 +602,10 @@ macro_rules! impl_exe_bops_for_stype {
                 }
             }
 
+            // (No broadcast axiom — see checkpoint 019 for the Verus SMT axiom ordering
+            // bug affecting SecType<usize, M>. Workaround attempts via broadcast lemmas
+            // hit a def-cycle. Body assertions below carry the burden for verification.)
+
             impl<M> core::ops::$trt<SecType<$baset, M>> for SecType<$baset, M> {
                 type Output = Self;
                 #[verifier::spinoff_prover]
@@ -612,8 +616,8 @@ macro_rules! impl_exe_bops_for_stype {
                     (self.is_constant() && other.is_constant()) ==> ret.is_constant(),
                     ret == SecType::spec_new((self@ $op other@).$use_cast())
                 {
-                    broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal;
                     proof {
+                        broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal;
                         use_type_invariant(&self);
                         use_type_invariant(&other);
                         assert((self@.val $op other@.val) >= $baset::MIN);
@@ -641,7 +645,9 @@ macro_rules! impl_exe_bops_for_stype {
                     (*old(self) $op other)@.$use_cast() === self@,
                     (old(self).is_constant() && other.is_constant()) ==> self.is_constant(),
                 {
-                    broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal;
+                    proof!{
+                        broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal;
+                    }
                     *self = core::ops::$trt::<SecType<$baset, M>>::$fname(*self, other);
                 }
             }
@@ -654,7 +660,9 @@ macro_rules! impl_exe_bops_for_stype {
                 ensures
                     ret == (self $op other@.val),
                 {
-                    broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal;
+                    proof!{
+                        broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal;
+                    }
                     SecType::constant(self).$fname(other).reveal_value()
                 }
             }
@@ -668,7 +676,9 @@ macro_rules! impl_exe_bops_for_stype {
                     (self@ $op SpecSecType::constant(other)).$use_cast() === ret@,
                     (self.is_constant()) ==> ret.is_constant(),
                 {
-                    broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal;
+                    proof!{
+                        broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal;
+                    }
                     self.$fname(Self::constant(other))
                 }
             }
@@ -1067,7 +1077,8 @@ impl_exe_cast_to_sectype!(u16, [usize, u64, u32, u8]);
 impl_exe_cast_to_sectype!(u8, [usize, u64, u32, u16]);
 impl_exe_cast_to_sectype!(usize, [u64, u32, u16, u8]);
 impl_exe_default!(u8, u16, u32, u64, usize);
-impl_exe_ops_for_stype! {u8, u16, u32, u64, usize}
+impl_exe_ops_for_stype! {u8, u16, u32, u64};
+impl_exe_ops_for_stype! {usize}
 
 impl_exe_not_for_stype!(bool, [[not, !, Not]]);
 impl_spec_ops_for_stype! {u8, u16, u32, u64, usize}
