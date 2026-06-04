@@ -103,7 +103,7 @@ pub broadcast proof fn axiom_size_from_cast_bytes<T: SpecSize>()
 #[verifier(external_body)]
 pub broadcast proof fn axiom_size_from_cast_bytes_def<T: SpecSize + VTypeCast<Seq<u8>>>(val: T)
     ensures
-        #[trigger] T::spec_size_def() == VTypeCast::<Seq<u8>>::vspec_cast_to(val).len(),
+        T::spec_size_def() == (#[trigger] VTypeCast::<Seq<u8>>::vspec_cast_to(val)).len(),
 {
 }
 

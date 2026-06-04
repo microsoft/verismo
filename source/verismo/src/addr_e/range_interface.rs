@@ -774,6 +774,7 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N> {
                     0 <= i < wi as int ==> self@[i] === prev[remap[i]].spec_set_range(
                         self@[i].spec_real_range(),
                     ),
+            decreases n - ri,
         {
             let ghost aset = self@.take(n as int).to_set();
             let ghost subs = self@.take(n as int);

@@ -267,9 +267,9 @@ macro_rules! mask_proof_for_bits_internal {
             requires
                 slow_bit_range_req(bits)
             ensures
-                forall |a: u64| #![auto] (a & BIT_MASK!(bits)) == a % (1u64 << bits),
-                forall |a: u64| #![auto] (a|BIT_MASK!(bits)) == add(sub(a, (a&BIT_MASK!(bits))), BIT_MASK!(bits)),
-                forall |a: u64| #![auto] add(a & !(BIT_MASK!(bits)), BIT_MASK!(bits)) >= a,
+                forall |a: u64| #![trigger (a & BIT_MASK!(bits))] (a & BIT_MASK!(bits)) == a % (1u64 << bits),
+                forall |a: u64| #![trigger (a|BIT_MASK!(bits))] (a|BIT_MASK!(bits)) == add(sub(a, (a&BIT_MASK!(bits))), BIT_MASK!(bits)),
+                forall |a: u64| #![trigger (a & !(BIT_MASK!(bits)))] add(a & !(BIT_MASK!(bits)), BIT_MASK!(bits)) >= a,
         {
             bit64_shl_auto();
             bit64_and_auto();
