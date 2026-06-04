@@ -133,7 +133,9 @@ macro_rules! quote_verbatim {
 }
 
 impl Visitor {
-    fn take_ghost<T: Default>(&self, dest: &mut T) -> T { take_ghost(self.erase_ghost, dest) }
+    fn take_ghost<T: Default>(&self, dest: &mut T) -> T {
+        take_ghost(self.erase_ghost, dest)
+    }
 
     fn maybe_erase_expr(&self, span: Span, e: Expr) -> Expr {
         if self.erase_ghost {
@@ -1235,10 +1237,24 @@ impl VisitMut for Visitor {
                         // project's Into impls for SecType, etc.).
                         let ty_str = quote::ToTokens::to_token_stream(&*ty).to_string();
                         let ty_trim = ty_str.replace(' ', "");
-                        let is_primitive = matches!(ty_trim.as_str(),
-                            "u8" | "u16" | "u32" | "u64" | "u128" | "usize"
-                            | "i8" | "i16" | "i32" | "i64" | "i128" | "isize"
-                            | "bool" | "char" | "f32" | "f64");
+                        let is_primitive = matches!(
+                            ty_trim.as_str(),
+                            "u8" | "u16"
+                                | "u32"
+                                | "u64"
+                                | "u128"
+                                | "usize"
+                                | "i8"
+                                | "i16"
+                                | "i32"
+                                | "i64"
+                                | "i128"
+                                | "isize"
+                                | "bool"
+                                | "char"
+                                | "f32"
+                                | "f64"
+                        );
                         if is_primitive {
                             Expr::Cast(cast)
                         } else {

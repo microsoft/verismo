@@ -290,13 +290,8 @@ macro_rules! mask_proof_for_bits {
     };
 }
 
-
 // Add more when necessary; We may add all between [0,64)
-mask_proof_for_bits!(
-    2u64,
-    3u64,
-    12u64,
-);
+mask_proof_for_bits!(2u64, 3u64, 12u64,);
 
 #[macro_export]
 macro_rules! bit_or_properties {
@@ -330,22 +325,22 @@ macro_rules! bit_or_properties {
             assert forall|a: $typ, b: $typ| $sname(a, b, #[trigger](a|b)) by {
                 $pname(a, b);
             }
-            assert forall |a: u64| 
+            assert forall |a: u64|
                 #[trigger] (a|a) == a
             by {
                 assert(a|a == a) by (bit_vector);
             }
-            assert forall |a: u64| 
+            assert forall |a: u64|
                 #[trigger] (a|u64::MIN) == a
             by {
                 assert(a|0 == a) by (bit_vector);
             }
-            assert forall |a: u64| 
+            assert forall |a: u64|
                 #[trigger] (a|u64::MAX) == u64::MAX
             by {
                 assert((a|u64::MAX) == u64::MAX) by (bit_vector);
             }
-           
+
         }
         }
     };
@@ -373,7 +368,6 @@ macro_rules! bit_not_properties {
         }
     };
 }
-
 
 #[macro_export]
 macro_rules! bit_shl_properties {
@@ -405,7 +399,7 @@ seq_macro::seq!(N in 0..64 {
 
 bit_or_properties! {u64, spec_bit64_or_properties, bit64_or_properties, bit64_or_auto}
 bit_not_properties! {u64, spec_bit64_not_properties, bit64_not_auto}
-bit_shl_properties!{u64, 1u64, bit64_shl_values_auto, bit64_shl_auto}
+bit_shl_properties! {u64, 1u64, bit64_shl_values_auto, bit64_shl_auto}
 
 verus! {
 

@@ -2,7 +2,7 @@ use vstd::prelude::*;
 
 use super::*;
 
-verus!{
+verus! {
     global size_of usize == 8;
 }
 

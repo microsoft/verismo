@@ -212,7 +212,7 @@ impl<T, M> IsConstant for SpecSecType<T, M> {
 }
 
 impl<T, M> SpecSecType<T, M> {
-    broadcast proof fn lemma_is_constant(&self) 
+    broadcast proof fn lemma_is_constant(&self)
     ensures
         #[trigger] self.is_constant() <==> self._is_constant(),
     {
@@ -588,8 +588,8 @@ macro_rules! impl_exe_bops_for_stype {
                 open spec fn [<obeys_ $fname _spec>]() -> bool { true }
                 open spec fn [<$fname _req>](self, rhs: SecType<$baset, M>) -> bool {
                     &&& rhs.is_constant()
-                    &&& (self $op rhs@.val) >= $baset::MIN 
-                    &&& (self $op rhs@.val) <= $baset::MAX 
+                    &&& (self $op rhs@.val) >= $baset::MIN
+                    &&& (self $op rhs@.val) <= $baset::MAX
                     &&& rhs@.val $check $val
                 }
 
@@ -601,7 +601,7 @@ macro_rules! impl_exe_bops_for_stype {
             impl<M> vstd::std_specs::ops::[<$trt SpecImpl>]<$baset> for SecType<$baset, M> {
                 open spec fn [<obeys_ $fname _spec>]() -> bool { true }
                 open spec fn [<$fname _req>](self, rhs: $baset) -> bool {
-                    &&& (self@.val $op rhs) >= $baset::MIN 
+                    &&& (self@.val $op rhs) >= $baset::MIN
                     &&& (self@.val $op rhs) <= $baset::MAX
                     &&& rhs $check $val
                 }
@@ -768,7 +768,7 @@ macro_rules! impl_exe_bops_for_stype_by_assume {
                     ret.wf_value(),
                     ret == SecType::spec_new((self@ $op other@).$use_cast())
                 {
-                    
+
                     SecType {
                         val: self.val $op other.val,
                         view: Ghost::assume_new(),
@@ -1380,26 +1380,26 @@ impl<T: ToSecSeq> VTypeCast<SecSeqByte> for Seq<T> {
 
 #[macro_use]
 macro_rules! def_basic_tosecseq {
-($basetype: ty) => {
-    verus!{
-    impl VTypeCast<SecSeqByte> for $basetype {
-        open spec fn vspec_cast_to(self) -> SecSeqByte {
-            let seq: Seq<u8> = self.vspec_cast_to();
-            Seq::new(
-                seq.len(),
-                |i| SpecSecType::constant(seq[i])
-            )
+    ($basetype: ty) => {
+        verus! {
+        impl VTypeCast<SecSeqByte> for $basetype {
+            open spec fn vspec_cast_to(self) -> SecSeqByte {
+                let seq: Seq<u8> = self.vspec_cast_to();
+                Seq::new(
+                    seq.len(),
+                    |i| SpecSecType::constant(seq[i])
+                )
+            }
         }
-    }
-    }
-}
+        }
+    };
 }
 
-def_basic_tosecseq!{u8}
-def_basic_tosecseq!{usize}
-def_basic_tosecseq!{u16}
-def_basic_tosecseq!{u32}
-def_basic_tosecseq!{u64}
+def_basic_tosecseq! {u8}
+def_basic_tosecseq! {usize}
+def_basic_tosecseq! {u16}
+def_basic_tosecseq! {u32}
+def_basic_tosecseq! {u64}
 
 verus! {
 
@@ -1447,54 +1447,54 @@ impl_cmp_ops_for_stype!(u64, u64,
     [[gt, >, VGt], [lt, <, VLt], [le, <=, VLe], [ge, >=, VGe], [eq, ==, VEq]]);
 
 impl_exe_bops_for_stype_by_assume!(u64,
-    [
-        [add, +, Add, int, (>= 0), vspec_cast_to],
-        [sub, -, Sub, int, (>= 0), vspec_cast_to],
-        [bitand, &, BitAnd, u64, (>= 0), call_self],
-    ]);
+[
+    [add, +, Add, int, (>= 0), vspec_cast_to],
+    [sub, -, Sub, int, (>= 0), vspec_cast_to],
+    [bitand, &, BitAnd, u64, (>= 0), call_self],
+]);
 impl_exe_bops_for_stype!(u64,
-    [
-        [mul, *, Mul, int, (>= 0), vspec_cast_to],
-        [div, /, Div, u64, (!= 0), call_self],
-        [rem, %, Rem, u64, (!= 0), call_self],
-        [shr, >>, Shr, u64, (< (8 * spec_size::<u64>())), call_self],
-        [shl, <<, Shl, u64, (< (8 * spec_size::<u64>())), call_self],
-        [bitxor, ^, BitXor, u64, (>= 0), call_self],
-        [bitor, |, BitOr, u64, (>= 0), call_self],
-    ]);
+[
+    [mul, *, Mul, int, (>= 0), vspec_cast_to],
+    [div, /, Div, u64, (!= 0), call_self],
+    [rem, %, Rem, u64, (!= 0), call_self],
+    [shr, >>, Shr, u64, (< (8 * spec_size::<u64>())), call_self],
+    [shl, <<, Shl, u64, (< (8 * spec_size::<u64>())), call_self],
+    [bitxor, ^, BitXor, u64, (>= 0), call_self],
+    [bitor, |, BitOr, u64, (>= 0), call_self],
+]);
 
 impl_exe_not_for_stype!(usize, [[not, !, Not]]);
 impl_cmp_ops_for_stype!(usize, usize,
     [[gt, >, VGt], [lt, <, VLt], [le, <=, VLe], [ge, >=, VGe], [eq, ==, VEq]]);
 /// BUG(verus): This is a workaround for the Verus bug where the following macro will trigger a compilation error.
 impl_exe_bops_for_stype_by_assume!(usize,
-    [
-        [add, +, Add, int, (>= 0), vspec_cast_to],
-        [sub, -, Sub, int, (>= 0), vspec_cast_to],
-    ]);
+[
+    [add, +, Add, int, (>= 0), vspec_cast_to],
+    [sub, -, Sub, int, (>= 0), vspec_cast_to],
+]);
 impl_exe_bops_for_stype!(usize,
-    [
-        [mul, *, Mul, int, (>= 0), vspec_cast_to],
-        [div, /, Div, usize, (!= 0), call_self],
-        [rem, %, Rem, usize, (!= 0), call_self],
-        [shr, >>, Shr, usize, (< (8 * spec_size::<usize>())), call_self],
-        [shl, <<, Shl, usize, (< (8 * spec_size::<usize>())), call_self],
-        [bitxor, ^, BitXor, usize, (>= 0), call_self],
-        [bitor, |, BitOr, usize, (>= 0), call_self],
-        [bitand, &, BitAnd, usize, (>= 0), call_self],
-    ]);
+[
+    [mul, *, Mul, int, (>= 0), vspec_cast_to],
+    [div, /, Div, usize, (!= 0), call_self],
+    [rem, %, Rem, usize, (!= 0), call_self],
+    [shr, >>, Shr, usize, (< (8 * spec_size::<usize>())), call_self],
+    [shl, <<, Shl, usize, (< (8 * spec_size::<usize>())), call_self],
+    [bitxor, ^, BitXor, usize, (>= 0), call_self],
+    [bitor, |, BitOr, usize, (>= 0), call_self],
+    [bitand, &, BitAnd, usize, (>= 0), call_self],
+]);
 impl_exe_bops_for_stype!(u8,
-    [
-        [bitand, &, BitAnd, u8, (>= 0), call_self],
-    ]);
+[
+    [bitand, &, BitAnd, u8, (>= 0), call_self],
+]);
 impl_exe_bops_for_stype!(u16,
-    [
-        [bitand, &, BitAnd, u16, (>= 0), call_self],
-    ]);
+[
+    [bitand, &, BitAnd, u16, (>= 0), call_self],
+]);
 impl_exe_bops_for_stype!(u32,
-    [
-        [bitand, &, BitAnd, u32, (>= 0), call_self],
-    ]);
+[
+    [bitand, &, BitAnd, u32, (>= 0), call_self],
+]);
 impl_exe_not_for_stype!(bool, [[not, !, Not]]);
 impl_spec_ops_for_stype! {u8, u16, u32, u64, usize}
 

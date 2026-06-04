@@ -1,7 +1,7 @@
 use super::*;
+use crate::arch::rmp::PagePermInt;
 use crate::pgtable_e::va_to_pa;
 use crate::security::SnpSecretsPageLayout;
-use crate::arch::rmp::PagePermInt;
 use crate::snp::cpu::{InitAPParams, InitApVmsa, PerCpuData, GDT};
 use crate::snp::percpu::BSP;
 

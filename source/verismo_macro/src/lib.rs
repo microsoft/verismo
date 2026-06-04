@@ -40,7 +40,9 @@ pub fn v_static(attribute: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 #[proc_macro]
-pub fn def_asm_addr_for(input: TokenStream) -> TokenStream { asm_global::asm_global(input) }
+pub fn def_asm_addr_for(input: TokenStream) -> TokenStream {
+    asm_global::asm_global(input)
+}
 
 #[proc_macro_attribute]
 pub fn gen_shared_globals(_attribute: TokenStream, item: TokenStream) -> TokenStream {
@@ -115,7 +117,9 @@ pub fn verismo_clone(input: TokenStream) -> proc_macro::TokenStream {
 }
 
 #[proc_macro_derive(VDefault)]
-pub fn verismo_default(input: TokenStream) -> TokenStream { default::verismo_default_expand(input) }
+pub fn verismo_default(input: TokenStream) -> TokenStream {
+    default::verismo_default_expand(input)
+}
 
 #[proc_macro_derive(VPrint)]
 pub fn verismo_print(input: TokenStream) -> TokenStream {
