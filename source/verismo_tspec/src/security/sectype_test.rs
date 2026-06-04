@@ -71,6 +71,16 @@ verismo! {
         proof {
             use_type_invariant(&v1);
             use_type_invariant(&v2);
+            // Bridge `(v1 * v2) < 100` to a nonlinear-arith fact on raw u64.
+            // (v1*v2).ord_int() inlines to v1@.bop_new(v2@, fn_spec_mul_u64_u64_int).val
+            // which equals v1@.val * v2@.val via fn_spec_mul's lambda body.
+            let val1: u64 = v1@.val;
+            let val2: u64 = v2@.val;
+            assert(val1 * val2 < 100) by (nonlinear_arith)
+                requires
+                    val1 < 10,
+                    val2 < 10,
+            ;
         }
         v1.add(v2)
     }
@@ -155,6 +165,7 @@ verismo! {
         v1 == 10,
     ensures
         ret@.val == !((v1@.val - 1) as u64),
+        ret.wf_value(),
     {
         proof {
             use_type_invariant(&v1);
@@ -163,7 +174,10 @@ verismo! {
         proof {
             use_type_invariant(&mask);
         }
-        let ret = (!mask);
+        let ret = !mask;
+        proof {
+            use_type_invariant(&ret);
+        }
         ret
     }
 
