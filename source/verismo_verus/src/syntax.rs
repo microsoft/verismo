@@ -151,7 +151,7 @@ impl Visitor {
         _semi_token: Option<Token![;]>,
         _is_trait: bool,
     ) -> Vec<Stmt> {
-        let stmts: Vec<Stmt> = Vec::new();
+        let mut stmts: Vec<Stmt> = Vec::new();
         let _unwrap_ghost_tracked: Vec<Stmt> = Vec::new();
         let _call_external_fn = attr_is_call_external(attrs);
         let is_exe = is_exe(&sig);
@@ -206,7 +206,29 @@ impl Visitor {
                         if self.for_non_secret {
                             pres.push(Expr::Verbatim(quote! {#var.is_constant()}));
                         }
-                        pres.push(Expr::Verbatim(quote! {#var.wf()}));
+                        // Replace the previous `var.wf()` precondition injection
+                        // with a body-level `use_type_invariant(&var)` proof
+                        // call. `wf()` is trivially true; the real fact callers
+                        // need is the closed `wf_value()` type invariant, which
+                        // only `use_type_invariant` can surface in the body.
+                        // Skip the receiver (`self`) and `old(self)` forms —
+                        // those identifiers may not be in scope or addressable
+                        // here.
+                        let var_ts = var.to_token_stream().to_string();
+                        if var_ts != "self"
+                            && var_ts != "(* old (self))"
+                            && var_ts != "(* self)"
+                            && !var_ts.contains("old")
+                        {
+                            stmts.push(Stmt::Semi(
+                                Expr::Verbatim(quote! {
+                                    proof {
+                                        use_type_invariant(& #var);
+                                    }
+                                }),
+                                Semi { spans: [proc_macro2::Span::call_site()] },
+                            ));
+                        }
                     }
 
                     if let Some(var) = post {
@@ -215,7 +237,14 @@ impl Visitor {
                         if self.for_non_secret {
                             posts.push(Expr::Verbatim(quote! {#var.is_constant()}));
                         }
-                        posts.push(Expr::Verbatim(quote! {#var.wf()}));
+                        // Note: dropped the previous `posts.push(var.wf())`
+                        // injection. `wf()` returns `true` on every type that
+                        // matters here, so it adds no proof power. The closed
+                        // `wf_value()` component of `is_constant()` still has
+                        // to be discharged by the caller's body via
+                        // `use_type_invariant(&local_return)` (or an explicit
+                        // `ensures` clause), because the named return is not in
+                        // scope inside the body.
                     }
                 }
 
@@ -1594,8 +1623,9 @@ impl VisitMut for Visitor {
             crate::rustdoc::process_item_fn(fun);
         }
         self.inside_ghost = if !is_exe(&fun.sig) { 1 } else { 0 };
-        let _stmts =
+        let stmts =
             self.visit_fn(&mut fun.attrs, Some(&fun.vis), &mut fun.sig, fun.semi_token, false);
+        fun.block.stmts.splice(0..0, stmts);
         fun.semi_token = None;
         visit_item_fn_mut(self, fun);
         self.inside_ghost = 0;
