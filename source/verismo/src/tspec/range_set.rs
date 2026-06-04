@@ -131,7 +131,7 @@ pub proof fn lemma_ranges_disjoint_insert(r2: (int, nat), range: (int, nat), rs:
         ranges_disjoint(rs, r2) == ranges_disjoint(rs.insert(range), r2),
 {
     let rs2 = rs.insert(range);
-    assert forall|r|
+    assert forall|r| #![auto]
         inside_range(r, r2) && r.1 != 0 && ranges_disjoint(rs, r) implies ranges_disjoint(
         rs2,
         r,
@@ -145,7 +145,7 @@ pub proof fn lemma_ranges_disjoint_insert(r2: (int, nat), range: (int, nat), rs:
             }
         }
     }
-    assert forall|r|
+    assert forall|r| #![auto]
         inside_range(r, r2) && r.1 != 0 && ranges_disjoint(
             rs.insert(range),
             r,

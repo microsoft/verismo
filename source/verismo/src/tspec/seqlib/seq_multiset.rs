@@ -36,7 +36,7 @@ pub proof fn seq_to_multi_set_to_set<T>(s1: Seq<T>)
 {
     s1.to_multiset_ensures();
     assert(s1.to_set() =~~= s1.to_multiset().dom()) by {
-        assert forall|a| s1.contains(a) == s1.to_multiset().dom().contains(a) by {
+        assert forall|a| #![auto] s1.contains(a) == s1.to_multiset().dom().contains(a) by {
             assert(s1.contains(a) == (s1.to_multiset().count(a) > 0));
         }
     }
