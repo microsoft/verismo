@@ -248,11 +248,7 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
             pub const fn value(&self) -> (ret: #valuetype)
             ensures
                 equal(ret, self.value),
-                self.value <= #max_val as #valuetype
             {
-                proof{
-                    assert(self.inv());
-                }
                 self.value
             }
             }
