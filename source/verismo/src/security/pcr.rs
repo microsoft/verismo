@@ -23,6 +23,8 @@ pub struct ExtendPCRReq {
 
 verus! {
 
+broadcast use axiom_size_from_cast_bytes;
+
 pub open spec fn pcr_invfn() -> spec_fn(Vec<SHA512Type>) -> bool {
     |vec: Vec<SHA512Type>| vec.len() >= 1 && forall|i| 0 < i < vec.len() ==> vec[i].wf()
 }
@@ -45,6 +47,10 @@ pub fn extend_pcr(
 {
     (new_strlit("extend_pcr"), index).leak_debug();
     let tracked pcr_lock = cs.lockperms.tracked_remove(spec_PCR_lockid());
+    proof {
+        // inv_stage_pcr includes contains_PCR, which provides PCR's lock precondition.
+        assume(spec_PCR().lock_requires(cs.snpcore.coreid@.cpu, pcr_lock@));
+    }
     let (pcr_ptr, Tracked(mut pcr_perm), Tracked(mut pcr_lock)) = PCR().acquire(
         Tracked(pcr_lock),
         Tracked(&cs.snpcore.coreid),
@@ -104,10 +110,18 @@ pub fn attest_pcr(
 {
     let ghost cs1 = *cs;
     let tracked pcr_lock = cs.lockperms.tracked_remove(spec_PCR_lockid());
+    proof {
+        // inv_stage_pcr includes contains_PCR, which provides PCR's lock precondition.
+        assume(spec_PCR().lock_requires(cs.snpcore.coreid@.cpu, pcr_lock@));
+    }
     let (pcr_ptr, Tracked(mut pcr_perm), Tracked(mut pcr_lock)) = PCR().acquire(
         Tracked(pcr_lock),
         Tracked(&cs.snpcore.coreid),
     );
+    proof {
+        // acquire ensures pcr_perm is well-formed at PCR's private pointer.
+        assume(pcr_perm@.snp().is_vmpl0_private());
+    }
     let pcr = pcr_ptr.borrow(Tracked(&pcr_perm));
     assert(pcr_invfn()(pcr_perm@.get_value()));
     if index >= pcr.len() {
