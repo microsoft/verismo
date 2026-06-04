@@ -4,6 +4,7 @@ use crate::arch::addr_s::*;
 use crate::arch::pgtable::entry_p;
 use crate::debug::VPrintAtLevel;
 use crate::global::*;
+use crate::lock::MapRawLockTrait;
 use crate::registers::{AnyRegTrait, RegisterPerm, RegisterPermValue};
 use crate::snp::ghcb::*;
 use crate::snp::SnpCoreSharedMem;
@@ -676,7 +677,6 @@ pub open spec fn ensures_mem_enc_dec_memperm(
     &&& prev_mem_perm@.range() === mem_perm@.range()
 }
 
-#[verifier::rlimit(50)]
 pub fn set_page_enc_dec(
     vaddr: u64,
     enc: bool,
@@ -702,21 +702,41 @@ pub fn set_page_enc_dec(
     let tracked cr3perm = cs.snpcore.regs.tracked_borrow(RegName::Cr3);
     assert(contains_PT(cs.lockperms));
     let pt_ref = PT();
+    let ghost lockperms_before_pt_remove = cs.lockperms;
     let tracked mut pt_lock = cs.lockperms.tracked_remove(spec_PT_lockid());
     proof {
-        // cs.inv provides the page-table lock permission for this core.
-        assume(pt_ref.lock_requires(cs.snpcore.coreid@.cpu, pt_lock@));
+        assert(pt_lock === lockperms_before_pt_remove[spec_PT_lockid()]);
+        assert(lockperms_before_pt_remove.inv(cs.snpcore.cpu()));
+        assert(lockperms_before_pt_remove[spec_PT_lockid()]@.is_unlocked(
+            cs.snpcore.cpu(),
+            spec_PT_lockid(),
+            lockperms_before_pt_remove[spec_PT_lockid()]@.points_to.range(),
+        ));
+        assert(pt_lock@.is_unlocked(
+            cs.snpcore.coreid@.cpu,
+            pt_ref.lockid(),
+            pt_ref.ptr_range(),
+        ));
+        assert(pt_ref.lock_requires(cs.snpcore.coreid@.cpu, pt_lock@));
     }
     let (tracked_ptr, Tracked(mut ptperm_perm), Tracked(pt_lock)) = pt_ref.acquire(
         Tracked(pt_lock),
         Tracked(&cs.snpcore.coreid),
     );
+    proof {
+        assert(pt_lock@.invfn.value_invfn() === TrackedPTEPerms::invfn());
+        assert(pt_lock@.invfn.inv::<TrackedPTEPerms>(ptperm_perm@.get_value()));
+        assert(wf_ptes(ptperm_perm@.get_value()@));
+    }
+    let ghost acquired_pt_perms = ptperm_perm@.get_value()@;
     // Dummy take to get PTE permission.
     let TrackedPTEPerms { perms } = tracked_ptr.take(Tracked(&mut ptperm_perm));
     let Tracked(mut pt_perms) = perms;
     let lvl = 0;
-    // PT lock invariant stores well-formed tracked page-table permissions.
-    assume(wf_ptes(pt_perms));
+    proof {
+        assert(pt_perms === acquired_pt_perms);
+        assert(wf_ptes(pt_perms));
+    }
     let pte_val_opt = _borrow_entry(
         vaddr,
         lvl,
@@ -771,23 +791,26 @@ pub fn set_page_enc_dec(
     };
     tracked_ptr.put(Tracked(&mut ptperm_perm), TrackedPTEPerms { perms: Tracked(pt_perms) });
     proof {
-        // The taken TrackedPTEPerms is restored before releasing the PT lock.
-        assume(pt_ref.unlock_requires(cs.snpcore.coreid@.cpu, pt_lock@, ptperm_perm@));
+        assert(pt_lock@.is_locked(
+            cs.snpcore.coreid@.cpu,
+            pt_ref.lockid(),
+            pt_ref.ptr_range(),
+        ));
+        assert(pt_lock@.invfn.inv::<TrackedPTEPerms>(ptperm_perm@.get_value()));
+        assert(pt_ref.unlock_requires(cs.snpcore.coreid@.cpu, pt_lock@, ptperm_perm@));
     }
     pt_ref.release(Tracked(&mut pt_lock), Tracked(ptperm_perm), Tracked(&cs.snpcore.coreid));
     proof {
         cs.lockperms.tracked_insert(spec_PT_lockid(), pt_lock);
-        // Releasing and reinserting the PT lock restores the shared-memory invariant
-        // and frames the update to the PT lock only.
-        assume(cs.inv());
-        assume(cs.only_lock_reg_updated((*old(cs)), set![], set![spec_PT().lockid()]));
+        assert(cs.inv());
+        assert(cs.only_lock_reg_updated((*old(cs)), set![], set![spec_PT().lockid()]));
         if ret {
-            assume(ensures_mem_enc_dec_memperm(enc, old(mem_perm0)[0], mem_perm0[0]));
+            assert(ensures_mem_enc_dec_memperm(enc, old(mem_perm0)[0], mem_perm0[0]));
         } else {
-            assume(mem_perm0[0] === old(mem_perm0)[0]);
+            assert(mem_perm0[0] === old(mem_perm0)[0]);
         }
-        assume(mem_perm0.contains_key(0));
-        assume(mem_perm0[0]@.wf_range((vaddr as int, PAGE_SIZE as nat)));
+        assert(mem_perm0.contains_key(0));
+        assert(mem_perm0[0]@.wf_range((vaddr as int, PAGE_SIZE as nat)));
     }
     return ret;
 }
