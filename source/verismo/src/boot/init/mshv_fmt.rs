@@ -37,6 +37,7 @@ pub fn get_hv_mem_count(arr: &HyperVMemMapTable) -> (ret: usize_t)
             ret <= arr@.len(),
             ret.is_constant(),
             forall|i: int| 0 <= i < (ret as int) ==> arr@[i].numpages@.val != 0,
+        decreases len - ret,
     {
         if arr.index(ret).numpages.reveal_value() == 0 {
             break ;
