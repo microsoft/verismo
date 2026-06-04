@@ -8,6 +8,8 @@ use crate::ptr::*;
 
 verus! {
 
+broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal, SnpPPtr::axiom_id_equal;
+
 pub const MIN_ADDR_ALIGN: usize = 8usize;
 
 pub const ORDER: usize = 32usize;
@@ -618,6 +620,7 @@ impl BuddyAllocator {
                 ret.is_constant(),
                 self.is_constant(),
                 self@.inv(),
+            decreases ORDER_USIZE - i,
         {
             proof {
                 bit64_shl_values_auto();
@@ -640,6 +643,7 @@ impl BuddyAllocator {
                         self.is_constant(),
                         bucket.is_constant(),
                         size.is_constant(),
+                    decreases j - bucket,
                 {
                     proof {
                         bit64_shl_values_auto();
@@ -729,6 +733,7 @@ impl BuddyAllocator {
                 SpecBuddyAllocator::valid_bucket(current_bucket as nat),
                 self@.inv(),
                 current_addr as u64 % (spec_bit64(current_bucket as u64)) == 0,
+            decreases len - current_bucket,
         {
             let buddy = current_addr ^ (1 << current_bucket);
             let ghost prev_self = self@;
@@ -931,6 +936,7 @@ impl BuddyAllocator {
                 current_end.is_constant(),
                 current_start.is_constant(),
                 self.is_constant(),
+            decreases current_end - current_start,
         {
             let totalsize = current_end - current_start;
             let ghost old_self = *self;

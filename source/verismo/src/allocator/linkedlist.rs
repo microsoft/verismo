@@ -108,6 +108,8 @@ impl LinkedListAllocator {
 } // verus!
 verus! {
 
+broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal, SnpPPtr::axiom_id_equal, axiom_size_from_cast_bytes;
+
 impl LinkedListAllocator {
     #[inline]
     pub fn minsize() -> (ret: usize)
@@ -154,6 +156,7 @@ impl LinkedListAllocator {
                 0 <= idx <= self@.len(),
                 forall|i| idx <= i < self@.len() ==> self.free_list@[i].val < addr,
                 self@.free_list.contains_ptr_at(prev_ptr, idx),
+            decreases idx,
         {
             let ghost i = idx - 1;
             let node = self.free_list.node_at(node_ptr.clone(), Ghost(i));
@@ -407,6 +410,7 @@ impl LinkedListAllocator {
                 ret is Some ==> ret->Some_0.is_constant(),
                 size.is_constant(),
                 ret is Some ==> (u64::MAX) - align as int > ret->Some_0 as int,
+            decreases self@.len() - idx,
         {
             let ghost i = self.free_list.reverse_index(idx);
             let ghost prev_i = self.free_list.reverse_index(idx - 1);

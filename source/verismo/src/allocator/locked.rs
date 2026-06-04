@@ -4,6 +4,8 @@ use crate::registers::CoreIdPerm;
 
 verus! {
 
+broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal, SnpPPtr::axiom_id_equal;
+
 impl VSpinLock<VeriSMoAllocator> {
     pub open spec fn lock_alloc_requires(&self, cpu: nat, alloc_lockperm: LockPermToRaw) -> bool {
         &&& self.lock_default_mem_requires(cpu, alloc_lockperm)
