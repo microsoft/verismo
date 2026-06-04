@@ -579,6 +579,7 @@ pub fn osmem_find(osmem: &Vec<OSMemEntry>, vpage: usize) -> (ret: Option<usize>)
         ensures
             0 <= i <= osmem.len(),
             i < osmem.len() ==> osmem[i as int].spec_start() <= vpage < osmem[i as int].spec_end(),
+        decreases osmem.len() - i,
     {
         let (start_page, npages): (usize, usize) = (
             osmem[i].start_page.into(),
@@ -749,6 +750,7 @@ pub fn _osmem_add_ram_from_allocator(
             allocator@.len() == 0,
             snpcore.inv(),
             *snpcore === prevcore,
+        decreases allocator@.len(),
     {
         let (range, perm) = range_mem.unwrap();
         let start_addr: usize = page_align_up(range.0);
@@ -835,6 +837,7 @@ pub fn add_osmem_to_e820(e820: VBox<E820Table>, e820_count: usize, osmem: &Vec<O
             e820@.is_constant(),
             e820.snp().is_vmpl0_private(),
             osmem_wf(osmem@),
+        decreases osmem.len() - i,
     {
         let entry = &osmem[i];
         assert(osmem[i as int].wf());
@@ -869,6 +872,7 @@ pub fn add_osmem_to_mut_e820(e820: &mut E820Table, e820_count: usize, osmem: &Ve
             e820_count + osmem@.len() <= E820Table::spec_len(),
             e820@.is_constant(),
             osmem_wf(osmem@),
+        decreases osmem.len() - i,
     {
         let entry = &osmem[i];
         assert(osmem[i as int].wf());
@@ -1044,6 +1048,7 @@ fn _lock_kernel(
             (start as int).spec_valid_pn_with((end - start) as nat),
             snpcore.inv(),
             *snpcore === *old(snpcore),
+        decreases end - start,
     {
         if let Some(e) = osmem_check_and_get(osmem, start, OSMemPerm::ram()) {
             let (i, mut entry) = e;
@@ -1141,6 +1146,7 @@ fn clear_kern_if_private(entry: OSMemEntry, Tracked(cs): Tracked<&mut SnpCoreSha
                 (tmp_start - start) as nat,
                 osperm,
             ),
+        decreases end - tmp_start,
     {
         let attr = RmpAttr::empty().set_vmpl(RICHOS_VMPL as u64).set_perms(
             osperm.value as u64,
@@ -1227,6 +1233,7 @@ fn _clear_kern_exe(osmem: &mut OSMem, Tracked(cs): Tracked<&mut SnpCoreSharedMem
             osmem_wf_kern_cleared(osmem@.take(i as int)),
             cs.inv(),
             cs.only_lock_reg_updated((*old(cs)), set![], set![spec_PT().lockid()]),
+        decreases osmem.len() - i,
     {
         let mut entry = osmem.remove(i);
         proof {
@@ -1267,6 +1274,7 @@ pub fn lock_kernel(
                 ),
             cs.inv(),
             cs.only_lock_reg_updated((*old(cs)), set![], set![spec_PT().lockid()]),
+        decreases ranges.len() - i,
     {
         let range = &ranges[i];
         let end = _lock_kernel(osmem, range, Tracked(&mut cs.snpcore));
