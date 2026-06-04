@@ -204,6 +204,7 @@ impl<T: Copy, const N: IndexType> Array<T, N> {
                     start as int,
                     end as int,
                 ).to_multiset(),
+            decreases last as int - j as int,
         {
             proof {
                 assert(self@.len() == Self::spec_len());
