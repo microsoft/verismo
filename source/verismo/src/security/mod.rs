@@ -46,6 +46,8 @@ pub const VERISMO_VMPCK_ID: u8 = 0;
 } // verus!
 verus! {
 
+broadcast use axiom_size_from_cast_bytes;
+
 pub open spec fn is_richos_vmsa_box(vmsa: VBox<VmsaPage>) -> bool {
     &&& vmsa.snp().is_vmpl0_private()
     &&& vmsa.is_page()
