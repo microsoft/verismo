@@ -40,7 +40,8 @@ pub broadcast proof fn axiom_size_from_cast_secbytes_def<T: SpecSize + VTypeCast
     val: T,
 )
     ensures
-        #[trigger] T::spec_size_def() == VTypeCast::<SecSeqByte>::vspec_cast_to(val).len(),
+        T::spec_size_def() == (#[trigger] VTypeCast::<SecSeqByte>::vspec_cast_to(val)).len(),
+        VTypeCast::<SecSeqByte>::vspec_cast_to(val).len() == size_of::<T>(),
 {
 }
 

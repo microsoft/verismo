@@ -7,6 +7,8 @@ use crate::ptr::*;
 
 verus! {
 
+broadcast use {SecType::axiom_spec_new, SecType::axiom_ext_equal, SnpPPtr::axiom_id_equal, axiom_size_from_cast_bytes, axiom_size_from_cast_secbytes_def};
+
 #[verifier(external_body)]
 pub tracked struct LockPermRaw {
     no_copy: NoCopy,

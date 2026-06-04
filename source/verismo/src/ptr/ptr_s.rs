@@ -21,7 +21,7 @@ impl<V: IsConstant + WellFormed + SpecSize> SnpPPtr<V> {
 
 impl<V: IsConstant + WellFormed + SpecSize> SnpMemAttrTrait for SnpPointsToData<V> {
     open spec fn snp(&self) -> SwSnpMemAttr {
-        self.snp.sw
+        self.snp.sw.spec_set_rmpmap(Map::empty()).spec_set_sysmap(Map::empty())
     }
 
     open spec fn hw_snp(&self) -> HwSnpMemAttr {
