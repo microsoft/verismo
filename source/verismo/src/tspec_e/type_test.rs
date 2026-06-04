@@ -3,6 +3,12 @@ use super::*;
 impl_secure_type! {(), type}
 use vops::VEq;
 
+verus! {
+
+broadcast use {SecType::axiom_spec_new, SecType::axiom_ext_equal};
+
+}
+
 verismo! {
     // Automatically Add derive(VTypeCast)
     #[repr(C, align(1))]
