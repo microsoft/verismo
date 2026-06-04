@@ -1,0 +1,26 @@
+[package]
+name = "verismo_tspec"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Verus deps
+builtin = { workspace = true }
+builtin_macros = { workspace = true }
+vstd = { workspace = true, features = ["alloc", "allow_panic"], default-features = false }
+
+# Local macros & helpers
+verismo_macro = { path = "../verismo_macro" }
+verismo_verus = { path = "../verismo_verus" }
+vops = { path = "../vops" }
+paste = "1.0"
+seq-macro = "0.3"
+
+[features]
+default = []
+
+[package.metadata.rust-analyzer]
+rustc_private = true
+
+[package.metadata.verus]
+verify = true

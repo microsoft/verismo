@@ -18,5 +18,5 @@ pub use pow_p::*;
 pub use pow_s::*;
 
 use self::minmax_s::*;
-use crate::tspec::*;
+use crate::*;
 use crate::*;

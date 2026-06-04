@@ -1,8 +1,8 @@
 use core::marker::PhantomData;
 
 use super::*;
-use crate::tspec::cast::VTypeCast;
-use crate::tspec::*;
+use crate::cast::VTypeCast;
+use crate::*;
 
 seq_macro::seq! {N in 1..=4 {
 verus! {
@@ -442,13 +442,13 @@ macro_rules! impl_binary_ops_trait_spec_fn {
     ($trt: tt, $baset: ty, $rhs: ty, $out: ty, $fname: ident, $spec_fn: ident) => {
         paste::paste! {
                 verus!{
-            impl<M> crate::tspec::ops::[<V $trt>]<SpecSecType<$rhs, M>, SpecSecType<$out, M>> for SpecSecType<$baset, M>{
+            impl<M> crate::ops::[<V $trt>]<SpecSecType<$rhs, M>, SpecSecType<$out, M>> for SpecSecType<$baset, M>{
                 open spec fn [<$fname>](self, rhs: SpecSecType<$rhs, M>) -> SpecSecType<$out, M> {
                     self.bop_new(rhs, $spec_fn())
                 }
             }
 
-            impl<M> crate::tspec::ops::[<V $trt>]<SecType<$rhs, M>, SecType<$out, M>> for SecType<$baset, M>{
+            impl<M> crate::ops::[<V $trt>]<SecType<$rhs, M>, SecType<$out, M>> for SecType<$baset, M>{
                 #[verifier(inline)]
                 open spec fn [<$fname>](self, rhs: SecType<$rhs, M>) -> SecType<$out, M> {
                     SecType::spec_new(self@.$fname(rhs@))
@@ -829,13 +829,13 @@ macro_rules! impl_exe_not_for_stype {
     ($baset: ty, [$([$fname: ident, $op: tt, $trt: ident]),* $(,)*]) => {
         paste::paste! {
                 verus!{
-        $(impl<M> crate::tspec::ops::[<VSpec $trt>] for SpecSecType<$baset, M> {
+        $(impl<M> crate::ops::[<VSpec $trt>] for SpecSecType<$baset, M> {
             open spec fn [<spec_ $fname>](self) -> Self {
                 self.uop_new(fnspec::[<fn_spec_ $fname _ $baset _ $baset>]())
             }
         }
 
-        impl<M> crate::tspec::ops::[<VSpec $trt>] for SecType<$baset, M> {
+        impl<M> crate::ops::[<VSpec $trt>] for SecType<$baset, M> {
             #[verifier(inline)]
             open spec fn [<spec_ $fname>](self) -> SecType<$baset, M> {
                 SecType::spec_new(self@.[<spec_ $fname>]())

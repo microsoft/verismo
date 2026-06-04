@@ -3,7 +3,8 @@ resolver = "2"
 members = [
     "verismo_main",
     "verismo",
-    "verismo_macro"
+    "verismo_macro",
+    "verismo_tspec"
 ]
 
 [workspace.dependencies]

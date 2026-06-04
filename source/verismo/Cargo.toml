@@ -19,6 +19,7 @@ hacl-sys = {git = "https://github.com/ziqiaozhou/hacl-packages", rev = "e02b4182
 # Useful macros
 verismo_macro = {path = "../verismo_macro"}
 verismo_verus = {path = "../verismo_verus"}
+verismo_tspec = {path = "../verismo_tspec"}
 paste = "1.0"
 seq-macro = "0.3"
 vops = {path = "../vops"}

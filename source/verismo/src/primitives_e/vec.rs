@@ -3,33 +3,12 @@ use alloc::vec::Vec;
 use super::*;
 use crate::vbox::*;
 
+// `WellFormed`/`IsConstant`/`VTypeCast`/`SpecSize` impls for `Vec<T>` were
+// moved into `verismo_tspec::vec_spec` to satisfy Rust's orphan rule (both
+// trait and type are now foreign to verismo). What remains here is the
+// `MutFnTrait` plumbing that genuinely depends on `vbox`.
+
 verus! {
-
-impl<T: WellFormed> WellFormed for Vec<T> {
-    open spec fn wf(&self) -> bool {
-        &&& self@.wf()
-    }
-}
-
-impl<T: IsConstant + WellFormed> IsConstant for Vec<T> {
-    open spec fn is_constant(&self) -> bool {
-        self@.is_constant()
-    }
-
-    open spec fn is_constant_to(&self, vmpl: nat) -> bool {
-        &&& self@.is_constant_to(vmpl)
-    }
-}
-
-impl<T: ToSecSeq> VTypeCast<SecSeqByte> for Vec<T> {
-    open spec fn vspec_cast_to(self) -> SecSeqByte {
-        self@.vspec_cast_to()
-    }
-}
-
-impl<T: SpecSize> SpecSize for Vec<T> {
-    uninterp spec fn spec_size_def() -> nat;
-}
 
 pub struct PushParam<T> {
     pub val: T,

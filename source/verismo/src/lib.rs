@@ -18,8 +18,23 @@
 
 extern crate alloc;
 
-#[macro_use]
-pub mod tspec;
+// `global size_of usize == 8` must be declared once per crate. The
+// declaration in verismo_tspec only governs that crate; we re-declare here so
+// constants like `VM_MEM_SIZE = 0x10_0000_0000_0000usize` typecheck.
+builtin_macros::verus! {
+    global size_of usize == 8;
+}
+
+// `tspec` was extracted into the standalone `verismo_tspec` crate so that
+// its broadcast groups can auto-propagate to downstream crates via
+// `broadcast use verismo_tspec::...;`. The re-export below preserves the
+// existing `crate::tspec::X` paths throughout verismo.
+pub use verismo_tspec as tspec;
+// `macro_const_int!` is the only `#[macro_export]`'d tspec macro used outside
+// tspec itself (e.g. arch/*/def_s.rs). Re-export it at the crate root so the
+// existing `crate::macro_const_int!` invocations keep working.
+pub use verismo_tspec::macro_const_int;
+
 #[macro_use]
 mod arch;
 mod primitives_e;

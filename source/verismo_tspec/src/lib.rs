@@ -1,3 +1,19 @@
+#![no_std]
+#![verifier::deprecated_postcondition_mut_ref_style(true)]
+#![allow(macro_expanded_macro_exports_accessed_by_absolute_paths)]
+#![allow(unexpected_cfgs)]
+#![allow(unused_variables)]
+#![allow(unused_imports)]
+#![allow(dead_code)]
+#![allow(unused)]
+#![allow(non_camel_case_types)]
+#![allow(non_snake_case)]
+#![allow(non_upper_case_globals)]
+#![allow(incomplete_features)]
+#![feature(specialization)]
+
+extern crate alloc;
+
 // math -> sec_lib;
 // math -> size
 // size -> array
@@ -5,6 +21,7 @@
 #[macro_use]
 mod math;
 mod cast;
+#[macro_use]
 mod constant;
 mod default;
 mod fmap;
@@ -21,6 +38,7 @@ mod seqlib;
 mod setlib;
 mod size_s;
 mod stream;
+mod vec_spec;
 mod wellformed;
 
 //use builtin::*;
@@ -70,6 +88,32 @@ verus! {
 #[verifier(inline)]
 pub open spec fn spec_unused<T>() -> T {
     arbitrary()
+}
+
+/// Top-level broadcast group bundling every axiom and lemma in `verismo_tspec`
+/// that is generally useful in client code (sectype extensionality, size/cast
+/// axioms, IsConstant lemmas, FMap invariants, etc.).
+///
+/// Marked with `broadcast_use_by_default_when_this_crate_is_imported` so that
+/// any downstream crate that simply `use`s `verismo_tspec` automatically gets
+/// these broadcasts in scope — no per-proof `broadcast use` required.
+#[verifier::broadcast_use_by_default_when_this_crate_is_imported]
+pub broadcast group group_tspec_default {
+    // SecType constructor + extensionality
+    SecType::axiom_spec_new,
+    SecType::axiom_ext_equal,
+    // IsConstant
+    axiom_const_forall,
+    // Cast/size axioms used pervasively for SecSeqByte and SpecSize
+    axiom_cast_to_seq_unique,
+    axiom_size_from_cast_secbytes_def,
+    axiom_size_from_cast_bytes,
+    axiom_size_from_cast_bytes_def,
+    axiom_max_count_size_rel,
+    axiom_set_full_max_count_rel,
+    // FMap
+    FMap::axiom_inv,
+    FMap::axiom_equal,
 }
 
 } // verus!

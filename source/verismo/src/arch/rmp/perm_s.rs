@@ -13,7 +13,16 @@ pub enum Perm {
 
 pub type PagePerm = Set<Perm>;
 
-impl IntValue for PagePerm {
+// `IntValue` (defined in `verismo_tspec`) cannot be implemented directly for
+// `PagePerm` because `PagePerm` is a type alias for `Set<Perm>` and both the
+// trait and `Set` are foreign to this crate. We expose the same operations
+// via a local trait, which the orphan rule does allow.
+pub trait PagePermInt: Sized {
+    spec fn as_int(&self) -> int;
+    spec fn from_int(val: int) -> Self;
+}
+
+impl PagePermInt for PagePerm {
     open spec fn as_int(&self) -> int {
         let v1: int = if self.contains(Perm::Read) {
             1
