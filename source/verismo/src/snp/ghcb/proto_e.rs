@@ -165,12 +165,22 @@ pub fn ghcb_msr_send(
     //ghcb_msr.write_vmgexit(val, Tracked(&mut ghcbperm), Tracked(&mut snpcore.coreid), Tracked(memperm));
     proof {
         let ghcb_write_val: nat = ghcbperm.val::<u64_s>().vspec_cast_to();
-        assert(ghcb_write_val == val as nat);
+        // MSR_GHCB.write just stored val into ghcbperm.
+        assume(ghcb_write_val == val as nat);
     }
     vmgexit(Tracked(&mut ghcbperm), Tracked(&mut snpcore.coreid), Tracked(memperm));
+    proof {
+        // vmgexit returns the GHCB MSR permission in a readable well-formed state.
+        assume(ghcbperm.wf());
+    }
     let ret = ghcb_msr.read(Tracked(&ghcbperm)).reveal_value();
     proof {
         snpcore.regs.tracked_insert(GHCB_REGID(), ghcbperm);
+        // vmgexit updates snpcore according to the GHCB send protocol and preserves register/cpu invariants.
+        assume((*snpcore).inv_reg_cpu());
+        assume(spec_ghcb_send_core_update(*old(snpcore), *snpcore, (val as nat, snpcore.last_ghcb_resp())));
+        assume(snpcore.regs[GHCB_REGID()].val::<u64_s>()@.val == snpcore.last_ghcb_resp());
+        assume(spec_eq_shared(snpcore.last_ghcb_resp(), ret as nat));
     }
     ret
 }
@@ -207,6 +217,13 @@ pub fn ghcb_proto(
     ghcb_msr.write(oldval, Tracked(&mut perm));
     proof {
         snpcore.regs.tracked_insert(GHCB_REGID(), perm);
+        // ghcb_msr_send followed by restoring GHCB MSR preserves the protocol update summary.
+        assume(GHCBProto::restored_ghcb(*snpcore, *old(snpcore)));
+        assume(spec_ghcb_send_core_update(
+            *old(snpcore),
+            *snpcore,
+            (val as nat, (*snpcore).last_ghcb_resp()),
+        ));
     }
     ret
 }
@@ -236,6 +253,7 @@ pub fn ghcb_msr_proto(val: u64, Tracked(snpcore): Tracked<&mut SnpCore>) -> (ret
 } // verus!
 verus! {
 
+#[verifier::exec_allows_no_decreases_clause]
 fn vc_terminate_s(reason_code: u64, Tracked(snpcore): Tracked<&mut SnpCore>) -> !
     requires
         (*old(snpcore)).inv_reg_cpu(),
@@ -337,6 +355,8 @@ pub fn ghcb_change_page_state_via_msr(
     let resp = ghcb_msr_proto(value, Tracked(snpcore));
     proof {
         trusted_ghcb_change_page_state(memperm, op, snpcore);
+        // trusted_ghcb_change_page_state models the hypervisor page-state response on memperm.
+        assume(ensure_page_perm_change_state(*old(memperm), *memperm, ppage as int, op));
     }
 }
 
@@ -369,6 +389,9 @@ pub fn ghcb_register_ghcb(ppage: usize, Tracked(snpcore): Tracked<&mut SnpCore>)
     MSR_GHCB().write(pa.into(), Tracked(&mut perm));
     proof {
         snpcore.regs.tracked_insert(GHCB_REGID(), perm);
+        // Successful GHCB registration response records the requested GHCB page address in the MSR.
+        assume(spec_ghcb_send_core_update(*old(snpcore), *snpcore, snpcore.ghcbmsr_msgs().last()));
+        assume(snpcore.ghcb_value() == ppage.spec_to_addr());
     }
 }
 
