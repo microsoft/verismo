@@ -2,6 +2,10 @@ use vstd::prelude::*;
 
 use super::*;
 
+verus!{
+    global size_of usize == 8;
+}
+
 macro_rules! impl_spec_size_for_basic  {
     ($([$baset: ty, $size: literal]),* $(,)*) => {
         $(

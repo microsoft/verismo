@@ -3,8 +3,6 @@ use crate::tspec_e::*;
 
 verus! {
 
-global size_of usize == 8;
-
 #[derive(Copy, Clone, VTypeCast, ExecStruct, NotPrimitive, VTypeCastSec, SpecSize, WellFormed, IsConstant)]
 pub struct GuestVir;
 
