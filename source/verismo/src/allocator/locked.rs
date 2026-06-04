@@ -4,7 +4,7 @@ use crate::registers::CoreIdPerm;
 
 verus! {
 
-broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal, SnpPPtr::axiom_id_equal;
+broadcast use {SecType::axiom_spec_new, SecType::axiom_ext_equal, SnpPPtr::axiom_id_equal, axiom_size_from_cast_bytes};
 
 impl VSpinLock<VeriSMoAllocator> {
     pub open spec fn lock_alloc_requires(&self, cpu: nat, alloc_lockperm: LockPermToRaw) -> bool {
@@ -31,6 +31,7 @@ impl VSpinLock<VeriSMoAllocator> {
     {
         let tracked alloc_lockperm = alloc_lockperm;
         (new_strlit("\n new")).leak_debug();
+        let ghost old_invfn = alloc_lockperm@.invfn;
         let (ptr, Tracked(mut allocperm), Tracked(alloc_lockperm)) = self.acquire(
             Tracked(alloc_lockperm),
             Tracked(coreid),
@@ -38,7 +39,15 @@ impl VSpinLock<VeriSMoAllocator> {
         (new_strlit(":")).leak_debug();
         let mut allocator = ptr.take(Tracked(&mut allocperm));
         let mut size = size;
+        proof {
+            old_invfn.lemma_inv::<VeriSMoAllocator>();
+            assert(old_invfn.value_invfn::<VeriSMoAllocator>() === VeriSMoAllocator::invfn());
+            assert(VeriSMoAllocator::invfn()(allocator) == allocator@.inv());
+        }
         let result = allocator.alloc_inner(size, align);
+        proof {
+            assert(inv_snp_value(allocperm@.snp(), allocator));
+        }
         ptr.put(Tracked(&mut allocperm), allocator);
         self.release(Tracked(&mut alloc_lockperm), Tracked(allocperm), Tracked(coreid));
         if let Some((addr, perm)) = result {

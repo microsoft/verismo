@@ -8,7 +8,7 @@ use crate::ptr::*;
 
 verus! {
 
-broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal, SnpPPtr::axiom_id_equal;
+broadcast use {SecType::axiom_spec_new, SecType::axiom_ext_equal, SnpPPtr::axiom_id_equal, axiom_size_from_cast_bytes};
 
 pub const MIN_ADDR_ALIGN: usize = 8usize;
 

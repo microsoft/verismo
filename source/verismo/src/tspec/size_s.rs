@@ -27,7 +27,10 @@ pub trait SpecSize {
 }
 
 // For core::mem:sizeof
-pub uninterp spec fn spec_size<T>() -> nat;
+#[verifier::inline]
+pub open spec fn spec_size<T>() -> nat {
+    vstd::layout::size_of::<T>()
+}
 
 pub trait ExecStruct {
 

@@ -108,7 +108,7 @@ impl LinkedListAllocator {
 } // verus!
 verus! {
 
-broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal, SnpPPtr::axiom_id_equal, axiom_size_from_cast_bytes;
+broadcast use {SecType::axiom_spec_new, SecType::axiom_ext_equal, SnpPPtr::axiom_id_equal, axiom_size_from_cast_bytes};
 
 impl LinkedListAllocator {
     #[inline]
