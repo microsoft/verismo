@@ -7,10 +7,6 @@ pub trait VTypeCast<T> {
     spec fn vspec_cast_to(self) -> T where Self: core::marker::Sized;
 }
 
-pub trait SpecInto<T> {
-    spec fn spec_into(self) -> T where Self: core::marker::Sized;
-}
-
 pub open spec fn is_castable<T1: IsConstant + SpecSize, T2: IsConstant + SpecSize>(t1: T1) -> bool {
     &&& spec_size::<T1>() == spec_size::<
         T2,
@@ -20,12 +16,6 @@ pub open spec fn is_castable<T1: IsConstant + SpecSize, T2: IsConstant + SpecSiz
             && t1.is_constant_to(3) == t2.is_constant_to(3)
             && t1.is_constant_to(4) == t2.is_constant_to(4)*/
 
-}
-
-impl<T2, T1: VTypeCast<T2>> SpecInto<T2> for T1 {
-    open spec fn spec_into(self) -> T2 {
-        self.vspec_cast_to()
-    }
 }
 
 #[verifier(external_body)]
