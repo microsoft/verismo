@@ -702,72 +702,87 @@ macro_rules! impl_exe_not_for_stype {
 macro_rules! impl_exe_cast_to_sectype {
     ($baset: ty, [$($out: ty),*$(,)*]) => {
         verus!{
-        impl<M> core::convert::From<SecType<$baset, M>> for $baset {
-            fn from(value: SecType<$baset, M>) -> $baset {
-                value.val as $baset
-            }
-        }
         impl<M> vstd::std_specs::convert::FromSpecImpl<SecType<$baset, M>> for $baset {
             open spec fn obeys_from_spec() -> bool { false }
             open spec fn from_spec(v: SecType<$baset, M>) -> $baset {
-                vstd::prelude::arbitrary()
+                v@.val
             }
         }
-        $(impl<M> core::convert::From<SecType<$baset, M>> for SecType<$out, M> {
+        impl<M> core::convert::From<SecType<$baset, M>> for $baset {
+            fn from(value: SecType<$baset, M>) -> (ret: $baset)
+                ensures
+                    ret == value@.val,
+            {
+                value.val as $baset
+            }
+        }
+        $(impl<M> vstd::std_specs::convert::FromSpecImpl<SecType<$baset, M>> for SecType<$out, M> {
+            open spec fn obeys_from_spec() -> bool { false }
+            open spec fn from_spec(v: SecType<$baset, M>) -> SecType<$out, M> {
+                SecType::spec_new(SpecSecType::constant(v@.val as $out))
+            }
+        }
+        impl<M> core::convert::From<SecType<$baset, M>> for SecType<$out, M> {
             #[verifier(external_body)]
-            fn from(value: SecType<$baset, M>) -> SecType<$out, M> {
+            fn from(value: SecType<$baset, M>) -> (ret: SecType<$out, M>)
+                ensures
+                    ret === SecType::spec_new(SpecSecType::constant(value@.val as $out)),
+            {
                 SecType{
                     val: value.val as $out,
-                    view: Ghost(value@.vspec_cast_to()),
+                    view: Ghost(SpecSecType::constant(value.val as $out)),
                 }
             }
         }
-        impl<M> vstd::std_specs::convert::FromSpecImpl<SecType<$baset, M>> for SecType<$out, M> {
-            open spec fn obeys_from_spec() -> bool { false }
-            open spec fn from_spec(v: SecType<$baset, M>) -> SecType<$out, M> {
-                vstd::prelude::arbitrary()
-            }
-        }
 
-        impl<M> core::convert::From<SecType<$baset, M>> for $out {
-            fn from(value: SecType<$baset, M>) -> $out {
-                value.val as $out
-            }
-        }
         impl<M> vstd::std_specs::convert::FromSpecImpl<SecType<$baset, M>> for $out {
             open spec fn obeys_from_spec() -> bool { false }
             open spec fn from_spec(v: SecType<$baset, M>) -> $out {
-                vstd::prelude::arbitrary()
+                v@.val as $out
+            }
+        }
+        impl<M> core::convert::From<SecType<$baset, M>> for $out {
+            fn from(value: SecType<$baset, M>) -> (ret: $out)
+                ensures
+                    ret == value@.val as $out,
+            {
+                value.val as $out
+            }
+        }
+        impl<M> vstd::std_specs::convert::FromSpecImpl<$baset> for SecType<$out, M> {
+            open spec fn obeys_from_spec() -> bool { false }
+            open spec fn from_spec(v: $baset) -> SecType<$out, M> {
+                SecType::spec_new(SpecSecType::constant(v as $out))
             }
         }
         impl<M> core::convert::From<$baset> for SecType<$out, M> {
-            fn from(value: $baset) -> (ret: SecType<$out, M>) {
+            fn from(value: $baset) -> (ret: SecType<$out, M>)
+                ensures
+                    ret === SecType::spec_new(SpecSecType::constant(value as $out)),
+            {
                 SecType{
                     val: value as $out,
                     view: Ghost(SpecSecType::constant(value as $out)),
                 }
             }
         }
-        impl<M> vstd::std_specs::convert::FromSpecImpl<$baset> for SecType<$out, M> {
-            open spec fn obeys_from_spec() -> bool { false }
-            open spec fn from_spec(v: $baset) -> SecType<$out, M> {
-                vstd::prelude::arbitrary()
-            }
-        }
     )*
 
+    impl<M> vstd::std_specs::convert::FromSpecImpl<$baset> for SecType<$baset, M> {
+        open spec fn obeys_from_spec() -> bool { false }
+        open spec fn from_spec(v: $baset) -> SecType<$baset, M> {
+            SecType::spec_new(SpecSecType::constant(v))
+        }
+    }
     impl<M> core::convert::From<$baset> for SecType<$baset, M> {
-        fn from(value: $baset) -> (ret: SecType<$baset, M>) {
+        fn from(value: $baset) -> (ret: SecType<$baset, M>)
+            ensures
+                ret === SecType::spec_new(SpecSecType::constant(value)),
+        {
             SecType{
                 val: value,
                 view: Ghost(SpecSecType::constant(value)),
             }
-        }
-    }
-    impl<M> vstd::std_specs::convert::FromSpecImpl<$baset> for SecType<$baset, M> {
-        open spec fn obeys_from_spec() -> bool { false }
-        open spec fn from_spec(v: $baset) -> SecType<$baset, M> {
-            vstd::prelude::arbitrary()
         }
     }
     }
