@@ -57,7 +57,7 @@ pub struct DescriptorSpec {
     pub limit16_19: u64,
     #[vbits(52, 55)]
     pub attr_8_11: u64,
-    #[vbits(56, 64)]
+    #[vbits(56, 63)]
     pub base24_31: u64,
 }
 
