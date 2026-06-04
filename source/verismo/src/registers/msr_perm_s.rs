@@ -55,7 +55,7 @@ impl RegisterPerm {
         requires
             x.view::<T>() === y.view::<T>(),
         ensures
-            #[trigger] x === #[trigger] y,
+            (#[trigger] x.view::<T>() === #[trigger] y.view::<T>()) ==> x === y,
     {
     }
 
@@ -78,7 +78,7 @@ impl RegisterPerm {
     #[verifier(external_body)]
     pub broadcast proof fn axiom_wf<T: WellFormed + IsConstant>(&self)
         ensures
-            #[trigger] self.wf() == self.view::<T>().wf(),
+            self.wf() == #[trigger] self.view::<T>().wf(),
     {
     }
 
