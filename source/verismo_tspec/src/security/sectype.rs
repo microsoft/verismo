@@ -203,7 +203,6 @@ impl<T, M> IsConstant for SpecSecType<T, M> {
         &&& self.valsets[vmpl].len() == 1
         &&& self.valsets[vmpl] =~~= set![self.val]
         &&& self.labels[vmpl] is Symbol
-        &&& self.wf_value()
     }
    open spec fn is_constant(&self) -> bool {
         #(
@@ -215,12 +214,14 @@ impl<T, M> IsConstant for SpecSecType<T, M> {
 impl<T, M> SpecSecType<T, M> {
     broadcast proof fn lemma_is_constant(&self) 
     ensures
-        #[trigger] self.is_constant() <==> (self._is_constant() && self.wf_value()),
+        #[trigger] self.is_constant() <==> self._is_constant(),
     {
     }
+
     pub proof fn proof_constant(&self)
         requires
             self.is_constant(),
+            self.wf_value(),
         ensures
             *self === SpecSecType::constant(self.val),
     {
@@ -260,13 +261,11 @@ impl<T, M> SecType<T, M> {
 impl<T, M> IsConstant for SecType<T, M> {
     #[verifier(inline)]
     open spec fn is_constant_to(&self, vmpl: nat) -> bool {
-        &&& self@.is_constant_to(vmpl)
-        &&& self.wf_value()
+        self@.is_constant_to(vmpl)
     }
 
     open spec fn is_constant(&self) -> bool {
-        &&& self@.is_constant()
-        &&& self.wf_value()
+        self@.is_constant()
     }
 }
 
@@ -514,11 +513,13 @@ macro_rules! impl_cmp_ops_for_stype {
                 exec fn $fname(&self, rhs: &SecType<$rhs, M>) -> (ret: bool)
                 requires
                     self@.sec_eq(rhs@),
-                    self.wf_value(),
-                    rhs.wf_value(),
                 ensures
                     (self@.val $op rhs@.val) == ret,
                 {
+                    proof {
+                        use_type_invariant(self);
+                        use_type_invariant(rhs);
+                    }
                     self.val $op rhs.val
                 }
             }
@@ -528,10 +529,12 @@ macro_rules! impl_cmp_ops_for_stype {
                 exec fn $fname(&self, rhs: &$rhs) -> (ret: bool)
                 requires
                     self@.sec_eq(Self::spec_constant(*rhs)@),
-                    self.wf_value(),
                 ensures
                     (self@.val $op Self::spec_constant(*rhs)@.val) == ret,
                 {
+                    proof {
+                        use_type_invariant(self);
+                    }
                     self.$fname(&Self::constant(*rhs))
                 }
             }
@@ -539,15 +542,14 @@ macro_rules! impl_cmp_ops_for_stype {
             impl<M> SecType<$baset, M> {
                 #[inline(always)]
                 pub exec fn [<sec_ $fname>](&self, rhs: &SecType<$rhs, M>) -> (ret: SecType<bool, M>)
-                requires
-                    self.wf_value(),
-                    rhs.wf_value(),
                 ensures
                     ret@ === self@.bop_new(rhs@, |val1: $baset, val2: $rhs| val1 $op val2),
                     ret@ === self@.bop_new(rhs@, [<fn_spec_ $fname _ $baset _ $rhs _ bool>]()),
                     ret.wf_value(),
                 {
                     proof {
+                        use_type_invariant(self);
+                        use_type_invariant(rhs);
                         self@.proof_bop_new(rhs@, [<fn_spec_ $fname _ $baset _ $rhs _ bool>]());
                     }
                     SecType {
@@ -621,6 +623,7 @@ macro_rules! impl_exe_bops_for_stype {
                     ret@ === (self@ $op other@).$use_cast(),
                     ret@.val == (self@.val $op other@.val),
                     (self.is_constant() && other.is_constant()) ==> ret.is_constant(),
+                    ret.wf_value(),
                     ret == SecType::spec_new((self@ $op other@).$use_cast())
                 {
                     proof {
@@ -762,6 +765,7 @@ macro_rules! impl_exe_bops_for_stype_by_assume {
                     ret@ === (self@ $op other@).$use_cast(),
                     ret@.val == (self@.val $op other@.val),
                     (self.is_constant() && other.is_constant()) ==> ret.is_constant(),
+                    ret.wf_value(),
                     ret == SecType::spec_new((self@ $op other@).$use_cast())
                 {
                     
@@ -1311,7 +1315,7 @@ impl<T: VTypeCast<SecSeqByte>> VTypeCast<T> for SecSeqByte {
 #[verifier(external_body)]
 pub proof fn proof_sectype_cast_eq<T1: VTypeCast<T2>, T2: VTypeCast<T1>, M>(v: SecType<T1, M>)
     requires
-        forall|basev: T1|
+        forall|basev: T1| #[trigger]
             VTypeCast::<T1>::vspec_cast_to(VTypeCast::<T2>::vspec_cast_to(basev)) === basev,
     ensures
         VTypeCast::<SecType<T1, M>>::vspec_cast_to(VTypeCast::<SecType<T2, M>>::vspec_cast_to(v))
