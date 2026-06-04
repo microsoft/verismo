@@ -138,7 +138,7 @@ spec fn validate_e820_loop_inv(
 }
 
 #[verifier::spinoff_prover]
-#[verifier::rlimit(1000)]
+#[verifier::rlimit(1)]
 proof fn lemma_validated_range_disjoint_e820(
     e820: Seq<E820Entry>,
     i: int,
@@ -158,7 +158,7 @@ proof fn lemma_validated_range_disjoint_e820(
         toval_range,
         r,
     ) by {
-        let k = choose|k: int| e820[k].spec_aligned_range() === r && 0 <= k && k < e820.len();
+        let k = choose|k: int| (#[trigger] e820[k]).spec_aligned_range() === r && 0 <= k && k < e820.len();
         assert(e820[k].spec_aligned_range() === r);
         assert(pre_validated.contains(r));
     }
