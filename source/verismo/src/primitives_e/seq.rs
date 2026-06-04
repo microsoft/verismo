@@ -93,7 +93,7 @@ impl ValSetSize for SecSeqByte {
 
 impl<T: IsFullSecret> IsFullSecret for Seq<T> {
     open spec fn is_fullsecret_to(&self, vmpl: nat) -> bool {
-        forall|i| 0 <= i < self.len() ==> self[i].is_fullsecret_to(vmpl)
+        forall|i| 0 <= i < self.len() ==> #[trigger] self[i].is_fullsecret_to(vmpl)
     }
 }
 

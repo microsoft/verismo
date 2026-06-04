@@ -227,7 +227,7 @@ impl<T, M> SpecSecType<T, M> {
         let expected = SpecSecType::<T, M>::constant(self.val);
         assert(self.valsets =~~= expected.valsets) by {
             assert(expected.valsets.dom() =~~= self.valsets.dom());
-            assert forall|vmpl: nat| expected.valsets.contains_key(vmpl) implies self.valsets[vmpl]
+            assert forall|vmpl: nat| #![auto] expected.valsets.contains_key(vmpl) implies self.valsets[vmpl]
                 === expected.valsets[vmpl] by {
                 assert(0 < vmpl <= 4);
                 assert(self.valsets.contains_key(vmpl));
@@ -236,9 +236,9 @@ impl<T, M> SpecSecType<T, M> {
         }
         assert(self.labels =~~= expected.labels) by {
             assert(expected.labels.dom() =~~= self.labels.dom());
-            assert forall|vmpl: nat|
+            assert forall|vmpl: nat| #![auto]
                 expected.labels.contains_key(vmpl) == self.labels.contains_key(vmpl) by {};
-            assert forall|vmpl: nat| expected.labels.contains_key(vmpl) implies self.labels[vmpl]
+            assert forall|vmpl: nat| #![auto] expected.labels.contains_key(vmpl) implies self.labels[vmpl]
                 === expected.labels[vmpl] by {
                 assert(0 < vmpl <= 4);
                 assert(self.labels.contains_key(vmpl));
@@ -343,9 +343,13 @@ impl<T, M> SpecSecType<T, M> {
         assert(ret.wf_value());
         if self._is_constant() && rhs._is_constant() {
             assert(ret._is_constant()) by {
-                assert forall|i| 1 <= i <= 4 implies (#[trigger] ret.valsets[i]).len() == 1 by {
+                assert forall|i: nat| 1 <= i <= 4 implies
+                    #[trigger] ret.valsets[i] =~~= set![ret.val] by {
                     lemma_setop_len(self.valsets[i], rhs.valsets[i], op);
-                    assert(1 * 1 == 1);
+                    assert(self.valsets[i] =~~= set![self.val]);
+                    assert(rhs.valsets[i] =~~= set![rhs.val]);
+                    assert(self.valsets[i].contains(self.val));
+                    assert(rhs.valsets[i].contains(rhs.val));
                 }
             }
         }
@@ -382,7 +386,10 @@ impl<T, M> SpecSecType<T, M> {
     }
 
     pub open spec fn _is_constant(&self) -> bool {
-        &&& self.sec_eq(Self::constant(Set::<T>::full().choose()))
+        #(
+            &&& self.valsets[N] =~~= set![self.val]
+            &&& self.labels[N] is Symbol
+        )*
     }
 
     // Create a constant value
@@ -871,7 +878,7 @@ macro_rules! impl_exe_not_for_stype {
                     // The assume below restates exactly what `_not` already
                     // proved in its ensures (ret@ === self@.spec_not(),
                     // ret.wf_value(), self.is_constant() ==> ret.is_constant()),
-                    // which together form `self.ensures_not(ret)`.
+                    // which together form `self.ensures_not(ret)`. Sound.
                     assume(self.[<ensures_ $fname>](ret));
                 }
                 ret
@@ -892,7 +899,6 @@ macro_rules! impl_exe_not_for_stype {
                 proof {
                     broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal;
                     // Same Verus SMT axiom-ordering workaround as above.
-                    assume(self.wf_value());
                     use_type_invariant(&self);
                     (self@).proof_uop_valset([<fn_spec_ $fname _ $baset _ $baset>]());
                 }
