@@ -178,6 +178,8 @@ mod internal {
     use super::*;
     verus! {
 
+broadcast use axiom_size_from_cast_bytes;
+
 #[verifier::exec_allows_no_decreases_clause]
 pub fn ghcb_change_page_state_via_pg_internal(
     ghcb_ptr: SnpPPtr<GhcbPage>,
