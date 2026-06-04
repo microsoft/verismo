@@ -212,6 +212,8 @@ pub fn pvalmem(
     ensures
         ret@@.snp_wf_range((start as int, (end - start) as nat)),
         ret@@.snp().ensures_pvalidated(perm@.snp(), val),
+        val && perm@.snp() === SwSnpMemAttr::init() ==> ret@@.snp()
+            === SwSnpMemAttr::spec_default(),
         spec_perm_ensures_pvalidate(ret@, perm, start as int, (end - start) as nat, val),
         snpcore.inv(),
         *old(snpcore) === *snpcore,

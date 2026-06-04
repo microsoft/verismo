@@ -2,6 +2,7 @@ use vstd::slice::slice_index_get;
 
 use super::*;
 use crate::arch::addr_s::VM_MEM_SIZE;
+use crate::arch::reg::RegName;
 use crate::ptr::rmp::*;
 
 verus! {
@@ -137,6 +138,46 @@ spec fn validate_e820_loop_inv(
     &&& mem_range_formatted(e820)
 }
 
+pub proof fn lemma_snp_core_self_frame(snpcore: crate::registers::SnpCore, regs: Set<RegName>)
+    ensures
+        snpcore.only_reg_coremode_updated(snpcore, regs),
+{
+    assert(snpcore.reg_updated(snpcore, regs));
+}
+
+impl E820Entry {
+    pub proof fn lemma_formatted_implies_cmp_max_requires(e820: Seq<E820Entry>, i: int)
+        requires
+            e820.is_constant(),
+            mem_range_formatted(e820),
+            0 <= i < e820.len(),
+        ensures
+            e820[i].spec_cmp_max_requires(),
+    {
+        let entry = e820[i];
+        assert(entry.wf_range());
+        assert(entry.spec_real_range().0.is_constant());
+        assert(entry.spec_real_range().1.is_constant());
+        assert(E820Entry::spec_sec_max().is_constant());
+        assert(entry.self_wf());
+    }
+}
+
+// Init memory is unvalidated, so it satisfies the precondition for pvalidate(true).
+pub proof fn lemma_init_perm_requires_pvalidate(perm: SnpPointsToRaw, r: (int, nat))
+    requires
+        perm@.snp() === SwSnpMemAttr::init(),
+        perm@.snp_wf_range(r),
+    ensures
+        spec_perm_requires_pvalidate(perm, r.0, r.1, true),
+{
+    broadcast use SwSnpMemAttr::axiom_pte;
+
+    assert(SwSnpMemAttr::init().deterministic_pte());
+    assert(SwSnpMemAttr::init().encrypted());
+    assert(!SwSnpMemAttr::init().rmp@.spec_validated());
+}
+
 #[verifier::spinoff_prover]
 #[verifier::rlimit(1)]
 proof fn lemma_validated_range_disjoint_e820(
@@ -191,7 +232,7 @@ spec fn validate_e820_iter_val_range(e820: Seq<E820Entry>, i: int, start: int, e
 }
 
 #[verifier::spinoff_prover]
-#[verifier::rlimit(1000)]
+#[verifier::rlimit(100)]
 pub fn validate_e820(
     e820: &[E820Entry],
     start_addr: usize_t,
@@ -243,9 +284,9 @@ pub fn validate_e820(
             SwSnpMemAttr::spec_default(),
             pre_validated,
         );
-        // Justification: validate_e820 has not modified core registers before the loop; the frame predicate
-        // follows from oldmemcc.wf but is not folded automatically.
-        assume(cc.snpcore.only_reg_coremode_updated(oldmemcc.cc.snpcore, set![GHCB_REGID()]));
+        assert(cc.snpcore === oldmemcc.cc.snpcore);
+        lemma_snp_core_self_frame(cc.snpcore, set![GHCB_REGID()]);
+        assert(cc.snpcore.only_reg_coremode_updated(oldmemcc.cc.snpcore, set![GHCB_REGID()]));
     }
     while val_end < end_addr && index < n
         invariant
@@ -291,9 +332,8 @@ pub fn validate_e820(
                 assert(pre_validated.contains(entry_r));
             }
             assert(entry.wf_range());
-            // Justification: formatted E820 entries satisfy the comparison/max requirements of aligned_start/end;
-            // SMT does not expand wf_range into these helper preconditions here.
-            assume(entry.spec_cmp_max_requires());
+            E820Entry::lemma_formatted_implies_cmp_max_requires(e820@, index as int);
+            assert(entry.spec_cmp_max_requires());
         }
         let cur_addr = entry.aligned_start().reveal_value();
         let cur_end = page_align_up(entry.end().reveal_value());
@@ -348,10 +388,17 @@ pub fn validate_e820(
         if val_end > val_start {
             let tracked pperm = memperm.tracked_remove(toval_range);
             proof {
-                // Justification: toval_range was proven init/default and page-aligned above, satisfying pvalidate permissions;
-                // SMT does not fold spec_perm_requires_pvalidate through memperm.remove_range facts.
-                assume(spec_perm_requires_pvalidate(pperm, val_start as int, (val_end - val_start) as nat, true));
+                assert(pperm@.snp() === SwSnpMemAttr::init());
+                assert(pperm@.snp_wf_range(toval_range));
+                lemma_init_perm_requires_pvalidate(pperm, toval_range);
+                assert(spec_perm_requires_pvalidate(
+                    pperm,
+                    val_start as int,
+                    (val_end - val_start) as nat,
+                    true,
+                ));
             }
+            let ghost old_pperm_snp = pperm@.snp();
             let Tracked(pperm) = pvalmem(
                 val_start as u64,
                 val_end as u64,
@@ -361,10 +408,9 @@ pub fn validate_e820(
             );
             proof {
                 assert(memperm.contains_default_except(prev_validated_range, pre_validated));
+                assert(old_pperm_snp === SwSnpMemAttr::init());
+                assert(pperm@.snp() === SwSnpMemAttr::spec_default());
                 memperm.tracked_insert(toval_range, pperm);
-                // Justification: pvalmem returns default-validated memory for the validated range;
-                // the tracked_insert frame fact is not folded automatically.
-                assume(memperm.contains_default_mem(toval_range));
                 assert(memperm.contains_default_mem(toval_range));
                 memperm.proof_remove_range_ensures(toval_range);
                 assert(range_disjoint_(toval_range, prev_validated_range));
@@ -412,10 +458,17 @@ pub fn validate_e820(
         }
         let tracked pperm = memperm.tracked_remove(toval_range);
         proof {
-            // Justification: final validation range is page-aligned init memory and satisfies pvalidate permissions;
-            // SMT does not fold this through memperm.remove_range.
-            assume(spec_perm_requires_pvalidate(pperm, val_end as int, (end_addr - val_end) as nat, true));
+            assert(pperm@.snp() === SwSnpMemAttr::init());
+            assert(pperm@.snp_wf_range(toval_range));
+            lemma_init_perm_requires_pvalidate(pperm, toval_range);
+            assert(spec_perm_requires_pvalidate(
+                pperm,
+                val_end as int,
+                (end_addr - val_end) as nat,
+                true,
+            ));
         }
+        let ghost old_pperm_snp = pperm@.snp();
         let Tracked(pperm) = pvalmem(
             val_end as u64,
             end_addr as u64,
@@ -425,10 +478,9 @@ pub fn validate_e820(
         );
         proof {
             assert(memperm.contains_default_except(prev_validated_range, pre_validated));
+            assert(old_pperm_snp === SwSnpMemAttr::init());
+            assert(pperm@.snp() === SwSnpMemAttr::spec_default());
             memperm.tracked_insert(toval_range, pperm);
-            // Justification: pvalmem returns default-validated memory for the final range;
-            // the tracked_insert frame fact is not folded automatically.
-            assume(memperm.contains_default_mem(toval_range));
             assert(memperm.contains_default_mem(toval_range));
             memperm.proof_remove_range_ensures(toval_range);
             assert(range_disjoint_(toval_range, prev_validated_range));
