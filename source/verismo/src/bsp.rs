@@ -30,7 +30,6 @@ mod ap {
 /// AP entry
 #[no_mangle]
 #[verifier::exec_allows_no_decreases_clause]
-#[verifier::rlimit(50)]
 pub extern "C" fn ap_call(
     cpu: &PerCpuData,
     Tracked(cs): Tracked<SnpCoreSharedMem>,
@@ -45,18 +44,40 @@ pub extern "C" fn ap_call(
     let cpu_id = cpu.cpu as usize;
     (new_strlit("ap call "), cpu_id).leak_debug();
     new_strlit("ap alloc_ghcb_handle").leak_debug();
+    let ghost cs0 = cs;
     let ghcb = GhcbHandle::alloc_ghcb_handle(Tracked(&mut cs));
+    let ghost cs1 = cs;
     proof {
-        // HyperPageHandle is VBox<OnePage>; OnePage is the architectural page-sized buffer.
-        assume(spec_size::<crate::addr_e::OnePage>() == PAGE_SIZE);
+        broadcast use axiom_size_from_cast_bytes;
+        assert(spec_size::<crate::addr_e::OnePage>() == PAGE_SIZE);
     }
     let (hyperv, ghcb) = HyperPageHandle::new_shared_page(PAGE_SIZE, ghcb, Tracked(&mut cs));
+    let ghost cs2 = cs;
     let (guest_channel, ghcb) = SnpGuestChannel::new(ghcb, Tracked(&mut cs));
+    let ghost cs3 = cs;
     let ghcb_hv_h = GhcbHyperPageHandle(ghcb, hyperv);
     assert(ghcb_hv_h.wf());
     proof {
-        // The setup above preserves the AP-wait shared-memory invariant.
-        assume(cs.inv_stage_ap_wait());
+        cs0.lemma_update_prop(
+            cs1,
+            cs2,
+            set![crate::snp::ghcb::GHCB_REGID()],
+            set![spec_ALLOCATOR_lockid(), spec_PT_lockid()],
+            set![],
+            set![spec_ALLOCATOR_lockid(), spec_PT_lockid()],
+        );
+        assert(set![spec_ALLOCATOR_lockid(), spec_PT_lockid()].union(
+            set![spec_ALLOCATOR_lockid(), spec_PT_lockid()],
+        ) =~~= set![spec_ALLOCATOR_lockid(), spec_PT_lockid()]);
+        cs0.lemma_update_prop(
+            cs2,
+            cs3,
+            set![crate::snp::ghcb::GHCB_REGID()],
+            set![spec_ALLOCATOR_lockid(), spec_PT_lockid()],
+            set![],
+            set![spec_ALLOCATOR_lockid(), spec_PT_lockid()],
+        );
+        assert(cs.inv_stage_ap_wait());
     }
     let mut vmsa: VBox<VmsaPage>;
     loop
@@ -68,10 +89,22 @@ pub extern "C" fn ap_call(
             vmsa@.vmpl.spec_eq(RICHOS_VMPL),
     {
         let richos_vmsa = RICHOS_VMSA();
+        let ghost lockperms_before_vmsa_remove = cs.lockperms;
         let tracked mut vmsa_lock = cs.lockperms.tracked_remove(spec_RICHOS_VMSA_lockid());
         proof {
-            // inv_stage_ap_wait includes the RICHOS_VMSA lock permission needed here.
-            assume(richos_vmsa.lock_requires(cs.snpcore.coreid@.cpu, vmsa_lock@));
+            assert(vmsa_lock === lockperms_before_vmsa_remove[spec_RICHOS_VMSA_lockid()]);
+            assert(lockperms_before_vmsa_remove.inv(cs.snpcore.cpu()));
+            assert(lockperms_before_vmsa_remove[spec_RICHOS_VMSA_lockid()]@.is_unlocked(
+                cs.snpcore.coreid@.cpu,
+                richos_vmsa.lockid(),
+                richos_vmsa.ptr_range(),
+            ));
+            assert(vmsa_lock@.is_unlocked(
+                cs.snpcore.coreid@.cpu,
+                richos_vmsa.lockid(),
+                richos_vmsa.ptr_range(),
+            ));
+            assert(richos_vmsa.lock_requires(cs.snpcore.coreid@.cpu, vmsa_lock@));
         }
         let (vmsa_vec_ptr, Tracked(mut vmsa_vec_perm), Tracked(mut vmsa_lock0)) =
             richos_vmsa.acquire(Tracked(vmsa_lock), Tracked(&cs.snpcore.coreid));
@@ -86,8 +119,21 @@ pub extern "C" fn ap_call(
         }
         vmsa_vec_ptr.put(Tracked(&mut vmsa_vec_perm), vmsa_vec);
         proof {
-            // acquire returned the matching points-to permission for this lock.
-            assume(richos_vmsa.unlock_requires(cs.snpcore.coreid@.cpu, vmsa_lock@, vmsa_vec_perm@));
+            assert(vmsa_lock@.is_locked(
+                cs.snpcore.coreid@.cpu,
+                richos_vmsa.lockid(),
+                richos_vmsa.ptr_range(),
+            ));
+            assert(vmsa_lock@.invfn.inv::<alloc::vec::Vec<Option<VBox<VmsaPage>>>>(
+                vmsa_vec_perm@.get_value(),
+            ));
+            assert(vmsa_vec_perm@.value is Some);
+            assert(vmsa_vec_perm@.wf_at(richos_vmsa.lockid()));
+            assert(richos_vmsa.unlock_requires(
+                cs.snpcore.coreid@.cpu,
+                vmsa_lock@,
+                vmsa_vec_perm@,
+            ));
         }
         richos_vmsa.release(
             Tracked(&mut vmsa_lock),
@@ -96,17 +142,15 @@ pub extern "C" fn ap_call(
         );
         proof {
             cs.lockperms.tracked_insert(spec_RICHOS_VMSA_lockid(), vmsa_lock);
-            // Re-inserting the released RICHOS_VMSA lock restores the AP-wait invariant.
-            assume(cs.inv_stage_ap_wait());
+            assert(cs.inv_stage_ap_wait());
         }
         match vmsa_opt {
             Some(v) => {
                 vmsa = v;
                 proof {
-                    // RICHOS_VMSA stores VMPL0-private VMSA boxes for AP startup.
-                    assume(vmsa.is_vmpl0_private_page());
-                    assume(vmsa@.vmpl.spec_eq(RICHOS_VMPL));
-                    assume(cs.inv_stage_ap_wait());
+                    assert(vmsa.is_vmpl0_private_page());
+                    assert(vmsa@.vmpl.spec_eq(RICHOS_VMPL));
+                    assert(cs.inv_stage_ap_wait());
                 }
                 break ;
             },
