@@ -804,9 +804,8 @@ pub fn set_pages_enc_dec(
         (*old(cs)).inv(),
         start_page.spec_valid_pn_with(size as nat),
         forall|page: int|
-            start_page <= page < start_page + size ==> old(mem_perms).contains_key(page) && old(
-                mem_perms,
-            )[page]@.wf_range((page.to_addr(), PAGE_SIZE as nat)),
+            start_page <= page < start_page + size ==> #[trigger] old(mem_perms).contains_key(page)
+                && old(mem_perms)[page]@.wf_range((page.to_addr(), PAGE_SIZE as nat)),
     ensures
         cs.inv(),
         cs.only_lock_reg_updated((*old(cs)), set![], set![spec_PT().lockid()]),
