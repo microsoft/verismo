@@ -132,7 +132,7 @@ impl RawMemPerms {
 
     pub open spec fn no_range(self, range: (int, nat)) -> bool {
         &&& !self.contains_range(range)
-        &&& forall|r: (int, nat)| inside_range(r, range) ==> !self.contains_range(r)
+        &&& forall|r: (int, nat)| inside_range(r, range) ==> !#[trigger] self.contains_range(r)
     }
 
     pub closed spec fn dom(self) -> Set<int> {
@@ -163,9 +163,15 @@ impl RawMemPerms {
         requires
             r.1 > 0,
         ensures
-            forall|r2| inside_range(r2, r) ==> self.eq_at(self.restrict(r), r2),
+            forall|r2|
+                #![trigger self.contains_range(r2)]
+                #![trigger self[r2]]
+                inside_range(r2, r) ==> self.eq_at(self.restrict(r), r2),
     {
-        assert forall|r2| inside_range(r2, r) implies self.eq_at(self.restrict(r), r2) by {
+        assert forall|r2|
+            #![trigger self.contains_range(r2)]
+            #![trigger self[r2]]
+            inside_range(r2, r) implies self.eq_at(self.restrict(r), r2) by {
             self.lemma_restricted(r, r2);
         }
     }
@@ -292,6 +298,10 @@ impl RawMemPerms {
             inside_range(r, r2) && r.1 != 0 && ranges_disjoint(rs, r) ==> (
             #[trigger] self.contains_range(r) == #[trigger] ret.contains_range(r))
         &&& forall|r|
+            #![trigger ranges_disjoint(rs, r)]
+            #![trigger self.contains_range(r)]
+            #![trigger self[r]]
+            #![trigger ret[r]]
             inside_range(r, r2) && r.1 != 0 && ranges_disjoint(rs, r) && self.contains_range(r)
                 ==> self[r] === ret[r]
     }
@@ -310,6 +320,8 @@ impl RawMemPerms {
     {
         if self.contains_with_snp_except(r2, snp, rs) {
             assert forall|r|
+                #![trigger ranges_disjoint(rs, r)]
+                #![trigger ret.contains_range(r)]
                 inside_range(r, r2) && r.1 != 0 && ranges_disjoint(
                     rs,
                     r,
@@ -322,6 +334,8 @@ impl RawMemPerms {
         }
         if ret.contains_with_snp_except(r2, snp, rs) {
             assert forall|r|
+                #![trigger ranges_disjoint(rs, r)]
+                #![trigger self.contains_range(r)]
                 inside_range(r, r2) && r.1 != 0 && ranges_disjoint(
                     rs,
                     r,
@@ -347,6 +361,7 @@ impl RawMemPerms {
                 range_disjoint_(r2, range) ==> (self.contains_with_snp_except(r2, snp, rs)
                     == ret.contains_with_snp_except(r2, snp, rs)),
             forall|snp, r2, rs|
+                #![trigger self.contains_with_snp_except(r2, snp, rs)]
                 inside_range(r2, range) ==> (self.contains_with_snp_except(r2, snp, rs)
                     == self.restrict(range).contains_with_snp_except(r2, snp, rs)),
     {
@@ -362,6 +377,10 @@ impl RawMemPerms {
                 self.proof_remove_range_ensures(range);
             }
             assert forall|r|
+                #![trigger ranges_disjoint(rs, r)]
+                #![trigger self.contains_range(r)]
+                #![trigger self[r]]
+                #![trigger ret[r]]
                 inside_range(r, r2) && r.1 != 0 && ranges_disjoint(rs, r) && self.contains_range(
                     r,
                 ) implies self[r] === ret[r] by {
@@ -369,11 +388,10 @@ impl RawMemPerms {
             }
             self.lemma_except_contains_eq(ret, r2, snp, rs);
         }
-        assert forall|snp, r2, rs| inside_range(r2, range) implies (self.contains_with_snp_except(
-            r2,
-            snp,
-            rs,
-        ) == self.restrict(range).contains_with_snp_except(r2, snp, rs)) by {
+        assert forall|snp, r2, rs| inside_range(r2, range) implies (
+        #[trigger] self.contains_with_snp_except(r2, snp, rs) == self.restrict(
+            range,
+        ).contains_with_snp_except(r2, snp, rs)) by {
             assert forall|r| inside_range(r, r2) && r.1 != 0 && ranges_disjoint(rs, r) implies (
             #[trigger] self.contains_range(r) == #[trigger] self.restrict(range).contains_range(
                 r,
@@ -381,6 +399,9 @@ impl RawMemPerms {
                 self.proof_remove_range_ensures(range);
             }
             assert forall|r|
+                #![trigger ranges_disjoint(rs, r)]
+                #![trigger self.contains_range(r)]
+                #![trigger self[r]]
                 inside_range(r, r2) && r.1 != 0 && ranges_disjoint(rs, r) && self.contains_range(
                     r,
                 ) implies self[r] === self.restrict(range)[r] by {
@@ -391,8 +412,12 @@ impl RawMemPerms {
         assert forall|snp, r2, rs| range_disjoint_(r2, range) implies (
         #[trigger] self.contains_with_snp_except(r2, snp, rs)
             == #[trigger] ret.contains_with_snp_except(r2, snp, rs.insert(range))) by {
-            assert forall|r| inside_range(r, r2) && r.1 != 0 implies ranges_disjoint(rs, r)
-                == ranges_disjoint(rs.insert(range), r) by {
+            assert forall|r|
+                #![trigger ranges_disjoint(rs, r)]
+                inside_range(r, r2) && r.1 != 0 implies ranges_disjoint(rs, r) == ranges_disjoint(
+                rs.insert(range),
+                r,
+            ) by {
                 lemma_ranges_disjoint_insert(r, range, rs);
             }
         }
@@ -404,9 +429,17 @@ impl RawMemPerms {
             ret === self.remove_range(range),
             ret.no_range(range),
             //self.remove_range(range).union(self.restrict(range)) === self,
-            forall|r: (int, nat)| range_disjoint_(range, r) ==> self.eq_at(ret, r),
-            forall|r: (int, nat)| r.1 > 0 && !self.contains_range(r) ==> !ret.contains_range(r),
+            forall|r: (int, nat)|
+                #![trigger self.contains_range(r)]
+                #![trigger self[r]]
+                range_disjoint_(range, r) ==> self.eq_at(ret, r),
+            forall|r: (int, nat)|
+                #![trigger self.contains_range(r)]
+                #![trigger ret.contains_range(r)]
+                r.1 > 0 && !self.contains_range(r) ==> !ret.contains_range(r),
             range.1 > 0 ==> forall|r2|
+                #![trigger self.contains_range(r2)]
+                #![trigger self[r2]]
                 inside_range(r2, range) ==> self.eq_at(
                     self.restrict(range),
                     r2,
@@ -420,14 +453,20 @@ impl RawMemPerms {
         let ret = self.remove_range(range);
         assert(self.remove_range(range).union(self.restrict(range)).perms =~~= self.perms);
         assert forall|r: (int, nat)|
+            #![trigger range_disjoint_(range, r)]
+            #![trigger self.contains_range(r)]
+            #![trigger ret.contains_range(r)]
+            #![trigger ret[r]]
+            #![trigger self[r]]
             r.1 > 0 && range_disjoint_(range, r) && self.contains_range(
                 r,
             ) implies ret.contains_range(r) && ret[r] === self[r] by {
             self.lemma_remove_range_ensures(range, r);
         }
-        assert forall|r: (int, nat)| r.1 > 0 && !self.contains_range(r) implies !ret.contains_range(
-            r,
-        ) by {
+        assert forall|r: (int, nat)|
+            #![trigger self.contains_range(r)]
+            #![trigger ret.contains_range(r)]
+            r.1 > 0 && !self.contains_range(r) implies !ret.contains_range(r) by {
             self.lemma_remove_range_ensures(range, r);
         }
         assert forall|r: (int, nat)| inside_range(r, range) implies !#[trigger] ret.contains_range(
@@ -501,6 +540,8 @@ impl RawMemPerms {
             self.contains_with_snp_except(r1, snp, rs),
     {
         assert forall|r|
+            #![trigger ranges_disjoint(rs, r)]
+            #![trigger self.contains_range(r)]
             inside_range(r, r1) && r.1 != 0 && ranges_disjoint(rs, r) implies self.contains_range(r)
             && self.contains_snp(r, snp) by {
             assert(inside_range(r, r2));
@@ -517,6 +558,7 @@ impl RawMemPerms {
     {
         let snp = self[r1].snp();
         assert forall|r|
+            #![trigger ranges_disjoint(rs, r)]
             inside_range(r, r1) && r.1 != 0 && ranges_disjoint(rs, r) implies self.contains_snp(
             r,
             snp,
@@ -539,10 +581,12 @@ impl RawMemPerms {
             self.contains_with_snp_except(r1, snp, rs),
     {
         assert forall|r|
+            #![trigger ranges_disjoint(rs, r)]
+            #![trigger self.contains_range(r)]
             inside_range(r, r1) && r.1 != 0 && ranges_disjoint(rs, r) implies self.contains_range(r)
             && self.contains_snp(r, snp) by {
             assert(inside_ranges(r1, rs));
-            let rr = choose|rr| rs.contains(rr) && inside_range(r1, rr);
+            let rr = choose|rr| #![trigger rs.contains(rr)] rs.contains(rr) && inside_range(r1, rr);
             assert(rs.contains(rr));
             assert(inside_range(r1, rr));
             assert(ranges_disjoint(rs, r));
@@ -607,12 +651,16 @@ impl RawMemPerms {
         assert(lower <= upper);
         let ret = range(lower, upper);
         assert forall|r|
+            #![trigger ranges_disjoint(rs, r)]
+            #![trigger self.contains_range(r)]
             inside_range(r, ret) && r.1 != 0 && ranges_disjoint(rs, r) implies self.contains_range(
             r,
         ) && self.contains_snp(r, snp) by {
             assert forall|i: int| within_range(i, r) implies self.perms.contains_key(i) && (
             #[trigger] self.perms[i])@.snp() === snp by {
-                assert forall|rr| rs.contains(rr) implies range_disjoint_(rr, (i, 1)) by {}
+                assert forall|rr|
+                    #![trigger rs.contains(rr)]
+                    rs.contains(rr) implies range_disjoint_(rr, (i, 1)) by {}
                 assert(ranges_disjoint(rs, (i, 1)));
                 if (within_range(i, r1)) {
                     assert(r1.1 != 0);
@@ -714,7 +762,7 @@ impl RawMemPerms {
 
     pub proof fn tracked_insert(tracked &mut self, range: (int, nat), tracked perm: SnpPointsToRaw)
         requires
-            forall|r| inside_range(r, range) ==> !old(self).contains_range(r),
+            forall|r| inside_range(r, range) ==> !#[trigger] old(self).contains_range(r),
             old(self).wf(),
             perm@.range() === range,
             perm@.snp.wf(),
@@ -842,7 +890,8 @@ impl RawMemPerms {
     )
         requires
             mem1.contains_with_snp_except(range, snp, except1),
-            forall|r| except1.contains(r) ==> mem2.contains_with_snp_except(r, snp, except2),
+            forall|r| #[trigger]
+                except1.contains(r) ==> mem2.contains_with_snp_except(r, snp, except2),
         ensures
             mem1.union(mem2).contains_with_snp_except(range, snp, except2),
     {

@@ -65,6 +65,7 @@ pub proof fn lemma_contains_except_remove(
 {
     let newrange = ranges.remove(toremove);
     assert forall|r2|
+        #![trigger ranges_disjoint(newrange, r2)]
         (inside_range(r2, r) && ranges_disjoint(newrange, r2) && r2.1
             > 0) implies memperm.contains_default_mem(r2) by {
         assert(ranges_disjoint(newrange.insert(toremove), r2));
