@@ -727,9 +727,7 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
 }
 
 pub broadcast group group_linkedlist_default {
-    LinkedList::<u8>::axiom_default,
-    LinkedList::<u32>::axiom_default,
-    LinkedList::<u64>::axiom_default,
+    LinkedList::<_>::axiom_default,
 }
 
 } // verus!
