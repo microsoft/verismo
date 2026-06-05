@@ -552,7 +552,7 @@ impl<T: MemRangeInterface> MemRangeSeqInterface for Seq<T>
             if self.to_aligned_ranges_internal().contains(v) {
                 assert (self.has_aligned_ranges_internal(v));
                 let i = choose |i: int| 0 <= i && i < self.len() &&
-                    self[i].spec_aligned_range() === v &&
+                    (#[trigger] self[i].spec_aligned_range()) === v &&
                     self[i].spec_range().1 != 0;
                 assert(self[i].spec_aligned_range() === v);
                 assert(v.1 != 0);
@@ -572,7 +572,7 @@ impl<T: MemRangeInterface> MemRangeSeqInterface for Seq<T>
             if self.to_aligned_ranges_internal().contains(v) {
                 assert (self.has_aligned_ranges_internal(v));
                 let i = choose |i: int| 0 <= i && i < self.len() &&
-                    self[i].spec_aligned_range() === v && self[i].spec_range().1 != 0;
+                    (#[trigger] self[i].spec_aligned_range()) === v && self[i].spec_range().1 != 0;
                 assert(self[i].spec_aligned_range() === v);
                 assert(v.1 != 0);
                 assert(0 <= i && i < self.len());
@@ -586,9 +586,9 @@ impl<T: MemRangeInterface> MemRangeSeqInterface for Seq<T>
 
             if self.to_aligned_ranges_internal2().contains(v) {
                 assert (exists |i: int| 0<= i && i < self.len() &&
-                to_page_aligned_range_fn()(self[i].spec_range()) === v);
+                (#[trigger] to_page_aligned_range_fn()(self[i].spec_range())) === v);
                 let i = choose |i: int| 0 <= i && i < self.len() &&
-                to_page_aligned_range_fn()(self[i].spec_range()) === v;
+                (#[trigger] to_page_aligned_range_fn()(self[i].spec_range())) === v;
                 assert(to_page_aligned_range_fn()(self[i].spec_range()) === v);
                 assert(to_page_aligned_range_fn()(self[i].spec_range()) === self[i].spec_aligned_range());
                 assert(self.to_aligned_ranges_internal().contains(v));
@@ -602,7 +602,7 @@ impl<T: MemRangeInterface> MemRangeSeqInterface for Seq<T>
         by {
             if self.to_valid_ranges_internal().contains(v) {
                 let i = choose |i: int| 0 <= i && i < self.len() &&
-                    self[i].spec_range() === v;
+                    (#[trigger] self[i].spec_range()) === v;
                 assert(self[i].spec_range() === v);
                 assert(v.1 != 0);
                 assert(self.to_valid_ranges_internal().contains(self[i].spec_range()));
@@ -670,11 +670,11 @@ pub open spec fn format_range_ensures<T: MemRangeInterface>(ret_seq: Seq<T>, pre
     &&& (wi <= ri <= n)
     &&& (ri == n) ==> (ret_seq.to_valid_ranges() === prev.to_valid_ranges())
     &&& mem_range_formatted(ret_seq)
-    &&& forall |i| 0 <= i < wi as int ==> is_format_entry(ret_seq[i], prev)
+    &&& forall |i| 0 <= i < wi as int ==> (#[trigger] is_format_entry(ret_seq[i], prev))
 }
 
 pub open spec fn is_format_entry<T: MemRangeInterface>(entry: T, oldself: Seq<T>) -> bool {
-    &&& (exists |j| entry === oldself[j].spec_set_range(entry.spec_real_range()) &&
+    &&& (exists |j| entry === (#[trigger] oldself[j].spec_set_range(entry.spec_real_range())) &&
                     0 <= j && j < oldself.len())
     //&&& entry.spec_real_range().0.is_constant()
     //&&& entry.spec_real_range().1.is_constant()
@@ -708,7 +708,10 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N> {
                 old(self)@.take(len as int),
                 ret_lens.0 as nat,
             ),
-            forall|i: int| (ret_lens.1 as int) <= i < self@.len() ==> old(self)@.contains(self@[i]),
+            forall|i: int|
+                (ret_lens.1 as int) <= i < self@.len() ==> (#[trigger] old(self)@.contains(
+                    self@[i],
+                )),
     {
         let n = len;
         if n == 0 {
@@ -743,7 +746,7 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N> {
         proof {
             seq_to_multi_set_to_set(self@.take(n as int));
             assert(self@.take(n as int).to_set() =~~= oldseq.to_set());
-            assert forall|e| self@.take(n as int).to_set().contains(e) implies (
+            assert forall|e| (#[trigger] self@.take(n as int).to_set().contains(e)) implies (
             e.spec_real_range().0.is_constant() && e.spec_real_range().1.is_constant()) by {
                 assert(oldseq.to_set().contains(e));
             }
@@ -793,9 +796,10 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N> {
                 speclt === range_speclt::<T>(),
                 forall|i| 0 <= i < (n as int) ==> (#[trigger] self@[i]).self_wf(),
                 forall|i: int| 0 <= i < (n as int) ==> prev[i] === prevself[i],
-                forall|i: int| (wi as int) <= i < self@.len() ==> self@[i] === prevself[i],
+                forall|i: int|
+                    (wi as int) <= i < self@.len() ==> self@[i] === (#[trigger] prevself[i]),
                 forall|e|
-                    self@.take(n as int).to_set().contains(e) ==> (
+                    (#[trigger] self@.take(n as int).to_set().contains(e)) ==> (
                     e.spec_real_range().0.is_constant() && e.spec_real_range().1.is_constant()),
                 seq_is_sorted(prev, speclt),
                 seq_is_sorted(self@.take(wi as int), speclt),
@@ -809,19 +813,19 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N> {
                 remap.len() == wi as int,
                 forall|i| 0 <= i < remap.len() ==> 0 <= #[trigger] remap[i] < (ri as int),
                 forall|i|
-                    0 <= i < (wi as int) ==> self@[i] === prev[remap[i]].spec_set_range(
-                        self@[i].spec_real_range(),
-                    ),
+                    0 <= i < (wi as int) ==> (#[trigger] self@[i])
+                        === prev[remap[i]].spec_set_range(self@[i].spec_real_range()),
             ensures
                 wi.is_constant(),
                 ri.is_constant(),
                 forall|i| 0 <= i < (n as int) ==> (#[trigger] self@[i]).self_wf(),
                 forall|e|
-                    self@.take(n as int).to_set().contains(e) ==> (
+                    (#[trigger] self@.take(n as int).to_set().contains(e)) ==> (
                     e.spec_real_range().0.is_constant() && e.spec_real_range().1.is_constant()),
                 (wi as int) <= (ri as int) <= (n as int),
-                forall|i: int| (wi as int) <= i < (n as int) ==> self@[i] === prev[i],
-                forall|i: int| (wi as int) <= i < self@.len() ==> self@[i] === prevself[i],
+                forall|i: int| (wi as int) <= i < (n as int) ==> self@[i] === (#[trigger] prev[i]),
+                forall|i: int|
+                    (wi as int) <= i < self@.len() ==> self@[i] === (#[trigger] prevself[i]),
                 self@.take(wi as int).to_valid_ranges() =~~= prev.take(ri as int).to_valid_ranges(),
                 seq_is_sorted(self@.take(wi as int), speclt),
                 forall|i: int| 0 <= i < (wi as int) ==> (#[trigger] self@[i]).wf_range(),
@@ -835,7 +839,7 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N> {
                 remap.len() == wi as int,
                 forall|i| 0 <= i < remap.len() ==> 0 <= #[trigger] remap[i] < (ri as int),
                 forall|i|
-                    0 <= i < wi as int ==> self@[i] === prev[remap[i]].spec_set_range(
+                    0 <= i < wi as int ==> (#[trigger] self@[i]) === prev[remap[i]].spec_set_range(
                         self@[i].spec_real_range(),
                     ),
             decreases n - ri,
@@ -889,7 +893,7 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N> {
                                 if s1.contains(r) {
                                     assert(r.1 != 0);
                                     let i = choose|i|
-                                        prev_sub[i].spec_range() === r && 0 <= i && i
+                                        (#[trigger] prev_sub[i].spec_range()) === r && 0 <= i && i
                                             < prev_sub.len();
                                     assert(prev_sub[i].spec_range() === r);
                                     assert(0 <= i && i < prev_next_sub.len());
@@ -899,8 +903,8 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N> {
                                 if s2.contains(r) {
                                     assert(r.1 != 0);
                                     let i = choose|i|
-                                        prev_next_sub[i].spec_range() === r && 0 <= i && i
-                                            < prev_next_sub.len();
+                                        (#[trigger] prev_next_sub[i].spec_range()) === r && 0 <= i
+                                            && i < prev_next_sub.len();
                                     assert(prev_next_sub[i].spec_range() === r);
                                     assert(0 <= i && i < prev_next_sub.len());
                                     assert(i != ri as int);
@@ -930,7 +934,7 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N> {
                         n as int,
                     ));
                 }
-                assert forall|i| 0 <= i < wi as int implies self@[i]
+                assert forall|i| 0 <= i < wi as int implies (#[trigger] self@[i])
                     === prev[remap[i]].spec_set_range(self@[i].spec_real_range()) by {
                     assert(self@[i] === prev_self[i]);
                 }
@@ -980,7 +984,7 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N> {
                 remap = remap.push(ri as int - 1);
                 assert(remap.len() == wi as int);
                 assert(prev[remap[wi as int - 1]] === v);
-                assert forall|i| 0 <= i < wi as int implies self@[i]
+                assert forall|i| 0 <= i < wi as int implies (#[trigger] self@[i])
                     === prev[remap[i]].spec_set_range(self@[i].spec_real_range()) by {
                     if i < wi as int - 1 {
                         assert(self@[i] === prev_self[i]);
@@ -989,7 +993,7 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N> {
                 }
                 let newseq = self@;
                 assert(n <= newseq.len());
-                assert forall|e| newseq.take(n as int).to_set().contains(e) implies (
+                assert forall|e| (#[trigger] newseq.take(n as int).to_set().contains(e)) implies (
                 e.spec_real_range().0.is_constant() && e.spec_real_range().1.is_constant()) by {
                     let newsub = newseq.take(n as int);
                     assert(newsub.to_set().contains(e));
@@ -1043,7 +1047,7 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N> {
                 ).to_valid_ranges());
             }
             assert forall|i| 0 <= i < wi as int implies is_format_entry(
-                self@[i],
+                #[trigger] self@[i],
                 oldself.take(n as int),
             ) by {
                 let k = remap[i];
@@ -1058,16 +1062,16 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N> {
                 let j = choose|j| oldself[j] === prev[k] && 0 <= j < (n as int);
                 assert(oldself[j] === prev[k]);
                 assert(exists|j|
-                    0 <= j < (n as int) && self@[i] === oldself.take(n as int)[j].spec_set_range(
-                        self@[i].spec_real_range(),
-                    )) by {
+                    0 <= j < (n as int) && self@[i] === (#[trigger] oldself.take(
+                        n as int,
+                    )[j].spec_set_range(self@[i].spec_real_range()))) by {
                     assert(0 <= j < (n as int));
                     assert(self@[i] === oldself[j].spec_set_range(self@[i].spec_real_range()));
                 }
                 assert(is_format_entry(self@[i], oldself.take(n as int)));
             }
             assert forall|i: int| (wi as int) <= i < self@.len() implies oldself.contains(
-                self@[i],
+                #[trigger] self@[i],
             ) by {
                 assert(prevself[i] === self@[i]);
                 assert(prevself.contains(self@[i]));
