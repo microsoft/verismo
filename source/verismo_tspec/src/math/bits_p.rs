@@ -274,6 +274,7 @@ macro_rules! mask_proof_for_bits_internal {
             bit64_shl_auto();
             bit64_and_auto();
             bit64_or_auto();
+            // Required to prove slow_bit_mask64_mod_auto quantified mask postconditions.
             $(
             assert(forall |a: u64| #![trigger (a & BIT_MASK!($N))] (a & BIT_MASK!($N)) == a % (1u64 << $N)) by(bit_vector);
             assert(forall |a: u64| #![trigger (a|BIT_MASK!($N))] (a|BIT_MASK!($N)) == add(sub(a, (a&BIT_MASK!($N))), BIT_MASK!($N))) by(bit_vector);
@@ -312,6 +313,7 @@ macro_rules! bit_or_properties {
             ensures
                 $sname(a, b, (a|b)),
         {
+            // Required to prove bit_or_properties helper postcondition.
             assert($sname(a, b, (a|b))) by(bit_vector);
         }
 
@@ -325,6 +327,7 @@ macro_rules! bit_or_properties {
             assert forall|a: $typ, b: $typ| $sname(a, b, #[trigger](a|b)) by {
                 $pname(a, b);
             }
+            // Required to prove bit_or_auto identity/max quantified postconditions.
             assert forall |a: u64|
                 #[trigger] (a|a) == a
             by {
@@ -469,6 +472,7 @@ verus! {
     ensures
         bits_p::spec_bit_set(val, b) > 0
     {
+        // Required to prove bit_set_non_zero postcondition from bit index bounds.
         assert(bits_p::spec_bit_set(val, b) > 0) by (bit_vector)
         requires
             0 <= b < 64;
@@ -488,11 +492,10 @@ verus!{
         let ret = (b >> a);
         #(
             if a == N {
+                // Required to prove shift/division relation for each concrete N.
                 assert(ret == b / (1u64 << N)) by(bit_vector)
                 requires ret == (b >> N);
-                assert(b <= u64::MAX);
                 bit64_shl_values_auto();
-                assert(b / POW2!(N) * POW2!(N) <= u64::MAX);
             }
         )*
         ret
@@ -511,14 +514,11 @@ seq_macro::seq!(N in 0..64 {
         {
             #(
                  if a == N {
+                    // Required to connect concrete left shift to multiplication.
                     assert((b<<N) == mul(b, (1u64 << N))) by(bit_vector);
                     bit64_shl_values_auto();
-                    assert(b * (1u64 << N) <= u64::MAX);
-                    assert(mul(b, POW2!(N)) == b * POW2!(N));
-                    assert((b<<N) == b * (1u64 << N));
                 }
             )*
-            assert((b<<a) == b * (1u64 << a));
 
         }
     }
@@ -532,6 +532,7 @@ verus!{
     ensures
         a & sub(b, 1) == a % b
     {
+        // Required to prove bit64 and/mod equivalence for pow2 modulus.
         #(
             assert(a & sub(POW2!(N), 1) == a % POW2!(N)) by(bit_vector);
         )*
@@ -543,6 +544,7 @@ verus!{
     ensures
         a & sub(b, 1) == a % b
     {
+        // Required to prove usize and/mod equivalence for pow2 modulus.
         #(
             assert(a & sub(POW2!(N) as usize, 1) == a % (POW2!(N)  as usize)) by(bit_vector);
         )*
