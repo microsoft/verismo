@@ -98,6 +98,7 @@ impl HwSnpMemAttr {
     // False -> Never return
     pub open spec fn valid_memmap(self, start: int, size: nat) -> bool {
         forall|vaddr|
+            #![trigger self.guestmap[vaddr]]
             start <= vaddr < start + size ==> self.guestmap[vaddr]
                 == self.rmpmap[self.sysmap[self.guestmap[vaddr]]]
     }
@@ -150,6 +151,7 @@ impl HwSnpMemAttr {
                 let memop: MemOp<GuestVir> = choose|memop: MemOp<GuestVir>|
                     memop is RmpOp && memop->RmpOp_0 is RmpAdjust;
                 let op = choose|op: Archx64Op|
+                    #![trigger op.to_memid()]
                     op.to_memid() === memid && op is MemOp && op->MemOp_0 === memop;
                 let (trap, trans) = Archx64::handle_mem_err_fn(MemError::from_err(memerr, memop));
                 if !trap {
@@ -197,6 +199,7 @@ impl HwSnpMemAttr {
                 let memop: MemOp<GuestVir> = choose|memop: MemOp<GuestVir>|
                     memop is RmpOp && memop->RmpOp_0 is Pvalidate;
                 let op = choose|op: Archx64Op|
+                    #![trigger op.to_memid()]
                     op.to_memid() === memid && op is MemOp && op->MemOp_0 === memop;
                 let (trap, trans) = Archx64::handle_mem_err_fn(MemError::from_err(memerr, memop));
                 if !trap {

@@ -271,12 +271,12 @@ verus! {
 
 pub open spec fn osmem_wf(osmem: Seq<OSMemEntry>) -> bool {
     &&& osmem.is_constant()
-    &&& forall|i| 0 <= i < osmem.len() ==> osmem[i].wf()
+    &&& forall|i| 0 <= i < osmem.len() ==> #[trigger] osmem[i].wf()
 }
 
 pub open spec fn osmem_wf_kern_cleared(osmem: Seq<OSMemEntry>) -> bool {
     &&& osmem.is_constant()
-    &&& forall|i| 0 <= i < osmem.len() ==> osmem[i].wf_kern_cleared()
+    &&& forall|i| 0 <= i < osmem.len() ==> #[trigger] osmem[i].wf_kern_cleared()
 }
 
 pub fn osmem_adjust(
@@ -435,7 +435,8 @@ pub fn osmem_add(
         ).set_vmsa(0);
         proof {
             assert(start_page.spec_valid_pn_with(npages as nat));
-            assert forall|i| old_page_perms.contains_key(i) implies spec_rmpadjmem_requires_at(
+            assert forall|i| #[trigger]
+                old_page_perms.contains_key(i) implies spec_rmpadjmem_requires_at(
                 old_page_perms[i],
                 i,
                 attr@,
@@ -461,7 +462,7 @@ pub fn osmem_add(
     };
     osmem.push(entry);
     proof {
-        assert forall|i| 0 <= i < osmem.len() implies osmem[i].wf() by {
+        assert forall|i| 0 <= i < osmem.len() implies #[trigger] osmem[i].wf() by {
             if i == osmem.len() - 1 {
                 assert forall|k| page_perms.contains_key(k) implies spec_contains_page_perm(
                     page_perms,
@@ -620,6 +621,7 @@ pub fn osmem_check(osmem: &Vec<OSMemEntry>, ppage: usize, osperm: OSMemPerm) -> 
         osmem_wf(osmem@),
     ensures
         ret ==> (osperm.value == 0 || exists|i|
+            #![trigger spec_ensure_check_osperm(ppage as int, osperm, osmem[i])]
             0 <= i < osmem.len() && spec_ensure_check_osperm(ppage as int, osperm, osmem[i])),
 {
     match osmem_find(osmem, ppage) {
@@ -787,7 +789,7 @@ pub fn _osmem_add_ram_from_allocator(
                     assert(aligned_perm@.bytes().is_constant());
                     assert(page_perms[i]@.bytes().is_constant()) by {
                         let b = page_perms[i]@.bytes();
-                        assert forall|k| 0 <= k < b.len() implies b[k].is_constant() by {
+                        assert forall|k| 0 <= k < b.len() implies #[trigger] b[k].is_constant() by {
                             let sub = aligned_perm@.bytes().subrange(
                                 offset,
                                 offset + PAGE_SIZE as int,
@@ -1252,6 +1254,7 @@ pub fn lock_kernel(
     requires
         osmem_wf(old(osmem)@),
         forall|i|
+            #![trigger (ranges@[i].0 as int).spec_valid_pn_with(ranges@[i].1 as nat)]
             0 <= i < ranges@.len() ==> (ranges@[i].0 as int).spec_valid_pn_with(
                 ranges@[i].1 as nat,
             ),
@@ -1267,6 +1270,7 @@ pub fn lock_kernel(
         invariant
             osmem_wf(osmem@),
             forall|i|
+                #![trigger (ranges@[i].0 as int).spec_valid_pn_with(ranges@[i].1 as nat)]
                 0 <= i < ranges@.len() ==> (ranges@[i].0 as int).spec_valid_pn_with(
                     ranges@[i].1 as nat,
                 ),

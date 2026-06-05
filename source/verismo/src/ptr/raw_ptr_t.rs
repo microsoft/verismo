@@ -89,6 +89,8 @@ pub fn mem_set_zeros2(
     ensures
         perms.dom() =~~= old(perms).dom(),
         forall|i|
+            #![trigger old(perms)[i]@]
+            #![trigger perms[i]@]
             (addr as int).to_page() <= i < ((addr + size) as int).to_page() ==> spec_set_zeros(
                 old(perms)[i]@,
                 perms[i]@,
@@ -133,7 +135,7 @@ pub fn mem_copy_to_pages(
             (dst_addr as int).to_page() <= i < ((dst_addr + size) as int).to_page() ==> old(
                 dst_perm,
             ).contains_key(i),
-        forall|i|
+        forall|i| #[trigger]
             old(dst_perm).contains_key(i) ==> old(dst_perm)[i]@.wf_not_null(
                 ((i as int).to_addr(), PAGE_SIZE as nat),
             ),

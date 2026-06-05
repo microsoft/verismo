@@ -57,6 +57,7 @@ pub open spec fn is_richos_vmsa_box(vmsa: VBox<VmsaPage>) -> bool {
 pub open spec fn richos_vmsa_invfn() -> spec_fn(Vec<Option<VBox<VmsaPage>>>) -> bool {
     |vec: Vec<Option<VBox<VmsaPage>>>|
         forall|i|
+            #![trigger vec[i]]
             0 <= i < vec@.len() ==> (vec[i] is Some ==> is_richos_vmsa_box(
                 #[trigger] vec[i]->Some_0,
             ))
