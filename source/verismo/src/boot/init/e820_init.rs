@@ -199,7 +199,8 @@ proof fn lemma_validated_range_disjoint_e820(
         toval_range,
         r,
     ) by {
-        let k = choose|k: int| (#[trigger] e820[k]).spec_aligned_range() === r && 0 <= k && k < e820.len();
+        let k = choose|k: int|
+            (#[trigger] e820[k]).spec_aligned_range() === r && 0 <= k && k < e820.len();
         assert(e820[k].spec_aligned_range() === r);
         assert(pre_validated.contains(r));
     }

@@ -40,7 +40,7 @@ pub fn get_hv_mem_count(arr: &HyperVMemMapTable) -> (ret: usize_t)
         decreases len - ret,
     {
         if arr.index(ret).numpages.reveal_value() == 0 {
-            break ;
+            break;
         }
         ret = ret + 1usize;
     }
@@ -73,12 +73,7 @@ pub fn fmt_hvparam<'a>(hv_param: &'a mut HvParamTable, n: usize_t) -> (ret: Opti
         n < old(hv_param).mem_table@.len() ==> old(hv_param).mem_table@[n as int].numpages@.val
             == 0,
     ensures
-        ret is Some ==> fmt_hvparam_ensures(
-            *old(hv_param),
-            *hv_param,
-            n as nat,
-            ret->Some_0,
-        ),
+        ret is Some ==> fmt_hvparam_ensures(*old(hv_param), *hv_param, n as nat, ret->Some_0),
 {
     let ghost hvslice = hv_param.mem_table@.subrange(0, n as int);
     proof {

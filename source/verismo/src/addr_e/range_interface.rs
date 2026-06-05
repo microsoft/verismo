@@ -946,7 +946,7 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N> {
             }
             if entry.size().reveal_value() == 0 {
                 ri = ri + 1;
-                continue ;
+                continue;
             }
             let start = entry.start();
             let size = entry.size();
@@ -970,7 +970,7 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N> {
                     assume(prev_entry.spec_cmp_max_requires());
                 }
                 if start.reveal_value() < prev_entry.end().reveal_value() {
-                    break ;
+                    break;
                 }
             }
             self.update(wi, entry);

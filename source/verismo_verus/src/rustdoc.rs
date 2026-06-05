@@ -27,7 +27,6 @@
 //
 // The other type, 'modes', is a bit more complicated: the value is a JSON blob with
 // some data explaining the function mode, param modes, and return mode.
-
 use std::iter::FromIterator;
 
 use proc_macro2::{Span, TokenTree};

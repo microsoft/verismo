@@ -25,7 +25,7 @@ pub fn fill_vec<T>(vec: &mut Vec<Option<T>>, n: usize)
         forall|i| old(vec).len() <= i < n ==> vec[i] === None,
 {
     if vec.len() >= n {
-        return ;
+        return;
     }
     let ghost oldvec = *vec;
     while vec.len() < n
@@ -69,7 +69,7 @@ fn create_lock_entries(priv_req: &LockKernReq) -> (ret: Vec<(usize, usize)>)
         let end: usize = end.into();
         let start: usize = start.into();
         if end <= start || !end.check_valid_pn(0) {
-            break ;
+            break;
         }
         entries.push((start, end - start));
         i = i + 1;

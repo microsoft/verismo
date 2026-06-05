@@ -19,6 +19,7 @@ pub type PagePerm = Set<Perm>;
 // via a local trait, which the orphan rule does allow.
 pub trait PagePermInt: Sized {
     spec fn as_int(&self) -> int;
+
     spec fn from_int(val: int) -> Self;
 }
 

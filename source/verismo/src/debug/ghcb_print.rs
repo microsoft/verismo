@@ -78,7 +78,7 @@ fn int2bytes(input: u64, base: u64) -> (ret: (Array<u8_t, 66>, usize))
             i == 64 ==> n == 0,
             n == 0 ==> i > 0,
             forall|k| 0 <= k < i ==> ascii_is_num(bytes@[k]),
-        decreases 64 - i
+        decreases 64 - i,
     {
         proof {
             assert(n as u64 / base as u64 <= n as u64 / 2) by (nonlinear_arith)
@@ -136,7 +136,7 @@ fn bytes2u64(s: &[u8], start: usize_t, size: usize_t) -> (ret: u64_t)
             start + size <= s@.len(),
             size < 8,
             s@.len() < u64::MAX,
-        decreases start + size - i
+        decreases start + size - i,
     {
         let c: u64 = (*slice_index_get(s, i)) as u64;
         let offset = (i - start) as u64;
@@ -163,7 +163,7 @@ fn str2u64(s: &StrSlice, start: usize_t, size: usize_t) -> (ret: u64_t)
             size < 8,
             s.is_ascii(),
             s@.len() < u64::MAX,
-        decreases start + size - i
+        decreases start + size - i,
     {
         let c: u64 = s.as_bytes()[i] as u64;
         let offset = (i - start) as u64;
@@ -241,7 +241,7 @@ fn ghcb_prints_with_lock2<'a>(
             snpcore_console_wf(*snpcore, console),
             snpcore.only_reg_coremode_updated(prevcore, set![GHCB_REGID()]),
             console@.only_val_updated(oldconsole),
-        decreases n - index
+        decreases n - index,
     {
         let len = min(6, n as u64 - index as u64) as usize;
         let val: u64_t = GHCB_HV_DEBUG;
@@ -336,7 +336,7 @@ fn ghcb_print_bytes_with_lock2<'a>(
             snpcore_console_wf(*snpcore, console),
             snpcore.only_reg_coremode_updated(prevcore, set![GHCB_REGID()]),
             console@.only_val_updated(oldconsole@),
-        decreases n - index
+        decreases n - index,
     {
         let len = min(6, n as u64 - index as u64) as usize;
         let val: u64_t = GHCB_HV_DEBUG;
@@ -504,7 +504,11 @@ impl<T: ?Sized + VPrint> VPrintLock for T {
         let tracked console_perm = console.trusted_into();
         proof {
             // early_print2 returns the matching updated console permission for release.
-            assume(console_ref.unlock_requires(cs.snpcore.coreid@.cpu, consolelock@, console_perm@));
+            assume(console_ref.unlock_requires(
+                cs.snpcore.coreid@.cpu,
+                consolelock@,
+                console_perm@,
+            ));
         }
         console_ref.release(
             Tracked(&mut consolelock),

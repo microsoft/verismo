@@ -117,7 +117,7 @@ impl SpinLock {
         loop {
             let h: u64 = self.holder.load(Ordering::Acquire);
             if h == ticket {
-                break ;
+                break;
             }
         }
         true

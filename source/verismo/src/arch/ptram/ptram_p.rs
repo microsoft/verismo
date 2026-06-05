@@ -112,9 +112,7 @@ impl GuestPTRam {
             gvn.is_valid(),
             self.map_entry_gpa_ok(memid, gvn, lvl) is Some,
         ensures
-            memtype(memid, self.map_entry_gpa_ok(memid, gvn, lvl)->Some_0.to_page()).is_pt(
-                lvl,
-            ),
+            memtype(memid, self.map_entry_gpa_ok(memid, gvn, lvl)->Some_0.to_page()).is_pt(lvl),
             self.map_entry_gpa_ok(memid, gvn, lvl)->Some_0.to_page().is_valid(),
     {
         self.lemma_map_entry_gpa_ok_valid(memid, gvn, lvl);
@@ -168,6 +166,7 @@ impl GuestPTRam {
             new_pt.inv(memid),
     {
         broadcast use {GuestPTRam::axiom_spec_new, VRamDB::axiom_spec_new};
+
         reveal(VRamDB::op);
         old_pt.spec_ram().proof_op_inv_sw(sysmap, memop, memid);
         // Justification: new_pt is old_pt with ram replaced by VRamDB::op result; proof_op_inv_sw
@@ -215,6 +214,7 @@ impl GuestPTRam {
             new_pt.inv_content_ok(memid),
     {
         broadcast use {GuestPTRam::axiom_spec_new, VRamDB::axiom_spec_new};
+
         reveal(GuestPTRam::inv_dom_ok);
         reveal(VRamDB::op);
         let ram = old_pt.spec_ram();
@@ -289,8 +289,7 @@ impl GuestPTRam {
         if old_pt.need_c_bit(memid, gvn) && lvl is L0 {
             reveal(GuestPTRam::inv_content_ok);
             reveal(GuestPTRam::inv_encrypted_priv_mem_ok);
-            assert(old_pt.map_entry_ok(memid, gvn, PTLevel::L0)->Some_0
-                === old_pte->Some_0.view());
+            assert(old_pt.map_entry_ok(memid, gvn, PTLevel::L0)->Some_0 === old_pte->Some_0.view());
             assert(old_pte->Some_0.view().is_encrypted());
         }
     }
@@ -447,6 +446,7 @@ impl GuestPTRam {
             new_pt.inv(memid),
     {
         broadcast use {GuestPTRam::axiom_spec_new, VRamDB::axiom_spec_new};
+
         reveal(GuestPTRam::inv_dom_ok);
         reveal(GuestPTRam::inv_content_ok);
         reveal(VRamDB::op);
@@ -469,11 +469,8 @@ impl GuestPTRam {
             reveal(GuestPTRam::inv_for_identity_map_ok);
             assert forall|gvn: GVN|
                 gvn.is_valid() && new_pt.map_entry_ok(memid, gvn, MAX_PT_LEVEL) is Some implies (
-            #[trigger] new_pt.map_entry_ok(
-                memid,
-                gvn,
-                MAX_PT_LEVEL,
-            ))->Some_0.spec_ppn().value() === gvn.value() by {
+            #[trigger] new_pt.map_entry_ok(memid, gvn, MAX_PT_LEVEL))->Some_0.spec_ppn().value()
+                === gvn.value() by {
                 Self::lemma_write_pte_inv_ppn_enc(
                     old_pt,
                     new_pt,

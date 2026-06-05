@@ -2,7 +2,6 @@
 // `alloc::vec::Vec`. Moved here from `verismo/src/primitives_e/vec.rs` so the
 // orphan rule (both `Vec` and the verus_tspec traits are foreign to verismo)
 // is satisfied. The vbox/MutFnTrait-dependent parts stay in verismo.
-
 use alloc::vec::Vec;
 
 use super::*;

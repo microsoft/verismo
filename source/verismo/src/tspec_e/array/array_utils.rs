@@ -29,7 +29,7 @@ impl<T: Copy, const N: IndexType> Array<T, N> {
         if i == j {
             assert(i as int == j as int);
             assert(self@ === old(self)@);
-            return ;
+            return;
         }
         let x1 = *self.index(i);
         let x2 = *self.index(j);
@@ -62,7 +62,7 @@ impl<T: Copy, const N: IndexType> Array<T, N> {
                 )@[k],
     {
         if end < 1 || start >= end - 1 {
-            return ;
+            return;
         }
         let mut i: usize = start;
         let mut j: usize = end - 1;

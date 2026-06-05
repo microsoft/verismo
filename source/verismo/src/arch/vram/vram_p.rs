@@ -133,12 +133,11 @@ impl VRamDB {
             gpmem === memop.to_mem(),
             memop.to_memid().to_asid() === memid.to_asid() || !memop->Write_1,
         ensures
-            (other.get_enc_bytes_ok(AddrMemID { memid, range: gpmem }) is Some
-                && memop->Write_1) ==> (other.get_enc_bytes_ok(
-                AddrMemID { memid, range: gpmem },
-            )->Some_0 === memop->Write_2),
-            (other.get_enc_bytes_ok(AddrMemID { memid, range: gpmem }) is Some
-                && !memop->Write_1) ==> {
+            (other.get_enc_bytes_ok(AddrMemID { memid, range: gpmem }) is Some && memop->Write_1)
+                ==> (other.get_enc_bytes_ok(AddrMemID { memid, range: gpmem })->Some_0
+                === memop->Write_2),
+            (other.get_enc_bytes_ok(AddrMemID { memid, range: gpmem }) is Some && !memop->Write_1)
+                ==> {
                 other.get_enc_bytes_ok(AddrMemID { memid, range: gpmem }) === self.get_enc_bytes_ok(
                     AddrMemID { memid, range: gpmem },
                 )
@@ -209,8 +208,7 @@ impl VRamDB {
         reveal(VRamDB::op);
         assert(read2 is Some === read1 is Some);
         if read2 is Some {
-            assert forall|i| 0 <= i < gpmem.len() implies read2->Some_0[i]
-                === read1->Some_0[i] by {
+            assert forall|i| 0 <= i < gpmem.len() implies read2->Some_0[i] === read1->Some_0[i] by {
                 if 0 <= i < gpmem.len() {
                     other.proof_read_enc_byte_to_bytes(memid, gpmem, i);
                     self.proof_read_enc_byte_to_bytes(memid, gpmem, i);
@@ -243,8 +241,7 @@ impl VRamDB {
             self.inv_sw(memid),
             self.op(sysmap, memop) is Ok,
             other === &self.op(sysmap, memop).to_result(),
-            (memop.to_memid().to_asid() !== memid.to_asid() && memop->Write_1)
-                || !memop->Write_1,
+            (memop.to_memid().to_asid() !== memid.to_asid() && memop->Write_1) || !memop->Write_1,
         ensures
             other.get_enc_bytes_ok(AddrMemID { memid, range: gpmem }) === self.get_enc_bytes_ok(
                 AddrMemID { memid, range: gpmem },
@@ -259,8 +256,7 @@ impl VRamDB {
         reveal(VRamDB::op);
         assert(read2 is Some === read1 is Some);
         if read2 is Some {
-            assert forall|i| 0 <= i < gpmem.len() implies read2->Some_0[i]
-                === read1->Some_0[i] by {
+            assert forall|i| 0 <= i < gpmem.len() implies read2->Some_0[i] === read1->Some_0[i] by {
                 if 0 <= i < gpmem.len() {
                     other.proof_read_enc_byte_to_bytes(memid, gpmem, i);
                     self.proof_read_enc_byte_to_bytes(memid, gpmem, i);
@@ -327,8 +323,7 @@ impl VRamDB {
             self.inv_sw(memid),
             self.op(sysmap, memop) is Ok,
             other === &self.op(sysmap, memop).to_result(),
-            (memop.to_memid().to_asid() !== memid.to_asid() && memop->Write_1)
-                || !memop->Write_1,
+            (memop.to_memid().to_asid() !== memid.to_asid() && memop->Write_1) || !memop->Write_1,
         ensures
             other.get_enc_byte_ok(memid, gpa) is Some ==> other.get_enc_byte_ok(memid, gpa)
                 === self.get_enc_byte_ok(memid, gpa),
@@ -545,12 +540,15 @@ impl VRamDB {
             (other.get_enc_byte_ok(memid, gpa) is Some && memop->Write_1) ==> (
             other.get_enc_byte_ok(memid, gpa)->Some_0 === memop->Write_2[gpa.value()
                 - memop.to_mem().first().value()]),
-            !(other.get_enc_byte_ok(memid, gpa) is Some && memop->Write_1) ==> (
-            other.get_byte(memop.to_memid(), gpa, memop->Write_1, sysmap)->Some_0
-                === memop->Write_2[gpa.value() - memop.to_mem().first().value()]),
+            !(other.get_enc_byte_ok(memid, gpa) is Some && memop->Write_1) ==> (other.get_byte(
+                memop.to_memid(),
+                gpa,
+                memop->Write_1,
+                sysmap,
+            )->Some_0 === memop->Write_2[gpa.value() - memop.to_mem().first().value()]),
             (!(other.get_enc_byte_ok(memid, gpa) is Some) && !memop->Write_1) ==> {
-                other.get_byte(memid, gpa, false, sysmap)->Some_0
-                    === memop->Write_2[gpa.value() - memop.to_mem().first().value()]
+                other.get_byte(memid, gpa, false, sysmap)->Some_0 === memop->Write_2[gpa.value()
+                    - memop.to_mem().first().value()]
             },
             !memop->Write_1 ==> {
                 other.get_enc_byte_ok(memid, gpa) === self.get_enc_byte_ok(memid, gpa)
@@ -796,11 +794,7 @@ impl VRamDB {
                 let spn = sysmap.translate(rmpop.get_gpn());
                 if spn is Some {
                     rmp_proof_inv_sw(&self.spec_rmp(), rmpop.set_spn(spn->Some_0), memid);
-                    rmp_proof_inv_memid_int(
-                        &self.spec_rmp(),
-                        rmpop.set_spn(spn->Some_0),
-                        memid,
-                    );
+                    rmp_proof_inv_memid_int(&self.spec_rmp(), rmpop.set_spn(spn->Some_0), memid);
                 }
             },
             _ => {},
@@ -835,11 +829,7 @@ impl VRamDB {
             memop->Write_1 === enc,  // same enc
             self.op(sysmap, memop) is Ok,
         ensures
-            memop->Write_2 === self.op(sysmap, memop).to_result().get_bytes(
-                rgpa_id,
-                enc,
-                sysmap,
-            ),
+            memop->Write_2 === self.op(sysmap, memop).to_result().get_bytes(rgpa_id, enc, sysmap),
     {
         reveal(VRamDB::op);
         reveal(VRamDB::op_write);

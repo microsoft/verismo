@@ -72,13 +72,16 @@ pub use vstd::string::*;
 pub type StrSlice<'a> = &'a str;
 
 verus! {
+
 #[inline(always)]
 pub const fn new_strlit<'a>(s: &'a str) -> (ret: &'a str)
-    ensures ret == s,
+    ensures
+        ret == s,
 {
     s
 }
-}
+
+} // verus!
 pub use vstd::view::*;
 pub use wellformed::*;
 

@@ -19,7 +19,13 @@ verismo_simple! {
 
 verus! {
 
-broadcast use {SecType::axiom_spec_new, SecType::axiom_ext_equal, SnpPPtr::axiom_id_equal, axiom_size_from_cast_bytes, axiom_size_from_cast_secbytes_def};
+broadcast use {
+    SecType::axiom_spec_new,
+    SecType::axiom_ext_equal,
+    SnpPPtr::axiom_id_equal,
+    axiom_size_from_cast_bytes,
+    axiom_size_from_cast_secbytes_def,
+};
 
 pub tracked struct VSnpPointsToNode<T> {
     pub next: SnpPointsTo<usize_t>,
@@ -401,8 +407,7 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
             proof {
                 assert(self.ptrs@ === old(self).ptrs@.drop_last());
                 assert(ret->Some_0.0.id() == ret->Some_0.1@@.pptr());
-                assert(ret->Some_0.1@ === old(self).perms@[(old(self).ptrs@.len()
-                    - 1) as nat]);
+                assert(ret->Some_0.1@ === old(self).perms@[(old(self).ptrs@.len() - 1) as nat]);
             }
             // Strange: Need to call wf and is_constant explicitly to ensure tracked is true.
             assert(ret->Some_0.1.wf());
@@ -560,7 +565,11 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
                         keep_idx = keep_idx0.remove(i);
                         removed_idx = removed_idx0.push(removed_original_idx);
                         assert(is_subseq_via_index(self@, old(self)@, keep_idx));
-                        assert(is_subseq_via_index(removeditems.push(cur_ptr_perm), old(self)@, removed_idx));
+                        assert(is_subseq_via_index(
+                            removeditems.push(cur_ptr_perm),
+                            old(self)@,
+                            removed_idx,
+                        ));
                     }
                     assert(removed_idx.len() > 0);
                     assert(cur_ptr.id() === old(self)@[removed_idx.last()].ptr.id());
@@ -636,11 +645,9 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
             ret is Some ==> self@ =~~= old(self)@.remove(i),
             (old(self)@.len() > 0) ==> self@.len() + 1 == old(self)@.len(),
             (old(self)@.len() == 0) ==> ret is None,
-            (old(self)@.len() > 0) ==> ret === Some((cur, ret->Some_0.1))
-                && ret->Some_0.1@ === old(self).perms@[i as nat] && old(self).spec_valid_item(
-                cur,
-                ret->Some_0.1@,
-            ),
+            (old(self)@.len() > 0) ==> ret === Some((cur, ret->Some_0.1)) && ret->Some_0.1@ === old(
+                self,
+            ).perms@[i as nat] && old(self).spec_valid_item(cur, ret->Some_0.1@),
     {
         if self.is_empty() {
             return None;

@@ -88,6 +88,7 @@ pub proof fn proof_field_set_at<
     let fb: SecSeqByte = f.vspec_cast_to();
     let end = (offset + spec_size::<F>()) as int;
     broadcast use {axiom_size_from_cast_secbytes_def, axiom_size_from_cast_bytes};
+
     axiom_size_from_cast_secbytes_def(prev_val);
     axiom_size_from_cast_secbytes_def(val);
     axiom_size_from_cast_secbytes_def(f);
@@ -120,6 +121,7 @@ pub broadcast proof fn proof_field_set_constant<
     let fb: SecSeqByte = f.vspec_cast_to();
     let end = (offset + spec_size::<F>()) as int;
     broadcast use {axiom_size_from_cast_secbytes_def, axiom_size_from_cast_bytes};
+
     axiom_size_from_cast_secbytes_def(prev_val);
     axiom_size_from_cast_secbytes_def(val);
     axiom_size_from_cast_secbytes_def(f);

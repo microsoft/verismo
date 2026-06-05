@@ -8,7 +8,12 @@ use crate::ptr::*;
 
 verus! {
 
-broadcast use {SecType::axiom_spec_new, SecType::axiom_ext_equal, SnpPPtr::axiom_id_equal, axiom_size_from_cast_bytes};
+broadcast use {
+    SecType::axiom_spec_new,
+    SecType::axiom_ext_equal,
+    SnpPPtr::axiom_id_equal,
+    axiom_size_from_cast_bytes,
+};
 
 pub const MIN_ADDR_ALIGN: usize = 8usize;
 
@@ -415,9 +420,7 @@ impl BuddyAllocator {
         ensures
             self@.inv(),
             ret is Some ==> {
-                ret->Some_0.1@@.wf_freemem(
-                    (ret->Some_0.0 as int, spec_bit64(bucket as u64) as nat),
-                )
+                ret->Some_0.1@@.wf_freemem((ret->Some_0.0 as int, spec_bit64(bucket as u64) as nat))
             },
             ret is Some ==> self@.spec_pop_or_push_element(old(self)@, bucket as nat),
             ret is None ==> {
@@ -542,8 +545,10 @@ impl BuddyAllocator {
             self@.inv(),
             ret is Some ==> alloc_valid_ptr(size, ret->Some_0),
             ret is Some ==> ret->Some_0.is_constant(),
-            ret is Some ==> (spec_align_up(ret->Some_0.0 as int, align as int), size as nat)
-                === (ret->Some_0.0 as int, size as nat),
+            ret is Some ==> (spec_align_up(ret->Some_0.0 as int, align as int), size as nat) === (
+                ret->Some_0.0 as int,
+                size as nat,
+            ),
     {
         let old_size = size;
         let mut size = size;
@@ -673,7 +678,7 @@ impl BuddyAllocator {
             }
             if let Some(addr_with_perm) = self.pop(bucket) {
                 ret = Some(addr_with_perm);
-                break ;
+                break;
             }
             i = i + 1;
         }
@@ -864,7 +869,7 @@ impl BuddyAllocator {
                 assert(removed@.len() == 0);
                 assert(prev_list =~~= list);
                 assert(self@.free_lists =~~= prev_self.free_lists);
-                break ;
+                break;
             }
         }
         self.push(current_bucket, current_addr, Tracked(current_perm));
@@ -913,7 +918,7 @@ impl BuddyAllocator {
             assert(spec_size::<Node<()>>() == MIN_ADDR_ALIGN);
         }
         if (current_start >= current_end) {
-            return ;
+            return;
         }
         let tracked (mut removed_start_perm, mut perm2) = perm.trusted_split(
             (current_start - oldstart) as nat,

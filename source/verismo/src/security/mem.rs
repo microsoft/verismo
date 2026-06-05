@@ -567,9 +567,8 @@ pub fn osmem_find(osmem: &Vec<OSMemEntry>, vpage: usize) -> (ret: Option<usize>)
     requires
         osmem_wf(osmem@),
     ensures
-        ret is Some ==> (0 <= ret.unwrap() < osmem.len()
-            && osmem[ret.unwrap() as int].spec_start() <= vpage
-            < osmem[ret.unwrap() as int].spec_end()),
+        ret is Some ==> (0 <= ret.unwrap() < osmem.len() && osmem[ret.unwrap() as int].spec_start()
+            <= vpage < osmem[ret.unwrap() as int].spec_end()),
 {
     let mut i = 0;
     while i < osmem.len()
@@ -590,7 +589,7 @@ pub fn osmem_find(osmem: &Vec<OSMemEntry>, vpage: usize) -> (ret: Option<usize>)
         }
         let end_page = start_page + npages;
         if vpage >= start_page && vpage < end_page {
-            break ;
+            break;
         }
         i = i + 1;
     }
@@ -635,9 +634,8 @@ pub fn osmem_check_and_get(osmem: &mut Vec<OSMemEntry>, ppage: usize, osperm: OS
         osmem_wf(old(osmem)@),
     ensures
         ret is None ==> *old(osmem) === *osmem,
-        ret is Some ==> osmem@ === old(osmem)@.remove(ret->Some_0.0 as int)
-            && ret->Some_0.1 === old(osmem)@[ret->Some_0.0 as int] && 0
-            <= ret->Some_0.0 < old(osmem)@.len(),
+        ret is Some ==> osmem@ === old(osmem)@.remove(ret->Some_0.0 as int) && ret->Some_0.1
+            === old(osmem)@[ret->Some_0.0 as int] && 0 <= ret->Some_0.0 < old(osmem)@.len(),
         ret is Some ==> spec_ensure_check_osperm(ppage as int, osperm, ret->Some_0.1),
 {
     match osmem_find(osmem, ppage) {
@@ -1099,7 +1097,7 @@ fn _lock_kernel(
             }
             start = tmp_end;
         } else {
-            break ;
+            break;
         }
     }
     return start;

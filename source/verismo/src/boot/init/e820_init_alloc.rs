@@ -153,10 +153,12 @@ pub fn init_allocator_e820(
                     // SMT does not expose the guestmap relation for the split permission.
                     assume(tmp_perm@.range().0 <= spec_pa_to_va(add_start as int));
                     assume(tmp_perm@.range().end() >= spec_pa_to_va(add_start as int));
-                    assume(tmp_perm@.snp().guestmap[spec_pa_to_va(add_start as int).to_page()] == (add_start as int).to_page());
+                    assume(tmp_perm@.snp().guestmap[spec_pa_to_va(add_start as int).to_page()] == (
+                    add_start as int).to_page());
                     assume(tmp_perm@.range().0 <= spec_pa_to_va(tmp_end as int));
                     assume(tmp_perm@.range().end() >= spec_pa_to_va(tmp_end as int));
-                    assume(tmp_perm@.snp().guestmap[spec_pa_to_va(tmp_end as int).to_page()] == (tmp_end as int).to_page());
+                    assume(tmp_perm@.snp().guestmap[spec_pa_to_va(tmp_end as int).to_page()] == (
+                    tmp_end as int).to_page());
                 }
                 let mut add_vstart = pa_to_va(add_start as u64, Tracked(&tmp_perm)) as usize;
                 let mut add_vend = pa_to_va(tmp_end as u64, Tracked(&tmp_perm)) as usize;
@@ -177,10 +179,12 @@ pub fn init_allocator_e820(
                     // SMT does not expose the guestmap relation for the permission range.
                     assume(to_add_perm@.range().0 <= spec_pa_to_va(add_start as int));
                     assume(to_add_perm@.range().end() >= spec_pa_to_va(add_start as int));
-                    assume(to_add_perm@.snp().guestmap[spec_pa_to_va(add_start as int).to_page()] == (add_start as int).to_page());
+                    assume(to_add_perm@.snp().guestmap[spec_pa_to_va(add_start as int).to_page()]
+                        == (add_start as int).to_page());
                     assume(to_add_perm@.range().0 <= spec_pa_to_va(add_end as int));
                     assume(to_add_perm@.range().end() >= spec_pa_to_va(add_end as int));
-                    assume(to_add_perm@.snp().guestmap[spec_pa_to_va(add_end as int).to_page()] == (add_end as int).to_page());
+                    assume(to_add_perm@.snp().guestmap[spec_pa_to_va(add_end as int).to_page()] == (
+                    add_end as int).to_page());
                 }
                 let mut add_vstart = pa_to_va(add_start as u64, Tracked(&to_add_perm)) as usize;
                 let mut add_vend = pa_to_va(add_end as u64, Tracked(&to_add_perm)) as usize;

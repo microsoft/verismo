@@ -13,7 +13,14 @@ use crate::snp::SnpCoreSharedMem;
 
 verus! {
 
-broadcast use {SecType::axiom_spec_new, SecType::axiom_ext_equal, SnpPPtr::axiom_id_equal, SnpPointsToBytes::axiom_map_ext_equal, axiom_size_from_cast_bytes, axiom_size_from_cast_secbytes_def};
+broadcast use {
+    SecType::axiom_spec_new,
+    SecType::axiom_ext_equal,
+    SnpPPtr::axiom_id_equal,
+    SnpPointsToBytes::axiom_map_ext_equal,
+    axiom_size_from_cast_bytes,
+    axiom_size_from_cast_secbytes_def,
+};
 
 #[verifier(external_body)]
 #[verifier::reject_recursive_types_in_ground_variants(T)]

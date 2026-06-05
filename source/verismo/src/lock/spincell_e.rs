@@ -8,7 +8,13 @@ use crate::vcell::*;
 
 verus! {
 
-broadcast use {SecType::axiom_spec_new, SecType::axiom_ext_equal, SnpPPtr::axiom_id_equal, axiom_size_from_cast_bytes, axiom_size_from_cast_secbytes_def};
+broadcast use {
+    SecType::axiom_spec_new,
+    SecType::axiom_ext_equal,
+    SnpPPtr::axiom_id_equal,
+    axiom_size_from_cast_bytes,
+    axiom_size_from_cast_secbytes_def,
+};
 
 impl SpinLock {
     // requires: check no deadlock
@@ -35,7 +41,7 @@ impl SpinLock {
         {
             if let Some(tmpperm) = self.trylock(Tracked(&mut tmplockperm), Tracked(core)) {
                 perm = tmpperm;
-                break ;
+                break;
             }
         }
         (Tracked(tmplockperm), perm)
@@ -208,6 +214,7 @@ impl<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> VSpinLock<T>
         self.lock.unlock(Tracked(lockperm), Tracked(rawperm), Tracked(core));
         proof {
             broadcast use LockPermToRaw::axiom_spec_new;
+
             assert(lockperm@.points_to.bytes() =~~= perm@.get_value().vspec_cast_to());
         }
     }

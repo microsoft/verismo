@@ -52,10 +52,7 @@ impl VRamDB {
         let target_gpn = new_pte@.spec_ppn();
         let ptesize = spec_size::<GuestPTEntry>() as int;
         // If it is the PTE and the target gpn need c bit
-        let is_last_entry = new_pte@.is_present() || memtype(
-            memid,
-            gpmem.to_page(),
-        )->PTE_0 is L0;
+        let is_last_entry = new_pte@.is_present() || memtype(memid, gpmem.to_page())->PTE_0 is L0;
         let need_c_bit = (memtype(memid, target_gpn).need_c_bit() && is_last_entry);
         &&& if old_pte is Some && gpmem.len() > 0 {
             let old_pte = old_pte->Some_0;

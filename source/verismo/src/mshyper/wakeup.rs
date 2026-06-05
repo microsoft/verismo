@@ -450,7 +450,7 @@ impl GhcbHandle {
             let mut check_error = vmsa.copy_guest_error_code();
             check_error.declassify();
             if error_mask != check_error.reveal_value() {
-                break ;
+                break;
             }
             ghcb.box_update(GhcbClear);
             let ghost prev_ghcb = ghcb@;

@@ -76,11 +76,9 @@ impl<VT: AddrType, PT: AddrType> MemMap<VT, PT> {
 
     pub open spec fn reverse(&self, page: SpecPage<PT>) -> Option<SpecPage<VT>> {
         if exists|gvn|
-            (#[trigger] self.translate(gvn)) is Some && (self.translate(gvn)->Some_0
-                =~= page) {
+            (#[trigger] self.translate(gvn)) is Some && (self.translate(gvn)->Some_0 =~= page) {
             let ret = choose|gvn|
-                (#[trigger] self.translate(gvn)) is Some && (self.translate(gvn)->Some_0
-                    =~= page);
+                (#[trigger] self.translate(gvn)) is Some && (self.translate(gvn)->Some_0 =~= page);
             Option::Some(ret)
         } else {
             Option::None
@@ -113,9 +111,8 @@ impl<VT: AddrType, PT: AddrType> MemMap<VT, PT> {
     #[verifier(opaque)]
     pub open spec fn is_identity_map(&self) -> bool {
         &&& (forall|vpage: SpecPage<VT>|
-            ((#[trigger] self.translate(vpage)) is Some) ==> self.translate(
-                vpage,
-            )->Some_0.as_int() === vpage.as_int())
+            ((#[trigger] self.translate(vpage)) is Some) ==> self.translate(vpage)->Some_0.as_int()
+                === vpage.as_int())
     }
 }
 

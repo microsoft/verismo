@@ -258,7 +258,13 @@ pub fn init_mem(
         // these are established by previous box_update_cs calls but not composed automatically.
         assume(is_alloc_perm(alloc_perm@));
         assume(alloc_lock@.is_clean_lock_for(spec_ALLOCATOR().ptr_range(), cc.snpcore.cpu()));
-        assume(init_vm_mem_requires(e820, start_addr, end_addr, SnpMemCoreConsole { memperm, cc }, unused_preval_memperm));
+        assume(init_vm_mem_requires(
+            e820,
+            start_addr,
+            end_addr,
+            SnpMemCoreConsole { memperm, cc },
+            unused_preval_memperm,
+        ));
         assume(hv_mem_slice@.is_constant());
         assume(mem_range_formatted(hv_mem_slice@));
         assume(hv_mem_slice@.len() > 0);
@@ -283,7 +289,9 @@ pub fn init_mem(
         // Justification: rejoined HvParamTable permission is VMPL0-private and matches hvparam_ptr.
         assume(hvraw_perm@.snp().is_vmpl0_private());
         assume(spec_size::<HvParamTable>() == hvraw_perm@.size());
-        assume(hvraw_perm@.wf_not_null(range(hvparam_ptr.id(), hvparam_ptr.id() + spec_size::<HvParamTable>() as int)));
+        assume(hvraw_perm@.wf_not_null(
+            range(hvparam_ptr.id(), hvparam_ptr.id() + spec_size::<HvParamTable>() as int),
+        ));
     }
     (
         mparam,

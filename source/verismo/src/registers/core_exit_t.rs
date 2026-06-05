@@ -4,8 +4,7 @@ use crate::ptr::*;
 verus! {
 
 pub open spec fn is_none_or_sharedmem(memperm: Option<SnpPointsToRaw>) -> bool {
-    &&& memperm is Some ==> (memperm->Some_0@.snp().is_hv_shared()
-        || memperm->Some_0@.size() == 0)
+    &&& memperm is Some ==> (memperm->Some_0@.snp().is_hv_shared() || memperm->Some_0@.size() == 0)
     &&& memperm is Some ==> memperm->Some_0@.wf()
 }
 

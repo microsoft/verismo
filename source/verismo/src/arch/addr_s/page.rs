@@ -414,6 +414,7 @@ impl<T> SpecMem<T> {
             let f2 = mem2.first().as_int();
             if f1 == f2 {
                 broadcast use SpecAddr::axiom_equal;
+
                 assert(mem1.first() === mem2.first());
                 assert(mem1.size == mem2.size);
                 assert(mem1 === mem2);

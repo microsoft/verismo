@@ -292,8 +292,8 @@ impl RawMemPerms {
             inside_range(r, r2) && r.1 != 0 && ranges_disjoint(rs, r) ==> (
             #[trigger] self.contains_range(r) == #[trigger] ret.contains_range(r))
         &&& forall|r|
-            inside_range(r, r2) && r.1 != 0 && ranges_disjoint(rs, r)
-                && self.contains_range(r) ==> self[r] === ret[r]
+            inside_range(r, r2) && r.1 != 0 && ranges_disjoint(rs, r) && self.contains_range(r)
+                ==> self[r] === ret[r]
     }
 
     proof fn lemma_except_contains_eq(
@@ -361,8 +361,10 @@ impl RawMemPerms {
             #[trigger] self.contains_range(r) == #[trigger] ret.contains_range(r)) by {
                 self.proof_remove_range_ensures(range);
             }
-            assert forall|r| inside_range(r, r2) && r.1 != 0 && ranges_disjoint(rs, r)
-                    && self.contains_range(r) implies self[r] === ret[r] by {
+            assert forall|r|
+                inside_range(r, r2) && r.1 != 0 && ranges_disjoint(rs, r) && self.contains_range(
+                    r,
+                ) implies self[r] === ret[r] by {
                 self.proof_remove_range_ensures(range);
             }
             self.lemma_except_contains_eq(ret, r2, snp, rs);
@@ -373,11 +375,15 @@ impl RawMemPerms {
             rs,
         ) == self.restrict(range).contains_with_snp_except(r2, snp, rs)) by {
             assert forall|r| inside_range(r, r2) && r.1 != 0 && ranges_disjoint(rs, r) implies (
-            #[trigger] self.contains_range(r) == #[trigger] self.restrict(range).contains_range(r)) by {
+            #[trigger] self.contains_range(r) == #[trigger] self.restrict(range).contains_range(
+                r,
+            )) by {
                 self.proof_remove_range_ensures(range);
             }
-            assert forall|r| inside_range(r, r2) && r.1 != 0 && ranges_disjoint(rs, r)
-                    && self.contains_range(r) implies self[r] === self.restrict(range)[r] by {
+            assert forall|r|
+                inside_range(r, r2) && r.1 != 0 && ranges_disjoint(rs, r) && self.contains_range(
+                    r,
+                ) implies self[r] === self.restrict(range)[r] by {
                 self.proof_remove_range_ensures(range);
             }
             self.lemma_except_contains_eq(self.restrict(range), r2, snp, rs);

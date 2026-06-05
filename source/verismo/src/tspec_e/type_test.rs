@@ -7,8 +7,7 @@ verus! {
 
 broadcast use {SecType::axiom_spec_new, SecType::axiom_ext_equal};
 
-}
-
+} // verus!
 verismo! {
     // Automatically Add derive(VTypeCast)
     #[repr(C, align(1))]

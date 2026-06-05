@@ -93,7 +93,7 @@ macro_rules! def_builtin_unary_spec_fn {
                                 |v1: $t1| $op v1
                             }
                         }
-        }
+}
     };
 }
 

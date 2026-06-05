@@ -47,15 +47,19 @@ impl GuestPTRam {
                 &&& memop.to_memid().is_sm(memid)
                 &&& memop.to_memid().to_asid() == memid.to_asid()
             }) ==> {
-                new_pt.map_entry_exe_ok(memid, gvn, lvl)->Some_0 === stream_to_data(
-                    memop->Write_2,
-                ) && new_pt.map_entry_exe_ok(memid, gvn, lvl)->Some_0.view().spec_ppn()
+                new_pt.map_entry_exe_ok(memid, gvn, lvl)->Some_0 === stream_to_data(memop->Write_2)
+                    && new_pt.map_entry_exe_ok(memid, gvn, lvl)->Some_0.view().spec_ppn()
                     === old_pt.map_entry_exe_ok(memid, gvn, lvl)->Some_0.view().spec_ppn()
             },
         decreases lvl.as_int(),
     {
         // Re-broadcast the generated size axiom inside this spinoff proof so GuestPTEntry size unfolds.
-        broadcast use {GuestPTRam::axiom_spec_new, VRamDB::axiom_spec_new, axiom_size_from_cast_bytes};
+        broadcast use {
+            GuestPTRam::axiom_spec_new,
+            VRamDB::axiom_spec_new,
+            axiom_size_from_cast_bytes,
+        };
+
         assert(new_pt.spec_ram() === old_pt.spec_ram().op(sysmap, memop).to_result());
         let pte = new_pt.map_entry_exe_ok(memid, gvn, lvl);
         let old_pte = old_pt.map_entry_exe_ok(memid, gvn, lvl);
@@ -172,8 +176,7 @@ impl GuestPTRam {
                                 sysmap,
                             );
                         }
-                        assert(write_pte.view().spec_ppn()
-                            === old_pte->Some_0.view().spec_ppn());
+                        assert(write_pte.view().spec_ppn() === old_pte->Some_0.view().spec_ppn());
                     } else {
                         old_pt.spec_ram().lemma_write_enc_bytes_effect_disjoint_read(
                             &new_pt.spec_ram(),

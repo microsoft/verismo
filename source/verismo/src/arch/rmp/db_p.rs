@@ -233,20 +233,20 @@ pub proof fn rmp_lemma_pvalidate_sw_inv(rmp: &RmpMap, op: RmpOp<SysPhy>, memid: 
             }
         } else {
             if !(op_memid.to_vmpl() is VMPL0) {
-            // Justification: non-VMPL0 pvalidate is rejected by rmp_op; SMT does not unfold the error condition here.
-            assume(is_error);
-            assert(is_error);
-            assume(new[spn] === rmp[spn]);
-            assert(new[spn] === rmp[spn]);
-            }
-            if memid.to_asid() !== op_memid.to_asid() {
-            if op_spn === spn {
-                // Justification: pvalidate for a different ASID cannot update this memid and errors at target SPN.
+                // Justification: non-VMPL0 pvalidate is rejected by rmp_op; SMT does not unfold the error condition here.
                 assume(is_error);
                 assert(is_error);
+                assume(new[spn] === rmp[spn]);
+                assert(new[spn] === rmp[spn]);
             }
-            assume(new[spn] === rmp[spn]);
-            assert(new[spn] === rmp[spn]);
+            if memid.to_asid() !== op_memid.to_asid() {
+                if op_spn === spn {
+                    // Justification: pvalidate for a different ASID cannot update this memid and errors at target SPN.
+                    assume(is_error);
+                    assert(is_error);
+                }
+                assume(new[spn] === rmp[spn]);
+                assert(new[spn] === rmp[spn]);
             }
             assert(rmp_reverse(rmp, memid, rmp[spn].view().spec_gpn()) === spn);
             assert forall|spn_test: SPN|

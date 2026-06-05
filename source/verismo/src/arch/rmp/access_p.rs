@@ -10,6 +10,7 @@ impl RmpEntry {
             entry.trans(op).to_result().inv(),
     {
         broadcast use {RmpEntry::axiom_spec_new, HiddenRmpEntryForPSP::axiom_spec_new};
+
         match op {
             RmpOp::RmpUpdate(_, newentry) => {
                 // Justification: rmpupdate preserves RmpEntry::inv by construction of the replacement entry;
@@ -45,6 +46,7 @@ impl RmpEntry {
             next@.inv_hvupdate_rel(entry@),
     {
         broadcast use {RmpEntry::axiom_spec_new, HiddenRmpEntryForPSP::axiom_spec_new};
+
         let next = entry.trans(op).to_result();
         // Justification: HV RmpUpdate transition constructs an invariant RMP entry related to the previous entry;
         // field-level generated setter axioms for hidden permissions do not instantiate reliably.
@@ -77,6 +79,7 @@ impl RmpEntry {
             next@.inv_hvupdate_rel(prev_entry@),
     {
         broadcast use {RmpEntry::axiom_spec_new, HiddenRmpEntryForPSP::axiom_spec_new};
+
         let next = entry.trans(op).to_result();
         // Justification: composing an HV update with an already-related previous entry preserves inv_hvupdate_rel;
         // this is a transitive field relation over generated ghost setters that SMT does not trigger here.

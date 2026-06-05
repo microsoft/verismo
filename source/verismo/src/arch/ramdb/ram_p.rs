@@ -31,6 +31,7 @@ impl RamDB {
             self.write_raw(asid, spmem, bytes).inv(),
     {
         broadcast use RamDB::axiom_spec_new;
+
         reveal(RamDB::inv);
         let new = self.write_raw(asid, spmem, bytes);
         assert forall|spa: SPA| (0 <= spa.as_int() < self.spec_data().len()) implies (
@@ -57,6 +58,7 @@ impl RamDB {
             ),
     {
         broadcast use RamDB::axiom_spec_new;
+
         reveal(RamDB::write_raw);
         // Justification: write_raw defines spec_data as the generated stream of to_write values;
         // the generated spec_set_data/spec_new axiom is not triggered for this indexed postcondition.
@@ -121,6 +123,7 @@ impl RamDB {
             ),
     {
         broadcast use RamDB::axiom_spec_new;
+
         reveal(RamDB::write_raw);
         let new = self.write_raw(asid, spmem, bytes);
         if !memrange_contains_block(spmem, idx(rspa)) {
@@ -155,6 +158,7 @@ impl RamDB {
             ),
     {
         broadcast use RamDB::axiom_spec_new;
+
         reveal(RamDB::write_raw);
         let new = self.write_raw(asid, spmem, bytes);
         assert(self.to_write(rspa, asid, spmem, bytes) == self.data[rspa.as_int()]);
@@ -171,6 +175,7 @@ impl RamDB {
             self.write_raw(asid, spmem, bytes).read_bytes_by_asid(asid, spmem) === bytes,
     {
         broadcast use RamDB::axiom_spec_new;
+
         reveal(RamDB::read_bytes_by_asid);
         reveal(RamDB::write_raw);
         let new = self.write_raw(asid, spmem, bytes);

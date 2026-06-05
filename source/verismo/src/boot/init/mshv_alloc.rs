@@ -319,7 +319,10 @@ fn init_allocator(
             // Justification: after processing entry idx-1, prev_end is set to that entry's end.
             assume(idx > 0 ==> prev_end as int == hv_mem_tb@[idx as int - 1].range().end());
             // Justification: allocator initialization only writes through GHCB and preserves the register frame condition.
-            assume(memcc.cc.snpcore.only_reg_coremode_updated(oldmemcc.cc.snpcore, set![GHCB_REGID()]));
+            assume(memcc.cc.snpcore.only_reg_coremode_updated(
+                oldmemcc.cc.snpcore,
+                set![GHCB_REGID()],
+            ));
             assert forall|i: int|
                 (idx as int) <= i < (len as int) implies memcc.memperm.contains_default_except(
                 hv_mem_tb@[i].range(),

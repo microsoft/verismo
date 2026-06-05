@@ -39,19 +39,19 @@ verus! {
 pub const GHCB_HV_DEBUG: u64 = 0xf03;
 
 } // verus!
-  /*
-  #[verifier::external]
-  pub mod trust {
-      use alloc::fmt;
+/*
+#[verifier::external]
+pub mod trust {
+    use alloc::fmt;
 
-      use super::*;
-      impl fmt::Write for GHCBProto {
-          fn write_str(&mut self, s: &str) -> fmt::Result {
-              GHCBProto::print_str(s);
-              Ok(())
-          }
-      }
-  }*/
+    use super::*;
+    impl fmt::Write for GHCBProto {
+        fn write_str(&mut self, s: &str) -> fmt::Result {
+            GHCBProto::print_str(s);
+            Ok(())
+        }
+    }
+}*/
 verus! {
 
 pub open spec fn GHCB_REGID() -> RegName {
@@ -178,7 +178,11 @@ pub fn ghcb_msr_send(
         snpcore.regs.tracked_insert(GHCB_REGID(), ghcbperm);
         // vmgexit updates snpcore according to the GHCB send protocol and preserves register/cpu invariants.
         assume((*snpcore).inv_reg_cpu());
-        assume(spec_ghcb_send_core_update(*old(snpcore), *snpcore, (val as nat, snpcore.last_ghcb_resp())));
+        assume(spec_ghcb_send_core_update(
+            *old(snpcore),
+            *snpcore,
+            (val as nat, snpcore.last_ghcb_resp()),
+        ));
         assume(snpcore.regs[GHCB_REGID()].val::<u64_s>()@.val == snpcore.last_ghcb_resp());
         assume(spec_eq_shared(snpcore.last_ghcb_resp(), ret as nat));
     }
@@ -277,10 +281,7 @@ pub fn vc_terminate(reason_code: u64_t, Tracked(snpcore): Tracked<&mut SnpCore>)
     vc_terminate_s(reason_code, Tracked(snpcore))
 }
 
-pub fn early_vc_terminate_debug(
-    reason_code: u64_t,
-    Tracked(cc): Tracked<&mut SnpCoreConsole>,
-) -> !
+pub fn early_vc_terminate_debug(reason_code: u64_t, Tracked(cc): Tracked<&mut SnpCoreConsole>) -> !
     requires
         old(cc).wf(),
     ensures

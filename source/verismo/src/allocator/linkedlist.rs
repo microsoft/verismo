@@ -108,7 +108,12 @@ impl LinkedListAllocator {
 } // verus!
 verus! {
 
-broadcast use {SecType::axiom_spec_new, SecType::axiom_ext_equal, SnpPPtr::axiom_id_equal, axiom_size_from_cast_bytes};
+broadcast use {
+    SecType::axiom_spec_new,
+    SecType::axiom_ext_equal,
+    SnpPPtr::axiom_id_equal,
+    axiom_size_from_cast_bytes,
+};
 
 impl LinkedListAllocator {
     #[inline]
@@ -163,7 +168,7 @@ impl LinkedListAllocator {
             let start = node.val;
             assert(self@.wf_perm(i as nat));
             if start >= addr {
-                break ;
+                break;
             }
             prev_ptr = node_ptr;
             node_ptr = node.next_ptr();
@@ -398,9 +403,7 @@ impl LinkedListAllocator {
             ensures
                 self@.inv(),
                 self.free_list.is_constant(),
-                ret is Some ==> ret_perm->Some_0@.wf_freemem(
-                    (ret->Some_0 as int, *size as nat),
-                ),
+                ret is Some ==> ret_perm->Some_0@.wf_freemem((ret->Some_0 as int, *size as nat)),
                 ret is Some ==> inside_range(
                     (spec_align_up(ret->Some_0 as int, align as int), expect_size as nat),
                     ret_perm->Some_0@.range(),
@@ -462,7 +465,7 @@ impl LinkedListAllocator {
                     proof { ret_perm = Some(perm) }
                     ;
                     ret = Some(start);
-                    break ;
+                    break;
                 }
             }
             prev_ptr = node_ptr;
@@ -494,8 +497,10 @@ impl LinkedListAllocator {
             self.wf(),
             ret is Some ==> alloc_valid_ptr(size, ret->Some_0),
             ret is Some ==> ret->Some_0.is_constant(),
-            ret is Some ==> (spec_align_up(ret->Some_0.0 as int, align as int), size as nat)
-                === (ret->Some_0.0 as int, size as nat),
+            ret is Some ==> (spec_align_up(ret->Some_0.0 as int, align as int), size as nat) === (
+                ret->Some_0.0 as int,
+                size as nat,
+            ),
     {
         let mut real_size = size;
         let ghost old_size = size as nat;

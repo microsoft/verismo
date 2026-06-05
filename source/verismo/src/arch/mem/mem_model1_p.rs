@@ -35,6 +35,7 @@ impl MemDB {
         let new_pt = self.spec_g_page_table(memid);
         let old_pt = old_memdb.spec_g_page_table(memid);
         broadcast use GuestPTRam::axiom_spec_new;
+
         assert(new_pt.ram === self.spec_vram());
         assert(old_pt.ram === old_memdb.spec_vram());
         assert(new_pt.l0_entry === self.spec_l0_entry());

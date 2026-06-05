@@ -140,8 +140,7 @@ pub proof fn proof_remove_keep<T>(
     keep_idx: Seq<int>,
     removed_idx: Seq<int>,
     i: int,
-)
-{
+) {
     admit();
 }
 

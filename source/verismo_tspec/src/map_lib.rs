@@ -49,7 +49,8 @@ pub proof fn tracked_seq_insert<T>(tracked m: &mut Map<nat, T>, i: nat, tracked 
         m[i] === v,
         m.contains_key(i),
         forall|k: nat| #![auto] k < i ==> m[k] === old(m)[k] && m.contains_key(k),
-        forall|k: nat| #![auto]
+        forall|k: nat|
+            #![auto]
             i + 1 <= k < (n + 1) ==> m[k] === old(m)[(k - 1) as nat] && m.contains_key(k),
 {
     let oldm = *m;
