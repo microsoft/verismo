@@ -5,6 +5,7 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -26,7 +27,7 @@ jobs:
             echo "VERUS_PATH=$(echo $VERUS_PATH)" >> $GITHUB_ENV
 
       - name: Verify
-        working-directory: source/verismo
+        working-directory: source
         run: cargo verus focus --release -- --multiple-errors=20
 
       - name: Fmt
