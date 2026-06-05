@@ -60,3 +60,25 @@ mod trusted_hacl;
 mod tspec_e;
 mod vbox;
 mod vcell;
+
+builtin_macros::verus! {
+
+/// Top-level broadcast group bundling every axiom defined inside the
+/// `verismo` crate that used to auto-propagate under the legacy Verus
+/// broadcast semantics.  Downstream proof modules can pull all of them in
+/// with a single `broadcast use crate::group_verismo_default;` line.
+pub broadcast group group_verismo_default {
+    crate::arch::addr_s::page::group_addr_default,
+    crate::arch::pgtable::memmap_s::group_pgtable_memmap_default,
+    crate::arch::ramdb::ram_p::group_ramdb_default,
+    crate::arch::rmp::db_p::group_rmp_db_default,
+    crate::arch::rmp::perm_s::group_rmp_perm_default,
+    crate::arch::x64::x64_s::group_x64_default,
+    crate::linkedlist::group_linkedlist_default,
+    crate::ptr::ptr_s::group_ptr_ptr_default,
+    crate::ptr::raw_ptr_s::group_raw_ptr_default,
+    crate::ptr::snp::snp_u::group_snp_attr_default,
+    crate::registers::msr_perm_s::group_msr_perm_default,
+}
+
+} // verus!

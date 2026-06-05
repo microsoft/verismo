@@ -135,4 +135,8 @@ impl MemMap<GuestVir, GuestPhy> {
     }
 }
 
+pub broadcast group group_pgtable_memmap_default {
+    MemMap::axiom_is_valid,
+}
+
 } // verus!

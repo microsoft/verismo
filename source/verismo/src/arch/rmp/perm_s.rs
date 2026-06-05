@@ -125,4 +125,8 @@ pub broadcast proof fn rmp_perm_track_dom(p: RmpPerm, vmpl: VMPL)
 {
 }
 
+pub broadcast group group_rmp_perm_default {
+    rmp_perm_track_dom,
+}
+
 } // verus!

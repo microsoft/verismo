@@ -3,6 +3,7 @@ use super::*;
 
 verus! {
 
+
 pub proof fn rmp_proof_check_access_rmp_has_gpn_memid(
     rmp: &RmpMap,
     memid: MemID,
@@ -343,6 +344,10 @@ pub proof fn rmp_lemma_hv_update_restrict_at(
         assume(rmp2[spn] === rmp[spn]);
         assert(rmp2[spn] === rmp[spn]);
     }
+}
+
+pub broadcast group group_rmp_db_default {
+    rmp_contains_all,
 }
 
 } // verus!

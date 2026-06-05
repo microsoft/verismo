@@ -91,4 +91,9 @@ impl RegisterPerm {
     }
 }
 
+pub broadcast group group_msr_perm_default {
+    RegisterPerm::axiom_eq,
+    RegisterPerm::axiom_wf,
+}
+
 } // verus!

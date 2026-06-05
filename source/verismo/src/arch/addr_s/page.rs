@@ -459,4 +459,16 @@ impl<T> SpecMem<T> {
     }
 }
 
+pub broadcast group group_addr_default {
+    SpecAddr::<GuestVir>::axiom_equal,
+    SpecAddr::<GuestPhy>::axiom_equal,
+    SpecAddr::<SysPhy>::axiom_equal,
+    SpecPage::<GuestVir>::axiom_equal,
+    SpecPage::<GuestPhy>::axiom_equal,
+    SpecPage::<SysPhy>::axiom_equal,
+    SpecMem::<GuestVir>::axiom_inv,
+    SpecMem::<GuestPhy>::axiom_inv,
+    SpecMem::<SysPhy>::axiom_inv,
+}
+
 } // verus!

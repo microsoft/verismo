@@ -333,4 +333,9 @@ impl Archx64 {
     }
 }
 
+pub broadcast group group_x64_default {
+    Archx64::axiom_reg_dom,
+    Archx64::axiom_entities_dom,
+}
+
 } // verus!

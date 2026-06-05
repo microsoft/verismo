@@ -135,4 +135,10 @@ impl<V: IsConstant + WellFormed + VTypeCast<SecSeqByte> + SpecSize> SnpPointsTo<
     }
 }
 
+pub broadcast group group_ptr_ptr_default {
+    SnpPPtr::<u8>::axiom_id_equal,
+    SnpPPtr::<u32>::axiom_id_equal,
+    SnpPPtr::<u64>::axiom_id_equal,
+}
+
 } // verus!

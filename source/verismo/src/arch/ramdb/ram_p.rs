@@ -240,4 +240,10 @@ impl RamDB {
     }
 }
 
+pub broadcast group group_ramdb_default {
+    RamDB::axiom_ram_len1,
+    RamDB::axiom_ram_len2,
+    RamDB::axiom_spec_new,
+}
+
 } // verus!

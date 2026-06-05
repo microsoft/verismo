@@ -414,4 +414,8 @@ impl SnpMemAttr {
     }
 }
 
+pub broadcast group group_snp_attr_default {
+    SwSnpMemAttr::axiom_pte,
+}
+
 } // verus!

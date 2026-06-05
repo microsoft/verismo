@@ -5,7 +5,7 @@ use crate::tspec::*;
 
 mod access_p;
 mod access_u;
-mod db_p;
+pub(crate) mod db_p;
 mod db_s;
 mod db_u;
 mod def_s;

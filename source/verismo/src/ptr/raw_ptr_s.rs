@@ -19,7 +19,7 @@ impl SnpPointsToRaw {
 
 impl SnpPointsToBytes {
     #[verifier(external_body)]
-    broadcast proof fn axiom_map_ext_equal(self, other: Self)
+    pub(crate) broadcast proof fn axiom_map_ext_equal(self, other: Self)
         ensures
             #[trigger] (self =~= other) == (self.bytes() =~~= other.bytes() && self.snp()
                 === other.snp() && self.range() === other.range()),
@@ -27,7 +27,7 @@ impl SnpPointsToBytes {
     }
 
     #[verifier(external_body)]
-    broadcast proof fn axiom_map_ext_equal_deep(self, other: Self)
+    pub(crate) broadcast proof fn axiom_map_ext_equal_deep(self, other: Self)
         ensures
             #[trigger] (self =~~= other) == (self.bytes() =~~= other.bytes() && self.snp
                 === other.snp && self.range() === other.range()),
@@ -413,6 +413,11 @@ pub open spec fn wf_page_range(
     forall|i|
         start_page <= i < (start_page + npages) ==> #[trigger] page_perms.contains_key(i)
             && page_perms[i]@.wf_range((i.to_addr(), PAGE_SIZE as nat))
+}
+
+pub broadcast group group_raw_ptr_default {
+    SnpPointsToBytes::axiom_map_ext_equal,
+    SnpPointsToBytes::axiom_map_ext_equal_deep,
 }
 
 } // verus!
