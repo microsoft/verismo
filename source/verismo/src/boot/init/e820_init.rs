@@ -179,7 +179,6 @@ pub proof fn lemma_init_perm_requires_pvalidate(perm: SnpPointsToRaw, r: (int, n
 }
 
 #[verifier::spinoff_prover]
-#[verifier::rlimit(1)]
 proof fn lemma_validated_range_disjoint_e820(
     e820: Seq<E820Entry>,
     i: int,

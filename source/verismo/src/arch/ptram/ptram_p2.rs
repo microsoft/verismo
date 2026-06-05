@@ -8,7 +8,6 @@ verus! {
 
 impl GuestPTRam {
     #[verifier::spinoff_prover]
-    #[verifier::rlimit(1)]
     pub proof fn lemma_write_pte_inv_ppn(
         old_pt: &Self,
         new_pt: &Self,
