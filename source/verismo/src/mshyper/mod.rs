@@ -19,6 +19,11 @@ use crate::*;
 
 verus! {
 
+broadcast use crate::group_verismo_default;
+
+} // verus!
+verus! {
+
 pub type HvCallStatus = u64;
 
 pub const HV_STATUS_TIMEOUT: u64 = 0x78u64;
@@ -226,11 +231,11 @@ impl HvCallVpVtlInput {
         proof {
             // Each field is initialized from the corresponding constant input via From,
             // which preserves the secure value and constant label.
-            assume(ret.ptid.spec_eq(ptid));
-            assume(ret.vpid.spec_eq(vpid));
-            assume(ret.vtl.spec_eq(vtl));
-            assume(ret.vmsa_addr.spec_eq(vmsa_addr));
-            assume(ret.is_constant());
+            assert(ret.ptid.spec_eq(ptid));
+            assert(ret.vpid.spec_eq(vpid));
+            assert(ret.vtl.spec_eq(vtl));
+            assert(ret.vmsa_addr.spec_eq(vmsa_addr));
+            assert(ret.is_constant());
         }
         ret
     }
