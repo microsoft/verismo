@@ -12,6 +12,11 @@ use crate::*;
 
 verus! {
 
+broadcast use crate::group_verismo_default;
+
+} // verus!
+verus! {
+
 pub const L4_MAX_ADDR: usize = 0x1000_0000_0000_0000usize;
 
 pub fn vn_to_pn(page: u64, Tracked(page_perm): Tracked<&SnpPointsToRaw>) -> (ret: u64)
@@ -391,7 +396,6 @@ fn borrow_entry(
     let tracked mut pt_lock = cs.lockperms.tracked_remove(spec_PT_lockid());
     proof {
         // cs.inv provides the page-table lock permission for this core.
-        assume(pt_ref.lock_requires(cs.snpcore.coreid@.cpu, pt_lock@));
     }
     let (tracked_ptr, Tracked(mut ptperm_perm), Tracked(pt_lock)) = pt_ref.acquire(
         Tracked(pt_lock),
@@ -400,7 +404,6 @@ fn borrow_entry(
     let TrackedPTEPerms { perms } = tracked_ptr.take(Tracked(&mut ptperm_perm));
     let Tracked(mut pt_perms) = perms;
     // PT lock invariant stores well-formed tracked page-table permissions.
-    assume(wf_ptes(pt_perms));
     let ghost cr3_u64: u64 = cr3perm.val::<u64_s>().vspec_cast_to();
     assert(cr3_u64 == static_cr3_value());
     assert(pt_perms[top_lvl_idx()].val().value == static_cr3_value());
@@ -414,15 +417,12 @@ fn borrow_entry(
     tracked_ptr.put(Tracked(&mut ptperm_perm), TrackedPTEPerms { perms: Tracked(pt_perms) });
     proof {
         // The taken TrackedPTEPerms is restored before releasing the PT lock.
-        assume(pt_ref.unlock_requires(cs.snpcore.coreid@.cpu, pt_lock@, ptperm_perm@));
     }
     pt_ref.release(Tracked(&mut pt_lock), Tracked(ptperm_perm), Tracked(&cs.snpcore.coreid));
     proof {
         cs.lockperms.tracked_insert(spec_PT_lockid(), pt_lock);
         // Releasing and reinserting the PT lock restores the shared-memory invariant
         // and frames the update to the PT lock only.
-        assume(cs.inv());
-        assume(cs.only_lock_reg_updated((*old(cs)), set![], set![spec_PT().lockid()]));
     }
     ret
 }
@@ -512,7 +512,6 @@ fn _borrow_entry(
                 //assert(prev->Some_0.pte === pt_perms[prev_lvl_idx].val());
                 prev->Some_0.pte.lemma_new_eq();
                 // wf_ptes relates adjacent levels; the previous level entry has a next table here.
-                assume(pt_perms[prev_lvl_idx].has_next());
                 assert(pte_perms_wf_prev(*pt_perms, glvl, gaddr));
                 assert(pt_perms.contains_key(lvl_idx));
             }
@@ -524,10 +523,6 @@ fn _borrow_entry(
             let tracked perm = perm.tracked_unwrap();
             proof {
                 // The PTE permission's next-table pointer matches page_table_ptr.
-                assume(perm@.wf_not_null_at(page_table_ptr.id()) || perm@.is_wf_pte(
-                    page_table_ptr.id(),
-                ));
-                assume(perm@.snp().is_vmpl0_private());
             }
             let page_table = page_table_ptr.borrow(Tracked(&perm));
             let idx = table_index(vaddr, lvl);
@@ -557,16 +552,6 @@ fn _borrow_entry(
     proof {
         // The recursive walk preserves pt_perms and, when it finds an entry,
         // returns exactly the permission entry for the requested level/index.
-        assume(*pt_perms =~~= *old(pt_perms));
-        assume(ret is Some ==> ret.is_constant());
-        assume(ret is Some ==> pt_perms[lvl_index(lvl as nat, vaddr as int)].val()
-            === ret->Some_0.pte);
-        assume(ret is Some ==> ret->Some_0.index == spec_table_index(vaddr, lvl as nat));
-        assume(ret is Some ==> ret->Some_0.ptr is Some == (lvl != PAGE_TABLE_LEVELS));
-        assume(ret is Some && ret->Some_0.ptr is Some ==> ret->Some_0.ptr->Some_0.id()
-            == pt_perms[lvl_index(lvl as nat + 1, vaddr as int)].next_tbptr());
-        assume(ret is Some ==> pt_perms.contains_key(lvl_index(lvl as nat, vaddr as int)));
-        assume((ret is Some && (lvl == 0)) ==> wf_pte_mem_perm(ret->Some_0.pte, mem_perm));
     }
     return ret;
 }
@@ -837,13 +822,6 @@ pub fn set_pages_enc_dec(
     proof {
         // Initially no pages have been processed, so the map is unchanged and
         // the shared-core frame is the input frame.
-        assume((*cs).only_lock_reg_updated(old_cs, set![], set![spec_PT().lockid()]));
-        assume(forall|page: int|
-            start_page <= page < start_page + size ==> #[trigger] mem_perms.contains_key(page)
-                && mem_perms[page]@.wf_range((page.to_addr(), PAGE_SIZE as nat)));
-        assume(forall|page: int|
-            start_page + i <= page < start_page + size ==> old_mem_perms[page]
-                === #[trigger] mem_perms[page]);
     }
     while i < size
         invariant
@@ -871,8 +849,6 @@ pub fn set_pages_enc_dec(
         proof {
             mem_perm0.tracked_insert(0, mem_perms.tracked_remove(page as int));
             // The loop invariant gives the page permission at this page index.
-            assume(mem_perm0.contains_key(0));
-            assume(mem_perm0[0]@.wf_range((page_addr as int, PAGE_SIZE as nat)));
         }
         let ok = set_page_enc_dec(page_addr, enc, Tracked(cs), Tracked(&mut mem_perm0));
         if !ok {
@@ -884,33 +860,16 @@ pub fn set_pages_enc_dec(
             let ghost newperm = mem_perm0[0];
             // set_page_enc_dec only updates the PT lock, so the loop frame composes
             // with the accumulated PT-lock frame.
-            assume((*cs).only_lock_reg_updated(old_cs, set![], set![spec_PT().lockid()]));
             mem_perms.tracked_insert(page as int, mem_perm0.tracked_remove(0));
             assert(old_mem_perms[page as int] === oldperm);
             assert(mem_perms[page as int] === newperm);
             assert(ensures_mem_enc_dec_memperm(enc, oldperm, newperm));
             // The processed-prefix and unprocessed-suffix map facts are preserved by
             // removing and reinserting exactly the current page permission.
-            assume(forall|page: int|
-                start_page <= page < start_page + i ==> #[trigger] mem_perms.contains_key(page)
-                    && ensures_mem_enc_dec_memperm(enc, old_mem_perms[page], mem_perms[page]));
-            assume(forall|page: int|
-                start_page + i <= page < start_page + size ==> old_mem_perms[page]
-                    === #[trigger] mem_perms[page]);
-            assume(forall|page: int|
-                start_page <= page < start_page + size ==> #[trigger] mem_perms.contains_key(page)
-                    && mem_perms[page]@.wf_range((page.to_addr(), PAGE_SIZE as nat)));
         }
     }
     proof {
         // At loop exit i == size, so the processed-prefix invariant is exactly the postcondition.
-        assume(cs.inv());
-        assume(cs.only_lock_reg_updated((*old(cs)), set![], set![spec_PT().lockid()]));
-        assume(mem_perms.dom() =~~= old(mem_perms).dom());
-        assume(forall|page: int|
-            start_page <= page < start_page + size ==> #[trigger] mem_perms.contains_key(page)
-                && mem_perms[page]@.wf_range((page.to_addr(), PAGE_SIZE as nat))
-                && ensures_mem_enc_dec_memperm(enc, old(mem_perms)[page], mem_perms[page]));
     }
 }
 
