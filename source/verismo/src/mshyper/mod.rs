@@ -19,11 +19,6 @@ use crate::*;
 
 verus! {
 
-broadcast use crate::group_verismo_default;
-
-} // verus!
-verus! {
-
 pub type HvCallStatus = u64;
 
 pub const HV_STATUS_TIMEOUT: u64 = 0x78u64;
@@ -228,15 +223,6 @@ impl HvCallVpVtlInput {
             vmsa_addr: vmsa_addr.into(),
             reserved_ctx: Array::new(u64_s::new(0)),
         };
-        proof {
-            // Each field is initialized from the corresponding constant input via From,
-            // which preserves the secure value and constant label.
-            assert(ret.ptid.spec_eq(ptid));
-            assert(ret.vpid.spec_eq(vpid));
-            assert(ret.vtl.spec_eq(vtl));
-            assert(ret.vmsa_addr.spec_eq(vmsa_addr));
-            assert(ret.is_constant());
-        }
         ret
     }
 }

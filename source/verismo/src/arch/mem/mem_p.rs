@@ -3,11 +3,6 @@ use crate::arch::attack::*;
 
 verus! {
 
-broadcast use crate::group_verismo_default;
-
-} // verus!
-verus! {
-
 impl MemOp<GuestVir> {
     proof fn lemma_vop_require_to_gop_require(&self, memid: MemID, memdb: &MemDB)
         requires
@@ -267,13 +262,6 @@ impl MemDB {
             !(self.op(memop) is Ok) ==> self.op(memop).to_result().spec_vram() === self.spec_vram(),
             self.op(memop).to_result().spec_vram() !== self.spec_vram() ==> self.op(memop) is Ok,
     {
-        broadcast use {
-            MemDB::axiom_spec_new,
-            VRamDB::axiom_spec_new,
-            TLB::axiom_spec_new,
-            GuestPTRam::axiom_spec_new,
-        };
-
         reveal(RmpEntry::check_access);
         if self.to_mem_map(memop.to_memid()).translate(memop.to_mem().to_page()) is Some {
             let gpmemop = self.to_gpop(memop);
@@ -326,8 +314,6 @@ impl MemDB {
         ensures
             new.spec_tlb().inv_encrypted_priv_mem(memid),
     {
-        broadcast use {MemDB::axiom_spec_new, TLB::axiom_spec_new, GuestPTRam::axiom_spec_new};
-
         let guestmap = self.to_mem_map(memid);
         let new_guestmap = self.to_mem_map(memid);
         let guestmap_tlb = self.spec_tlb().to_mem_map(memid);
@@ -364,8 +350,6 @@ impl MemDB {
         ensures
             new.spec_tlb().inv_encrypted_priv_mem(memid),
     {
-        broadcast use {MemDB::axiom_spec_new, TLB::axiom_spec_new, GuestPTRam::axiom_spec_new};
-
         let op_memid = memop.to_addr_memid().memid;
         let guestmap = self.to_mem_map(memid);
         let new_guestmap = self.to_mem_map(memid);
@@ -435,13 +419,6 @@ impl MemDB {
         ensures
             self.op(memop).to_result().inv(memid),
     {
-        broadcast use {
-            MemDB::axiom_spec_new,
-            VRamDB::axiom_spec_new,
-            TLB::axiom_spec_new,
-            GuestPTRam::axiom_spec_new,
-        };
-
         reveal(MemDB::inv);
         let new = self.op(memop).to_result();
         let op_memid = memop.to_memid();
@@ -521,8 +498,6 @@ impl MemDB {
                 memop,
             ).to_page() === gpa.to_page()),
     {
-        broadcast use {MemDB::axiom_spec_new, VRamDB::axiom_spec_new};
-
         let op_memid = memop.to_memid();
         let op_sysmap = self.spec_sysmap()[op_memid];
         let op_gvn = memop.to_page();
@@ -551,8 +526,6 @@ impl MemDB {
             self.op(memop).to_result().spec_l0_entry() === self.spec_l0_entry(),
             self.op(memop) is Ok || !(self.op(memop).to_err() is RmpOp),
     {
-        broadcast use {MemDB::axiom_spec_new, VRamDB::axiom_spec_new};
-
         reveal(RmpEntry::check_access);
         reveal(VRamDB::op);
     }
@@ -564,8 +537,6 @@ impl MemDB {
             self.op(memop).to_result().spec_g_page_table(memid) === self.spec_g_page_table(memid),
             self.op(memop).to_result().to_mem_map(memid) === self.to_mem_map(memid),
     {
-        broadcast use {MemDB::axiom_spec_new, VRamDB::axiom_spec_new, GuestPTRam::axiom_spec_new};
-
         reveal(VRamDB::op);
         self.proof_op_read_Ginv(memop);
         let news = self.op(memop).to_result();

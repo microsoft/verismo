@@ -213,34 +213,14 @@ impl SnpMemAttr {
     {
         assert(self.hw.rmp@.inv_hvupdate_rel(self.sw.rmp@));
         if self.sw.is_vmpl0_private() {
-            assert(self.sw.is_vm_confidential());
             self.sw.axiom_pte();
             self.hw.axiom_pte();
-            assert(self.hw.pte == self.sw.pte);
-            assert(self.sw.pte.len() == 1);
-            assert(self.hw.pte.len() == 1);
-            assert(self.sw.pte() === self.sw.pte.last());
-            assert(self.hw.pte() === self.hw.pte.last());
-            assert(self.hw.pte.last() === self.sw.pte.last());
-            assert(self.sw.encrypted());
-            assert(self.hw.encrypted());
-            assert(self.hw.rmp@.spec_validated());
             rmp_perm_track_dom(self.hw.rmp@.perms, VMPL::VMPL1);
             rmp_perm_track_dom(self.hw.rmp@.perms, VMPL::VMPL2);
             rmp_perm_track_dom(self.hw.rmp@.perms, VMPL::VMPL3);
             rmp_perm_track_dom(self.sw.rmp@.perms, VMPL::VMPL1);
             rmp_perm_track_dom(self.sw.rmp@.perms, VMPL::VMPL2);
             rmp_perm_track_dom(self.sw.rmp@.perms, VMPL::VMPL3);
-            if self.hw.rmp@ !== self.sw.rmp@ {
-                assert(self.hw.rmp@.perms[VMPL::VMPL1].subset_of(self.sw.rmp@.perms[VMPL::VMPL1]));
-                assert(self.hw.rmp@.perms[VMPL::VMPL2].subset_of(self.sw.rmp@.perms[VMPL::VMPL2]));
-                assert(self.hw.rmp@.perms[VMPL::VMPL3].subset_of(self.sw.rmp@.perms[VMPL::VMPL3]));
-            }
-            assert(!self.hw.rmp@.perms[VMPL::VMPL1].contains(Perm::Write));
-            assert(!self.hw.rmp@.perms[VMPL::VMPL2].contains(Perm::Write));
-            assert(!self.hw.rmp@.perms[VMPL::VMPL3].contains(Perm::Write));
-            assert(self.hw.rmp@.is_vmpl_private(0));
-            assert(self.hw.is_vmpl0_private());
         }
         if self.hw.is_vmpl0_private() {
             assert(self.sw.is_vm_confidential());

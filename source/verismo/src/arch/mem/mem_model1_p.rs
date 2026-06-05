@@ -34,20 +34,6 @@ impl MemDB {
         self.spec_vram().lemma_model_eq_inv(&old_memdb.spec_vram(), memid);
         let new_pt = self.spec_g_page_table(memid);
         let old_pt = old_memdb.spec_g_page_table(memid);
-        broadcast use GuestPTRam::axiom_spec_new;
-
-        assert(new_pt.ram === self.spec_vram());
-        assert(old_pt.ram === old_memdb.spec_vram());
-        assert(new_pt.l0_entry === self.spec_l0_entry());
-        assert(old_pt.l0_entry === old_memdb.spec_l0_entry());
-        assert(new_pt.spec_ram() === self.spec_vram());
-        assert(old_pt.spec_ram() === old_memdb.spec_vram());
-        assert(new_pt.spec_ram().model1_eq(&old_pt.spec_ram(), memid));
-        assert(equal(new_pt.l0_entry(memid), old_pt.l0_entry(memid)));
-        assert(new_pt.model1_eq(&old_pt, memid));
-        assert(old_pt.inv(memid));
-        assert(rmp_inv_sw(&old_pt.spec_ram().spec_rmp(), memid));
-        assert(rmp_inv_memid_int(&old_pt.spec_ram().spec_rmp(), memid));
         assert(new_pt.inv_dom_ok(memid));
         assert forall|gvn: GVN| gvn.is_valid() implies #[trigger] new_pt.inv_content_gpa_ok(
             memid,

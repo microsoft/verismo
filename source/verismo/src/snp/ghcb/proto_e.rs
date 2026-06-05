@@ -5,11 +5,6 @@ use crate::registers::*;
 
 verus! {
 
-broadcast use crate::group_verismo_default;
-
-} // verus!
-verus! {
-
 #[inline]
 pub fn SM_EVERCRYPT_ERR(subcode: u64_t) -> (ret: u64_t)
     requires
@@ -174,22 +169,9 @@ pub fn ghcb_msr_send(
         assert(ghcb_write_val == val as nat);
     }
     vmgexit(Tracked(&mut ghcbperm), Tracked(&mut snpcore.coreid), Tracked(memperm));
-    proof {
-        // vmgexit returns the GHCB MSR permission in a readable well-formed state.
-        assert(ghcbperm.wf());
-    }
     let ret = ghcb_msr.read(Tracked(&ghcbperm)).reveal_value();
     proof {
         snpcore.regs.tracked_insert(GHCB_REGID(), ghcbperm);
-        // vmgexit updates snpcore according to the GHCB send protocol and preserves register/cpu invariants.
-        assert((*snpcore).inv_reg_cpu());
-        assert(spec_ghcb_send_core_update(
-            *old(snpcore),
-            *snpcore,
-            (val as nat, snpcore.last_ghcb_resp()),
-        ));
-        assert(snpcore.regs[GHCB_REGID()].val::<u64_s>()@.val == snpcore.last_ghcb_resp());
-        assert(spec_eq_shared(snpcore.last_ghcb_resp(), ret as nat));
     }
     ret
 }
@@ -226,13 +208,6 @@ pub fn ghcb_proto(
     ghcb_msr.write(oldval, Tracked(&mut perm));
     proof {
         snpcore.regs.tracked_insert(GHCB_REGID(), perm);
-        // ghcb_msr_send followed by restoring GHCB MSR preserves the protocol update summary.
-        assert(GHCBProto::restored_ghcb(*snpcore, *old(snpcore)));
-        assert(spec_ghcb_send_core_update(
-            *old(snpcore),
-            *snpcore,
-            (val as nat, (*snpcore).last_ghcb_resp()),
-        ));
     }
     ret
 }
@@ -361,8 +336,6 @@ pub fn ghcb_change_page_state_via_msr(
     let resp = ghcb_msr_proto(value, Tracked(snpcore));
     proof {
         trusted_ghcb_change_page_state(memperm, op, snpcore);
-        // trusted_ghcb_change_page_state models the hypervisor page-state response on memperm.
-        assert(ensure_page_perm_change_state(*old(memperm), *memperm, ppage as int, op));
     }
 }
 
@@ -395,9 +368,6 @@ pub fn ghcb_register_ghcb(ppage: usize, Tracked(snpcore): Tracked<&mut SnpCore>)
     MSR_GHCB().write(pa.into(), Tracked(&mut perm));
     proof {
         snpcore.regs.tracked_insert(GHCB_REGID(), perm);
-        // Successful GHCB registration response records the requested GHCB page address in the MSR.
-        assert(spec_ghcb_send_core_update(*old(snpcore), *snpcore, snpcore.ghcbmsr_msgs().last()));
-        assert(snpcore.ghcb_value() == ppage.spec_to_addr());
     }
 }
 

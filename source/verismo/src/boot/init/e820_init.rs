@@ -146,7 +146,6 @@ pub proof fn lemma_snp_core_self_frame(snpcore: crate::registers::SnpCore, regs:
     ensures
         snpcore.only_reg_coremode_updated(snpcore, regs),
 {
-    assert(snpcore.reg_updated(snpcore, regs));
 }
 
 impl E820Entry {
@@ -159,11 +158,6 @@ impl E820Entry {
             e820[i].spec_cmp_max_requires(),
     {
         let entry = e820[i];
-        assert(entry.wf_range());
-        assert(entry.spec_real_range().0.is_constant());
-        assert(entry.spec_real_range().1.is_constant());
-        assert(E820Entry::spec_sec_max().is_constant());
-        assert(entry.self_wf());
     }
 }
 
@@ -175,11 +169,6 @@ pub proof fn lemma_init_perm_requires_pvalidate(perm: SnpPointsToRaw, r: (int, n
     ensures
         spec_perm_requires_pvalidate(perm, r.0, r.1, true),
 {
-    broadcast use SwSnpMemAttr::axiom_pte;
-
-    assert(SwSnpMemAttr::init().deterministic_pte());
-    assert(SwSnpMemAttr::init().encrypted());
-    assert(!SwSnpMemAttr::init().rmp@.spec_validated());
 }
 
 #[verifier::spinoff_prover]
@@ -293,9 +282,7 @@ pub fn validate_e820(
             SwSnpMemAttr::spec_default(),
             pre_validated,
         );
-        assert(cc.snpcore === oldmemcc.cc.snpcore);
         lemma_snp_core_self_frame(cc.snpcore, set![GHCB_REGID()]);
-        assert(cc.snpcore.only_reg_coremode_updated(oldmemcc.cc.snpcore, set![GHCB_REGID()]));
     }
     while val_end < end_addr && index < n
         invariant
@@ -347,7 +334,6 @@ pub fn validate_e820(
             }
             assert(entry.wf_range());
             E820Entry::lemma_formatted_implies_cmp_max_requires(e820@, index as int);
-            assert(entry.spec_cmp_max_requires());
         }
         let cur_addr = entry.aligned_start().reveal_value();
         let cur_end = page_align_up(entry.end().reveal_value());
@@ -401,17 +387,6 @@ pub fn validate_e820(
         }
         if val_end > val_start {
             let tracked pperm = memperm.tracked_remove(toval_range);
-            proof {
-                assert(pperm@.snp() === SwSnpMemAttr::init());
-                assert(pperm@.snp_wf_range(toval_range));
-                lemma_init_perm_requires_pvalidate(pperm, toval_range);
-                assert(spec_perm_requires_pvalidate(
-                    pperm,
-                    val_start as int,
-                    (val_end - val_start) as nat,
-                    true,
-                ));
-            }
             let ghost old_pperm_snp = pperm@.snp();
             let Tracked(pperm) = pvalmem(
                 val_start as u64,
@@ -422,8 +397,6 @@ pub fn validate_e820(
             );
             proof {
                 assert(memperm.contains_default_except(prev_validated_range, pre_validated));
-                assert(old_pperm_snp === SwSnpMemAttr::init());
-                assert(pperm@.snp() === SwSnpMemAttr::spec_default());
                 memperm.tracked_insert(toval_range, pperm);
                 assert(memperm.contains_default_mem(toval_range));
                 memperm.proof_remove_range_ensures(toval_range);
@@ -471,17 +444,6 @@ pub fn validate_e820(
             memperm.proof_remove_range_ensures(toval_range);
         }
         let tracked pperm = memperm.tracked_remove(toval_range);
-        proof {
-            assert(pperm@.snp() === SwSnpMemAttr::init());
-            assert(pperm@.snp_wf_range(toval_range));
-            lemma_init_perm_requires_pvalidate(pperm, toval_range);
-            assert(spec_perm_requires_pvalidate(
-                pperm,
-                val_end as int,
-                (end_addr - val_end) as nat,
-                true,
-            ));
-        }
         let ghost old_pperm_snp = pperm@.snp();
         let Tracked(pperm) = pvalmem(
             val_end as u64,
@@ -492,8 +454,6 @@ pub fn validate_e820(
         );
         proof {
             assert(memperm.contains_default_except(prev_validated_range, pre_validated));
-            assert(old_pperm_snp === SwSnpMemAttr::init());
-            assert(pperm@.snp() === SwSnpMemAttr::spec_default());
             memperm.tracked_insert(toval_range, pperm);
             assert(memperm.contains_default_mem(toval_range));
             memperm.proof_remove_range_ensures(toval_range);
