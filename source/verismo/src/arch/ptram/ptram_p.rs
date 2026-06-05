@@ -5,9 +5,10 @@ use crate::arch::rmp::{RmpEntry, RmpMap, *};
 use crate::arch::vram::VRamDB;
 
 verus! {
-broadcast use crate::group_verismo_default;
-}
 
+broadcast use crate::group_verismo_default;
+
+} // verus!
 verus! {
 
 impl GuestPTRam {
@@ -190,8 +191,7 @@ impl GuestPTRam {
             },
             MemOp::InvlPage(gpa_id) => {},
             MemOp::FlushAll(_) => {},
-            MemOp::RmpOp(rmpop) => {
-            },
+            MemOp::RmpOp(rmpop) => {},
         }
     }
 

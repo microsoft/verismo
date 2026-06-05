@@ -1,9 +1,10 @@
 use super::*;
 
 verus! {
-broadcast use crate::group_verismo_default;
-}
 
+broadcast use crate::group_verismo_default;
+
+} // verus!
 verus! {
 
 impl RmpEntry {

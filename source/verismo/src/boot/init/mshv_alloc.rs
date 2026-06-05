@@ -5,9 +5,10 @@ use crate::allocator::VeriSMoAllocator;
 use crate::boot::init::e820_init_alloc::init_allocator_e820;
 
 verus! {
-broadcast use crate::group_verismo_default;
-}
 
+broadcast use crate::group_verismo_default;
+
+} // verus!
 verus! {
 
 pub open spec fn init_allocator_requires(

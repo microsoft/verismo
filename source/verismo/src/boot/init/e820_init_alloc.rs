@@ -7,9 +7,10 @@ use crate::pgtable_e::pa_to_va;
 use crate::ptr::rmp::*;
 
 verus! {
-broadcast use crate::group_verismo_default;
-}
 
+broadcast use crate::group_verismo_default;
+
+} // verus!
 verus! {
 
 pub fn init_allocator_e820(

@@ -3,9 +3,10 @@ use crate::arch::addr_s::*;
 use crate::tspec::*;
 
 verus! {
-broadcast use crate::group_verismo_default;
-}
 
+broadcast use crate::group_verismo_default;
+
+} // verus!
 verus! {
 
 impl<VT: AddrType, PT: AddrType> MemMap<VT, PT> {

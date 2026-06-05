@@ -11,9 +11,10 @@ use crate::lock::{LockPermRaw, MapLockContains, MapRawLockTrait};
 use crate::vbox::{MutFnTrait, MutFnWithCSTrait, VBox};
 
 verus! {
-broadcast use crate::group_verismo_default;
-}
 
+broadcast use crate::group_verismo_default;
+
+} // verus!
 verus! {
 
 spec fn init_prepare_e820_ensures(

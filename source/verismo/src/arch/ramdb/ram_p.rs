@@ -8,6 +8,7 @@ use crate::tspec::*;
 use crate::*;
 
 verus! {
+
 broadcast use {
     crate::arch::addr_s::page::group_addr_default,
     crate::arch::pgtable::memmap_s::group_pgtable_memmap_default,
@@ -19,8 +20,8 @@ broadcast use {
     crate::ptr::snp::snp_u::group_snp_attr_default,
     crate::registers::msr_perm_s::group_msr_perm_default,
 };
-}
 
+} // verus!
 verus! {
 
 impl RamDB {

@@ -13,9 +13,10 @@ use crate::vbox::VBox;
 global_asm!(include_str!("isr.s"), options(att_syntax));
 
 verus! {
-broadcast use crate::group_verismo_default;
-}
 
+broadcast use crate::group_verismo_default;
+
+} // verus!
 verus! {
 
 // Requires the exception code and stackframe is not secret.

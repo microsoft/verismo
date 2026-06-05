@@ -2,9 +2,10 @@ use super::*;
 use crate::arch::attack::*;
 
 verus! {
-broadcast use crate::group_verismo_default;
-}
 
+broadcast use crate::group_verismo_default;
+
+} // verus!
 verus! {
 
 impl MemOp<GuestVir> {

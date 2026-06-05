@@ -2,6 +2,7 @@ use super::perm_s::*;
 use super::*;
 
 verus! {
+
 broadcast use {
     crate::arch::addr_s::page::group_addr_default,
     crate::arch::pgtable::memmap_s::group_pgtable_memmap_default,
@@ -13,8 +14,8 @@ broadcast use {
     crate::ptr::snp::snp_u::group_snp_attr_default,
     crate::registers::msr_perm_s::group_msr_perm_default,
 };
-}
 
+} // verus!
 verus! {
 
 pub proof fn rmp_proof_check_access_rmp_has_gpn_memid(
@@ -155,7 +156,8 @@ pub proof fn rmp_proof_inv_sw(rmp: &RmpMap, op: RmpOp<SysPhy>, memid: MemID)
                 assert(new[rev_new].view().spec_asid() === memid.to_asid());
                 if rev_new === page {
                     assert(new[rev_new].view().spec_gpn() === rmp[rev_new].view().spec_gpn());
-                    assert(new[rev_new].view().spec_validated() === rmp[rev_new].view().spec_validated());
+                    assert(new[rev_new].view().spec_validated()
+                        === rmp[rev_new].view().spec_validated());
                     assert(new[rev_new].view().spec_asid() === rmp[rev_new].view().spec_asid());
                 } else {
                     assert(new[rev_new] === rmp[rev_new]);
