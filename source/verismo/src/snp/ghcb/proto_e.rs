@@ -33,26 +33,7 @@ pub fn SM_TERM_RICHOS_ERR(subcode: u64_t) -> (ret: u64_t)
     (SM_TERM_RICHOS + (subcode << SUBCODE_OFFSET))
 }
 
-} // verus!
-verus! {
-
 pub const GHCB_HV_DEBUG: u64 = 0xf03;
-
-} // verus!
-/*
-#[verifier::external]
-pub mod trust {
-    use alloc::fmt;
-
-    use super::*;
-    impl fmt::Write for GHCBProto {
-        fn write_str(&mut self, s: &str) -> fmt::Result {
-            GHCBProto::print_str(s);
-            Ok(())
-        }
-    }
-}*/
-verus! {
 
 pub open spec fn GHCB_REGID() -> RegName {
     RegName::MSR(MSR_GHCB_BASE)

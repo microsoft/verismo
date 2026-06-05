@@ -182,140 +182,140 @@ mod internal {
     use super::*;
     verus! {
 
-#[verifier::exec_allows_no_decreases_clause]
-pub fn ghcb_change_page_state_via_pg_internal(
-    ghcb_ptr: SnpPPtr<GhcbPage>,
-    ppage: u64,
-    npages: u16,
-    op: PageOps,
-    Tracked(page_perms): Tracked<&mut Map<int, SnpPointsToRaw>>,
-    Tracked(ghcbpage_perm0): Tracked<&mut Map<int, SnpPointsTo<GhcbPage>>>,
-    Tracked(cs): Tracked<&mut SnpCoreSharedMem>,
-)
-    requires
-        old(cs).inv(),
-        old(ghcbpage_perm0).contains_key(0),
-        old(ghcbpage_perm0)[0]@.wf_shared(ghcb_ptr.id()),
-        ghcb_ptr.is_constant(),
-        spec_valid_page_state_change(ppage, npages as nat),
-        npages <= SNP_PAGE_STATE_CHANGE_MAX_ENTRY,
-        requires_pages_perms(*old(page_perms), ppage as int, npages as nat),
-        forall|i|
-            #![trigger old(page_perms).contains_key(i)]
-            ppage <= i < (ppage + npages) ==> old(page_perms).contains_key(i) && old(
-                page_perms,
-            )[i]@.wf_range((i.to_addr(), PAGE_SIZE as nat)),
-    ensures
-        ghcbpage_perm0.contains_key(0),
-        ghcbpage_perm0[0]@.only_val_updated(old(ghcbpage_perm0)[0]@),
-        ghcbpage_perm0[0]@.wf_shared(ghcb_ptr.id()),
-        cs.inv(),
-        cs.only_lock_reg_coremode_updated(*old(cs), set![], set![]),
-        ensure_pages_perm_change_state(
-            *old(page_perms),
-            *page_perms,
-            ppage as int,
-            npages as nat,
-            op,
-        ),
-{
-    if npages == 0 {
-        return;
-    }
-    let tracked mut ghcbpage_perm = ghcbpage_perm0.tracked_remove(0);
-    let scratch_ptr = ghcb_ptr.shared_buffer();
-    let scratch_paddr = scratch_ptr.as_u64();
-    let mut ghcb = VBox::<GhcbPage>::from_raw(ghcb_ptr.to_usize(), Tracked(ghcbpage_perm));
-    ghcb.box_update(GhcbClear);
-    let (ghcb_ptr, Tracked(mut ghcbpage_perm)) = ghcb.into_raw();
-    let tracked (left, right) = ghcbpage_perm.tracked_into_raw().trusted_split(
-        GhcbPage::spec_shared_buffer_offset(),
-    );
-    let tracked (scratch_perm, right) = right.trusted_split(spec_size::<SnpPageStateChange>());
-    let mut scratch: VBox<SnpPageStateChange> = VBox::from_raw(
-        scratch_ptr.to_usize(),
-        Tracked(scratch_perm.trusted_into()),
-    );
-    // Clear the buffer
-    scratch.box_update((FillPageStateChangeFn, ppage, npages, op));
-    let (scratch_ptr, Tracked(scratch_perm)) = scratch.into_raw();
-    let mut exit_code = SVM_EXIT_PAGE_STATE_CHANGE;
-    let mut exit_info1 = 0;
-    let mut exit_info2 = 0;
-    let tracked mut ghcbpage_perm = left.trusted_join(scratch_perm.tracked_into_raw()).trusted_join(
-        right,
-    ).tracked_into();
-    let (mut header, Tracked(mut ghcbpage_perm)) = scratch_ptr.header().copy_with::<GhcbPage>(
-        Tracked(ghcbpage_perm),
-    );
-    let ghost oldcs = *cs;
-    let ghost old_ghcbpage_perm = ghcbpage_perm;
-    while header.cur_entry.le(&header.end_entry)
-        invariant
-            header.is_constant(),
-            ghcbpage_perm@.wf_shared(ghcb_ptr.id()),
+    #[verifier::exec_allows_no_decreases_clause]
+    pub fn ghcb_change_page_state_via_pg_internal(
+        ghcb_ptr: SnpPPtr<GhcbPage>,
+        ppage: u64,
+        npages: u16,
+        op: PageOps,
+        Tracked(page_perms): Tracked<&mut Map<int, SnpPointsToRaw>>,
+        Tracked(ghcbpage_perm0): Tracked<&mut Map<int, SnpPointsTo<GhcbPage>>>,
+        Tracked(cs): Tracked<&mut SnpCoreSharedMem>,
+    )
+        requires
+            old(cs).inv(),
+            old(ghcbpage_perm0).contains_key(0),
+            old(ghcbpage_perm0)[0]@.wf_shared(ghcb_ptr.id()),
             ghcb_ptr.is_constant(),
-            ghcbpage_perm@.only_val_updated(old_ghcbpage_perm@),
+            spec_valid_page_state_change(ppage, npages as nat),
+            npages <= SNP_PAGE_STATE_CHANGE_MAX_ENTRY,
+            requires_pages_perms(*old(page_perms), ppage as int, npages as nat),
+            forall|i|
+                #![trigger old(page_perms).contains_key(i)]
+                ppage <= i < (ppage + npages) ==> old(page_perms).contains_key(i) && old(
+                    page_perms,
+                )[i]@.wf_range((i.to_addr(), PAGE_SIZE as nat)),
+        ensures
+            ghcbpage_perm0.contains_key(0),
+            ghcbpage_perm0[0]@.only_val_updated(old(ghcbpage_perm0)[0]@),
+            ghcbpage_perm0[0]@.wf_shared(ghcb_ptr.id()),
             cs.inv(),
-            cs.only_lock_reg_coremode_updated(oldcs, set![], set![]),
-            *page_perms === *old(page_perms),
+            cs.only_lock_reg_coremode_updated(*old(cs), set![], set![]),
+            ensure_pages_perm_change_state(
+                *old(page_perms),
+                *page_perms,
+                ppage as int,
+                npages as nat,
+                op,
+            ),
     {
+        if npages == 0 {
+            return;
+        }
+        let tracked mut ghcbpage_perm = ghcbpage_perm0.tracked_remove(0);
+        let scratch_ptr = ghcb_ptr.shared_buffer();
+        let scratch_paddr = scratch_ptr.as_u64();
         let mut ghcb = VBox::<GhcbPage>::from_raw(ghcb_ptr.to_usize(), Tracked(ghcbpage_perm));
-        ghcb.box_update((GhcbSetSwScratchFn, scratch_paddr));
-        let (_, Tracked(mut tmp_ghcbpage_perm)) = ghcb.into_raw();
-        let tracked mut ghcbpage_perm0 = Map::tracked_empty();
-        let ghost prevcs = *cs;
+        ghcb.box_update(GhcbClear);
+        let (ghcb_ptr, Tracked(mut ghcbpage_perm)) = ghcb.into_raw();
+        let tracked (left, right) = ghcbpage_perm.tracked_into_raw().trusted_split(
+            GhcbPage::spec_shared_buffer_offset(),
+        );
+        let tracked (scratch_perm, right) = right.trusted_split(spec_size::<SnpPageStateChange>());
+        let mut scratch: VBox<SnpPageStateChange> = VBox::from_raw(
+            scratch_ptr.to_usize(),
+            Tracked(scratch_perm.trusted_into()),
+        );
+        // Clear the buffer
+        scratch.box_update((FillPageStateChangeFn, ppage, npages, op));
+        let (scratch_ptr, Tracked(scratch_perm)) = scratch.into_raw();
         let mut exit_code = SVM_EXIT_PAGE_STATE_CHANGE;
         let mut exit_info1 = 0;
         let mut exit_info2 = 0;
-        proof {
-            ghcbpage_perm0.tracked_insert(0, tmp_ghcbpage_perm);
-        }
-        let resp = ghcb_page_proto(
-            ghcb_ptr.clone(),
-            &mut exit_code,
-            &mut exit_info1,
-            &mut exit_info2,
-            Tracked(&mut ghcbpage_perm0),
-            Tracked(cs),
+        let tracked mut ghcbpage_perm = left.trusted_join(scratch_perm.tracked_into_raw()).trusted_join(
+            right,
+        ).tracked_into();
+        let (mut header, Tracked(mut ghcbpage_perm)) = scratch_ptr.header().copy_with::<GhcbPage>(
+            Tracked(ghcbpage_perm),
         );
-        proof {
-            oldcs.lemma_update_prop(prevcs, *cs, set![], set![], set![], set![]);
+        let ghost oldcs = *cs;
+        let ghost old_ghcbpage_perm = ghcbpage_perm;
+        while header.cur_entry.le(&header.end_entry)
+            invariant
+                header.is_constant(),
+                ghcbpage_perm@.wf_shared(ghcb_ptr.id()),
+                ghcb_ptr.is_constant(),
+                ghcbpage_perm@.only_val_updated(old_ghcbpage_perm@),
+                cs.inv(),
+                cs.only_lock_reg_coremode_updated(oldcs, set![], set![]),
+                *page_perms === *old(page_perms),
+        {
+            let mut ghcb = VBox::<GhcbPage>::from_raw(ghcb_ptr.to_usize(), Tracked(ghcbpage_perm));
+            ghcb.box_update((GhcbSetSwScratchFn, scratch_paddr));
+            let (_, Tracked(mut tmp_ghcbpage_perm)) = ghcb.into_raw();
+            let tracked mut ghcbpage_perm0 = Map::tracked_empty();
+            let ghost prevcs = *cs;
+            let mut exit_code = SVM_EXIT_PAGE_STATE_CHANGE;
+            let mut exit_info1 = 0;
+            let mut exit_info2 = 0;
+            proof {
+                ghcbpage_perm0.tracked_insert(0, tmp_ghcbpage_perm);
+            }
+            let resp = ghcb_page_proto(
+                ghcb_ptr.clone(),
+                &mut exit_code,
+                &mut exit_info1,
+                &mut exit_info2,
+                Tracked(&mut ghcbpage_perm0),
+                Tracked(cs),
+            );
+            proof {
+                oldcs.lemma_update_prop(prevcs, *cs, set![], set![], set![], set![]);
+            }
+            match resp {
+                SvmStatus::Ok => {},
+                _ => {
+                    proof {
+                        reveal_strlit("Bad change page state");
+                    }
+                    new_strlit("Bad change page state").err(Tracked(cs));
+                    vc_terminate(SM_TERM_GHCB_RESP_INVALID, Tracked(&mut cs.snpcore));
+                },
+            }
+            let scratch_ptr: SnpPPtr<SnpPageStateChange> = ghcb_ptr.shared_buffer().to();
+            let (tmpheader, Tracked(mut tmp_ghcb_perm)) = scratch_ptr.header().copy_with::<GhcbPage>(
+                Tracked(ghcbpage_perm0.tracked_remove(0)),
+            );
+            header = tmpheader;
+            //header.leak_debug();
+            proof {
+                // TODO: Add page_perm updates
+                ghcbpage_perm = tmp_ghcb_perm;
+            }
         }
-        match resp {
-            SvmStatus::Ok => {},
-            _ => {
-                proof {
-                    reveal_strlit("Bad change page state");
-                }
-                new_strlit("Bad change page state").err(Tracked(cs));
-                vc_terminate(SM_TERM_GHCB_RESP_INVALID, Tracked(&mut cs.snpcore));
-            },
-        }
-        let scratch_ptr: SnpPPtr<SnpPageStateChange> = ghcb_ptr.shared_buffer().to();
-        let (tmpheader, Tracked(mut tmp_ghcb_perm)) = scratch_ptr.header().copy_with::<GhcbPage>(
-            Tracked(ghcbpage_perm0.tracked_remove(0)),
-        );
-        header = tmpheader;
-        //header.leak_debug();
         proof {
-            // TODO: Add page_perm updates
-            ghcbpage_perm = tmp_ghcb_perm;
+            trusted_ghcb_change_pages_state_via_pg(
+                ppage as int,
+                npages as nat,
+                page_perms,
+                op,
+                &cs.snpcore,
+            );
+            ghcbpage_perm0.tracked_insert(0, ghcbpage_perm);
         }
     }
-    proof {
-        trusted_ghcb_change_pages_state_via_pg(
-            ppage as int,
-            npages as nat,
-            page_perms,
-            op,
-            &cs.snpcore,
-        );
-        ghcbpage_perm0.tracked_insert(0, ghcbpage_perm);
-    }
-}
 
-} // verus!
+    } // verus!
 }
 
 verus! {

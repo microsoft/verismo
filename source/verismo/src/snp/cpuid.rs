@@ -109,7 +109,7 @@ pub const EVERCRYPT_USED_FEATURES: u32 = X86_FEATURE_AES | X86_FEATURE_PCLMULQDQ
 pub const X86_FEATURE_VPCLMULQDQ: u32 = BIT32!(10);
 
 } // verus!
-// return regflag if feature is set
+/// return regflag if feature is set
 macro_rules! feature {
     ($reg: ident, $feature: ident, $regflag: expr) => {
         if $reg & $feature == $feature {

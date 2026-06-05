@@ -427,7 +427,7 @@ impl<'a> MutFnTrait<'a, GhcbClear, bool> for GhcbPage {
 }
 
 } // verus!
-//($fnname: ident, $inputty: ident, $fieldt: ty, $fieldname: ident)
+  //($fnname: ident, $inputty: ident, $fieldt: ty, $fieldname: ident)
 ghcb_box_fn! {GhcbSetRcxFn, GhcbSetRcx, GhcbCheckRcx, u64 ,rcx}
 ghcb_box_fn! {GhcbSetRaxFn, GhcbSetRax, GhcbCheckRax, u64, rax}
 ghcb_box_fn! {GhcbSetRdxFn, GhcbSetRdx, GhcbCheckRdx, u64, rdx}
