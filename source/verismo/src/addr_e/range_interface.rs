@@ -1,5 +1,10 @@
 use super::*;
 
+verus! {
+
+broadcast use crate::group_verismo_default;
+
+} // verus!
 verismo_simple! {
 
 pub open spec fn spec_valid_range(r: (usize_s, usize_s), max: usize_s) -> (usize_s, usize_s) {
@@ -78,8 +83,8 @@ impl MemRangeInterface for (usize_s, usize_s) {
         let ret = *self;
         proof {
             // ret is exactly *self, and spec_real_range for this instance is *self.
-            assume(ret === self.spec_real_range());
-            assume(Self::real_wf(ret));
+            assert(ret === self.spec_real_range());
+            assert(Self::real_wf(ret));
         }
         ret
     }
@@ -91,8 +96,8 @@ impl MemRangeInterface for (usize_s, usize_s) {
         proof {
             // Casting the architecture constant into SecType preserves the value
             // and produces a constant secure value.
-            assume(ret == Self::spec_end_max());
-            assume(ret.is_constant());
+            assert(ret == Self::spec_end_max());
+            assert(ret.is_constant());
         }
         ret
     }
@@ -138,8 +143,8 @@ impl MemRangeInterface for (usize_t, usize_t) {
         proof {
             // The pair components are converted with From<usize>, whose ensures
             // preserve the values as constant SecType values.
-            assume(ret === self.spec_real_range());
-            assume(Self::real_wf(ret));
+            assert(ret === self.spec_real_range());
+            assert(Self::real_wf(ret));
         }
         ret
     }
@@ -151,8 +156,8 @@ impl MemRangeInterface for (usize_t, usize_t) {
         proof {
             // Casting the architecture constant into SecType preserves the value
             // and produces a constant secure value.
-            assume(ret == Self::spec_end_max());
-            assume(ret.is_constant());
+            assert(ret == Self::spec_end_max());
+            assert(ret.is_constant());
         }
         ret
     }
@@ -181,10 +186,10 @@ impl MemRangeInterface for (usize_t, usize_t) {
             r.1@.proof_constant();
             // The assignments above come from `From<SecType<_>>` conversions whose
             // ensures preserve the secure views; Verus does not unfold those casts here.
-            assume(self.spec_real_range().0@ === r.0@);
-            assume(self.spec_real_range().1@ === r.1@);
-            assume(self.spec_real_range() === r);
-            assume((*old(self)).spec_set_range(r) === *self);
+            assert(self.spec_real_range().0@ === r.0@);
+            assert(self.spec_real_range().1@ === r.1@);
+            assert(self.spec_real_range() === r);
+            assert((*old(self)).spec_set_range(r) === *self);
         }
     }
 }
@@ -385,10 +390,10 @@ impl<T: MemRangeInterface> GeneratedMemRangeInterface for T {
         };
         proof {
             // The branch implements spec_valid_range's clipped start exactly.
-            assume(ret == self.spec_range().0);
-            assume(ret.is_constant());
-            assume(ret <= Self::spec_max());
-            assume(ret.wf());
+            assert(ret == self.spec_range().0);
+            assert(ret.is_constant());
+            assert(ret <= Self::spec_max());
+            assert(ret.wf());
         }
         ret
     }
@@ -407,10 +412,10 @@ impl<T: MemRangeInterface> GeneratedMemRangeInterface for T {
         };
         proof {
             // The branch implements spec_valid_range's clipped size exactly.
-            assume(ret == self.spec_range().1);
-            assume(ret.is_constant());
-            assume(ret <= Self::spec_max());
-            assume(ret.wf());
+            assert(ret == self.spec_range().1);
+            assert(ret.is_constant());
+            assert(ret <= Self::spec_max());
+            assert(ret.wf());
         }
         ret
     }
@@ -423,16 +428,16 @@ impl<T: MemRangeInterface> GeneratedMemRangeInterface for T {
         proof {
             // start/size are the clipped range with end <= spec_max, so the secure
             // addition is within usize bounds.
-            assume(start@.val + size@.val >= usize::MIN);
-            assume(start@.val + size@.val <= usize::MAX);
+            assert(start@.val + size@.val >= usize::MIN);
+            assert(start@.val + size@.val <= usize::MAX);
         }
         let ret = start + size;
         proof {
             // The addition above computes spec_range().end().
-            assume(ret == self.spec_range().end());
-            assume(ret.is_constant());
-            assume(ret <= Self::spec_max());
-            assume(ret.wf());
+            assert(ret == self.spec_range().end());
+            assert(ret.is_constant());
+            assert(ret <= Self::spec_max());
+            assert(ret.wf());
         }
         ret
     }
@@ -735,7 +740,7 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N> {
                 assert(y.spec_real_range().0.is_constant());
                 assert(y.spec_real_range().1.is_constant());
                 // spec_sec_max is defined as a SecType spec_constant of spec_end_max.
-                assume(T::spec_sec_max().is_constant());
+                assert(T::spec_sec_max().is_constant());
                 assert(x.spec_lt_requires(&y));
             }
         }
@@ -941,8 +946,8 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N> {
                 assert(entry === self@[ri as int]);
                 // The loop invariants give entry's real range constants and wf;
                 // spec_sec_max is a secure constant, completing spec_cmp_max_requires.
-                assume(T::spec_sec_max().is_constant());
-                assume(entry.spec_cmp_max_requires());
+                assert(T::spec_sec_max().is_constant());
+                assert(entry.spec_cmp_max_requires());
             }
             if entry.size().reveal_value() == 0 {
                 ri = ri + 1;
@@ -957,8 +962,8 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N> {
             proof {
                 // start() and size() returned the clipped valid range; after update_range
                 // the entry's real range is exactly that valid nonzero range.
-                assume(entry.wf_range());
-                assume(entry.spec_cmp_max_requires());
+                assert(entry.wf_range());
+                assert(entry.spec_cmp_max_requires());
             }
             if wi > 0 {
                 assert(self@[wi as int - 1].self_wf());
@@ -966,8 +971,8 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N> {
                 proof {
                     // Same constant spec_sec_max fact plus the loop invariant for
                     // the previously written entry establishes end()'s precondition.
-                    assume(T::spec_sec_max().is_constant());
-                    assume(prev_entry.spec_cmp_max_requires());
+                    assert(T::spec_sec_max().is_constant());
+                    assert(prev_entry.spec_cmp_max_requires());
                 }
                 if start.reveal_value() < prev_entry.end().reveal_value() {
                     break;
@@ -1023,7 +1028,7 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N> {
                     ).to_range_seq().push(entry.spec_range()));
                     // ri was just incremented after consuming `entry`, so this is
                     // the standard take/push decomposition for the sorted prefix.
-                    assume(prev.take(ri as int).to_range_seq() =~~= prev.take(
+                    assert(prev.take(ri as int).to_range_seq() =~~= prev.take(
                         ri as int - 1,
                     ).to_range_seq().push(entry.spec_range()));
                 }
