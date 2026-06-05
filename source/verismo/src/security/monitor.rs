@@ -675,11 +675,10 @@ impl<'a> MonitorHandle<'a> {
             Tracked(cs),
         ) {
             self.gvca_page = Some(gvca);
-            new_strlit("Register gvca_page\n").leak_debug();
-            assume(self.wf_registered());
+            "Register gvca_page\n".leak_debug();
             true
         } else {
-            new_strlit("failed to register GVCA\n").leak_debug();
+            "failed to register GVCA\n".leak_debug();
             false
         };
         osmem_ptr.put(Tracked(&mut osmem_perm), osmem);
