@@ -2,6 +2,11 @@ use super::*;
 
 verus! {
 
+broadcast use crate::group_verismo_default;
+
+} // verus!
+verus! {
+
 pub const INVALID_ADDR: usize = VM_MEM_SIZE + 1;
 
 pub open spec fn spec_pa_to_va(pa: int) -> int {
@@ -212,7 +217,7 @@ macro_rules! impl_addr_safe_interface {
                     use_type_invariant(&s);
                     // `s` is created by `From<usize>` for SecType, whose ensures
                     // makes the secure value equal to the source PAGE_SIZE constant.
-                    assume(s@.val == PAGE_SIZE);
+                    assert(s@.val == PAGE_SIZE);
                     assert(s@.val != 0);
                     assert((*self)@.val >= $ptype::MIN);
                     assert((*self)@.val <= $ptype::MAX);
@@ -224,8 +229,8 @@ macro_rules! impl_addr_safe_interface {
                     // Verus may not unfold the SecType Div spec in this impl body
                     // (SMT axiom-ordering issue); the call above already establishes
                     // these facts from Div's ensures and s == PAGE_SIZE.
-                    assume(ret === self.spec_to_page());
-                    assume(self.spec_ensures_to_page(ret));
+                    assert(ret === self.spec_to_page());
+                    assert(self.spec_ensures_to_page(ret));
                 }
                 ret
             }
@@ -286,8 +291,8 @@ macro_rules! impl_page_safe_interface {
                     // Verus may not unfold the SecType Mul spec in this impl body
                     // (SMT axiom-ordering issue); the call above already establishes
                     // these facts from Mul's ensures and PAGE_SIZE == 0x1000.
-                    assume(ret === self.spec_to_addr());
-                    assume(self.spec_ensures_to_addr(ret));
+                    assert(ret === self.spec_to_addr());
+                    assert(self.spec_ensures_to_addr(ret));
                 }
                 ret
             }
