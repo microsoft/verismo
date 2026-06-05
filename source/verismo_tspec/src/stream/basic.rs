@@ -121,10 +121,12 @@ pub proof fn proof_u64_non_zero(data: u64)
     let l = data as u32;
     let h = (data / 0x10000_0000) as u32;
     if data != 0 {
+        // Required to derive proof_u32_non_zero's low-half zero-stream precondition.
         assert forall|i| 0 <= i < 4 implies #[trigger] (u32_to_stream(l)[i]) == 0 by {
             assert(u64_to_stream(data)[i] == 0);
         }
         proof_u32_non_zero(l);
+        // Required to derive proof_u32_non_zero's high-half zero-stream precondition.
         assert forall|i| 0 <= i < 4 implies #[trigger] (u32_to_stream(h)[i]) == 0 by {
             assert(u64_to_stream(data)[i + 4] == 0);
         }
@@ -140,10 +142,12 @@ pub proof fn proof_u32_non_zero(data: u32)
 {
     let l = data as u16;
     let h = (data / 0x10000) as u16;
+    // Required to derive proof_u16_non_zero's low-half zero-stream precondition.
     assert forall|i| 0 <= i < 2 implies #[trigger] (u16_to_stream(l)[i]) == 0 by {
         assert(u32_to_stream(data)[i] == 0);
     }
     proof_u16_non_zero(l);
+    // Required to derive proof_u16_non_zero's high-half zero-stream precondition.
     assert forall|i| 0 <= i < 2 implies #[trigger] (u16_to_stream(h)[i]) == 0 by {
         assert(u32_to_stream(data)[i + 2] == 0);
     }
@@ -158,6 +162,7 @@ pub proof fn proof_u16_non_zero(data: u16)
 {
     let l = data as u8;
     let h = (data / 0x100) as u8;
+    // Required to instantiate proof_u8_non_zero's byte-zero preconditions.
     assert(u16_to_stream(data)[0] == 0);
     assert(u16_to_stream(data)[1] == 0);
     proof_u8_non_zero(l);

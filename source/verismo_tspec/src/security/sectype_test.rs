@@ -8,9 +8,7 @@ use vops::VEq;
 
 verus! {
 
-// Surface the SecType constructor/extensionality axioms for every proof in
-// this test module.  Without this, postconditions involving `spec_new(...)`
-// (e.g. `v1 + v2`, `v1 * v2`, casts) are opaque to the verifier.
+// Required in this in-crate test module; downstream default broadcasts do not surface these here.
 broadcast use {
     SecType::axiom_spec_new,
     SecType::axiom_ext_equal,
@@ -59,10 +57,6 @@ verismo! {
     requires
         v1@.val + v2@.val <= u64::MAX,
     {
-        proof {
-            use_type_invariant(&v1);
-            use_type_invariant(&v2);
-        }
         v1.add(v2)
     }
 
@@ -74,8 +68,6 @@ verismo! {
         v1 * v2 < 100,
     {
         proof {
-            use_type_invariant(&v1);
-            use_type_invariant(&v2);
             // Bridge `(v1 * v2) < 100` to a nonlinear-arith fact on raw u64.
             // (v1*v2).ord_int() inlines to v1@.bop_new(v2@, fn_spec_mul_u64_u64_int).val
             // which equals v1@.val * v2@.val via fn_spec_mul's lambda body.
@@ -95,11 +87,6 @@ verismo! {
         v1@.val * v2@.val <= u64::MAX,
     {
         let v = 11;
-        assert(v1@.val >= 0);
-        assert(v2@.val >= 0);
-        assert(v1@.val >= 0) by {
-            assert(v1@.val >= 0)
-        }
         v
     }
 }
@@ -147,19 +134,9 @@ verismo_non_secret! {
     ensures
         v1 & v2 < 10,
     {
+        // Required to prove the bit-vector bound from the non-secret operands.
         proof {p::proof_test_bits2(v1 as u64, v2 as u64)}
 
-        if v1 & v2 == 4 {
-            proof {
-                assert(v1 & v2 == 4);
-            }
-        }
-
-        if v1 & v2 != 4 {
-            proof {
-                assert(v1 & v2 != 4);
-            }
-        }
         v1 & v2
     }
 }
@@ -182,9 +159,6 @@ verismo! {
     ensures
         ret == 0x100
     {
-        proof {
-            use_type_invariant(&v1);
-        }
         v1 + 1
     }
 
@@ -196,9 +170,6 @@ verismo! {
         v1@.val == 0xff,
         ret@.val == 0xff,
     {
-        proof {
-            use_type_invariant(&v1);
-        }
         v1 as u32
     }
 }

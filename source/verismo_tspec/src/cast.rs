@@ -4,6 +4,7 @@ use super::*;
 // `use super::*;` already pulls them in via the `tspec` re-exports.
 verus! {
 
+// Required here to make the constancy axiom available to cast proofs in this crate.
 broadcast use axiom_const_forall;
 
 pub trait VTypeCast<T> {
@@ -87,6 +88,7 @@ pub proof fn proof_field_set_at<
     let val_bytes: SecSeqByte = val.vspec_cast_to();
     let fb: SecSeqByte = f.vspec_cast_to();
     let end = (offset + spec_size::<F>()) as int;
+    // Required to instantiate size/cast axioms while proving field subranges.
     broadcast use {axiom_size_from_cast_secbytes_def, axiom_size_from_cast_bytes};
 
     axiom_size_from_cast_secbytes_def(prev_val);
@@ -120,6 +122,7 @@ pub broadcast proof fn proof_field_set_constant<
     let bytes: SecSeqByte = val.vspec_cast_to();
     let fb: SecSeqByte = f.vspec_cast_to();
     let end = (offset + spec_size::<F>()) as int;
+    // Required to instantiate size/cast axioms while proving field-set constancy.
     broadcast use {axiom_size_from_cast_secbytes_def, axiom_size_from_cast_bytes};
 
     axiom_size_from_cast_secbytes_def(prev_val);

@@ -352,7 +352,6 @@ impl<T, M> SpecSecType<T, M> {
                 }
             }
         }
-        broadcast use SpecSecType::lemma_is_constant;
         ret
     }
 
@@ -374,7 +373,6 @@ impl<T, M> SpecSecType<T, M> {
             self.is_constant() ==> (#[trigger]self.uop_new(op)).is_constant(),
     {
         let ret = self.uop_new(op);
-        broadcast use SpecSecType::lemma_is_constant;
         if self._is_constant() {
             assert forall|i: nat| 1 <= i <= 4 implies
                 #[trigger] ret.valsets[i] =~~= set![ret.val] by {
@@ -430,10 +428,7 @@ impl<T, M> SecType<T, M> {
             ret === SecType::spec_constant(val),
     {
         let ret = Self { val, view: Ghost(SpecSecType::constant(val)) };
-        proof {
-            broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal;
-            assert(ret@ =~~= SecType::spec_constant(val)@);
-        }
+        assert(ret@ =~~= SecType::spec_constant(val)@);
         ret
     }
 
@@ -646,7 +641,6 @@ macro_rules! impl_exe_bops_for_stype {
                     ret == SecType::spec_new((self@ $op other@).$use_cast())
                 {
                     proof {
-                        broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal;
                         use_type_invariant(&self);
                         use_type_invariant(&other);
                         assert((self@.val $op other@.val) >= $baset::MIN);
@@ -659,7 +653,6 @@ macro_rules! impl_exe_bops_for_stype {
                         val: self.val $op other.val,
                         view: Ghost(view),
                     };
-                    assert(ret == SecType::<$baset, M>::spec_new((self@ $op other@).$use_cast()));
                     ret
                 }
             }
@@ -674,9 +667,6 @@ macro_rules! impl_exe_bops_for_stype {
                     (*old(self) $op other)@.$use_cast() === self@,
                     (old(self).is_constant() && other.is_constant()) ==> self.is_constant(),
                 {
-                    proof!{
-                        broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal;
-                    }
                     *self = core::ops::$trt::<SecType<$baset, M>>::$fname(*self, other);
                 }
             }
@@ -689,9 +679,6 @@ macro_rules! impl_exe_bops_for_stype {
                 ensures
                     ret == (self $op other@.val),
                 {
-                    proof!{
-                        broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal;
-                    }
                     SecType::constant(self).$fname(other).reveal_value()
                 }
             }
@@ -705,9 +692,6 @@ macro_rules! impl_exe_bops_for_stype {
                     (self@ $op SpecSecType::constant(other)).$use_cast() === ret@,
                     (self.is_constant()) ==> ret.is_constant(),
                 {
-                    proof!{
-                        broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal;
-                    }
                     self.$fname(Self::constant(other))
                 }
             }
@@ -805,9 +789,6 @@ macro_rules! impl_exe_bops_for_stype_by_assume {
                     (*old(self) $op other)@.$use_cast() === self@,
                     (old(self).is_constant() && other.is_constant()) ==> self.is_constant(),
                 {
-                    proof!{
-                        broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal;
-                    }
                     *self = core::ops::$trt::<SecType<$baset, M>>::$fname(*self, other);
                 }
             }
@@ -820,9 +801,6 @@ macro_rules! impl_exe_bops_for_stype_by_assume {
                 ensures
                     ret == (self $op other@.val),
                 {
-                    proof!{
-                        broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal;
-                    }
                     SecType::constant(self).$fname(other).reveal_value()
                 }
             }
@@ -836,9 +814,6 @@ macro_rules! impl_exe_bops_for_stype_by_assume {
                     (self@ $op SpecSecType::constant(other)).$use_cast() === ret@,
                     (self.is_constant()) ==> ret.is_constant(),
                 {
-                    proof!{
-                        broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal;
-                    }
                     self.$fname(Self::constant(other))
                 }
             }
@@ -882,7 +857,6 @@ macro_rules! impl_exe_not_for_stype {
             exec fn $fname(self) -> (ret: Self)
             {
                 proof {
-                    broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal;
                     // BEGIN Verus SMT axiom-ordering workaround. Restate the
                     // trait's [<requires_ $fname>] precondition (self.wf_value())
                     // because the *SpecImpl axiom for VNot is emitted after the
@@ -920,7 +894,6 @@ macro_rules! impl_exe_not_for_stype {
                 self.is_constant() ==> ret.is_constant(),
             {
                 proof {
-                    broadcast use SecType::axiom_spec_new, SecType::axiom_ext_equal;
                     // Same Verus SMT axiom-ordering workaround as above.
                     use_type_invariant(&self);
                     (self@).proof_uop_valset([<fn_spec_ $fname _ $baset _ $baset>]());

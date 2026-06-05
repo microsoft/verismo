@@ -31,30 +31,6 @@ pub proof fn proof_subs_remove<T>(s: Seq<T>, subs: Seq<T>, subs_idx: Seq<int>, i
     let (subs0, subs_idx0) = (subs, subs_idx);
     let subs1 = subs0.remove(i);
     let subs_idx1 = subs_idx0.remove(i);
-    assert forall|k: int| (0 <= k < subs_idx1.len()) implies sub_element(
-        subs1,
-        s,
-        subs_idx1,
-        k,
-    ) by {
-        assert(subs_idx1.len() == subs_idx0.len() - 1);
-        assert(0 <= k < subs_idx0.len());
-        assert(0 <= k < subs0.len());
-        assert(0 <= k < subs1.len());
-        if k < i {
-            assert(sub_element(subs0, s, subs_idx0, k));
-            assert(subs_idx0[k] == subs_idx1[k]);
-            assert(subs0[k] === subs1[k]);
-            assert(sub_element(subs1, s, subs_idx1, k));
-        } else {
-            assert(subs_idx0[k + 1] == subs_idx1[k]);
-            assert(subs0[k + 1] === subs1[k]);
-            assert(sub_element(subs0, s, subs_idx0, k + 1));
-            assert(sub_element(subs1, s, subs_idx1, k));
-        }
-    }
-    assert(subs1.len() == subs_idx1.len());
-    assert(subs1.len() <= s.len());
 }
 
 pub proof fn proof_subs_push<T>(s: Seq<T>, subs: Seq<T>, subs_idx: Seq<int>, i: int)
@@ -70,31 +46,6 @@ pub proof fn proof_subs_push<T>(s: Seq<T>, subs: Seq<T>, subs_idx: Seq<int>, i: 
     let (subs0, subs_idx0) = (subs, subs_idx);
     let subs1 = subs.push(s[i]);
     let subs_idx1 = subs_idx.push(i);
-    assert(subs_idx1.len() == subs_idx0.len() + 1);
-    assert forall|k: int| (0 <= k < subs_idx1.len()) implies sub_element(
-        subs1,
-        s,
-        subs_idx1,
-        k,
-    ) by {
-        assert(subs_idx1.len() == subs_idx0.len() + 1);
-        if (0 <= k < subs_idx0.len()) {
-            assert(0 <= k < subs0.len());
-            assert(0 <= k < subs1.len());
-            assert(sub_element(subs0, s, subs_idx0, k));
-            assert(subs_idx0[k] == subs_idx1[k]);
-            assert(subs0[k] === subs1[k]);
-            assert(sub_element(subs1, s, subs_idx1, k));
-        } else {
-            assert(k == subs_idx0.len());
-            assert(i == subs_idx1[k]);
-            assert(s[i] === subs1[k]);
-            assert(sub_element(subs1, s, subs_idx1, k));
-        }
-    }
-    assert(subs1.len() == subs_idx1.len());
-    assert(subs1.len() <= s.len());
-    assert(is_subseq_via_index(subs1, s, subs_idx1));
 }
 
 pub proof fn lemma_remove_keep<T>(
@@ -123,8 +74,6 @@ pub proof fn lemma_remove_keep<T>(
     let keep0 = keep;
     let keep_idx0 = keep_idx;
     let (removed0, removed_idx0) = (removed, removed_idx);
-    assert(sub_element(keep0, s, keep_idx0, i));
-    assert(0 <= keep_idx0[i] < s.len());
     let removed1 = removed0.push(s[keep_idx0[i]]);
     let removed_idx1 = removed_idx0.push(keep_idx0[i]);
     let keep1 = keep0.remove(i);
