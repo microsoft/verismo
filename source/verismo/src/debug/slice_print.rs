@@ -3,6 +3,11 @@ use vstd::slice::slice_index_get;
 use super::*;
 use crate::snp::{snpcore_console_wf, SnpCoreConsole, SnpCoreSharedMem};
 
+verus! {
+
+broadcast use crate::group_verismo_default;
+
+} // verus!
 verismo_simple! {
 impl<T: VPrint> VPrint for [T] {
     open spec fn early_print_requires(&self) -> bool {
@@ -28,7 +33,7 @@ impl<T: VPrint> VPrint for [T] {
         let mut i: usize = 0;
         proof {
             // The prefix prints establish the same GHCB/console frame relation.
-            assume(print_ensures_snp_c(oldsnpcore, oldconsole, *snpcore, console));
+            assert(print_ensures_snp_c(oldsnpcore, oldconsole, *snpcore, console));
         }
         while i < n
         invariant
@@ -50,7 +55,7 @@ impl<T: VPrint> VPrint for [T] {
             proof {
                 console = tmpconsole;
                 // Element and separator prints compose with the loop's print frame.
-                assume(print_ensures_snp_c(oldsnpcore, oldconsole, *snpcore, console));
+                assert(print_ensures_snp_c(oldsnpcore, oldconsole, *snpcore, console));
             }
             i = i + 1;
         }
@@ -60,7 +65,7 @@ impl<T: VPrint> VPrint for [T] {
         let ret = new_strlit("]\n").early_print2(Tracked(snpcore), Tracked(console));
         proof {
             // The closing bracket print composes with the accumulated frame.
-            assume(print_ensures_snp_c(*old(snpcore), input_console, *snpcore, ret@));
+            assert(print_ensures_snp_c(*old(snpcore), input_console, *snpcore, ret@));
         }
         ret
     }
