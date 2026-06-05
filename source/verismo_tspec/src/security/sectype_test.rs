@@ -172,20 +172,8 @@ verismo! {
         ret@.val == !((v1@.val - 1) as u64),
         ret.wf_value(),
     {
-        proof {
-            use_type_invariant(&v1);
-        }
         let mask = v1 - 1;
-        proof {
-            use_type_invariant(&mask);
-        }
-        let ret = !mask;
-        proof {
-            use_type_invariant(&ret);
-            assert(v1.is_constant() ==> mask.is_constant());
-            assert(mask.is_constant() ==> ret.is_constant());
-        }
-        ret
+        !mask
     }
 
     fn test_add2(v1: u64) -> (ret: u64)

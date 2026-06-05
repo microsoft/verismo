@@ -371,7 +371,7 @@ impl<T, M> SpecSecType<T, M> {
 
     pub broadcast proof fn axiom_uop_new_constant<T2>(self, op: spec_fn(T) -> T2)
         ensures
-            self.is_constant() ==> #[trigger] self.uop_new(op).is_constant(),
+            self.is_constant() ==> (#[trigger]self.uop_new(op)).is_constant(),
     {
         let ret = self.uop_new(op);
         broadcast use SpecSecType::lemma_is_constant;
