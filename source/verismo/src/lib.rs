@@ -26,10 +26,10 @@ builtin_macros::verus! {
 global size_of usize == 8;
 
 } // verus!
-  // `tspec` was extracted into the standalone `verismo_tspec` crate so that
-  // its broadcast groups can auto-propagate to downstream crates via
-  // `broadcast use verismo_tspec::...;`. The re-export below preserves the
-  // existing `crate::tspec::X` paths throughout verismo.
+// `tspec` was extracted into the standalone `verismo_tspec` crate so that
+// its broadcast groups can auto-propagate to downstream crates via
+// `broadcast use verismo_tspec::...;`. The re-export below preserves the
+// existing `crate::tspec::X` paths throughout verismo.
 pub use verismo_tspec as tspec;
 // `macro_const_int!` is the only `#[macro_export]`'d tspec macro used outside
 // tspec itself (e.g. arch/*/def_s.rs). Re-export it at the crate root so the

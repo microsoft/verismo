@@ -445,6 +445,7 @@ impl<T: ?Sized + VPrint> VPrintLock for T {
         // Required: without axiom_global_CONSOLE, console_ref.acquire lock_requires is not proved.
         proof {
             broadcast use crate::global::axiom_global_CONSOLE;
+
         }
         let (_, Tracked(console), Tracked(mut consolelock)) = console_ref.acquire(
             Tracked(consolelock),
@@ -456,6 +457,7 @@ impl<T: ?Sized + VPrint> VPrintLock for T {
         // Required: without axiom_spec_new, console_ref.release unlock_requires is not proved.
         proof {
             broadcast use LockPermToRaw::axiom_spec_new;
+
         }
         console_ref.release(
             Tracked(&mut consolelock),

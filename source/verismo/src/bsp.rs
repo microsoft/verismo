@@ -27,104 +27,104 @@ mod ap {
     use crate::debug::VPrintAtLevel;
     verus! {
 
-    /// AP entry
-    #[no_mangle]
-    #[verifier::exec_allows_no_decreases_clause]
-    pub extern "C" fn ap_call(
-        cpu: &PerCpuData,
-        Tracked(cs): Tracked<SnpCoreSharedMem>,
-        Tracked(nextvmpl_id): Tracked<CoreIdPerm>,
-    )
-        requires
-            nextvmpl_id@.vmpl == RICHOS_VMPL as nat,
-            cs.inv_stage_ap_wait(),
-            cpu.inv(),
-    {
-        let tracked mut cs = cs;
-        let cpu_id = cpu.cpu as usize;
-        (new_strlit("ap call "), cpu_id).leak_debug();
-        new_strlit("ap alloc_ghcb_handle").leak_debug();
-        let ghost cs0 = cs;
-        let ghcb = GhcbHandle::alloc_ghcb_handle(Tracked(&mut cs));
-        let ghost cs1 = cs;
-        let (hyperv, ghcb) = HyperPageHandle::new_shared_page(PAGE_SIZE, ghcb, Tracked(&mut cs));
-        let ghost cs2 = cs;
-        let (guest_channel, ghcb) = SnpGuestChannel::new(ghcb, Tracked(&mut cs));
-        let ghost cs3 = cs;
-        let ghcb_hv_h = GhcbHyperPageHandle(ghcb, hyperv);
-        proof {
-            cs0.lemma_update_prop(
-                cs1,
-                cs2,
-                set![crate::snp::ghcb::GHCB_REGID()],
-                set![spec_ALLOCATOR_lockid(), spec_PT_lockid()],
-                set![],
-                set![spec_ALLOCATOR_lockid(), spec_PT_lockid()],
-            );
-            cs0.lemma_update_prop(
-                cs2,
-                cs3,
-                set![crate::snp::ghcb::GHCB_REGID()],
-                set![spec_ALLOCATOR_lockid(), spec_PT_lockid()],
-                set![],
-                set![spec_ALLOCATOR_lockid(), spec_PT_lockid()],
-            );
-        }
-        let mut vmsa: VBox<VmsaPage>;
-        loop
-            invariant
-                cs.inv_stage_ap_wait(),
-                nextvmpl_id@.vmpl == RICHOS_VMPL as nat,
-            ensures
-                vmsa.is_vmpl0_private_page(),
-                vmsa@.vmpl.spec_eq(RICHOS_VMPL),
-        {
-            let richos_vmsa = RICHOS_VMSA();
-            let ghost lockperms_before_vmsa_remove = cs.lockperms;
-            let tracked mut vmsa_lock = cs.lockperms.tracked_remove(spec_RICHOS_VMSA_lockid());
-            let (vmsa_vec_ptr, Tracked(mut vmsa_vec_perm), Tracked(mut vmsa_lock0)) =
-                richos_vmsa.acquire(Tracked(vmsa_lock), Tracked(&cs.snpcore.coreid));
-            proof {
-                vmsa_lock = vmsa_lock0;
-            }
-            let mut vmsa_vec = vmsa_vec_ptr.take(Tracked(&mut vmsa_vec_perm));
-            let mut vmsa_opt: Option<VBox<VmsaPage>> = None;
-            if vmsa_vec.len() > cpu_id {
-                vmsa_opt = vmsa_vec.remove(cpu_id);
-                vmsa_vec.insert(cpu_id, None);
-            }
-            vmsa_vec_ptr.put(Tracked(&mut vmsa_vec_perm), vmsa_vec);
-            richos_vmsa.release(
-                Tracked(&mut vmsa_lock),
-                Tracked(vmsa_vec_perm),
-                Tracked(&cs.snpcore.coreid),
-            );
-            proof {
-                cs.lockperms.tracked_insert(spec_RICHOS_VMSA_lockid(), vmsa_lock);
-            }
-            match vmsa_opt {
-                Some(v) => {
-                    vmsa = v;
-                    break;
-                },
-                _ => {},
-            }
-            crate::lock::fence();
-        }
-        new_strlit("start richos ap\n").leak_debug();
-        crate::security::run_richos(
-            ghcb_hv_h,
-            guest_channel,
-            vmsa,
-            cpu.secret,
-            Tracked(nextvmpl_id),
-            Tracked(&mut cs),
+/// AP entry
+#[no_mangle]
+#[verifier::exec_allows_no_decreases_clause]
+pub extern "C" fn ap_call(
+    cpu: &PerCpuData,
+    Tracked(cs): Tracked<SnpCoreSharedMem>,
+    Tracked(nextvmpl_id): Tracked<CoreIdPerm>,
+)
+    requires
+        nextvmpl_id@.vmpl == RICHOS_VMPL as nat,
+        cs.inv_stage_ap_wait(),
+        cpu.inv(),
+{
+    let tracked mut cs = cs;
+    let cpu_id = cpu.cpu as usize;
+    (new_strlit("ap call "), cpu_id).leak_debug();
+    new_strlit("ap alloc_ghcb_handle").leak_debug();
+    let ghost cs0 = cs;
+    let ghcb = GhcbHandle::alloc_ghcb_handle(Tracked(&mut cs));
+    let ghost cs1 = cs;
+    let (hyperv, ghcb) = HyperPageHandle::new_shared_page(PAGE_SIZE, ghcb, Tracked(&mut cs));
+    let ghost cs2 = cs;
+    let (guest_channel, ghcb) = SnpGuestChannel::new(ghcb, Tracked(&mut cs));
+    let ghost cs3 = cs;
+    let ghcb_hv_h = GhcbHyperPageHandle(ghcb, hyperv);
+    proof {
+        cs0.lemma_update_prop(
+            cs1,
+            cs2,
+            set![crate::snp::ghcb::GHCB_REGID()],
+            set![spec_ALLOCATOR_lockid(), spec_PT_lockid()],
+            set![],
+            set![spec_ALLOCATOR_lockid(), spec_PT_lockid()],
         );
-        loop {
-        }
+        cs0.lemma_update_prop(
+            cs2,
+            cs3,
+            set![crate::snp::ghcb::GHCB_REGID()],
+            set![spec_ALLOCATOR_lockid(), spec_PT_lockid()],
+            set![],
+            set![spec_ALLOCATOR_lockid(), spec_PT_lockid()],
+        );
     }
+    let mut vmsa: VBox<VmsaPage>;
+    loop
+        invariant
+            cs.inv_stage_ap_wait(),
+            nextvmpl_id@.vmpl == RICHOS_VMPL as nat,
+        ensures
+            vmsa.is_vmpl0_private_page(),
+            vmsa@.vmpl.spec_eq(RICHOS_VMPL),
+    {
+        let richos_vmsa = RICHOS_VMSA();
+        let ghost lockperms_before_vmsa_remove = cs.lockperms;
+        let tracked mut vmsa_lock = cs.lockperms.tracked_remove(spec_RICHOS_VMSA_lockid());
+        let (vmsa_vec_ptr, Tracked(mut vmsa_vec_perm), Tracked(mut vmsa_lock0)) =
+            richos_vmsa.acquire(Tracked(vmsa_lock), Tracked(&cs.snpcore.coreid));
+        proof {
+            vmsa_lock = vmsa_lock0;
+        }
+        let mut vmsa_vec = vmsa_vec_ptr.take(Tracked(&mut vmsa_vec_perm));
+        let mut vmsa_opt: Option<VBox<VmsaPage>> = None;
+        if vmsa_vec.len() > cpu_id {
+            vmsa_opt = vmsa_vec.remove(cpu_id);
+            vmsa_vec.insert(cpu_id, None);
+        }
+        vmsa_vec_ptr.put(Tracked(&mut vmsa_vec_perm), vmsa_vec);
+        richos_vmsa.release(
+            Tracked(&mut vmsa_lock),
+            Tracked(vmsa_vec_perm),
+            Tracked(&cs.snpcore.coreid),
+        );
+        proof {
+            cs.lockperms.tracked_insert(spec_RICHOS_VMSA_lockid(), vmsa_lock);
+        }
+        match vmsa_opt {
+            Some(v) => {
+                vmsa = v;
+                break;
+            },
+            _ => {},
+        }
+        crate::lock::fence();
+    }
+    new_strlit("start richos ap\n").leak_debug();
+    crate::security::run_richos(
+        ghcb_hv_h,
+        guest_channel,
+        vmsa,
+        cpu.secret,
+        Tracked(nextvmpl_id),
+        Tracked(&mut cs),
+    );
+    loop {
+    }
+}
 
-    } // verus!
+} // verus!
 } // verus!
 verus! {
 

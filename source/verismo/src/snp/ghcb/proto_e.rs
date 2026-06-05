@@ -39,19 +39,19 @@ verus! {
 pub const GHCB_HV_DEBUG: u64 = 0xf03;
 
 } // verus!
-  /*
-  #[verifier::external]
-  pub mod trust {
-      use alloc::fmt;
+/*
+#[verifier::external]
+pub mod trust {
+    use alloc::fmt;
 
-      use super::*;
-      impl fmt::Write for GHCBProto {
-          fn write_str(&mut self, s: &str) -> fmt::Result {
-              GHCBProto::print_str(s);
-              Ok(())
-          }
-      }
-  }*/
+    use super::*;
+    impl fmt::Write for GHCBProto {
+        fn write_str(&mut self, s: &str) -> fmt::Result {
+            GHCBProto::print_str(s);
+            Ok(())
+        }
+    }
+}*/
 verus! {
 
 pub open spec fn GHCB_REGID() -> RegName {
