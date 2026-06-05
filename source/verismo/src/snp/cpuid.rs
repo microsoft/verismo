@@ -129,6 +129,7 @@ pub fn process_cpuid(eax: u32, ecx: u32, xcr0: u64, xss: u64, cpuid_table: &[Snp
     ensures
         ret.is_constant(),
         ret is Some ==> exists|i|
+            #![trigger cpuid_table@[i].eax_in@.val]
             0 <= i < cpuid_table@.len() && cpuid_table@[i].eax_in@.val == eax
                 && cpuid_table@[i].ecx_in@.val == ecx && ret->Some_0 === cpuid_table@[i].rets,
 {
@@ -142,6 +143,7 @@ pub fn process_cpuid(eax: u32, ecx: u32, xcr0: u64, xss: u64, cpuid_table: &[Snp
             i.is_constant(),
             0 <= (i as int) <= n,
             forall|k: int|
+                #![trigger cpuid_table@[k].eax_in@.val]
                 0 <= k < (i as int) ==> !(cpuid_table@[k].eax_in@.val == eax
                     && cpuid_table@[k].ecx_in@.val == ecx),
             ret is None,

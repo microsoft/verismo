@@ -378,7 +378,9 @@ impl SnpPointsToRaw {
             offsets.len() > 0,
         ensures
             forall|i: int| 0 <= i < offsets.len() ==> Self::wf_seq_perms(s, i),
-            forall|i: int| 0 <= i < offsets.len() ==> s[i]@.range().0 == offsets[i],
+            forall|i: int|
+                #![trigger s[i]@.range().0]
+                0 <= i < offsets.len() ==> s[i]@.range().0 == offsets[i],
             Self::merge_perm_ensures(s, offsets.len(), self),
         decreases offsets.len(),
     {

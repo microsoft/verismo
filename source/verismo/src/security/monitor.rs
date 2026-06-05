@@ -33,7 +33,7 @@ pub fn fill_vec<T>(vec: &mut Vec<Option<T>>, n: usize)
             vec.len() <= n,
             vec.len() >= oldvec.len(),
             n >= oldvec.len(),
-            forall|i| 0 <= i < oldvec.len() ==> vec[i] === oldvec[i],
+            forall|i| #![trigger vec[i]] 0 <= i < oldvec.len() ==> vec[i] === oldvec[i],
             forall|i| oldvec.len() <= i < vec.len() ==> vec[i] === None,
         decreases n - vec.len(),
     {
@@ -46,7 +46,7 @@ fn create_lock_entries(priv_req: &LockKernReq) -> (ret: Vec<(usize, usize)>)
     requires
         priv_req.wf(),
     ensures
-        forall|k| 0 <= k < ret.len() ==> ret[k].0.spec_valid_pn_with(ret[k].1 as nat),
+        forall|k| 0 <= k < ret.len() ==> #[trigger] ret[k].0.spec_valid_pn_with(ret[k].1 as nat),
 {
     let mut entries = Vec::<(usize, usize)>::new();
     let mut i = 0;
@@ -56,9 +56,11 @@ fn create_lock_entries(priv_req: &LockKernReq) -> (ret: Vec<(usize, usize)>)
             entries.len() == i,
             priv_req.wf(),
             forall|k|
+                #![trigger entries[k].0]
                 0 <= k < i ==> entries[k].0 === priv_req@[k].start.vspec_cast_to() && entries[k].1
                     == priv_req@[k].end@.val - priv_req@[k].start@.val,
-            forall|k| 0 <= k < i ==> entries[k].0.spec_valid_pn_with(entries[k].1 as nat),
+            forall|k|
+                0 <= k < i ==> #[trigger] entries[k].0.spec_valid_pn_with(entries[k].1 as nat),
         decreases 256 - i,
     {
         let val = priv_req.index(i);
@@ -610,7 +612,9 @@ impl<'a> MonitorHandle<'a> {
         #[verusfmt::skip]
         proof {
             assert(richos_vmsa_invfn()(vmsa_vec)) by {
-                assert forall|i| 0 <= i < vmsa_vec.len() && vmsa_vec[i] is Some implies
+                assert forall|i|
+                    #![trigger vmsa_vec[i]]
+                    0 <= i < vmsa_vec.len() && vmsa_vec[i] is Some implies
                     is_richos_vmsa_box(#[trigger] vmsa_vec[i]->Some_0)
                 by {
                     if vmsa_vec[i] is Some {
