@@ -2,7 +2,20 @@ use super::perm_s::*;
 use super::*;
 
 verus! {
+broadcast use {
+    crate::arch::addr_s::page::group_addr_default,
+    crate::arch::pgtable::memmap_s::group_pgtable_memmap_default,
+    crate::arch::rmp::perm_s::group_rmp_perm_default,
+    crate::arch::x64::x64_s::group_x64_default,
+    crate::linkedlist::group_linkedlist_default,
+    crate::ptr::ptr_s::group_ptr_ptr_default,
+    crate::ptr::raw_ptr_s::group_raw_ptr_default,
+    crate::ptr::snp::snp_u::group_snp_attr_default,
+    crate::registers::msr_perm_s::group_msr_perm_default,
+};
+}
 
+verus! {
 
 pub proof fn rmp_proof_check_access_rmp_has_gpn_memid(
     rmp: &RmpMap,
@@ -98,13 +111,113 @@ pub proof fn rmp_proof_inv_sw(rmp: &RmpMap, op: RmpOp<SysPhy>, memid: MemID)
     match op {
         RmpOp::Pvalidate(_, _) => {
             rmp_lemma_pvalidate_sw_inv(rmp, op, memid);
+            assert(rmp_inv_sw(&rmp_op(rmp, op).to_result(), memid));
         },
-        RmpOp::RmpAdjust(_, _) => {},
-        RmpOp::RmpUpdate(_, _) => {},
+        RmpOp::RmpAdjust(PageID { page, memid: op_memid }, param) => {
+            broadcast use {RmpEntry::axiom_spec_new, HiddenRmpEntryForPSP::axiom_spec_new};
+
+            let new = rmp_op(rmp, op).to_result();
+            rmp_proof_op_dom_inv(rmp, op);
+            assert(new.dom() === rmp.dom());
+            assert forall|spn: SPN|
+                {
+                    &&& new.dom().contains(spn)
+                    &&& (#[trigger] new[spn]).view().spec_validated()
+                    &&& new[spn].view().spec_asid() === memid.to_asid()
+                } implies (rmp_reverse(&new, memid, new[spn].view().spec_gpn()) === spn) by {
+                if spn === page {
+                    assert(new[spn].view().spec_gpn() === rmp[spn].view().spec_gpn());
+                    assert(new[spn].view().spec_validated() === rmp[spn].view().spec_validated());
+                    assert(new[spn].view().spec_asid() === rmp[spn].view().spec_asid());
+                } else {
+                    assert(new[spn] === rmp[spn]);
+                }
+                let gpn = new[spn].view().spec_gpn();
+                let old_gpn = rmp[spn].view().spec_gpn();
+                assert(gpn === old_gpn);
+                assert(rmp.dom().contains(spn));
+                assert(rmp[spn].view().spec_validated());
+                assert(rmp[spn].view().spec_asid() === memid.to_asid());
+                assert(rmp_reverse(rmp, memid, old_gpn) === spn);
+                let rev_new = rmp_reverse(&new, memid, gpn);
+                assert(exists|w: SPN|
+                    {
+                        &&& (#[trigger] new[w]).view().spec_gpn() === gpn
+                        &&& new.dom().contains(w)
+                        &&& new[w].view().spec_validated()
+                        &&& new[w].view().spec_asid() === memid.to_asid()
+                    }) by {
+                    assert(new[spn].view().spec_gpn() === gpn);
+                }
+                assert(new[rev_new].view().spec_gpn() === gpn);
+                assert(new.dom().contains(rev_new));
+                assert(new[rev_new].view().spec_validated());
+                assert(new[rev_new].view().spec_asid() === memid.to_asid());
+                if rev_new === page {
+                    assert(new[rev_new].view().spec_gpn() === rmp[rev_new].view().spec_gpn());
+                    assert(new[rev_new].view().spec_validated() === rmp[rev_new].view().spec_validated());
+                    assert(new[rev_new].view().spec_asid() === rmp[rev_new].view().spec_asid());
+                } else {
+                    assert(new[rev_new] === rmp[rev_new]);
+                }
+                assert(rmp.dom().contains(rev_new));
+                assert(rmp[rev_new].view().spec_gpn() === old_gpn);
+                assert(rmp[rev_new].view().spec_validated());
+                assert(rmp[rev_new].view().spec_asid() === memid.to_asid());
+                assert(rmp_reverse(rmp, memid, old_gpn) === rev_new);
+            }
+        },
+        RmpOp::RmpUpdate(PageID { page, memid: op_memid }, newentry) => {
+            broadcast use {RmpEntry::axiom_spec_new, HiddenRmpEntryForPSP::axiom_spec_new};
+
+            let new = rmp_op(rmp, op).to_result();
+            rmp_proof_op_dom_inv(rmp, op);
+            assert(new.dom() === rmp.dom());
+            assert forall|spn: SPN|
+                {
+                    &&& new.dom().contains(spn)
+                    &&& (#[trigger] new[spn]).view().spec_validated()
+                    &&& new[spn].view().spec_asid() === memid.to_asid()
+                } implies (rmp_reverse(&new, memid, new[spn].view().spec_gpn()) === spn) by {
+                if new[spn] !== rmp[spn] {
+                    assert(spn === page);
+                    assert(!new[spn].view().spec_validated());
+                }
+                assert(new[spn] === rmp[spn]);
+                let gpn = new[spn].view().spec_gpn();
+                assert(rmp.dom().contains(spn));
+                assert(rmp[spn].view().spec_validated());
+                assert(rmp[spn].view().spec_asid() === memid.to_asid());
+                assert(rmp_reverse(rmp, memid, gpn) === spn);
+                let rev_new = rmp_reverse(&new, memid, gpn);
+                assert(exists|w: SPN|
+                    {
+                        &&& (#[trigger] new[w]).view().spec_gpn() === gpn
+                        &&& new.dom().contains(w)
+                        &&& new[w].view().spec_validated()
+                        &&& new[w].view().spec_asid() === memid.to_asid()
+                    }) by {
+                    assert(new[spn].view().spec_gpn() === gpn);
+                }
+                assert(new[rev_new].view().spec_gpn() === gpn);
+                assert(new.dom().contains(rev_new));
+                assert(new[rev_new].view().spec_validated());
+                assert(new[rev_new].view().spec_asid() === memid.to_asid());
+                if new[rev_new] !== rmp[rev_new] {
+                    assert(rev_new === page);
+                    assert(!new[rev_new].view().spec_validated());
+                }
+                assert(new[rev_new] === rmp[rev_new]);
+                assert(rmp.dom().contains(rev_new));
+                assert(rmp[rev_new].view().spec_gpn() === gpn);
+                assert(rmp[rev_new].view().spec_validated());
+                assert(rmp[rev_new].view().spec_asid() === memid.to_asid());
+                assert(rmp_reverse(rmp, memid, gpn) === rev_new);
+            }
+        },
     }
     // Justification: each RMP operation preserves the software invariant under the stated sp_op_requires;
     // branch-specific transition facts are hidden behind rmp_op and do not trigger here.
-    assume(rmp_inv_sw(&rmp_op(rmp, op).to_result(), memid));
 }
 
 /// TODO: function body check has been running for 2 seconds
@@ -116,6 +229,8 @@ pub proof fn rmp_proof_inv_memid_int(rmp: &RmpMap, op: RmpOp<SysPhy>, memid: Mem
     ensures
         rmp_inv_memid_int(&rmp_op(rmp, op).to_result(), memid),
 {
+    broadcast use {RmpEntry::axiom_spec_new, HiddenRmpEntryForPSP::axiom_spec_new};
+
     reveal(rmp_inv);
     let new = rmp_op(rmp, op).to_result();
     rmp_proof_op_dom_inv(rmp, op);
@@ -135,14 +250,11 @@ pub proof fn rmp_proof_inv_memid_int(rmp: &RmpMap, op: RmpOp<SysPhy>, memid: Mem
         match op {
             RmpOp::Pvalidate(_, _) => {
                 // Justification: pvalidate preserves GPN/perms; SMT does not unfold rmp_op/pvalidate in this quantified branch.
-                assume(new[spn].view().spec_gpn() === rmp[spn].view().spec_gpn());
                 assert(new[spn].view().spec_gpn() === rmp[spn].view().spec_gpn());
                 // Justification: pvalidate preserves permissions; SMT does not unfold the pvalidate setter chain here.
-                assume(new_perms === perms);
                 assert(new_perms === perms);
                 assert(memtype(memid, rmp[spn].view().spec_gpn()).is_sm_int());
                 // Justification: this is exactly the prior rmp_inv_memid_int permission fact for unchanged perms.
-                assume(!vmpl_perm.contains(Perm::Write));
                 assert(!vmpl_perm.contains(Perm::Write));
                 assert(!new[spn].view().check_vmpl(vmpl, Perm::Write));
             },
@@ -150,13 +262,10 @@ pub proof fn rmp_proof_inv_memid_int(rmp: &RmpMap, op: RmpOp<SysPhy>, memid: Mem
                 let update_spn = page_id.page;
                 // Justification: rmpadjust preserves GPN and only narrows permissions after access checks;
                 // SMT does not unfold the update for arbitrary spn in this quantified proof.
-                assume(new[spn].view().spec_gpn() === rmp[spn].view().spec_gpn());
                 assert(new[spn].view().spec_gpn() === rmp[spn].view().spec_gpn());
                 assert(memtype(memid, rmp[spn].view().spec_gpn()).is_sm_int());
-                assume(!vmpl_perm.contains(Perm::Write));
                 assert(!vmpl_perm.contains(Perm::Write));
                 // Justification: check_vmpl reads the same non-write permission for this VMPL after rmpadjust.
-                assume(!new[spn].view().check_vmpl(vmpl, Perm::Write));
                 assert(!new[spn].view().check_vmpl(vmpl, Perm::Write));
             },
             RmpOp::RmpUpdate(_, _) => {
@@ -164,7 +273,6 @@ pub proof fn rmp_proof_inv_memid_int(rmp: &RmpMap, op: RmpOp<SysPhy>, memid: Mem
                     assert(vmpl.as_int() > memid.to_vmpl().as_int());
                     // Justification: HV RmpUpdate initializes non-VMPL0 permissions to empty;
                     // generated map/index axioms do not instantiate for arbitrary vmpl in this quantified proof.
-                    assume(new_vmpl_perm === PagePerm::empty());
                     assert(new_vmpl_perm === PagePerm::empty());
                     assert(!new_vmpl_perm.contains(Perm::Write));
                 } else {
@@ -187,6 +295,8 @@ pub proof fn rmp_lemma_pvalidate_sw_inv(rmp: &RmpMap, op: RmpOp<SysPhy>, memid: 
     ensures
         rmp_inv_sw(&rmp_op(rmp, op).to_result(), memid),
 {
+    broadcast use {RmpEntry::axiom_spec_new, HiddenRmpEntryForPSP::axiom_spec_new};
+
     let is_error = rmp_op(rmp, op) is Error;
     let new = rmp_op(rmp, op).to_result();
     let gpn = op->Pvalidate_1.gpn;
@@ -201,14 +311,12 @@ pub proof fn rmp_lemma_pvalidate_sw_inv(rmp: &RmpMap, op: RmpOp<SysPhy>, memid: 
         } implies (rmp_reverse(&new, memid, rmp[spn].view().spec_gpn()) === spn) by {
         // Justification: rmp_inv_sw uniqueness is preserved by pvalidate; SMT loses the reverse-map witness
         // through rmp_op's single-entry update.
-        assume(rmp_reverse(&new, memid, rmp[spn].view().spec_gpn()) === spn);
         assert(rmp.dom().contains(spn));
         if op_memid.to_vmpl() is VMPL0 && memid.to_asid() === op_memid.to_asid() {
             if !val {
                 assert(rmp[spn].view().spec_validated());
                 // Justification: pvalidate(false) for the same VM leaves unrelated entries unchanged;
                 // map update extensionality is not triggered for arbitrary spn.
-                assume(rmp[spn] === new[spn]);
                 assert(rmp[spn] === new[spn]);
                 assert(rmp_reverse(rmp, memid, rmp[spn].view().spec_gpn()) === spn)
             } else {
@@ -216,7 +324,6 @@ pub proof fn rmp_lemma_pvalidate_sw_inv(rmp: &RmpMap, op: RmpOp<SysPhy>, memid: 
                 if rmp[spn] !== new[spn] {
                     // Justification: a successful validating pvalidate writes the requested GPN to the target entry;
                     // the fact is hidden behind RmpEntry::check_access/pvalidate expansion.
-                    assume(new[spn].view().spec_gpn() === gpn);
                     assert(new[spn].view().spec_gpn() === gpn) by {
                         reveal(RmpEntry::check_access);
                     }
@@ -235,18 +342,14 @@ pub proof fn rmp_lemma_pvalidate_sw_inv(rmp: &RmpMap, op: RmpOp<SysPhy>, memid: 
         } else {
             if !(op_memid.to_vmpl() is VMPL0) {
                 // Justification: non-VMPL0 pvalidate is rejected by rmp_op; SMT does not unfold the error condition here.
-                assume(is_error);
                 assert(is_error);
-                assume(new[spn] === rmp[spn]);
                 assert(new[spn] === rmp[spn]);
             }
             if memid.to_asid() !== op_memid.to_asid() {
                 if op_spn === spn {
                     // Justification: pvalidate for a different ASID cannot update this memid and errors at target SPN.
-                    assume(is_error);
                     assert(is_error);
                 }
-                assume(new[spn] === rmp[spn]);
                 assert(new[spn] === rmp[spn]);
             }
             assert(rmp_reverse(rmp, memid, rmp[spn].view().spec_gpn()) === spn);
@@ -259,7 +362,6 @@ pub proof fn rmp_lemma_pvalidate_sw_inv(rmp: &RmpMap, op: RmpOp<SysPhy>, memid: 
                     &&& new[spn_test].view().spec_validated()
                 } implies spn_test === spn by {
                 // Justification: outside the pvalidate target, entries are unchanged; map extensionality is not triggered.
-                assume(new[spn_test] === rmp[spn_test]);
                 assert(new[spn_test] === rmp[spn_test]);
                 assert(rmp_inv_sw(rmp, memid));
                 assert((rmp_reverse(rmp, memid, rmp[spn].view().spec_gpn()) === spn_test));
@@ -268,7 +370,6 @@ pub proof fn rmp_lemma_pvalidate_sw_inv(rmp: &RmpMap, op: RmpOp<SysPhy>, memid: 
     }
     // Justification: the quantified reverse-map proof above establishes rmp_inv_sw for the pvalidate result;
     // SMT does not fold the invariant predicate after the single-entry update.
-    assume(rmp_inv_sw(&rmp_op(rmp, op).to_result(), memid));
 }
 
 pub proof fn rmp_lemma_hv_update_inv(rmp: &RmpMap, newrmp: RmpMap, hv_id: MemID)
@@ -277,6 +378,8 @@ pub proof fn rmp_lemma_hv_update_inv(rmp: &RmpMap, newrmp: RmpMap, hv_id: MemID)
     ensures
         rmp_inv(&rmp_hv_update(rmp, newrmp, hv_id)),
 {
+    broadcast use {RmpEntry::axiom_spec_new, HiddenRmpEntryForPSP::axiom_spec_new};
+
     reveal(rmp_inv);
     assert forall|i: SPN| rmp.dom().contains(i) implies #[trigger] rmp[i].inv() by {
         let spn_id = PageID { page: i, memid: hv_id };
@@ -284,7 +387,6 @@ pub proof fn rmp_lemma_hv_update_inv(rmp: &RmpMap, newrmp: RmpMap, hv_id: MemID)
     }
     // Justification: the quantified proof above establishes every entry in rmp_hv_update is invariant;
     // SMT does not fold opaque rmp_inv over the updated map.
-    assume(rmp_inv(&rmp_hv_update(rmp, newrmp, hv_id)));
 }
 
 pub proof fn rmp_lemma_hv_update_restrict(rmp: &RmpMap, newrmp: RmpMap, hv_id: MemID)
@@ -299,16 +401,11 @@ pub proof fn rmp_lemma_hv_update_restrict(rmp: &RmpMap, newrmp: RmpMap, hv_id: M
                 hv_id,
             )[i]@.spec_perms() === rmp_perm_init()),
 {
+    broadcast use {RmpEntry::axiom_spec_new, HiddenRmpEntryForPSP::axiom_spec_new};
+
     reveal(rmp_inv);
     // Justification: rmp_hv_update changes entries exactly by HV RmpUpdate, which clears validation
     // and resets permissions for changed entries; SMT does not fold this into the quantified postcondition.
-    assume(forall|i|
-        (rmp.dom().contains(i) && (#[trigger] rmp_hv_update(rmp, newrmp, hv_id)[i] !== rmp[i]))
-            ==> (!rmp_hv_update(rmp, newrmp, hv_id)[i]@.spec_validated() && rmp_hv_update(
-            rmp,
-            newrmp,
-            hv_id,
-        )[i]@.spec_perms() === rmp_perm_init()));
 }
 
 pub proof fn rmp_lemma_hv_update_restrict_at(
@@ -330,6 +427,8 @@ pub proof fn rmp_lemma_hv_update_restrict_at(
             || (rmp_check_access(&rmp_hv_update(rmp, newrmp, hv_id), memid, enc, gpmem, perm, spn)
             === rmp_check_access(rmp, memid, enc, gpmem, perm, spn))),
 {
+    broadcast use {RmpEntry::axiom_spec_new, HiddenRmpEntryForPSP::axiom_spec_new};
+
     reveal(RmpEntry::check_access);
     rmp_lemma_hv_update_inv(rmp, newrmp, hv_id);
     reveal(rmp_inv);
@@ -341,7 +440,6 @@ pub proof fn rmp_lemma_hv_update_restrict_at(
     } else {
         // Justification: HV update cannot modify a guest-validated entry that passes this access check;
         // the restriction lemma's trigger does not fire for this indexed map expression.
-        assume(rmp2[spn] === rmp[spn]);
         assert(rmp2[spn] === rmp[spn]);
     }
 }

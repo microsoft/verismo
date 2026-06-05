@@ -8,6 +8,20 @@ use crate::tspec::*;
 use crate::*;
 
 verus! {
+broadcast use {
+    crate::arch::addr_s::page::group_addr_default,
+    crate::arch::pgtable::memmap_s::group_pgtable_memmap_default,
+    crate::arch::rmp::perm_s::group_rmp_perm_default,
+    crate::arch::x64::x64_s::group_x64_default,
+    crate::linkedlist::group_linkedlist_default,
+    crate::ptr::ptr_s::group_ptr_ptr_default,
+    crate::ptr::raw_ptr_s::group_raw_ptr_default,
+    crate::ptr::snp::snp_u::group_snp_attr_default,
+    crate::registers::msr_perm_s::group_msr_perm_default,
+};
+}
+
+verus! {
 
 impl RamDB {
     #[verifier(external_body)]
@@ -43,7 +57,6 @@ impl RamDB {
         };
         // Justification: the quantified invariant above establishes RamDB::inv for the write_raw result;
         // SMT fails to fold the opaque inv predicate after the generated setter expansion.
-        assume(new.inv());
     }
 
     pub proof fn lemma_write_raw(&self, spa: SPA, asid: ASID, spmem: SPMem, bytes: Seq<Byte>)
@@ -62,12 +75,6 @@ impl RamDB {
         reveal(RamDB::write_raw);
         // Justification: write_raw defines spec_data as the generated stream of to_write values;
         // the generated spec_set_data/spec_new axiom is not triggered for this indexed postcondition.
-        assume(self.write_raw(asid, spmem, bytes).spec_data()[spa.as_int()] === self.to_write(
-            spa,
-            asid,
-            spmem,
-            bytes,
-        ));
     }
 
     pub proof fn lemma_write_change_byte(
@@ -183,21 +190,18 @@ impl RamDB {
         let crypto_mask: Byte = self.crypto_mask[self.spec_write_count()].get_mask();
         // Justification: write_raw sets data to this stream via generated spec_set_data/spec_new;
         // SMT does not instantiate the constructor axiom for the generated setter here.
-        assume(new.data === Stream::new(
-            self.data.len(),
-            |i: int| self.to_write(SPA::new(i), asid, spmem, bytes),
-        ));
         assert(new.data === Stream::new(
             self.data.len(),
             |i: int| self.to_write(SPA::new(i), asid, spmem, bytes),
         ));
         assert(bytes.len() === spmem.len());
+        spmem.proof_same_page();
         assert forall|k| 0 <= k < bytes.len() implies (bytes[k] === read_bytes[k]) by {
+            spmem.proof_same_page();
             let i = spmem[k].as_int();
             assert(k == i - spmem[0].as_int());
             // Justification: valid SpecMem indexes stay within the same page by SpecMem's page invariant;
             // the quantified index form does not trigger proof_same_page automatically.
-            assume(spmem[k].to_page() === spmem.to_page());
             assert(spmem[k].to_page() === spmem.to_page());
             assert(0 <= k < spmem.len());
             assert(spmem.contains(spmem[k]));

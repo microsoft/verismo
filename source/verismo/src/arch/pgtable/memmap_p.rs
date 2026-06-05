@@ -3,6 +3,10 @@ use crate::arch::addr_s::*;
 use crate::tspec::*;
 
 verus! {
+broadcast use crate::group_verismo_default;
+}
+
+verus! {
 
 impl<VT: AddrType, PT: AddrType> MemMap<VT, PT> {
     pub proof fn lemma_is_one_to_one_map_two_diff_va(
@@ -45,9 +49,10 @@ impl<VT: AddrType, PT: AddrType> MemMap<VT, PT> {
             } else {
                 assert(smem1.disjoint(smem2)) by {
                     reveal(MemMap::is_one_to_one_map);
+                    smem1.proof_same_page();
+                    smem2.proof_same_page();
                     // Justification: one-to-one translation maps different source pages to different target pages;
                     // page-sized translated memories on different target pages are disjoint, but SMT loses the page arithmetic.
-                    assume(smem1.disjoint(smem2));
                 }
             }
         }
@@ -80,7 +85,6 @@ impl<VT: AddrType, PT: AddrType> MemMap<VT, PT> {
             assert(self.translate(p)->Some_0.value() =~= p.value());
             // Justification: under identity translation, any chosen reverse page with the same translated
             // integer value is extensionally equal to the original page; dummy-holder equality axiom does not trigger.
-            assume(p =~= vpage);
         }
         assert forall|ppage: SpecPage<PT>| (#[trigger] self.reverse(ppage)) is Some implies (
         self.translate(self.reverse(ppage)->Some_0) is Some && self.translate(
