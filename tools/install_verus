@@ -190,6 +190,9 @@ install_prebuilt() {
     verify_verus_assets
 }
 
+# Install verusfmt
+curl --proto '=https' --tlsv1.2 -LsSf "https://github.com/verus-lang/verusfmt/releases/download/$VERUSFMT_VERSION/verusfmt-installer.sh" | sh
+
 if $INSTALL_PREBUILT; then
     install_prebuilt
     exit 0
@@ -199,9 +202,6 @@ if [ -z "$VERUS_DIR" ]; then
     install_prebuilt
     exit 0
 fi
-
-# Install verusfmt
-curl --proto '=https' --tlsv1.2 -LsSf "https://github.com/verus-lang/verusfmt/releases/download/$VERUSFMT_VERSION/verusfmt-installer.sh" | sh
 
 # Fetch Verus source code if VERUS_DIR does not exist.
 if [ ! -d "$VERUS_DIR" ]; then
