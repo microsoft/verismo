@@ -5,6 +5,10 @@ use crate::arch::rmp::{RmpEntry, RmpMap, *};
 use crate::arch::vram::VRamDB;
 
 verus! {
+broadcast use crate::group_verismo_default;
+}
+
+verus! {
 
 impl GuestPTRam {
     /// Prove the correctness of our model
@@ -171,8 +175,6 @@ impl GuestPTRam {
         old_pt.spec_ram().proof_op_inv_sw(sysmap, memop, memid);
         // Justification: new_pt is old_pt with ram replaced by VRamDB::op result; proof_op_inv_sw
         // preserves these RMP invariants, but setter/constructor instantiation is not reliable here.
-        assume(new_pt.spec_ram().inv_sw(memid));
-        assume(new_pt.spec_ram().inv_memid_int(memid));
         assert(new_pt.spec_ram().inv_sw(memid));
         assert(new_pt.spec_ram().inv_memid_int(memid));
         match memop {
@@ -184,13 +186,11 @@ impl GuestPTRam {
             MemOp::Write(gpa_id, enc, data) => {
                 if old_pt.ram.op(sysmap, memop) is Ok {
                     Self::lemma_safe_write(memid, old_pt, new_pt, gpa_id, enc, data, sysmap);
-                    //assume(new_pt.inv(memid));
                 }
             },
             MemOp::InvlPage(gpa_id) => {},
             MemOp::FlushAll(_) => {},
             MemOp::RmpOp(rmpop) => {
-                assume(new_pt.inv(memid));
             },
         }
     }
@@ -220,12 +220,8 @@ impl GuestPTRam {
         let ram = old_pt.spec_ram();
         // Justification: safe read callers supply a valid system map and translated read operation;
         // SMT cannot recover those facts from the enclosing memory-operation proof.
-        assume(sysmap.is_valid());
-        assume(MemOp::Read(gpmem_id, enc).is_valid());
         ram.proof_op_inv(sysmap, MemOp::Read(gpmem_id, enc));
         // Justification: VRamDB read does not alter page-table content/domain; constructor axioms are not triggered.
-        assume(new_pt.inv_dom_ok(memid));
-        assume(new_pt.inv_content_ok(memid));
     }
 
     proof fn lemma_write_pte_inv_ppn_enc(
@@ -455,13 +451,10 @@ impl GuestPTRam {
         let op_memid = gpa_id.memid;
         let memop = MemOp::Write(gpa_id, enc, data);
         // Justification: VRamDB writes update SRAM bytes but preserve RMP; SMT loses this through op_write/setter expansion.
-        assume(rmp === new_pt.spec_ram().spec_rmp());
         assert(rmp === new_pt.spec_ram().spec_rmp());
         assert(new_pt.ram.rmp.dom() === old_pt.ram.rmp.dom());
         assert(new_pt.inv_dom_ok(memid)) by {
             // Justification: safe write callers provide a valid sysmap and valid translated write operation.
-            assume(sysmap.is_valid());
-            assume(memop.is_valid());
             old_pt.spec_ram().proof_op_inv(sysmap, memop);
             assert(new_pt.spec_ram().inv());
         }
