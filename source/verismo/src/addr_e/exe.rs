@@ -3,11 +3,6 @@ use crate::tspec::*;
 
 verus! {
 
-broadcast use crate::group_verismo_default;
-
-} // verus!
-verus! {
-
 #[inline]
 pub fn page_align_up(value: usize_t) -> (ret: usize_t)
     requires
@@ -44,25 +39,7 @@ verismo_simple! {
         }
         let v: u64 = value.into();
         let align: u64 = PAGE_SIZE as u64;
-        proof {
-            use_type_invariant(&v);
-            use_type_invariant(&align);
-            assert(v.wf());
-            assert(align.wf());
-            // PAGE_SIZE is the architecture 4KiB constant (1 << 12); the
-            // bit64_shl_values_auto lemma above establishes it is a power of 2.
-            assert(spec_bit64_is_pow_of_2(align as int));
-        }
         let ret = align_down_by(v, align) as usize;
-        proof {
-            // align_down_by's ensures establish page alignment and bounds; Verus
-            // does not unfold the secure cast/align specs far enough here.
-            assert(ret as int % PAGE_SIZE!() == 0);
-            assert(ret == spec_align_down(value as int, PAGE_SIZE!()));
-            assert((value as int) - PAGE_SIZE!() <= ret as int);
-            assert(ret as int <= value as int);
-            assert(value.is_constant() ==> ret.is_constant());
-        }
         ret
     }
 }
