@@ -19,14 +19,6 @@ verismo_simple! {
 
 verus! {
 
-broadcast use {
-    SecType::axiom_spec_new,
-    SecType::axiom_ext_equal,
-    SnpPPtr::axiom_id_equal,
-    axiom_size_from_cast_bytes,
-    axiom_size_from_cast_secbytes_def,
-};
-
 pub tracked struct VSnpPointsToNode<T> {
     pub next: SnpPointsTo<usize_t>,
     pub val: SnpPointsTo<T>,
@@ -549,18 +541,6 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
                     let ghost removed_original_idx = keep_idx0[i];
                     proof {
                         assert(self@ =~~= prev_self@.remove(i));
-                        assert(is_subseq_via_index(prev_self@, old(self)@, keep_idx0));
-                        assert(sub_element(prev_self@, old(self)@, keep_idx0, i));
-                        assert(prev_self@[i] === old(self)@[removed_original_idx]);
-                        assert(prev_self.wf_perm(i as nat));
-                        assert(cur_ptr_perm.ptr.id() === prev_self@[i].ptr.id());
-                        assert(cur_ptr_perm.ptr === prev_self@[i].ptr) by {
-                            cur_ptr_perm.ptr.axiom_id_equal(prev_self@[i].ptr);
-                        }
-                        assert(cur_ptr_perm.snp === prev_self@[i].snp);
-                        assert(cur_ptr_perm.val === prev_self@[i].val);
-                        assert(cur_ptr_perm === prev_self@[i]);
-                        assert(cur_ptr_perm === old(self)@[removed_original_idx]);
                         lemma_remove_keep(
                             old(self)@,
                             keep,
@@ -571,14 +551,7 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
                         );
                         keep_idx = keep_idx0.remove(i);
                         removed_idx = removed_idx0.push(removed_original_idx);
-                        assert(is_subseq_via_index(self@, old(self)@, keep_idx));
-                        assert(is_subseq_via_index(
-                            removeditems.push(cur_ptr_perm),
-                            old(self)@,
-                            removed_idx,
-                        ));
                     }
-                    assert(removed_idx.len() > 0);
                     assert(cur_ptr.id() === old(self)@[removed_idx.last()].ptr.id());
                     assert(cur_ptr === old(self)@[removed_idx.last()].ptr) by {
                         cur_ptr.axiom_id_equal(old(self)@[removed_idx.last()].ptr);
@@ -587,7 +560,6 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
                     removed = removed + 1;
                     proof {
                         d = d - 1;
-                        assert(is_subseq_via_index(ret@, old(self)@, removed_idx));
                     }
                 } else {
                     assert(false);

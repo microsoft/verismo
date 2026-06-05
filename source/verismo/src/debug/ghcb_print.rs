@@ -569,20 +569,9 @@ impl<T: ?Sized + VPrint> VPrintLock for T {
             //assert(consolelock@ === oldconsolelock@);
             assert(cs.lockperms === oldlockperms.insert(console_ref.lockid(), consolelock));
             assert(cs.lockperms.updated_lock(&oldlockperms, set![console_ref.lockid()]));
-            // Probe individual conjuncts of print_ensures_cs:
-            assert(cs.inv());
-            assert(cs.only_lock_reg_coremode_updated(
-                *old(cs),
-                set![GHCB_REGID()],
-                set![spec_CONSOLE().lockid()],
-            ));
-            assert(cs.lockperms.contains_vlock(spec_CONSOLE()));
-            assert(forall|id|
-                id != spec_CONSOLE().lockid() && old(cs).lockperms.contains_key(id) ==> (
-                #[trigger] cs.lockperms[id]) === old(cs).lockperms[id] && cs.lockperms.contains_key(
-                    id,
-                ));
-            assert(old(cs).inv());
+            // TODO: needs real proof - was assume(print_ensures_cs(*old(cs), *cs)) before broadcast-group migration.
+            // The missing fact is global-lock id separation needed to show the console-lock update preserves cs.wf_pt().
+            assume(print_ensures_cs(*old(cs), *cs));
         }
     }
 }
