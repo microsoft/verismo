@@ -14,12 +14,6 @@ macro_rules! define_dummy_holder_axiom {
             (left.value() == right.value()) == #[trigger](left =~= right),
             (left.value() == right.value()) == (left === right),
         {}
-
-        #[verifier(external_body)]
-        pub broadcast proof fn axiom_addr_type_dummy_holder(&self)
-        ensures
-            #[trigger] self.dummy === arbitrary(),
-        {}
     }
     };
 }
