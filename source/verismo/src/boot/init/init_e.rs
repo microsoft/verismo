@@ -11,6 +11,10 @@ use crate::lock::{LockPermRaw, MapLockContains, MapRawLockTrait};
 use crate::vbox::{MutFnTrait, MutFnWithCSTrait, VBox};
 
 verus! {
+broadcast use crate::group_verismo_default;
+}
+
+verus! {
 
 spec fn init_prepare_e820_ensures(
     prev_mparam: MonitorParams,
@@ -95,13 +99,8 @@ impl<'a> MutFnWithCSTrait<'a, SnpCoreConsole, InitE820Fn, InitE820Out<'a>> for M
             }
             // Justification: e820_format returns the formatted validated E820 slice and only prints through GHCB;
             // the trait postcondition bundles these facts but SMT does not compose them while `e820` borrows self.
-            assume(cc.wf());
-            assume(cc.wf_core(old(cc).snpcore.cpu()));
-            assume(cc.snpcore.only_reg_coremode_updated(old(cc).snpcore, set![GHCB_REGID()]));
-            assume(e820@.is_constant());
             // Justification: Rust borrow of the returned E820 slice prevents referring to `self` in the
             // proof of the trait postcondition here; the preceding assumptions are the components of it.
-            assume(false);
         }
         e820
     }
@@ -122,10 +121,6 @@ impl<'a> MutFnTrait<'a, InitCpuCountParams, u64_s> for MonitorParams {
 
     fn box_update(&'a mut self, params: InitCpuCountParams) -> (ret: u64_s) {
         self.cpu_count = params.1;
-        proof {
-            // Justification: box_update only assigns cpu_count to params.1; generated setter equality does not trigger.
-            assume(*self === old(self).spec_set_cpu_count(params.1));
-        }
         params.1
     }
 }
@@ -193,16 +188,11 @@ pub fn init_mem(
             HyperVMemMapEntry,
         >());
         // Justification: HvParamTable is architecturally one page; generated spec_size arithmetic does not trigger.
-        assume(spec_size::<HvParamTable>() < PAGE_SIZE!());
         assert(spec_size::<HvParamTable>() < PAGE_SIZE!());
     }
     ;
     let tracked (hvparam_perm, hv_unused) = hvraw_perm.trusted_split(spec_size::<HvParamTable>());
     let tracked mut hvparam_perm: SnpPointsTo<HvParamTable> = hvparam_perm.tracked_into();
-    proof {
-        // Justification: monitor parameter permissions are validated VMPL0-private by mp_perms.wf_at.
-        assume(mp_perm@.snp().is_vmpl0_private());
-    }
     let mparam = mp_ptr.borrow(Tracked(&mp_perm));
     if !mparam.check_valid() {
         new_strlit("\nInvalid mparam\n").leak_debug();
@@ -233,7 +223,6 @@ pub fn init_mem(
     let mut mparam = VBox::from_raw(mp_ptr.to_usize(), Tracked(mp_perm));
     proof {
         // Justification: the borrowed monitor parameters come from mp_perms.wf_at(mp_ptr).
-        assume(mparam@.mp_wf());
         assert(mparam@.mp_wf());
         assert(mparam.wf());
     }
@@ -243,32 +232,11 @@ pub fn init_mem(
     );
     assert(hvparam.wf());
     mparam.box_update((InitCpuCount, hvparam.borrow().cpu_count));
-    proof {
-        // Justification: mparam remains constant/well-formed and cc remains wf after cpu-count update.
-        assume(mparam@.is_constant());
-        assume(cc.wf());
-    }
     // format e820 params
     let e820 = mparam.box_update_cs(InitE820Fn, Tracked(&mut cc));
     SlicePrinter { s: e820 }.debug(Tracked(&mut cc));
     // format hv params
     let (hv_mem_slice) = hvparam.box_update_cs(FmtHvParamCall, Tracked(&mut cc));
-    proof {
-        // Justification: formatted hypervisor memory and E820 slices satisfy process_vm_mem requirements;
-        // these are established by previous box_update_cs calls but not composed automatically.
-        assume(is_alloc_perm(alloc_perm@));
-        assume(alloc_lock@.is_clean_lock_for(spec_ALLOCATOR().ptr_range(), cc.snpcore.cpu()));
-        assume(init_vm_mem_requires(
-            e820,
-            start_addr,
-            end_addr,
-            SnpMemCoreConsole { memperm, cc },
-            unused_preval_memperm,
-        ));
-        assume(hv_mem_slice@.is_constant());
-        assume(mem_range_formatted(hv_mem_slice@));
-        assume(hv_mem_slice@.len() > 0);
-    }
     let cc = process_vm_mem(
         hv_mem_slice,
         e820,
@@ -280,19 +248,7 @@ pub fn init_mem(
         Tracked(alloc_lock),
     );
     let (_, Tracked(hvparam_perm)) = hvparam.into_raw();
-    proof {
-        // Justification: hvparam_perm and hv_unused are the adjacent pieces from the earlier trusted_split.
-        assume(hvparam_perm@.vspec_cast_to().range().end() == hv_unused@.range().0);
-    }
     let tracked hvraw_perm = hvparam_perm.tracked_into_raw().trusted_join(hv_unused);
-    proof {
-        // Justification: rejoined HvParamTable permission is VMPL0-private and matches hvparam_ptr.
-        assume(hvraw_perm@.snp().is_vmpl0_private());
-        assume(spec_size::<HvParamTable>() == hvraw_perm@.size());
-        assume(hvraw_perm@.wf_not_null(
-            range(hvparam_ptr.id(), hvparam_ptr.id() + spec_size::<HvParamTable>() as int),
-        ));
-    }
     (
         mparam,
         VBox::from_raw(hvparam_ptr.to_usize(), Tracked(hvraw_perm.tracked_into())),

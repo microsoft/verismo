@@ -13,6 +13,10 @@ use crate::vbox::VBox;
 global_asm!(include_str!("isr.s"), options(att_syntax));
 
 verus! {
+broadcast use crate::group_verismo_default;
+}
+
+verus! {
 
 // Requires the exception code and stackframe is not secret.
 // This holds since we do not have secret-dependent control flows.
@@ -44,15 +48,6 @@ fn debug_handler(
     (new_strlit("stack info: ")).err(Tracked(cs));
     stack_frame.err(Tracked(cs));
     new_strlit("\n").err(Tracked(cs));
-    proof {
-        // Justification: debug_handler only prints to GHCB/console locks; the chained err calls preserve
-        // the core-mode frame condition, but SMT does not compose those print frame lemmas.
-        assume(cs.only_lock_reg_coremode_updated(
-            *old(cs),
-            set![GHCB_REGID()],
-            set![spec_CONSOLE_lockid()],
-        ));
-    }
 }
 
 #[no_mangle]
@@ -124,17 +119,6 @@ impl IDTEntry {
             options: ENTRY_MIN_PRE.into(),
             reserved: 0u32.into(),
         };
-        proof {
-            // Justification: each field is built from constant integer conversions and the bit-sliced
-            // selector values match the specification; generated integer cast facts do not trigger.
-            assume(ret.is_constant());
-            assume(ret.pointer_low@.val == addr as u16);
-            assume(ret.pointer_middle@.val == (addr >> 16u64) as u16);
-            assume(ret.pointer_high@.val == (addr >> 32u64) as u32);
-            assume(ret.gdt_selector@.val == gdt_selector);
-            assume(ret.options@.val == ENTRY_MIN_PRE);
-            assume(ret.reserved@.val == 0u32);
-        }
         ret
     }
     }
@@ -225,13 +209,6 @@ pub fn init_idt(Tracked(cs): Tracked<&mut SnpCoreSharedMem>)
 {
     let tracked mut cs_perm;
     let tracked mut idt_perm;
-    proof {
-        // Justification: inv_ac includes the allocator lock permission needed to allocate the IDT box;
-        // SMT does not unfold the lockperms/vlock predicate through VBox::new_uninit's precondition.
-        assume((*cs).lockperms.contains_vlock(spec_ALLOCATOR()));
-        // Justification: InterruptDescriptorTable has 256 entries and therefore exceeds allocator minimum size.
-        assume(spec_size::<InterruptDescriptorTable>() >= VeriSMoAllocator::spec_minsize());
-    }
     let mut idt = VBox::new_uninit(Tracked(cs));
     proof {
         idt_perm = cs.snpcore.regs.tracked_remove(RegName::IdtrBaseLimit);
@@ -242,24 +219,13 @@ pub fn init_idt(Tracked(cs): Tracked<&mut SnpCoreSharedMem>)
     // convert vbox to raw mem.
     let (idt_addr, idt_memperm) = idt.into_raw();
     // TODO: adjust pte.
-    assume(!idt_memperm@@.snp().pte().w);
     let dtp = Idtr { base: idt_addr.as_u64().into(), limit: 0xffffu64.into() };
-    proof {
-        // Justification: IDTR fields are built from constant integer conversions; generated IsConstant
-        // facts for the struct literal do not trigger automatically.
-        assume(dtp.is_constant());
-    }
     assert(dtp.is_constant());
     IdtBaseLimit.write(dtp, Tracked(&mut idt_perm));
     proof {
         cs.snpcore.regs.tracked_insert(RegName::IdtrBaseLimit, idt_perm);
         // Justification: init_idt only allocates the IDT and writes IdtrBaseLimit; the lock/register
         // frame condition follows from the tracked remove/insert sequence but is not folded automatically.
-        assume(cs.only_lock_reg_updated(
-            (*old(cs)),
-            set![RegName::IdtrBaseLimit],
-            set![spec_ALLOCATOR_lockid()],
-        ));
     }
 }
 
