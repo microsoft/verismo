@@ -5,6 +5,10 @@ use crate::allocator::VeriSMoAllocator;
 use crate::boot::init::e820_init_alloc::init_allocator_e820;
 
 verus! {
+broadcast use crate::group_verismo_default;
+}
+
+verus! {
 
 pub open spec fn init_allocator_requires(
     allocator: VeriSMoAllocator,
@@ -66,7 +70,6 @@ fn init_allocator(
     let tracked mut memcc = SnpMemCoreConsole { memperm, cc };
     proof {
         // Justification: no core register update occurs before the Hyper-V allocation loop.
-        assume(memcc.cc.snpcore.only_reg_coremode_updated(oldmemcc.cc.snpcore, set![GHCB_REGID()]));
         assert forall|i: int|
             (idx as int) <= i < (len as int) implies memcc.memperm.contains_default_except(
             hv_mem_tb@[i].range(),
@@ -105,10 +108,6 @@ fn init_allocator(
         decreases len - idx,
     {
         let entry = slice_index_get(hv_mem_tb, idx as usize_t);
-        proof {
-            // Justification: formatted Hyper-V memory entries satisfy helper comparison/max preconditions.
-            assume(entry.spec_cmp_max_requires());
-        }
         let start_gpn = entry.start().reveal_value();
         let npages = entry.size().reveal_value();
         let tracked SnpMemCoreConsole { mut memperm, cc } = memcc;
@@ -128,10 +127,6 @@ fn init_allocator(
         let ghost g_current_range = range(start as int, end as int);
         let static_range = (static_start, static_end - static_start);
         let current_range = (start, end - start);
-        proof {
-            // Justification: static/current ranges are valid ordered ranges from checked boot addresses.
-            assume(static_range.spec_check_disjoint_requires(&current_range));
-        }
         let inside = static_range.check_inside(&current_range);
         let disjoint = static_range.check_disjoint(&current_range);
         if !disjoint && !inside {
@@ -143,13 +138,11 @@ fn init_allocator(
         if inside {
             proof {
                 // Justification: check_inside true means the static Verismo range is inside current Hyper-V range.
-                assume(inside_range(verismo_static, g_current_range));
                 assert(inside_range(verismo_static, g_current_range));
                 assert(start@ <= static_start@);
                 assert(end@ >= static_end@);
                 if static_end@ < end@ {
                     // Justification: loop invariant says current Hyper-V range is default except e820/static ranges.
-                    assume(memperm.contains_default_except(g_current_range, except_ranges));
                     lemma_contains_except_remove(
                         memperm,
                         range(static_end as int, end as int),
@@ -160,7 +153,6 @@ fn init_allocator(
                 }
                 if start@ < static_start@ {
                     // Justification: loop invariant says current Hyper-V range is default except e820/static ranges.
-                    assume(memperm.contains_default_except(g_current_range, except_ranges));
                     lemma_contains_except_remove(
                         memperm,
                         range(start as int, static_start as int),
@@ -277,13 +269,11 @@ fn init_allocator(
         } else {
             proof {
                 // Justification: check_disjoint true means current Hyper-V range is disjoint from Verismo static range.
-                assume(range_disjoint_(verismo_static, g_current_range));
                 assert(range_disjoint_(verismo_static, g_current_range));
                 let used_range = g_current_range;
                 memperm.proof_remove_range_ensures(used_range);
                 memperm.proof_remove_range_ensures_except(used_range);
                 // Justification: current range was maintained default except e820/static ranges by the loop invariant.
-                assume(memperm.contains_default_except(used_range, except_ranges));
                 assert(memperm.contains_default_except(used_range, except_ranges));
                 //lemma_contains_except_remove(memperm, used_range, g_current_range, except_ranges, verismo_static);
                 let tracked mut hv_memperm = memperm.tracked_split(used_range);
@@ -317,12 +307,7 @@ fn init_allocator(
         proof {
             memcc = SnpMemCoreConsole { memperm, cc };
             // Justification: after processing entry idx-1, prev_end is set to that entry's end.
-            assume(idx > 0 ==> prev_end as int == hv_mem_tb@[idx as int - 1].range().end());
             // Justification: allocator initialization only writes through GHCB and preserves the register frame condition.
-            assume(memcc.cc.snpcore.only_reg_coremode_updated(
-                oldmemcc.cc.snpcore,
-                set![GHCB_REGID()],
-            ));
             assert forall|i: int|
                 (idx as int) <= i < (len as int) implies memcc.memperm.contains_default_except(
                 hv_mem_tb@[i].range(),
@@ -331,7 +316,6 @@ fn init_allocator(
                 assert(prev_memperm.contains_default_except(hv_mem_tb@[i].range(), except_ranges));
                 mem_range_formatted_is_disjoint(hv_mem_tb@);
                 // Justification: formatted Hyper-V ranges are disjoint and i is after the just-processed index.
-                assume(range_disjoint_(hv_mem_tb@[i].range(), g_current_range));
                 assert(range_disjoint_(hv_mem_tb@[i].range(), g_current_range));
                 prev_memperm.proof_remove_range_ensures(g_current_range);
             }

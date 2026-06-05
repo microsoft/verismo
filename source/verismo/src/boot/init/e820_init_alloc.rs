@@ -7,6 +7,10 @@ use crate::pgtable_e::pa_to_va;
 use crate::ptr::rmp::*;
 
 verus! {
+broadcast use crate::group_verismo_default;
+}
+
+verus! {
 
 pub fn init_allocator_e820(
     allocator: &mut VeriSMoAllocator,
@@ -40,10 +44,6 @@ pub fn init_allocator_e820(
     let ghost oldmemcc = memcc;
     let tracked SnpMemCoreConsole { mut memperm, mut cc } = memcc;
     let ghost mem_range = range(prev_end as int, end_addr as int);
-    proof {
-        // Justification: no core register update occurs before allocation loop; follows from memcc.wf.
-        assume(cc.snpcore.only_reg_coremode_updated(oldmemcc.cc.snpcore, set![GHCB_REGID()]));
-    }
     while prev_end < end_addr
         invariant
             prev_end >= start_addr,
@@ -78,10 +78,6 @@ pub fn init_allocator_e820(
         if index < n {
             let e = slice_index_get(e820, index);
             //let ghost e = e820@[index as int];
-            proof {
-                // Justification: formatted E820 entries satisfy helper comparison/max preconditions for start/size.
-                assume(e.spec_cmp_max_requires());
-            }
             let size = e.size().reveal_value();
             let paddr = e.start().reveal_value();  // 1:1 mapping
             assert(e.wf_range());
@@ -148,25 +144,9 @@ pub fn init_allocator_e820(
                 proof {
                     to_add_perm = to_add_perm2;
                 }
-                proof {
-                    // Justification: allocator memory ranges are identity-mapped by construction during early boot;
-                    // SMT does not expose the guestmap relation for the split permission.
-                    assume(tmp_perm@.range().0 <= spec_pa_to_va(add_start as int));
-                    assume(tmp_perm@.range().end() >= spec_pa_to_va(add_start as int));
-                    assume(tmp_perm@.snp().guestmap[spec_pa_to_va(add_start as int).to_page()] == (
-                    add_start as int).to_page());
-                    assume(tmp_perm@.range().0 <= spec_pa_to_va(tmp_end as int));
-                    assume(tmp_perm@.range().end() >= spec_pa_to_va(tmp_end as int));
-                    assume(tmp_perm@.snp().guestmap[spec_pa_to_va(tmp_end as int).to_page()] == (
-                    tmp_end as int).to_page());
-                }
                 let mut add_vstart = pa_to_va(add_start as u64, Tracked(&tmp_perm)) as usize;
                 let mut add_vend = pa_to_va(tmp_end as u64, Tracked(&tmp_perm)) as usize;
                 mem_set_zeros(add_vstart, add_vend - add_vstart, Tracked(&mut tmp_perm));
-                proof {
-                    // Justification: the skipped low page chunk has PAGE_SIZE bytes, exceeding allocator min size.
-                    assume(add_vend as int - add_vstart as int >= VeriSMoAllocator::spec_minsize());
-                }
                 allocator.add_mem(&mut add_vstart, &mut add_vend, Tracked(tmp_perm));
                 add_start = tmp_end;
             }
@@ -174,26 +154,9 @@ pub fn init_allocator_e820(
             assert(add_end.is_constant());
             assert(add_end > add_start);
             if (add_end - add_start) >= VeriSMoAllocator::minsize() {
-                proof {
-                    // Justification: allocator memory ranges are identity-mapped by construction during early boot;
-                    // SMT does not expose the guestmap relation for the permission range.
-                    assume(to_add_perm@.range().0 <= spec_pa_to_va(add_start as int));
-                    assume(to_add_perm@.range().end() >= spec_pa_to_va(add_start as int));
-                    assume(to_add_perm@.snp().guestmap[spec_pa_to_va(add_start as int).to_page()]
-                        == (add_start as int).to_page());
-                    assume(to_add_perm@.range().0 <= spec_pa_to_va(add_end as int));
-                    assume(to_add_perm@.range().end() >= spec_pa_to_va(add_end as int));
-                    assume(to_add_perm@.snp().guestmap[spec_pa_to_va(add_end as int).to_page()] == (
-                    add_end as int).to_page());
-                }
                 let mut add_vstart = pa_to_va(add_start as u64, Tracked(&to_add_perm)) as usize;
                 let mut add_vend = pa_to_va(add_end as u64, Tracked(&to_add_perm)) as usize;
                 mem_set_zeros(add_vstart, add_vend - add_vstart, Tracked(&mut to_add_perm));
-                proof {
-                    // Justification: branch condition add_end - add_start >= minsize and identity pa_to_va
-                    // imply the virtual range passed to allocator.add_mem is large enough.
-                    assume(add_vend as int - add_vstart as int >= VeriSMoAllocator::spec_minsize());
-                }
                 allocator.add_mem(&mut add_vstart, &mut add_vend, Tracked(to_add_perm));
             }
         }
