@@ -12,6 +12,11 @@ use crate::snp::snpcore_console_wf;
 
 verus! {
 
+broadcast use crate::group_verismo_default;
+
+} // verus!
+verus! {
+
 spec fn ascii_is_num(val: u8) -> bool {
     ||| '0' as u8 <= val <= '9' as u8
     ||| 'a' as u8 <= val <= 'f' as u8
@@ -94,7 +99,7 @@ fn int2bytes(input: u64, base: u64) -> (ret: (Array<u8_t, 66>, usize))
                 assert(pow2 == (pow1 * 2) as u64);
                 assert(pow1 * 2 == (pow1 * 2) as u64);
                 assert(u64::MAX / pow2 == u64::MAX / ((pow1 * 2) as u64));
-                assume(u64::MAX / ((pow1 * 2) as u64) == u64::MAX / pow1 / 2);  // TODO: add nonlinear proof
+                assert(u64::MAX / ((pow1 * 2) as u64) == u64::MAX / pow1 / 2);  // TODO: add nonlinear proof
             }
             assert(u64::MAX / (1u64 << 63u64) / 2 == 0);
         }
@@ -229,7 +234,7 @@ fn ghcb_prints_with_lock2<'a>(
     let tracked mut console = console;
     proof {
         // Reading GHCB MSR only records GHCB_REGID as updated in core mode.
-        assume(snpcore.only_reg_coremode_updated(prevcore, set![GHCB_REGID()]));
+        assert(snpcore.only_reg_coremode_updated(prevcore, set![GHCB_REGID()]));
     }
     while index < n
         invariant
@@ -249,15 +254,15 @@ fn ghcb_prints_with_lock2<'a>(
         let tracked mut some_console = Some(console);
         proof {
             // snpcore_console_wf makes the optional console shared-memory permission valid for GHCB send.
-            assume(is_none_or_sharedmem(some_console));
+            assert(is_none_or_sharedmem(some_console));
         }
         ghcb_msr_send(val, Tracked(&mut some_console), Tracked(snpcore));
         proof {
             console = some_console.tracked_unwrap();
             // ghcb_msr_send preserves console wf and only updates GHCB_REGID.
-            assume(snpcore_console_wf(*snpcore, console));
-            assume(snpcore.only_reg_coremode_updated(prevcore, set![GHCB_REGID()]));
-            assume(console@.only_val_updated(oldconsole));
+            assert(snpcore_console_wf(*snpcore, console));
+            assert(snpcore.only_reg_coremode_updated(prevcore, set![GHCB_REGID()]));
+            assert(console@.only_val_updated(oldconsole));
         }
         index = index + len;
     }
@@ -269,8 +274,8 @@ fn ghcb_prints_with_lock2<'a>(
     proof {
         snpcore.regs.tracked_insert(GHCB_REGID(), perm);
         // Restoring the saved MSR value gives the advertised restored-GHCB relation.
-        assume(GHCBProto::restored_ghcb(*snpcore, *old(snpcore)));
-        assume(print_ensures_snp_c(*old(snpcore), oldconsole_raw, *snpcore, console));
+        assert(GHCBProto::restored_ghcb(*snpcore, *old(snpcore)));
+        assert(print_ensures_snp_c(*old(snpcore), oldconsole_raw, *snpcore, console));
     }
     (n as usize, Tracked(console))
 }
@@ -325,7 +330,7 @@ fn ghcb_print_bytes_with_lock2<'a>(
     let oldval = ghcb_msr.read(Tracked(perm));
     proof {
         // Reading GHCB MSR only records GHCB_REGID as updated in core mode.
-        assume(snpcore.only_reg_coremode_updated(prevcore, set![GHCB_REGID()]));
+        assert(snpcore.only_reg_coremode_updated(prevcore, set![GHCB_REGID()]));
     }
     while index < n
         invariant
@@ -344,15 +349,15 @@ fn ghcb_print_bytes_with_lock2<'a>(
         let tracked mut some_console = Some(console);
         proof {
             // snpcore_console_wf makes the optional console shared-memory permission valid for GHCB send.
-            assume(is_none_or_sharedmem(some_console));
+            assert(is_none_or_sharedmem(some_console));
         }
         ghcb_msr_send(val, Tracked(&mut some_console), Tracked(snpcore));
         proof {
             console = some_console.tracked_unwrap();
             // ghcb_msr_send preserves console wf and only updates GHCB_REGID.
-            assume(snpcore_console_wf(*snpcore, console));
-            assume(snpcore.only_reg_coremode_updated(prevcore, set![GHCB_REGID()]));
-            assume(console@.only_val_updated(oldconsole@));
+            assert(snpcore_console_wf(*snpcore, console));
+            assert(snpcore.only_reg_coremode_updated(prevcore, set![GHCB_REGID()]));
+            assert(console@.only_val_updated(oldconsole@));
         }
         index = index + len;
     }
@@ -364,8 +369,8 @@ fn ghcb_print_bytes_with_lock2<'a>(
     proof {
         snpcore.regs.tracked_insert(GHCB_REGID(), perm);
         // Restoring the saved MSR value gives the advertised restored-GHCB relation.
-        assume(GHCBProto::restored_ghcb(*snpcore, *old(snpcore)));
-        assume(print_ensures_snp_c(*old(snpcore), oldconsole, *snpcore, console));
+        assert(GHCBProto::restored_ghcb(*snpcore, *old(snpcore)));
+        assert(print_ensures_snp_c(*old(snpcore), oldconsole, *snpcore, console));
     }
     (n as usize, Tracked(console))
 }
@@ -466,7 +471,7 @@ impl<T1: VPrint, T2: VPrint> VPrint for (T1, T2) {
         proof {
             // Sequential component prints compose: each step only updates GHCB_REGID
             // and the console value, so the whole tuple print has the same frame.
-            assume(print_ensures_snp_c(old_snpcore, old_console, *snpcore, ret@));
+            assert(print_ensures_snp_c(old_snpcore, old_console, *snpcore, ret@));
         }
         ret
     }
@@ -480,7 +485,8 @@ impl<T: ?Sized + VPrint> VPrintLock for T {
 
     #[inline]
     fn print(&self, Tracked(cs): Tracked<&mut SnpCoreSharedMem>) {
-        let ghost oldlockperms = cs.lockperms;
+        let ghost oldcs = *cs;
+        let ghost oldlockperms = oldcs.lockperms;
         let console_ref = CONSOLE();
         let tracked consolelock = cs.lockperms.tracked_remove(console_ref.lockid());
         let ghost oldconsolelock = consolelock;
@@ -488,23 +494,63 @@ impl<T: ?Sized + VPrint> VPrintLock for T {
         assert(cs.lockperms.inv(cs.snpcore.cpu()));
         assert(console_ref.is_constant());
         proof {
-            // cs.inv contains the console lock permission for this core.
-            assume(console_ref.lock_requires(cs.snpcore.coreid@.cpu, consolelock@));
+            broadcast use crate::global::axiom_global_CONSOLE;
+
+            assert(oldcs.inv());
+            assert(oldlockperms.inv(cs.snpcore.cpu()));
+            assert(*console_ref === spec_CONSOLE());
+            assert(console_ref.lockid() == spec_CONSOLE().lockid());
+            assert(spec_CONSOLE().lockid() == spec_CONSOLE_lockid());
+            assert(console_ref.lockid() == spec_CONSOLE_lockid());
+            assert(spec_CONSOLE().ptr_range() === spec_CONSOLE_range());
+            assert(console_ref.ptr_range() === spec_CONSOLE().ptr_range());
+            assert(console_ref.ptr_range() === spec_CONSOLE_range());
+            assert(contains_CONSOLE(oldlockperms));
+            assert(oldlockperms.contains_lock(spec_CONSOLE_lockid(), spec_CONSOLE_range()));
+            assert(consolelock === oldlockperms[console_ref.lockid()]);
+            assert(oldlockperms[console_ref.lockid()]@.points_to.range()
+                === console_ref.ptr_range());
+            assert(oldlockperms[console_ref.lockid()]@.is_unlocked(
+                cs.snpcore.coreid@.cpu,
+                console_ref.lockid(),
+                console_ref.ptr_range(),
+            ));
+            assert(consolelock@.is_unlocked(
+                cs.snpcore.coreid@.cpu,
+                console_ref.lockid(),
+                console_ref.ptr_range(),
+            ));
+            assert(console_ref.lock_requires(cs.snpcore.coreid@.cpu, consolelock@));
         }
         let (_, Tracked(console), Tracked(mut consolelock)) = console_ref.acquire(
             Tracked(consolelock),
             Tracked(&cs.snpcore.coreid),
         );
+        let ghost acquired_console = console@;
         let tracked console = console.trusted_into_raw();
         proof {
             // The CONSOLE lock invariant gives the raw console permission.
-            assume(console.is_console());
+            assert(console.is_console());
         }
         let Tracked(mut console) = self.early_print2(Tracked(&mut cs.snpcore), Tracked(console));
         let tracked console_perm = console.trusted_into();
         proof {
-            // early_print2 returns the matching updated console permission for release.
-            assume(console_ref.unlock_requires(
+            broadcast use crate::global::axiom_global_CONSOLE;
+            broadcast use LockPermToRaw::axiom_spec_new;
+
+            assert(console_ref.ensures_lock(oldconsolelock@, consolelock@, acquired_console));
+            assert(consolelock@ === oldconsolelock@.spec_set_locked(true));
+            assert(consolelock@.is_locked(
+                oldcs.snpcore.coreid@.cpu,
+                console_ref.lockid(),
+                console_ref.ptr_range(),
+            ));
+            assert(cs.snpcore.only_reg_coremode_updated(oldcs.snpcore, set![GHCB_REGID()]));
+            assert(cs.snpcore.coreid@.cpu == oldcs.snpcore.coreid@.cpu);
+            assert(console_perm@.value() is Some);
+            assert(console_perm@.wf_at(console_ref.lockid()));
+            assert(consolelock@.invfn.inv(console_perm@.get_value()));
+            assert(console_ref.unlock_requires(
                 cs.snpcore.coreid@.cpu,
                 consolelock@,
                 console_perm@,
@@ -518,10 +564,13 @@ impl<T: ?Sized + VPrint> VPrintLock for T {
         proof {
             cs.lockperms.tracked_insert(console_ref.lockid(), consolelock);
             // release records only a value update to the console lock permission.
-            assume(consolelock@.points_to.only_val_updated(oldconsolelock@.points_to));
+            assert(consolelock@.points_to.only_val_updated(oldconsolelock@.points_to));
             //assert(consolelock@.points_to.bytes() =~~= oldconsolelock@.points_to.bytes());
             //assert(consolelock@ === oldconsolelock@);
-            assume(cs.lockperms.updated_lock(&oldlockperms, set![console_ref.lockid()]));
+            assert(cs.lockperms === oldlockperms.insert(console_ref.lockid(), consolelock));
+            assert(cs.lockperms.updated_lock(&oldlockperms, set![console_ref.lockid()]));
+            // TODO: needs real proof - was assume(print_ensures_cs(*old(cs), *cs)) before broadcast-group migration.
+            // The missing fact is global-lock id separation needed to show the console-lock update preserves cs.wf_pt().
             assume(print_ensures_cs(*old(cs), *cs));
         }
     }
@@ -553,8 +602,8 @@ impl<T: ?Sized + VPrint> VEarlyPrintAtLevel for T {
         proof {
             // In non-debug builds debug printing is a no-op; the state is unchanged,
             // which satisfies the print postconditions for this level.
-            assume(print_ensures_cc(*old(cs), *cs));
-            assume(VEarlyPrintAtLevel::print_ensures(self, *old(cs), *cs));
+            assert(print_ensures_cc(*old(cs), *cs));
+            assert(VEarlyPrintAtLevel::print_ensures(self, *old(cs), *cs));
         }
     }
 
@@ -598,8 +647,8 @@ impl<T: ?Sized + VPrint> VPrintAtLevel for T {
         proof {
             // In non-debug builds debug printing is a no-op; the state is unchanged,
             // which satisfies the print postconditions for this level.
-            assume(print_ensures_cs(*old(cs), *cs));
-            assume(VPrintAtLevel::print_ensures(self, *old(cs), *cs));
+            assert(print_ensures_cs(*old(cs), *cs));
+            assert(VPrintAtLevel::print_ensures(self, *old(cs), *cs));
         }
     }
 
