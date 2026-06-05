@@ -369,6 +369,25 @@ impl<T, M> SpecSecType<T, M> {
         self.proof_bop_new::<T, T2>(SpecSecType::constant(arbitrary()), uop_to_bop(op))
     }
 
+    pub broadcast proof fn axiom_uop_new_constant<T2>(self, op: spec_fn(T) -> T2)
+        ensures
+            self.is_constant() ==> #[trigger] self.uop_new(op).is_constant(),
+    {
+        let ret = self.uop_new(op);
+        broadcast use SpecSecType::lemma_is_constant;
+        if self._is_constant() {
+            assert forall|i: nat| 1 <= i <= 4 implies
+                #[trigger] ret.valsets[i] =~~= set![ret.val] by {
+                let other = SpecSecType::<T, M>::constant(arbitrary::<T>());
+                lemma_setop_len(self.valsets[i], other.valsets[i], uop_to_bop(op));
+                assert(self.valsets[i] =~~= set![self.val]);
+                assert(other.valsets[i] =~~= set![other.val]);
+                assert(self.valsets[i].contains(self.val));
+                assert(other.valsets[i].contains(other.val));
+            }
+        }
+    }
+
     #[verifier(inline)]
     pub open spec fn uop_new<T2>(self, op: spec_fn(T) -> T2) -> SpecSecType<T2, M> {
         self.bop_new(SpecSecType::constant(arbitrary::<T>()), uop_to_bop(op))

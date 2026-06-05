@@ -11,7 +11,11 @@ verus! {
 // Surface the SecType constructor/extensionality axioms for every proof in
 // this test module.  Without this, postconditions involving `spec_new(...)`
 // (e.g. `v1 + v2`, `v1 * v2`, casts) are opaque to the verifier.
-broadcast use {SecType::axiom_spec_new, SecType::axiom_ext_equal};
+broadcast use {
+    SecType::axiom_spec_new,
+    SecType::axiom_ext_equal,
+    SpecSecType::axiom_uop_new_constant,
+};
 
 } // verus!
 mod p {
@@ -178,6 +182,8 @@ verismo! {
         let ret = !mask;
         proof {
             use_type_invariant(&ret);
+            assert(v1.is_constant() ==> mask.is_constant());
+            assert(mask.is_constant() ==> ret.is_constant());
         }
         ret
     }
