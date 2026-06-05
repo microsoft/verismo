@@ -2,11 +2,6 @@ use super::*;
 
 verus! {
 
-broadcast use crate::group_verismo_default;
-
-} // verus!
-verus! {
-
 pub const INVALID_ADDR: usize = VM_MEM_SIZE + 1;
 
 pub open spec fn spec_pa_to_va(pa: int) -> int {
@@ -212,26 +207,7 @@ macro_rules! impl_addr_safe_interface {
 
             fn to_page(&self) -> (ret: $basetype) {
                 let s: $basetype = PAGE_SIZE.into();
-                proof {
-                    use_type_invariant(self);
-                    use_type_invariant(&s);
-                    // `s` is created by `From<usize>` for SecType, whose ensures
-                    // makes the secure value equal to the source PAGE_SIZE constant.
-                    assert(s@.val == PAGE_SIZE);
-                    assert(s@.val != 0);
-                    assert((*self)@.val >= $ptype::MIN);
-                    assert((*self)@.val <= $ptype::MAX);
-                    assert((*self)@.val / s@.val >= $ptype::MIN);
-                    assert((*self)@.val / s@.val <= $ptype::MAX);
-                }
                 let ret = (*self).div(s);
-                proof {
-                    // Verus may not unfold the SecType Div spec in this impl body
-                    // (SMT axiom-ordering issue); the call above already establishes
-                    // these facts from Div's ensures and s == PAGE_SIZE.
-                    assert(ret === self.spec_to_page());
-                    assert(self.spec_ensures_to_page(ret));
-                }
                 ret
             }
         }
@@ -277,23 +253,7 @@ macro_rules! impl_page_safe_interface {
 
             fn to_addr(&self) -> (ret: $basetype)
             {
-                proof {
-                    use_type_invariant(self);
-                    assert(PAGE_SIZE != 0);
-                    assert((*self)@.val >= $ptype::MIN);
-                    assert((*self)@.val <= VM_PAGE_NUM);
-                    assert((*self)@.val * PAGE_SIZE <= VM_MEM_SIZE);
-                    assert((*self)@.val * PAGE_SIZE >= $ptype::MIN);
-                    assert((*self)@.val * PAGE_SIZE <= $ptype::MAX);
-                }
                 let ret = (*self).mul(PAGE_SIZE as $ptype);
-                proof {
-                    // Verus may not unfold the SecType Mul spec in this impl body
-                    // (SMT axiom-ordering issue); the call above already establishes
-                    // these facts from Mul's ensures and PAGE_SIZE == 0x1000.
-                    assert(ret === self.spec_to_addr());
-                    assert(self.spec_ensures_to_addr(ret));
-                }
                 ret
             }
         }

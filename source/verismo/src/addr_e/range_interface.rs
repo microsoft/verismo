@@ -1,10 +1,5 @@
 use super::*;
 
-verus! {
-
-broadcast use crate::group_verismo_default;
-
-} // verus!
 verismo_simple! {
 
 pub open spec fn spec_valid_range(r: (usize_s, usize_s), max: usize_s) -> (usize_s, usize_s) {
@@ -82,7 +77,7 @@ impl MemRangeInterface for (usize_s, usize_s) {
     {
         let ret = *self;
         proof {
-            // ret is exactly *self, and spec_real_range for this instance is *self.
+            // Required: without this block Verus does not use the inline spec_real_range/real_wf facts for ret.
             assert(ret === self.spec_real_range());
             assert(Self::real_wf(ret));
         }
@@ -94,8 +89,7 @@ impl MemRangeInterface for (usize_s, usize_s) {
     {
         let ret = VM_MEM_SIZE as usize_s;
         proof {
-            // Casting the architecture constant into SecType preserves the value
-            // and produces a constant secure value.
+            // Required: without this block Verus does not prove the cast equals spec_end_max and is_constant.
             assert(ret == Self::spec_end_max());
             assert(ret.is_constant());
         }
@@ -140,12 +134,6 @@ impl MemRangeInterface for (usize_t, usize_t) {
     fn real_range(&self) -> (ret: (usize_s, usize_s))
     {
         let ret = (self.0.into(), self.1.into());
-        proof {
-            // The pair components are converted with From<usize>, whose ensures
-            // preserve the values as constant SecType values.
-            assert(ret === self.spec_real_range());
-            assert(Self::real_wf(ret));
-        }
         ret
     }
 
@@ -153,12 +141,6 @@ impl MemRangeInterface for (usize_t, usize_t) {
     fn end_max() -> (ret: usize_s)
     {
         let ret = VM_MEM_SIZE as usize_s;
-        proof {
-            // Casting the architecture constant into SecType preserves the value
-            // and produces a constant secure value.
-            assert(ret == Self::spec_end_max());
-            assert(ret.is_constant());
-        }
         ret
     }
 
@@ -181,16 +163,6 @@ impl MemRangeInterface for (usize_t, usize_t) {
     fn update_range(&mut self, r: (usize_s, usize_s))
     {
         *self = (r.0.into(), r.1.into());
-        proof{
-            r.0@.proof_constant();
-            r.1@.proof_constant();
-            // The assignments above come from `From<SecType<_>>` conversions whose
-            // ensures preserve the secure views; Verus does not unfold those casts here.
-            assert(self.spec_real_range().0@ === r.0@);
-            assert(self.spec_real_range().1@ === r.1@);
-            assert(self.spec_real_range() === r);
-            assert((*old(self)).spec_set_range(r) === *self);
-        }
     }
 }
 
@@ -388,13 +360,6 @@ impl<T: MemRangeInterface> GeneratedMemRangeInterface for T {
         } else {
             Self::end_max()
         };
-        proof {
-            // The branch implements spec_valid_range's clipped start exactly.
-            assert(ret == self.spec_range().0);
-            assert(ret.is_constant());
-            assert(ret <= Self::spec_max());
-            assert(ret.wf());
-        }
         ret
     }
 
@@ -410,13 +375,6 @@ impl<T: MemRangeInterface> GeneratedMemRangeInterface for T {
         } else {
             Self::end_max() - start
         };
-        proof {
-            // The branch implements spec_valid_range's clipped size exactly.
-            assert(ret == self.spec_range().1);
-            assert(ret.is_constant());
-            assert(ret <= Self::spec_max());
-            assert(ret.wf());
-        }
         ret
     }
 
@@ -425,20 +383,7 @@ impl<T: MemRangeInterface> GeneratedMemRangeInterface for T {
     {
         let start = self.start();
         let size = self.size();
-        proof {
-            // start/size are the clipped range with end <= spec_max, so the secure
-            // addition is within usize bounds.
-            assert(start@.val + size@.val >= usize::MIN);
-            assert(start@.val + size@.val <= usize::MAX);
-        }
         let ret = start + size;
-        proof {
-            // The addition above computes spec_range().end().
-            assert(ret == self.spec_range().end());
-            assert(ret.is_constant());
-            assert(ret <= Self::spec_max());
-            assert(ret.wf());
-        }
         ret
     }
 
@@ -946,13 +891,6 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N> {
             }
             let mut entry = *self.index(ri);
             assert(self@[ri as int].self_wf());
-            proof {
-                assert(entry === self@[ri as int]);
-                // The loop invariants give entry's real range constants and wf;
-                // spec_sec_max is a secure constant, completing spec_cmp_max_requires.
-                assert(T::spec_sec_max().is_constant());
-                assert(entry.spec_cmp_max_requires());
-            }
             if entry.size().reveal_value() == 0 {
                 ri = ri + 1;
                 continue;
@@ -963,21 +901,9 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N> {
                 T::proof_constant_real_wf((start, size));
             }
             entry.update_range((start, size));
-            proof {
-                // start() and size() returned the clipped valid range; after update_range
-                // the entry's real range is exactly that valid nonzero range.
-                assert(entry.wf_range());
-                assert(entry.spec_cmp_max_requires());
-            }
             if wi > 0 {
                 assert(self@[wi as int - 1].self_wf());
                 let prev_entry = *self.index(wi - 1);
-                proof {
-                    // Same constant spec_sec_max fact plus the loop invariant for
-                    // the previously written entry establishes end()'s precondition.
-                    assert(T::spec_sec_max().is_constant());
-                    assert(prev_entry.spec_cmp_max_requires());
-                }
                 if start.reveal_value() < prev_entry.end().reveal_value() {
                     break;
                 }

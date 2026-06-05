@@ -3,21 +3,6 @@ use super::*;
 
 verus! {
 
-broadcast use {
-    crate::arch::addr_s::page::group_addr_default,
-    crate::arch::pgtable::memmap_s::group_pgtable_memmap_default,
-    crate::arch::rmp::perm_s::group_rmp_perm_default,
-    crate::arch::x64::x64_s::group_x64_default,
-    crate::linkedlist::group_linkedlist_default,
-    crate::ptr::ptr_s::group_ptr_ptr_default,
-    crate::ptr::raw_ptr_s::group_raw_ptr_default,
-    crate::ptr::snp::snp_u::group_snp_attr_default,
-    crate::registers::msr_perm_s::group_msr_perm_default,
-};
-
-} // verus!
-verus! {
-
 pub proof fn rmp_proof_check_access_rmp_has_gpn_memid(
     rmp: &RmpMap,
     memid: MemID,
@@ -52,9 +37,7 @@ pub proof fn rmp_lemma_model_eq_inv(rmp: &RmpMap, other: &RmpMap, memid: MemID)
                 &&& vmpl.as_int() > memid.to_vmpl().as_int()
                 &&& rmp[spn].view().spec_asid() === memid.to_asid()
             } implies !#[trigger] rmp[spn].view().check_vmpl(vmpl, Perm::Write) by {
-            assert(!(vmpl is VMPL0));
             rmp_lemma_hv_update_restrict(&other, *rmp, MemID::Hv);
-            assert(*rmp === rmp_hv_update(other, *rmp, MemID::Hv));
             if rmp[spn] !== other[spn] {
                 assert(rmp[spn].view().spec_perms() === rmp_perm_init());
                 assert(rmp[spn].view().spec_perms().index(vmpl) === PagePerm::empty());
@@ -112,14 +95,13 @@ pub proof fn rmp_proof_inv_sw(rmp: &RmpMap, op: RmpOp<SysPhy>, memid: MemID)
     match op {
         RmpOp::Pvalidate(_, _) => {
             rmp_lemma_pvalidate_sw_inv(rmp, op, memid);
-            assert(rmp_inv_sw(&rmp_op(rmp, op).to_result(), memid));
         },
         RmpOp::RmpAdjust(PageID { page, memid: op_memid }, param) => {
+            // Required: removing this broadcast loses RmpAdjust spec_new facts for new/rmp entry equality assertions.
             broadcast use {RmpEntry::axiom_spec_new, HiddenRmpEntryForPSP::axiom_spec_new};
 
             let new = rmp_op(rmp, op).to_result();
             rmp_proof_op_dom_inv(rmp, op);
-            assert(new.dom() === rmp.dom());
             assert forall|spn: SPN|
                 {
                     &&& new.dom().contains(spn)
@@ -170,11 +152,11 @@ pub proof fn rmp_proof_inv_sw(rmp: &RmpMap, op: RmpOp<SysPhy>, memid: MemID)
             }
         },
         RmpOp::RmpUpdate(PageID { page, memid: op_memid }, newentry) => {
+            // Required: removing this broadcast loses RmpUpdate spec_new facts proving changed entries are unvalidated.
             broadcast use {RmpEntry::axiom_spec_new, HiddenRmpEntryForPSP::axiom_spec_new};
 
             let new = rmp_op(rmp, op).to_result();
             rmp_proof_op_dom_inv(rmp, op);
-            assert(new.dom() === rmp.dom());
             assert forall|spn: SPN|
                 {
                     &&& new.dom().contains(spn)
@@ -231,12 +213,12 @@ pub proof fn rmp_proof_inv_memid_int(rmp: &RmpMap, op: RmpOp<SysPhy>, memid: Mem
     ensures
         rmp_inv_memid_int(&rmp_op(rmp, op).to_result(), memid),
 {
+    // Required: removing this broadcast loses spec_new facts for permission preservation and HV update empty perms.
     broadcast use {RmpEntry::axiom_spec_new, HiddenRmpEntryForPSP::axiom_spec_new};
 
     reveal(rmp_inv);
     let new = rmp_op(rmp, op).to_result();
     rmp_proof_op_dom_inv(rmp, op);
-    assert(new.dom() === rmp.dom());
     assert forall|spn: SPN, vmpl: VMPL|
         {
             &&& new.dom().contains(spn)
@@ -297,6 +279,7 @@ pub proof fn rmp_lemma_pvalidate_sw_inv(rmp: &RmpMap, op: RmpOp<SysPhy>, memid: 
     ensures
         rmp_inv_sw(&rmp_op(rmp, op).to_result(), memid),
 {
+    // Required: removing this broadcast loses pvalidate spec_new/update facts for unchanged-entry assertions.
     broadcast use {RmpEntry::axiom_spec_new, HiddenRmpEntryForPSP::axiom_spec_new};
 
     let is_error = rmp_op(rmp, op) is Error;
@@ -380,6 +363,7 @@ pub proof fn rmp_lemma_hv_update_inv(rmp: &RmpMap, newrmp: RmpMap, hv_id: MemID)
     ensures
         rmp_inv(&rmp_hv_update(rmp, newrmp, hv_id)),
 {
+    // Required: removing this broadcast prevents folding rmp_hv_update entry invariants into rmp_inv.
     broadcast use {RmpEntry::axiom_spec_new, HiddenRmpEntryForPSP::axiom_spec_new};
 
     reveal(rmp_inv);
@@ -403,6 +387,7 @@ pub proof fn rmp_lemma_hv_update_restrict(rmp: &RmpMap, newrmp: RmpMap, hv_id: M
                 hv_id,
             )[i]@.spec_perms() === rmp_perm_init()),
 {
+    // Required: removing this broadcast loses HV RmpUpdate spec_new facts for validation/perms postconditions.
     broadcast use {RmpEntry::axiom_spec_new, HiddenRmpEntryForPSP::axiom_spec_new};
 
     reveal(rmp_inv);
@@ -429,6 +414,7 @@ pub proof fn rmp_lemma_hv_update_restrict_at(
             || (rmp_check_access(&rmp_hv_update(rmp, newrmp, hv_id), memid, enc, gpmem, perm, spn)
             === rmp_check_access(rmp, memid, enc, gpmem, perm, spn))),
 {
+    // Required: removing this broadcast loses HV update equality facts needed after check_access unfolds.
     broadcast use {RmpEntry::axiom_spec_new, HiddenRmpEntryForPSP::axiom_spec_new};
 
     reveal(RmpEntry::check_access);

@@ -12,11 +12,6 @@ use crate::*;
 
 verus! {
 
-broadcast use crate::group_verismo_default;
-
-} // verus!
-verus! {
-
 pub const L4_MAX_ADDR: usize = 0x1000_0000_0000_0000usize;
 
 pub fn vn_to_pn(page: u64, Tracked(page_perm): Tracked<&SnpPointsToRaw>) -> (ret: u64)
@@ -394,9 +389,6 @@ fn borrow_entry(
     assert(contains_PT(cs.lockperms));
     let pt_ref = PT();
     let tracked mut pt_lock = cs.lockperms.tracked_remove(spec_PT_lockid());
-    proof {
-        // cs.inv provides the page-table lock permission for this core.
-    }
     let (tracked_ptr, Tracked(mut ptperm_perm), Tracked(pt_lock)) = pt_ref.acquire(
         Tracked(pt_lock),
         Tracked(&cs.snpcore.coreid),
@@ -415,9 +407,6 @@ fn borrow_entry(
         Tracked(&mut pt_perms),
     );
     tracked_ptr.put(Tracked(&mut ptperm_perm), TrackedPTEPerms { perms: Tracked(pt_perms) });
-    proof {
-        // The taken TrackedPTEPerms is restored before releasing the PT lock.
-    }
     pt_ref.release(Tracked(&mut pt_lock), Tracked(ptperm_perm), Tracked(&cs.snpcore.coreid));
     proof {
         cs.lockperms.tracked_insert(spec_PT_lockid(), pt_lock);
@@ -507,9 +496,6 @@ fn _borrow_entry(
                 assert(pt_perms.contains_key(prev_lvl_idx));
                 assert(prev_pt_perms[prev_lvl_idx] === pt_perms[prev_lvl_idx]);
                 assert(pt_perms[prev_lvl_idx].wf(prev_lvl_idx));
-                assert(PTE::spec_new(prev->Some_0.pte.value.vspec_cast_to())
-                    === pt_perms[prev_lvl_idx].val());
-                //assert(prev->Some_0.pte === pt_perms[prev_lvl_idx].val());
                 prev->Some_0.pte.lemma_new_eq();
                 // wf_ptes relates adjacent levels; the previous level entry has a next table here.
                 assert(pte_perms_wf_prev(*pt_perms, glvl, gaddr));
@@ -519,11 +505,7 @@ fn _borrow_entry(
             let tracked PtePerm { lvl: lvl_nat, val, range, perm } = pte_perm;
             let ppage: usize = prev_entry.get_page() as usize;  // ppage == start_page.
             let page_table_ptr = SnpPPtr::<PageTable>::from_usize(ppage.to_addr());
-            assert(perm is Some);
             let tracked perm = perm.tracked_unwrap();
-            proof {
-                // The PTE permission's next-table pointer matches page_table_ptr.
-            }
             let page_table = page_table_ptr.borrow(Tracked(&perm));
             let idx = table_index(vaddr, lvl);
             assert(page_table@.len() == PT_ENTRY_NUM);
@@ -549,10 +531,6 @@ fn _borrow_entry(
     } else {
         None
     };
-    proof {
-        // The recursive walk preserves pt_perms and, when it finds an entry,
-        // returns exactly the permission entry for the requested level/index.
-    }
     return ret;
 }
 
@@ -688,37 +666,15 @@ pub fn set_page_enc_dec(
     let tracked cr3perm = cs.snpcore.regs.tracked_borrow(RegName::Cr3);
     assert(contains_PT(cs.lockperms));
     let pt_ref = PT();
-    let ghost lockperms_before_pt_remove = cs.lockperms;
     let tracked mut pt_lock = cs.lockperms.tracked_remove(spec_PT_lockid());
-    proof {
-        assert(pt_lock === lockperms_before_pt_remove[spec_PT_lockid()]);
-        assert(lockperms_before_pt_remove.inv(cs.snpcore.cpu()));
-        assert(lockperms_before_pt_remove[spec_PT_lockid()]@.is_unlocked(
-            cs.snpcore.cpu(),
-            spec_PT_lockid(),
-            lockperms_before_pt_remove[spec_PT_lockid()]@.points_to.range(),
-        ));
-        assert(pt_lock@.is_unlocked(cs.snpcore.coreid@.cpu, pt_ref.lockid(), pt_ref.ptr_range()));
-        assert(pt_ref.lock_requires(cs.snpcore.coreid@.cpu, pt_lock@));
-    }
     let (tracked_ptr, Tracked(mut ptperm_perm), Tracked(pt_lock)) = pt_ref.acquire(
         Tracked(pt_lock),
         Tracked(&cs.snpcore.coreid),
     );
-    proof {
-        assert(pt_lock@.invfn.value_invfn() === TrackedPTEPerms::invfn());
-        assert(pt_lock@.invfn.inv::<TrackedPTEPerms>(ptperm_perm@.get_value()));
-        assert(wf_ptes(ptperm_perm@.get_value()@));
-    }
-    let ghost acquired_pt_perms = ptperm_perm@.get_value()@;
     // Dummy take to get PTE permission.
     let TrackedPTEPerms { perms } = tracked_ptr.take(Tracked(&mut ptperm_perm));
     let Tracked(mut pt_perms) = perms;
     let lvl = 0;
-    proof {
-        assert(pt_perms === acquired_pt_perms);
-        assert(wf_ptes(pt_perms));
-    }
     let pte_val_opt = _borrow_entry(
         vaddr,
         lvl,
@@ -728,7 +684,6 @@ pub fn set_page_enc_dec(
     );
     let ret = if let Option::Some(pte_with_ptr) = pte_val_opt {
         let PTEWithPtr { pte, ptr, index } = pte_with_ptr;
-        assert(ptr is Some);
         let mut pte_addr: usize = ptr.unwrap().to_usize();
         let encryption = if enc {
             1
@@ -745,9 +700,6 @@ pub fn set_page_enc_dec(
             }
             pte_addr = pte_addr + index * 8;
             let pte_ptr = SnpPPtr::<u64_s>::from_usize(pte_addr);
-            proof {
-                assert(memmap_perm.contains_key(addr_id));
-            }
             pte_ptr.write_pte(
                 new_pte,
                 Ghost(lvl as nat),
@@ -755,9 +707,6 @@ pub fn set_page_enc_dec(
                 Tracked(&mut pt_perms),
                 Tracked(&mut memmap_perm),
             );
-            proof {
-                assert(memmap_perm.contains_key(addr_id));
-            }
             let tracked mut mem_perm = memmap_perm.tracked_remove(addr_id);
             invlpg(vaddr, Tracked(&mut mem_perm));
             proof {
@@ -772,23 +721,9 @@ pub fn set_page_enc_dec(
         false
     };
     tracked_ptr.put(Tracked(&mut ptperm_perm), TrackedPTEPerms { perms: Tracked(pt_perms) });
-    proof {
-        assert(pt_lock@.is_locked(cs.snpcore.coreid@.cpu, pt_ref.lockid(), pt_ref.ptr_range()));
-        assert(pt_lock@.invfn.inv::<TrackedPTEPerms>(ptperm_perm@.get_value()));
-        assert(pt_ref.unlock_requires(cs.snpcore.coreid@.cpu, pt_lock@, ptperm_perm@));
-    }
     pt_ref.release(Tracked(&mut pt_lock), Tracked(ptperm_perm), Tracked(&cs.snpcore.coreid));
     proof {
         cs.lockperms.tracked_insert(spec_PT_lockid(), pt_lock);
-        assert(cs.inv());
-        assert(cs.only_lock_reg_updated((*old(cs)), set![], set![spec_PT().lockid()]));
-        if ret {
-            assert(ensures_mem_enc_dec_memperm(enc, old(mem_perm0)[0], mem_perm0[0]));
-        } else {
-            assert(mem_perm0[0] === old(mem_perm0)[0]);
-        }
-        assert(mem_perm0.contains_key(0));
-        assert(mem_perm0[0]@.wf_range((vaddr as int, PAGE_SIZE as nat)));
     }
     return ret;
 }
@@ -818,10 +753,6 @@ pub fn set_pages_enc_dec(
     let mut i = 0;
     let ghost old_mem_perms = *mem_perms;
     let ghost old_cs = (*cs);
-    proof {
-        // Initially no pages have been processed, so the map is unchanged and
-        // the shared-core frame is the input frame.
-    }
     while i < size
         invariant
             i <= size,
@@ -866,9 +797,6 @@ pub fn set_pages_enc_dec(
             // The processed-prefix and unprocessed-suffix map facts are preserved by
             // removing and reinserting exactly the current page permission.
         }
-    }
-    proof {
-        // At loop exit i == size, so the processed-prefix invariant is exactly the postcondition.
     }
 }
 
