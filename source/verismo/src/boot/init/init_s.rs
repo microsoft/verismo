@@ -24,6 +24,7 @@ impl InitMem for RawMemPerms {
     open spec fn mem_perms_e820_valid(&self, e820: Seq<E820Entry>) -> bool {
         // e820 table records all validated memory.
         &&& forall|r|
+            #![trigger e820.to_aligned_ranges().contains(r)]
             e820.to_aligned_ranges().contains(r) ==> self.contains_default_except(
                 r,
                 e820.to_valid_ranges(),
@@ -66,6 +67,7 @@ pub proof fn lemma_contains_except_remove(
     let newrange = ranges.remove(toremove);
     assert forall|r2|
         #![trigger ranges_disjoint(newrange, r2)]
+        #![trigger memperm.contains_range(r2)]
         (inside_range(r2, r) && ranges_disjoint(newrange, r2) && r2.1
             > 0) implies memperm.contains_default_mem(r2) by {
         assert(ranges_disjoint(newrange.insert(toremove), r2));
