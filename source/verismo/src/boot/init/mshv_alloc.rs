@@ -68,6 +68,7 @@ fn init_allocator(
         // Justification: no core register update occurs before the Hyper-V allocation loop.
         assume(memcc.cc.snpcore.only_reg_coremode_updated(oldmemcc.cc.snpcore, set![GHCB_REGID()]));
         assert forall|i: int|
+            #![trigger hv_mem_tb@[i]]
             (idx as int) <= i < (len as int) implies memcc.memperm.contains_default_except(
             hv_mem_tb@[i].range(),
             except_ranges,
@@ -250,6 +251,7 @@ fn init_allocator(
                     assert(hv_memperm.contains_default_except(used_range, e820@.to_valid_ranges()))
                         by {
                         assert forall|r|
+                            #![trigger hv_memperm.contains_range(r)]
                             (inside_range(r, used_range) && r.1 != 0 && ranges_disjoint(
                                 e820@.to_valid_ranges(),
                                 r,
@@ -294,6 +296,7 @@ fn init_allocator(
                 ));
                 assert(hv_memperm.contains_default_except(used_range, e820@.to_valid_ranges())) by {
                     assert forall|r|
+                        #![trigger hv_memperm.contains_range(r)]
                         inside_range(r, used_range) && r.1 != 0 && ranges_disjoint(
                             e820@.to_valid_ranges(),
                             r,
@@ -324,6 +327,7 @@ fn init_allocator(
                 set![GHCB_REGID()],
             ));
             assert forall|i: int|
+                #![trigger hv_mem_tb@[i]]
                 (idx as int) <= i < (len as int) implies memcc.memperm.contains_default_except(
                 hv_mem_tb@[i].range(),
                 except_ranges,

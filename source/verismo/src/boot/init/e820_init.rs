@@ -57,6 +57,8 @@ proof fn lemma_validate_e820_single(
 {
     let end_init_range = range(end_addr as int, VM_MEM_SIZE as int);
     assert forall|r: (int, nat)|
+        #![trigger ranges_disjoint(pre_validated, r)]
+        #![trigger memperm.contains_range(r)]
         r.1 != 0 && inside_range(r, validated_range) && ranges_disjoint(
             pre_validated,
             r,
@@ -105,6 +107,8 @@ proof fn lemma_validate_e820_single(
             pre_validated,
         );
         assert forall|r: (int, nat)|
+            #![trigger ranges_disjoint(pre_validated, r)]
+            #![trigger memperm.contains_range(r)]
             r.1 != 0 && inside_range(r, next_init_range) && ranges_disjoint(
                 pre_validated,
                 r,
@@ -254,6 +258,10 @@ pub fn validate_e820(
         newmemcc@.wf_core(memcc.cc.snpcore.cpu()),
         newmemcc@.cc.snpcore.only_reg_coremode_updated(memcc.cc.snpcore, set![GHCB_REGID()]),
         forall|r|
+            #![trigger newmemcc@.memperm.contains_range(r)]
+            #![trigger memcc.memperm.contains_range(r)]
+            #![trigger newmemcc@.memperm[r]]
+            #![trigger memcc.memperm[r]]
             range_disjoint_(r, range(start_addr as int, end_addr as int))
                 ==> newmemcc@.memperm.eq_at(memcc.memperm, r),
         newmemcc@.memperm.contains_default_except(
@@ -303,6 +311,10 @@ pub fn validate_e820(
             memperm.contains_init_except(range(val_end as int, VM_MEM_SIZE as int), pre_validated),
             memperm.contains_init_except(range(end_addr as int, VM_MEM_SIZE as int), pre_validated),
             forall|r|
+                #![trigger memperm.contains_range(r)]
+                #![trigger oldmemcc.memperm.contains_range(r)]
+                #![trigger memperm[r]]
+                #![trigger oldmemcc.memperm[r]]
                 range_disjoint_(r, range(start_addr as int, end_addr as int)) ==> memperm.eq_at(
                     oldmemcc.memperm,
                     r,

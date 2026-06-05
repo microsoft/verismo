@@ -481,7 +481,9 @@ pub fn load_bzimage_to_vmsa(
                 assert(entry.spec_start() <= i < entry.spec_end());
                 entry.proof_contains(i);
             }
-            assert forall|i: int| prefer_mem.contains_key(i) implies prefer_mem[i]@.wf_not_null(
+            assert forall|i: int|
+                #![trigger prefer_mem.contains_key(i)]
+                prefer_mem.contains_key(i) implies prefer_mem[i]@.wf_not_null(
                 (i.to_addr(), PAGE_SIZE as nat),
             ) && entry.spec_start() <= i < entry.spec_end() by {
                 entry.proof_contains(i);

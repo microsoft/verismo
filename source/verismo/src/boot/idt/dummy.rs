@@ -158,7 +158,7 @@ pub fn init_idt_content(idt: &mut InterruptDescriptorTable, gdt_selector: u16)
             dummy_handler == spec_isr_handler_addr_0(),
             dummy_handler.is_constant(),
             gdt_selector.is_constant(),
-            forall|k: int| 0 <= k < (i as int) ==> idt@[k].is_constant(),
+            forall|k: int| #![trigger idt@[k]] 0 <= k < (i as int) ==> idt@[k].is_constant(),
             i.is_constant(),
         decreases idt@.len() - i as int,
     {

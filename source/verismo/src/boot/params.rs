@@ -124,11 +124,11 @@ pub open spec fn e820_disjoint(e820: Seq<E820Entry>, r: (int, nat)) -> bool {
 }
 
 pub open spec fn e820_align_include(e820: Set<E820Entry>, r: (int, nat)) -> bool {
-    exists |e| e820.contains(e) && inside_range(r, e.spec_aligned_range())
+    exists |e| #![trigger e820.contains(e)] e820.contains(e) && inside_range(r, e.spec_aligned_range())
 }
 
 pub open spec fn e820_align_available_include(e820: Set<E820Entry>, r: (int, nat)) -> bool {
-    exists |e| e820.contains(e) && inside_range(r, e.spec_aligned_range()) && e.memty != E820_TYPE_RSVD
+    exists |e| #![trigger e820.contains(e)] e820.contains(e) && inside_range(r, e.spec_aligned_range()) && e.memty != E820_TYPE_RSVD
 }
 
 #[repr(C, packed)]
