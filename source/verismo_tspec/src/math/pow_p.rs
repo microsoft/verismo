@@ -13,23 +13,27 @@ pub proof fn proof_bits_to_pow2(bit: u64)
         let bit2 = sub(bit, 1);
         proof_bits_to_pow2(bit2);
         let val2: u64 = (1u64 << bit2);
+        // Required to bound val2 and connect recursive pow2 result.
         assert(val2 == spec_nat_pow2(bit2 as nat));
         assert(bit2 <= 62);
         assert((1u64 << bit2) <= (1u64 << 62u64)) by (bit_vector)
             requires
                 bit2 <= 62,
         ;
+        // Required to normalize POW2!(62) for val2 bound reasoning.
         assert((1u64 << 62) == POW2!(62)) by (bit_vector);
+        // Required to prove recursive shift step equals pow2(bit).
         assert((1u64 << sub(bit, 1)) << 1u64 == (1u64 << bit)) by (bit_vector)
             requires
                 0 < bit < 64,
         ;
+        // Required to connect left shift by one with multiplication by two.
         assert(val2 << 1u64 == mul(2u64, val2)) by (bit_vector)
             requires
                 val2 <= 0x4000_0000_0000_0000u64,
         ;
-        assert(spec_nat_pow2(bit as nat) == mul(2, (1u64 << bit2)));
     } else {
+        // Required to prove proof_bits_to_pow2 base case.
         assert((1u64 << 0) == 1) by (bit_vector);
     }
 }
@@ -74,15 +78,9 @@ pub proof fn proof_pow2_to_bits(val: nat) -> (ret: u64)
     bit64_shl_values_auto();
     let val64 = val as u64;
     let ret = spec_pow2_to_bits_exe(val);
-    if spec_bit64_is_pow_of_2(val64 as int) && val > 1 {
-        assert(spec_bit64_is_pow_of_2((val64 >> 1u64) as int)) by (bit_vector)
-            requires
-                spec_bit64_is_pow_of_2(val64 as int),
-                val64 > 1,
-        ;
-    }
     if val > 1 {
         let next = val64 >> 1u64;
+        // Required to prove recursion decreases and next is nonzero/in range.
         assert(next < val64 && next < (1u64 << 63) && next > 0) by (bit_vector)
             requires
                 next == val64 >> 1u64,
@@ -90,8 +88,6 @@ pub proof fn proof_pow2_to_bits(val: nat) -> (ret: u64)
         ;
         let next_bits = spec_pow2_to_bits_exe(next as nat);
         proof_pow2_to_bits(next as nat);
-        assert(next_bits < 63);
-        assert(ret < 64);
         let next_bits64 = next_bits as u64;
         let ret_bits64 = next_bits64 + 1;
         bit64_shr_div_rel(val64, 1);
