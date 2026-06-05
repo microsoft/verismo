@@ -7,7 +7,7 @@ use crate::vbox::*;
 
 verus! {
 
-broadcast use axiom_size_from_cast_bytes;
+broadcast use {axiom_size_from_cast_bytes, crate::group_verismo_default};
 
 #[verifier(external_body)]
 proof fn trusted_ghcb_change_pages_state_via_pg(
@@ -397,7 +397,7 @@ impl<'a> MutFnTrait<'a, FillPageStateChange, bool> for SnpPageStateChange {
         let ghost prev = *self;
         proof {
             // Header initialization preserves the constant page-state-change buffer invariant.
-            assume(self.is_constant());
+            assert(self.is_constant());
         }
         while i < npages
             invariant
@@ -420,8 +420,8 @@ impl<'a> MutFnTrait<'a, FillPageStateChange, bool> for SnpPageStateChange {
             self.entries.update((i as usize), entry.value.into());
             proof {
                 // set_entry stores the generated constant entry and preserves earlier entries.
-                assume(self.is_constant());
-                assume(forall|k: int|
+                assert(self.is_constant());
+                assert(forall|k: int|
                     0 <= k < i + 1 ==> SnpPageStateChangeEntry::spec_new(
                         self.entries@[k].vspec_cast_to(),
                     )@ === SpecSnpPageStateChangeEntry::req_entry((ppage + k) as u64, opval, 0));
