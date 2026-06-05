@@ -35,7 +35,7 @@ fn bytes_to_str<const N: usize_t, 'a>(arr: &'a Array<u8_t, N>) -> (ret: &'a str)
     ensures
         ret.is_ascii(),
         ret@.len() <= arr@.len(),
-        forall|i| 0 <= i < ret@.len() ==> arr@[i] == ret@[i] as u8,
+        forall|i| 0 <= i < ret@.len() ==> #[trigger] arr@[i] == ret@[i] as u8,
 {
     let slice = arr.array.as_slice();
     core::str::from_utf8(slice).unwrap()
@@ -53,7 +53,7 @@ fn int2bytes(input: u64, base: u64) -> (ret: (Array<u8_t, 66>, usize))
     ensures
         ascii_is_num(ret.0@[0]),
         3 <= ret.1 <= 66,
-        (forall|k: int| 2 <= k < (ret.1 as int) ==> ascii_is_num(ret.0@[k])),
+        (forall|k: int| 2 <= k < (ret.1 as int) ==> #[trigger] ascii_is_num(ret.0@[k])),
 {
     let mut n = input;
     let mut bytes: Array<u8, 66> = Array::new(0);
@@ -77,7 +77,7 @@ fn int2bytes(input: u64, base: u64) -> (ret: (Array<u8_t, 66>, usize))
             i < 64 ==> n <= u64::MAX / (1u64 << i as u64),
             i == 64 ==> n == 0,
             n == 0 ==> i > 0,
-            forall|k| 0 <= k < i ==> ascii_is_num(bytes@[k]),
+            forall|k| 0 <= k < i ==> #[trigger] ascii_is_num(bytes@[k]),
         decreases 64 - i,
     {
         proof {

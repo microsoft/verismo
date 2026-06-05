@@ -139,7 +139,7 @@ impl LinkedListAllocator {
             addr.is_constant(),
         ensures
             self@.free_list.contains_ptr_at(ret.0, ret.1@),
-            forall|i| ret.1@ <= i < self@.len() ==> self@.free_list@[i].val < addr,
+            forall|i| ret.1@ <= i < self@.len() ==> (#[trigger] self@.free_list@[i]).val < addr,
     {
         let mut node_ptr = self.free_list.head_ptr();
         let mut prev_ptr = SnpPPtr::nullptr();
@@ -155,11 +155,12 @@ impl LinkedListAllocator {
                 (idx == 0) == (node_ptr.is_null()),
                 self@.free_list.contains_ptr_at(prev_ptr, idx),
                 idx > 0 ==> self@.free_list.contains_ptr_at(node_ptr, idx - 1),
-                forall|i: int| idx <= i < self@.len() ==> self.free_list@[i].val < addr,
+                forall|i: int|
+                    idx <= i < self@.len() ==> (#[trigger] self.free_list@[i]).val < addr,
             ensures
                 prev_ptr.is_constant(),
                 0 <= idx <= self@.len(),
-                forall|i| idx <= i < self@.len() ==> self.free_list@[i].val < addr,
+                forall|i| idx <= i < self@.len() ==> (#[trigger] self.free_list@[i]).val < addr,
                 self@.free_list.contains_ptr_at(prev_ptr, idx),
             decreases idx,
         {

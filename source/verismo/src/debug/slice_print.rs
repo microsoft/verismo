@@ -6,7 +6,7 @@ use crate::snp::{snpcore_console_wf, SnpCoreConsole, SnpCoreSharedMem};
 verismo_simple! {
 impl<T: VPrint> VPrint for [T] {
     open spec fn early_print_requires(&self) -> bool {
-        forall |i| 0 <= i < self@.len() ==> self@[i].early_print_requires()
+        forall |i| 0 <= i < self@.len() ==> (#[trigger] self@[i]).early_print_requires()
     }
 
 
@@ -40,7 +40,7 @@ impl<T: VPrint> VPrint for [T] {
             snpcore_console_wf(oldsnpcore, oldconsole),
             print_ensures_snp_c(oldsnpcore, oldconsole, *snpcore, console),
             n == self@.len(),
-            forall |i| 0 <= i < self@.len() ==> self@[i].early_print_requires(),
+            forall |i| 0 <= i < self@.len() ==> (#[trigger] self@[i]).early_print_requires(),
         {
             let Tracked(tmpconsole) =  slice_index_get(self, i.reveal_value()).early_print2(Tracked(snpcore), Tracked(console));
             proof {
@@ -68,7 +68,7 @@ impl<T: VPrint> VPrint for [T] {
 
 impl<T: VPrint + IsConstant + WellFormed, const N: usize_t> VPrint for [T; N] {
     open spec fn early_print_requires(&self) -> bool {
-        &&& forall |i| 0 <= i < self@.len() ==> self@[i].early_print_requires()
+        &&& forall |i| 0 <= i < self@.len() ==> (#[trigger] self@[i]).early_print_requires()
         &&& self.is_constant()
     }
 
@@ -93,7 +93,7 @@ verus! {
 
 impl<'a, T: IsConstant + WellFormed + VPrint> VPrint for SlicePrinter<'a, T> {
     open spec fn early_print_requires(&self) -> bool {
-        forall|i| 0 <= i < self.s@.len() ==> self.s@[i].early_print_requires()
+        forall|i| 0 <= i < self.s@.len() ==> (#[trigger] self.s@[i]).early_print_requires()
     }
 
     #[inline]

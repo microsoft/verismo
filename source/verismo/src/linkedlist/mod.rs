@@ -326,13 +326,13 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
         if self@.len() > 0 && self.head == id {
             (self@.len() - 1)
         } else {
-            choose|i: int| id == self@[i].ptr.id() && 0 <= i < self@.len()
+            choose|i: int| id == (#[trigger] self@[i]).ptr.id() && 0 <= i < self@.len()
         }
     }
 
     pub open spec fn _spec_has_index_of(&self, nodeptr: int) -> bool {
         &&& self@.len() > 0
-        &&& exists|i| nodeptr == self@[i].ptr.id() && 0 <= i < self@.len()
+        &&& exists|i| nodeptr == (#[trigger] self@[i]).ptr.id() && 0 <= i < self@.len()
     }
 
     pub open spec fn spec_has_index_of(&self, nodeptr: SnpPPtr::<Node<T>>) -> bool {
@@ -423,13 +423,15 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
     ) -> (ret: (Self, Ghost<Seq<int>>, Ghost<Seq<int>>))
         requires
             old(self).inv(),
-            forall|var: SnpPPtr<Node<T>>| var.is_constant() ==> cond_fn.requires((var,)),
+            forall|var: SnpPPtr<Node<T>>|
+                (#[trigger] var.is_constant()) ==> cond_fn.requires((var,)),
         ensures
             self.inv(),
             ret.0@.len() <= max_len as nat,
             ret.0@.len() < max_len as nat ==> forall|k: int|
-                0 <= k < self@.len() ==> cond_fn.ensures((self@[k].ptr,), false),
-            forall|k: int| 0 <= k < ret.0@.len() ==> cond_fn.ensures((ret.0@[k].ptr,), true),
+                0 <= k < self@.len() ==> cond_fn.ensures(((#[trigger] self@[k]).ptr,), false),
+            forall|k: int|
+                0 <= k < ret.0@.len() ==> cond_fn.ensures(((#[trigger] ret.0@[k]).ptr,), true),
             is_subseq_via_index(ret.0@, old(self)@, ret.1@),
             is_subseq_via_index(self@, old(self)@, ret.2@),
             (ret.0@.len() == 0) ==> *old(self) === *self,
@@ -456,7 +458,8 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
             invariant
                 self.inv(),
                 ret.inv(),
-                forall|var: SnpPPtr<Node<T>>| var.is_constant() ==> cond_fn.requires((var,)),
+                forall|var: SnpPPtr<Node<T>>|
+                    (#[trigger] var.is_constant()) ==> cond_fn.requires((var,)),
                 old(self).is_constant(),
                 self.is_constant(),
                 removed.is_constant(),
@@ -480,8 +483,12 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
                 keep_idx.len() + removed_idx.len() == old(self)@.len(),
                 removed_idx.len() == removed as nat,
                 forall|k: int|
-                    self@.len() - d <= k < self@.len() ==> cond_fn.ensures((self@[k].ptr,), false),
-                forall|k: int| 0 <= k < ret@.len() ==> cond_fn.ensures((ret@[k].ptr,), true),
+                    self@.len() - d <= k < self@.len() ==> cond_fn.ensures(
+                        ((#[trigger] self@[k]).ptr,),
+                        false,
+                    ),
+                forall|k: int|
+                    0 <= k < ret@.len() ==> cond_fn.ensures(((#[trigger] ret@[k]).ptr,), true),
                 is_subseq_via_index(self@, old(self)@, keep_idx),
                 is_subseq_via_index(ret@, old(self)@, removed_idx),
                 ret@.len() == 0 ==> (old(self) === self && keep_idx === Seq::new(
@@ -599,7 +606,7 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
                 d = d + 1;
                 let ghost i = self@.len() - d - 1;
                 assert forall|k: int| i < k < self@.len() implies cond_fn.ensures(
-                    (self@[k].ptr,),
+                    ((#[trigger] self@[k]).ptr,),
                     false,
                 ) by {
                     if self@.len() != prev_self@.len() {
@@ -610,7 +617,7 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
                     }
                 }
                 assert forall|k: int| 0 <= k < ret@.len() implies cond_fn.ensures(
-                    (ret@[k].ptr,),
+                    ((#[trigger] ret@[k]).ptr,),
                     true,
                 ) by {
                     if ret@.len() != prev_ret@.len() {
@@ -1033,7 +1040,7 @@ impl<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> LinkedList<T
             assert forall |k: nat|
                 0 <= k < self@.len() && k != i
             implies
-                self@[k as int] === prev@[k as int]
+                #[trigger] self@[k as int] === prev@[k as int]
             by{
                 assert(prev.wf_perm(k));
                 assert(self.perms@[k] === prev.perms@[k]);

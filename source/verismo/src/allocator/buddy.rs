@@ -391,7 +391,7 @@ impl BuddyAllocator {
         ensures
             ret@.wf_before_validate_write(),
             forall|i: int|
-                0 <= i < ORDER_USIZE as int ==> ret@.free_lists[i]@.len()
+                0 <= i < ORDER_USIZE as int ==> (#[trigger] ret@.free_lists[i])@.len()
                     == 0,
     //forall |i: int| 0 <= i < ORDER_USIZE as int ==> ret@.free_lists[i] is Some,
 
@@ -795,12 +795,13 @@ impl BuddyAllocator {
                     assert forall|j1: (nat, nat), j2: (nat, nat)|
                         !builtin::spec_eq(j1, j2) && key_map.dom().contains(j1)
                             && key_map.dom().contains(j2) implies !builtin::spec_eq(
-                        key_map.index(j1),
-                        key_map.index(j2),
+                        #[trigger] key_map.index(j1),
+                        #[trigger] key_map.index(j2),
                     ) by {
                         assert(prev_self.wf_perm(j1.0, j1.1));
                     }
-                    assert forall|j| key_map.dom().contains(j) implies self@.perms.dom().contains(
+                    assert forall|j| #[trigger]
+                        key_map.dom().contains(j) implies self@.perms.dom().contains(
                         key_map.index(j),
                     ) by {
                         let (bb, ii) = j;
@@ -812,10 +813,8 @@ impl BuddyAllocator {
                     self.perms.borrow_mut().tracked_map_keys_in_place(key_map);
                     assert(self@.inv()) by {
                         assert forall|k|
-                            k !== (
-                                current_bucket as nat,
-                                (prev_list@.len() - 1) as nat,
-                            ) implies prev_self.perms.contains_key(k) == self@.perms.contains_key(
+                            k !== (current_bucket as nat, (prev_list@.len() - 1) as nat) implies (
+                        #[trigger] prev_self.perms.contains_key(k)) == self@.perms.contains_key(
                             k,
                         ) by {
                             assert(prev_self.wf_perm(k.0, k.1));
