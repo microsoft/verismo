@@ -466,11 +466,11 @@ impl<T: ?Sized + VPrint> VPrintLock for T {
         );
         proof {
             cs.lockperms.tracked_insert(console_ref.lockid(), consolelock);
-            //assert(consolelock@.points_to.bytes() =~~= oldconsolelock@.points_to.bytes());
-            //assert(consolelock@ === oldconsolelock@);
-            // TODO: needs real proof - was assume(print_ensures_cs(*old(cs), *cs)) before broadcast-group migration.
-            // The missing fact is global-lock id separation needed to show the console-lock update preserves cs.wf_pt().
-            assume(print_ensures_cs(*old(cs), *cs));
+            // Required: axiom_global_auto provides the distinct-lockid facts needed to
+            // show that the non-CONSOLE entries (PT, ALLOCATOR, ...) are untouched, so
+            // cs.wf_pt() and the print_ensures_cs forall both still hold.
+            broadcast use crate::global::axiom_global_auto;
+
         }
     }
 }
