@@ -233,8 +233,6 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
                         by {
                             assert_bit_vector(val != 0 || ((val >> offset) & mask) == 0);
                         }
-                        // Empty concrete value has the all-zero spec view by generated getter definitions.
-                        assume(builtin::equal(ret.view(), #specname::empty()));
                     }
                     ret
                 }
