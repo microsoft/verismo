@@ -26,10 +26,6 @@ jobs:
             ./install_verus --use-prebuilt
             echo "VERUS_PATH=$(echo $VERUS_PATH)" >> $GITHUB_ENV
 
-      - name: Verify
-        working-directory: source
-        run: cargo verus focus --release -- --multiple-errors=20
-
       - name: Fmt
         run: cargo fmt --check
         working-directory: tools/cargo-v
@@ -41,3 +37,6 @@ jobs:
       - name: Fmt verus code
         run: ./tools/fmt.sh --check
 
+      - name: Verify
+        working-directory: source
+        run: cargo verus focus --release -- --multiple-errors=20
