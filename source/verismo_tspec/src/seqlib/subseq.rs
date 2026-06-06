@@ -82,15 +82,4 @@ pub proof fn lemma_remove_keep<T>(
     proof_subs_push(s, removed0, removed_idx0, keep_idx0[i]);
 }
 
-pub proof fn proof_remove_keep<T>(
-    s: Seq<T>,
-    keep: Seq<T>,
-    removed: Seq<T>,
-    keep_idx: Seq<int>,
-    removed_idx: Seq<int>,
-    i: int,
-) {
-    admit();
-}
-
 } // verus!
