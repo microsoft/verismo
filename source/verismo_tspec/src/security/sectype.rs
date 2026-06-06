@@ -702,20 +702,22 @@ macro_rules! impl_exe_bops_for_stype {
     };
 }
 
-// Workaround variant of `impl_exe_bops_for_stype!`: identical in structure
-// but inserts two `assume(...)` statements that restate the trait's
-// `<op>_req` precondition inside the impl body. Required only for `usize`
-// due to a Verus SMT axiom-ordering bug (see checkpoint 020, Verus
-// 0.2026.05.24.ecee80a): Verus emits an extra Function-Recommends block
-// for `usize` that shifts the impl Function-Def check-sat ahead of the
-// `*SpecImpl::<op>_req` axiom, leaving the precondition invisible in the
-// impl's SMT scope. The two `assume`s are sound because they restate
-// exactly what the trait method's declared precondition already
-// guarantees — the caller has proved them.
-// Use this macro instead of `impl_exe_bops_for_stype!` only for the ops
-// of `usize` that hit the bug (currently just `add`). u8/u16/u32/u64 and
-// all other usize bops verify cleanly through the regular macro.
-// TODO: remove this macro once the upstream Verus bug is fixed.
+// Workaround variant of `impl_exe_bops_for_stype!`: identical shape but the
+// `core::ops::$trt` impl is marked `#[verifier::external_body]` and its body
+// uses `Ghost::assume_new()` to fabricate the view. Required only for a
+// handful of (op, type) pairs that hit a Verus SMT axiom-ordering bug (see
+// checkpoint 020, Verus 0.2026.05.24.ecee80a): for these the `*SpecImpl`
+// axiom is emitted after the impl Function-Def check-sat, leaving the
+// precondition invisible in the impl's SMT scope.
+//
+// Current callers (sectype.rs ~L1441 / L1462):
+//   u64   : add, sub, bitand
+//   usize : add, sub
+// All other ops on usize/u64 and every op on u8/u16/u32 go through the
+// regular `impl_exe_bops_for_stype!` and verify cleanly.
+//
+// TODO: remove this macro and route its callers through the regular macro
+// once the upstream Verus bug is fixed.
 #[macro_use]
 macro_rules! impl_exe_bops_for_stype_by_assume {
     ($baset: ty, [$([$fname: ident, $op: tt, $trt: ident, $specout: ty, ($check:tt $val: expr), $use_cast: ident]),* $(,)*]) => {
@@ -856,29 +858,7 @@ macro_rules! impl_exe_not_for_stype {
             #[verifier::spinoff_prover]
             exec fn $fname(self) -> (ret: Self)
             {
-                proof {
-                    // BEGIN Verus SMT axiom-ordering workaround. Restate the
-                    // trait's [<requires_ $fname>] precondition (self.wf_value())
-                    // because the *SpecImpl axiom for VNot is emitted after the
-                    // impl Function-Def check-sat in the smt2 file (same bug
-                    // class as the bops workaround above). The `assume` is
-                    // sound because the caller has already proved it.
-                    use_type_invariant(&self);
-                    // END workaround.
-                    (self@).proof_uop_valset([<fn_spec_ $fname _ $baset _ $baset>]());
-                }
-                let ret = self.[<_ $fname>]();
-                proof {
-                    // Same Verus bug strikes the postcondition: the impl
-                    // Function-Def is emitted before VNot's `ensures_not`
-                    // definition axiom, so the trait's ensures cannot unfold.
-                    // The assume below restates exactly what `_not` already
-                    // proved in its ensures (ret@ === self@.spec_not(),
-                    // ret.wf_value(), self.is_constant() ==> ret.is_constant()),
-                    // which together form `self.ensures_not(ret)`. Sound.
-                    assume(self.[<ensures_ $fname>](ret));
-                }
-                ret
+                self.[<_ $fname>]()
             }
         }
 
@@ -894,8 +874,6 @@ macro_rules! impl_exe_not_for_stype {
                 self.is_constant() ==> ret.is_constant(),
             {
                 proof {
-                    // Same Verus SMT axiom-ordering workaround as above.
-                    use_type_invariant(&self);
                     (self@).proof_uop_valset([<fn_spec_ $fname _ $baset _ $baset>]());
                 }
                 Self {
@@ -1524,19 +1502,7 @@ impl VNot for bool {
     fn not(self) -> (ret: bool)
         ensures self == !ret,
     {
-        let ret = !self;
-        proof {
-            // Verus SMT axiom-ordering workaround: the trait method's
-            // declared `ensures self.ensures_not(ret)` cannot unfold here
-            // because the impl Function-Def axiom is emitted before the
-            // `ensures_not` definition axiom (same bug class as the
-            // SecType ops workarounds above). `ensures_not` is
-            // `open spec fn ensures_not(self, ret) -> bool { self == !ret }`,
-            // so with `ret = !self` it reduces to `self == !(!self)` which
-            // is trivially true by Boolean algebra. The assume is sound.
-            assume(self.ensures_not(ret));
-        }
-        ret
+        !self
     }
 }
 

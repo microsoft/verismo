@@ -169,7 +169,7 @@ macro_rules! impl_page_interface {
 
 #[macro_export]
 macro_rules! impl_addr_safe_interface {
-    ($basetype: ty, $ptype: ty) => {
+    ($basetype: ty) => {
         verus! {
         impl AddrTrait<$basetype> for $basetype {
             open spec fn spec_to_page(&self) -> $basetype {
@@ -207,8 +207,7 @@ macro_rules! impl_addr_safe_interface {
 
             fn to_page(&self) -> (ret: $basetype) {
                 let s: $basetype = PAGE_SIZE.into();
-                let ret = (*self).div(s);
-                ret
+                (*self).div(s)
             }
         }
         }
@@ -253,8 +252,7 @@ macro_rules! impl_page_safe_interface {
 
             fn to_addr(&self) -> (ret: $basetype)
             {
-                let ret = (*self).mul(PAGE_SIZE as $ptype);
-                ret
+                (*self).mul(PAGE_SIZE as $ptype)
             }
         }
         }
@@ -295,8 +293,8 @@ impl_page_interface! {u64_t}
 impl_addr_interface! {usize_t}
 impl_page_interface! {usize_t}
 
-impl_addr_safe_interface! {usize_s, usize_t}
+impl_addr_safe_interface! {usize_s}
 impl_page_safe_interface! {usize_s, usize_t}
 
-impl_addr_safe_interface! {u64_s, u64_t}
+impl_addr_safe_interface! {u64_s}
 impl_page_safe_interface! {u64_s, u64_t}
