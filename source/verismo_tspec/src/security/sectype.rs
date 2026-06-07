@@ -625,9 +625,9 @@ macro_rules! impl_exe_bops_for_stype {
                 }
             }
 
-            // (No broadcast axiom — see checkpoint 019 for the Verus SMT axiom ordering
-            // bug affecting SecType<usize, M>. Workaround attempts via broadcast lemmas
-            // hit a def-cycle. Body assertions below carry the burden for verification.)
+            // No broadcast axiom is emitted here: pulling spec_new equalities into a broadcast
+            // lemma hits a def-cycle on SecType<usize, M>. The body assertions below carry the
+            // burden instead.
 
             impl<M> core::ops::$trt<SecType<$baset, M>> for SecType<$baset, M> {
                 type Output = Self;
@@ -705,12 +705,12 @@ macro_rules! impl_exe_bops_for_stype {
 // Workaround variant of `impl_exe_bops_for_stype!`: identical shape but the
 // `core::ops::$trt` impl is marked `#[verifier::external_body]` and its body
 // uses `Ghost::assume_new()` to fabricate the view. Required only for a
-// handful of (op, type) pairs that hit a Verus SMT axiom-ordering bug (see
-// checkpoint 020, Verus 0.2026.05.24.ecee80a): for these the `*SpecImpl`
-// axiom is emitted after the impl Function-Def check-sat, leaving the
-// precondition invisible in the impl's SMT scope.
+// handful of (op, type) pairs that hit a Verus SMT axiom-ordering bug on
+// 0.2026.05.24.ecee80a: for these the `*SpecImpl` axiom is emitted after the
+// impl Function-Def check-sat, leaving the precondition invisible in the
+// impl's SMT scope.
 //
-// Current callers (sectype.rs ~L1441 / L1462):
+// Current callers (further down in this file):
 //   u64   : add, sub, bitand
 //   usize : add, sub
 // All other ops on usize/u64 and every op on u8/u16/u32 go through the
@@ -1436,7 +1436,8 @@ impl_exe_bops_for_stype!(u64,
 impl_exe_not_for_stype!(usize, [[not, !, Not]]);
 impl_cmp_ops_for_stype!(usize, usize,
     [[gt, >, VGt], [lt, <, VLt], [le, <=, VLe], [ge, >=, VGe], [eq, ==, VEq]]);
-/// BUG(verus): This is a workaround for the Verus bug where the following macro will trigger a compilation error.
+// Hits the SMT axiom-ordering bug described above the
+// `impl_exe_bops_for_stype_by_assume!` definition.
 impl_exe_bops_for_stype_by_assume!(usize,
 [
     [add, +, Add, int, (>= 0), vspec_cast_to],
