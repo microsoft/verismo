@@ -665,9 +665,8 @@ pub fn set_page_enc_dec(
     let ghost old_mem_perm0 = *mem_perm0;
     let tracked cr3perm = cs.snpcore.regs.tracked_borrow(RegName::Cr3);
     assert(contains_PT(cs.lockperms));
-    let pt_ref = PT();
     let tracked mut pt_lock = cs.lockperms.tracked_remove(spec_PT_lockid());
-    let (tracked_ptr, Tracked(mut ptperm_perm), Tracked(pt_lock)) = pt_ref.acquire(
+    let (tracked_ptr, Tracked(mut ptperm_perm), Tracked(pt_lock)) = PT().acquire(
         Tracked(pt_lock),
         Tracked(&cs.snpcore.coreid),
     );
@@ -675,6 +674,7 @@ pub fn set_page_enc_dec(
     let TrackedPTEPerms { perms } = tracked_ptr.take(Tracked(&mut ptperm_perm));
     let Tracked(mut pt_perms) = perms;
     let lvl = 0;
+    assert(wf_ptes(pt_perms));
     let pte_val_opt = _borrow_entry(
         vaddr,
         lvl,
@@ -721,7 +721,7 @@ pub fn set_page_enc_dec(
         false
     };
     tracked_ptr.put(Tracked(&mut ptperm_perm), TrackedPTEPerms { perms: Tracked(pt_perms) });
-    pt_ref.release(Tracked(&mut pt_lock), Tracked(ptperm_perm), Tracked(&cs.snpcore.coreid));
+    PT().release(Tracked(&mut pt_lock), Tracked(ptperm_perm), Tracked(&cs.snpcore.coreid));
     proof {
         cs.lockperms.tracked_insert(spec_PT_lockid(), pt_lock);
     }

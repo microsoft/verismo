@@ -80,11 +80,9 @@ mod ap {
                 vmsa.is_vmpl0_private_page(),
                 vmsa@.vmpl.spec_eq(RICHOS_VMPL),
         {
-            let richos_vmsa = RICHOS_VMSA();
-            let ghost lockperms_before_vmsa_remove = cs.lockperms;
             let tracked mut vmsa_lock = cs.lockperms.tracked_remove(spec_RICHOS_VMSA_lockid());
             let (vmsa_vec_ptr, Tracked(mut vmsa_vec_perm), Tracked(mut vmsa_lock0)) =
-                richos_vmsa.acquire(Tracked(vmsa_lock), Tracked(&cs.snpcore.coreid));
+                RICHOS_VMSA().acquire(Tracked(vmsa_lock), Tracked(&cs.snpcore.coreid));
             proof {
                 vmsa_lock = vmsa_lock0;
             }
@@ -95,7 +93,7 @@ mod ap {
                 vmsa_vec.insert(cpu_id, None);
             }
             vmsa_vec_ptr.put(Tracked(&mut vmsa_vec_perm), vmsa_vec);
-            richos_vmsa.release(
+            RICHOS_VMSA().release(
                 Tracked(&mut vmsa_lock),
                 Tracked(vmsa_vec_perm),
                 Tracked(&cs.snpcore.coreid),
