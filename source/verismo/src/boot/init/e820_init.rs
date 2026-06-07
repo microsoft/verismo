@@ -387,7 +387,6 @@ pub fn validate_e820(
         }
         if val_end > val_start {
             let tracked pperm = memperm.tracked_remove(toval_range);
-            let ghost old_pperm_snp = pperm@.snp();
             let Tracked(pperm) = pvalmem(
                 val_start as u64,
                 val_end as u64,
@@ -444,7 +443,6 @@ pub fn validate_e820(
             memperm.proof_remove_range_ensures(toval_range);
         }
         let tracked pperm = memperm.tracked_remove(toval_range);
-        let ghost old_pperm_snp = pperm@.snp();
         let Tracked(pperm) = pvalmem(
             val_end as u64,
             end_addr as u64,

@@ -206,7 +206,6 @@ impl<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> VSpinLock<T>
             lockperm@.wf(),
     {
         let ghost old_invfn = old(lockperm)@.invfn;
-        let ghost old_lp = old(lockperm)@;
         proof {
             old_invfn.lemma_inv::<T>();
         }

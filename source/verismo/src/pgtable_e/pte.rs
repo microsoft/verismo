@@ -387,15 +387,14 @@ fn borrow_entry(
     assert(cr3_u64 == static_cr3_value());
     let tracked cr3perm = cs.snpcore.regs.tracked_borrow(RegName::Cr3);
     assert(contains_PT(cs.lockperms));
-    let pt_ref = PT();
     let tracked mut pt_lock = cs.lockperms.tracked_remove(spec_PT_lockid());
-    let (tracked_ptr, Tracked(mut ptperm_perm), Tracked(pt_lock)) = pt_ref.acquire(
+    let (tracked_ptr, Tracked(mut ptperm_perm), Tracked(pt_lock)) = PT().acquire(
         Tracked(pt_lock),
         Tracked(&cs.snpcore.coreid),
     );
     let TrackedPTEPerms { perms } = tracked_ptr.take(Tracked(&mut ptperm_perm));
     let Tracked(mut pt_perms) = perms;
-    // PT lock invariant stores well-formed tracked page-table permissions.
+    assert(wf_ptes(pt_perms));
     let ghost cr3_u64: u64 = cr3perm.val::<u64_s>().vspec_cast_to();
     assert(cr3_u64 == static_cr3_value());
     assert(pt_perms[top_lvl_idx()].val().value == static_cr3_value());
@@ -407,11 +406,9 @@ fn borrow_entry(
         Tracked(&mut pt_perms),
     );
     tracked_ptr.put(Tracked(&mut ptperm_perm), TrackedPTEPerms { perms: Tracked(pt_perms) });
-    pt_ref.release(Tracked(&mut pt_lock), Tracked(ptperm_perm), Tracked(&cs.snpcore.coreid));
+    PT().release(Tracked(&mut pt_lock), Tracked(ptperm_perm), Tracked(&cs.snpcore.coreid));
     proof {
         cs.lockperms.tracked_insert(spec_PT_lockid(), pt_lock);
-        // Releasing and reinserting the PT lock restores the shared-memory invariant
-        // and frames the update to the PT lock only.
     }
     ret
 }
