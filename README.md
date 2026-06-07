@@ -28,13 +28,21 @@ First, Install rust toolchain;
 tools/install.sh
 ```
 
-## 1. Install tools 🧰
-Then, build verus, verus-rustc (replacing rustc) and igvm tools and dependencies.
+## 1. Install Verus 🧰
+Install the Verus toolchain (verus, rust_verify, z3, cargo-verus, verusfmt) into `~/.cargo/bin`.
+By default this downloads the pinned prebuilt release:
+```
+tools/install_verus
+```
+Pass `--verus-dir PATH` (optionally with `--verus-rev REV`) to build Verus from a source checkout instead, or `--force` to reinstall when the expected version is already present. Run `tools/install_verus --help` for full usage.
+
+## 2. Install build tools 🧰
+Then, build verus-rustc (replacing rustc) and igvm tools and dependencies.
 ```
 tools/activate.sh
 ```
 
-## 2. Verify and Build ✔️ 🛠️
+## 3. Verify and Build ✔️ 🛠️
 
 Now, run verification checks and build the binary. 
 
@@ -77,14 +85,14 @@ or
 cd source/verismo_main; cargo build --feature noverify --release;
 ```
 
-## 3. Create VM image (skip if you run `make` or `make verify`)
+## 4. Create VM image (skip if you run `make` or `make verify`)
 
 1. Download linux submodule: `git submodule update --init richos/snplinux`
 2. Build guest OS and drivers: `make fs -f Makefile.default`
 1. Run `sh source/target/target/release/verismo/igvm.sh` to generate the verismo in IGVM format for Hyper-V: `source/target/target/release/verismo/verismo-rust.bin`
 2. Run `make fs` to generate a vhdx file  as filesystem for the VM: `richos/test-fs/verismo.vhdx`
 
-## 4. Deploy and run
+## 5. Deploy and run
 
 ### Requirements
 
