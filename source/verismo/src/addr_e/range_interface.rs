@@ -77,7 +77,6 @@ impl MemRangeInterface for (usize_s, usize_s) {
     {
         let ret = *self;
         proof {
-            // Required: without this block Verus does not use the inline spec_real_range/real_wf facts for ret.
             assert(ret === self.spec_real_range());
             assert(Self::real_wf(ret));
         }
@@ -89,7 +88,6 @@ impl MemRangeInterface for (usize_s, usize_s) {
     {
         let ret = VM_MEM_SIZE as usize_s;
         proof {
-            // Required: without this block Verus does not prove the cast equals spec_end_max and is_constant.
             assert(ret == Self::spec_end_max());
             assert(ret.is_constant());
         }
@@ -133,15 +131,13 @@ impl MemRangeInterface for (usize_t, usize_t) {
     #[inline]
     fn real_range(&self) -> (ret: (usize_s, usize_s))
     {
-        let ret = (self.0.into(), self.1.into());
-        ret
+        (self.0.into(), self.1.into())
     }
 
     #[inline]
     fn end_max() -> (ret: usize_s)
     {
-        let ret = VM_MEM_SIZE as usize_s;
-        ret
+        VM_MEM_SIZE as usize_s
     }
 
     #[verifier(inline)]
@@ -355,12 +351,11 @@ impl<T: MemRangeInterface> GeneratedMemRangeInterface for T {
     fn start(&self) -> (ret: usize_s)
     {
         assert(self.spec_real_range().0.is_constant());
-        let ret = if self.real_range().0 < Self::end_max() {
+        if self.real_range().0 < Self::end_max() {
             self.real_range().0
         } else {
             Self::end_max()
-        };
-        ret
+        }
     }
 
     fn size(&self) -> (ret: usize_s)
@@ -368,23 +363,19 @@ impl<T: MemRangeInterface> GeneratedMemRangeInterface for T {
         let (start, size) = self.real_range();
         assert(start.is_constant());
         assert(size.is_constant());
-        let ret = if !(start < Self::end_max()) {
+        if !(start < Self::end_max()) {
             0
         } else if size < Self::end_max() - start {
             size
         } else {
             Self::end_max() - start
-        };
-        ret
+        }
     }
 
     #[inline]
     fn end(&self) -> (ret: usize_s)
     {
-        let start = self.start();
-        let size = self.size();
-        let ret = start + size;
-        ret
+        self.start() + self.size()
     }
 
     fn aligned_start(&self) -> (ret: usize_s)

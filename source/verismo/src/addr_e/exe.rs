@@ -38,8 +38,6 @@ verismo_simple! {
             bit64_shl_values_auto();
         }
         let v: u64 = value.into();
-        let align: u64 = PAGE_SIZE as u64;
-        let ret = align_down_by(v, align) as usize;
-        ret
+        align_down_by(v, PAGE_SIZE as u64) as usize
     }
 }
