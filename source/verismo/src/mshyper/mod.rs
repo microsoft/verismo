@@ -216,14 +216,13 @@ impl HvCallVpVtlInput {
             ret.is_constant(),
     {
         let vmsa_addr = vmsa_addr | HV_X64_REGISTER_SEV_CONTROL_USE_SEV;
-        let ret = HvCallVpVtlInput {
+        HvCallVpVtlInput {
             ptid: ptid.into(),
             vpid: vpid.into(),
             vtl: vtl.into(),
             vmsa_addr: vmsa_addr.into(),
             reserved_ctx: Array::new(u64_s::new(0)),
-        };
-        ret
+        }
     }
 }
 

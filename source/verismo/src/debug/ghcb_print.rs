@@ -94,7 +94,7 @@ fn int2bytes(input: u64, base: u64) -> (ret: (Array<u8_t, 66>, usize))
                 assert(pow2 == (pow1 * 2) as u64);
                 assert(pow1 * 2 == (pow1 * 2) as u64);
                 assert(u64::MAX / pow2 == u64::MAX / ((pow1 * 2) as u64));
-                assert(u64::MAX / ((pow1 * 2) as u64) == u64::MAX / pow1 / 2);  // TODO: add nonlinear proof
+                assert(u64::MAX / ((pow1 * 2) as u64) == u64::MAX / pow1 / 2);
             }
             assert(u64::MAX / (1u64 << 63u64) / 2 == 0);
         }
@@ -426,8 +426,7 @@ impl<T1: VPrint, T2: VPrint> VPrint for (T1, T2) {
     ) -> (newconsole: Tracked<SnpPointsToRaw>) {
         let Tracked(console) = self.0.early_print2(Tracked(snpcore), Tracked(console));
         let Tracked(console) = new_strlit(" ").early_print2(Tracked(snpcore), Tracked(console));
-        let ret = self.1.early_print2(Tracked(snpcore), Tracked(console));
-        ret
+        self.1.early_print2(Tracked(snpcore), Tracked(console))
     }
 }
 
@@ -441,8 +440,6 @@ impl<T: ?Sized + VPrint> VPrintLock for T {
     fn print(&self, Tracked(cs): Tracked<&mut SnpCoreSharedMem>) {
         let console_ref = CONSOLE();
         let tracked consolelock = cs.lockperms.tracked_remove(console_ref.lockid());
-
-        // Required: without axiom_global_CONSOLE, console_ref.acquire lock_requires is not proved.
         proof {
             broadcast use crate::global::axiom_global_CONSOLE;
 
@@ -454,7 +451,6 @@ impl<T: ?Sized + VPrint> VPrintLock for T {
         let tracked console = console.trusted_into_raw();
         let Tracked(mut console) = self.early_print2(Tracked(&mut cs.snpcore), Tracked(console));
         let tracked console_perm = console.trusted_into();
-        // Required: without axiom_spec_new, console_ref.release unlock_requires is not proved.
         proof {
             broadcast use LockPermToRaw::axiom_spec_new;
 
@@ -466,9 +462,6 @@ impl<T: ?Sized + VPrint> VPrintLock for T {
         );
         proof {
             cs.lockperms.tracked_insert(console_ref.lockid(), consolelock);
-            // Required: axiom_global_auto provides the distinct-lockid facts needed to
-            // show that the non-CONSOLE entries (PT, ALLOCATOR, ...) are untouched, so
-            // cs.wf_pt() and the print_ensures_cs forall both still hold.
             broadcast use crate::global::axiom_global_auto;
 
         }
