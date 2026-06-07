@@ -407,7 +407,6 @@ impl<T> SpecMem<T> {
             let f1 = mem1.first().as_int();
             let f2 = mem2.first().as_int();
             if f1 == f2 {
-                // Required: removing this broadcast loses SpecAddr extensional equality from equal integer addresses.
                 broadcast use SpecAddr::axiom_equal;
 
                 assert(mem1.first() === mem2.first());
