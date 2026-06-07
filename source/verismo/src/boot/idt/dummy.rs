@@ -112,15 +112,14 @@ impl IDTEntry {
         ret.options@.val == ENTRY_MIN_PRE,
         ret.reserved@.val == 0u32,
     {
-        let ret = IDTEntry{
+        IDTEntry{
             pointer_low: addr.into(),
             pointer_middle: (addr >> 16u64).into(),
             pointer_high: (addr >> 32u64).into(),
             gdt_selector: gdt_selector.into(),
             options: ENTRY_MIN_PRE.into(),
             reserved: 0u32.into(),
-        };
-        ret
+        }
     }
     }
 }
@@ -219,14 +218,11 @@ pub fn init_idt(Tracked(cs): Tracked<&mut SnpCoreSharedMem>)
     box_init_idt_content(&mut idt, gdt_selector);
     // convert vbox to raw mem.
     let (idt_addr, idt_memperm) = idt.into_raw();
-    // TODO: adjust pte.
     let dtp = Idtr { base: idt_addr.as_u64().into(), limit: 0xffffu64.into() };
     assert(dtp.is_constant());
     IdtBaseLimit.write(dtp, Tracked(&mut idt_perm));
     proof {
         cs.snpcore.regs.tracked_insert(RegName::IdtrBaseLimit, idt_perm);
-        // Justification: init_idt only allocates the IDT and writes IdtrBaseLimit; the lock/register
-        // frame condition follows from the tracked remove/insert sequence but is not folded automatically.
     }
 }
 
