@@ -678,7 +678,6 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N> {
                 assert(x.spec_real_range().1.is_constant());
                 assert(y.spec_real_range().0.is_constant());
                 assert(y.spec_real_range().1.is_constant());
-                // spec_sec_max is defined as a SecType spec_constant of spec_end_max.
                 assert(T::spec_sec_max().is_constant());
                 assert(x.spec_lt_requires(&y));
             }
@@ -947,8 +946,6 @@ impl<T: MemRangeInterface + Copy, const N: usize_t> Array<T, N> {
                     assert(self@.take(wi as int).to_range_seq() =~~= self@.take(
                         wi as int - 1,
                     ).to_range_seq().push(entry.spec_range()));
-                    // ri was just incremented after consuming `entry`, so this is
-                    // the standard take/push decomposition for the sorted prefix.
                     assert(prev.take(ri as int).to_range_seq() =~~= prev.take(
                         ri as int - 1,
                     ).to_range_seq().push(entry.spec_range()));
