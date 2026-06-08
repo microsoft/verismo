@@ -70,7 +70,6 @@ fn init_allocator(
     }
     let tracked mut memcc = SnpMemCoreConsole { memperm, cc };
     proof {
-        // Justification: no core register update occurs before the Hyper-V allocation loop.
         assert forall|i: int|
             #![trigger hv_mem_tb@[i]]
             (idx as int) <= i < (len as int) implies memcc.memperm.contains_default_except(
@@ -139,12 +138,10 @@ fn init_allocator(
         let tracked mut cc = cc;
         if inside {
             proof {
-                // Justification: check_inside true means the static Verismo range is inside current Hyper-V range.
                 assert(inside_range(verismo_static, g_current_range));
                 assert(start@ <= static_start@);
                 assert(end@ >= static_end@);
                 if static_end@ < end@ {
-                    // Justification: loop invariant says current Hyper-V range is default except e820/static ranges.
                     lemma_contains_except_remove(
                         memperm,
                         range(static_end as int, end as int),
@@ -154,7 +151,6 @@ fn init_allocator(
                     );
                 }
                 if start@ < static_start@ {
-                    // Justification: loop invariant says current Hyper-V range is default except e820/static ranges.
                     lemma_contains_except_remove(
                         memperm,
                         range(start as int, static_start as int),
@@ -271,12 +267,10 @@ fn init_allocator(
             }
         } else {
             proof {
-                // Justification: check_disjoint true means current Hyper-V range is disjoint from Verismo static range.
                 assert(range_disjoint_(verismo_static, g_current_range));
                 let used_range = g_current_range;
                 memperm.proof_remove_range_ensures(used_range);
                 memperm.proof_remove_range_ensures_except(used_range);
-                // Justification: current range was maintained default except e820/static ranges by the loop invariant.
                 assert(memperm.contains_default_except(used_range, except_ranges));
                 //lemma_contains_except_remove(memperm, used_range, g_current_range, except_ranges, verismo_static);
                 let tracked mut hv_memperm = memperm.tracked_split(used_range);
@@ -310,8 +304,6 @@ fn init_allocator(
         idx = idx + 1;
         proof {
             memcc = SnpMemCoreConsole { memperm, cc };
-            // Justification: after processing entry idx-1, prev_end is set to that entry's end.
-            // Justification: allocator initialization only writes through GHCB and preserves the register frame condition.
             assert forall|i: int|
                 #![trigger hv_mem_tb@[i]]
                 (idx as int) <= i < (len as int) implies memcc.memperm.contains_default_except(
@@ -320,7 +312,6 @@ fn init_allocator(
             ) by {
                 assert(prev_memperm.contains_default_except(hv_mem_tb@[i].range(), except_ranges));
                 mem_range_formatted_is_disjoint(hv_mem_tb@);
-                // Justification: formatted Hyper-V ranges are disjoint and i is after the just-processed index.
                 assert(range_disjoint_(hv_mem_tb@[i].range(), g_current_range));
                 prev_memperm.proof_remove_range_ensures(g_current_range);
             }

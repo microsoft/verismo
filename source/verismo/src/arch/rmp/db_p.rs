@@ -198,8 +198,6 @@ pub proof fn rmp_proof_inv_sw(rmp: &RmpMap, op: RmpOp<SysPhy>, memid: MemID)
             }
         },
     }
-    // Justification: each RMP operation preserves the software invariant under the stated sp_op_requires;
-    // branch-specific transition facts are hidden behind rmp_op and do not trigger here.
 }
 
 /// TODO: function body check has been running for 2 seconds
@@ -230,30 +228,22 @@ pub proof fn rmp_proof_inv_memid_int(rmp: &RmpMap, op: RmpOp<SysPhy>, memid: Mem
         let vmpl_perm = perms[vmpl];
         match op {
             RmpOp::Pvalidate(_, _) => {
-                // Justification: pvalidate preserves GPN/perms; SMT does not unfold rmp_op/pvalidate in this quantified branch.
                 assert(new[spn].view().spec_gpn() === rmp[spn].view().spec_gpn());
-                // Justification: pvalidate preserves permissions; SMT does not unfold the pvalidate setter chain here.
                 assert(new_perms === perms);
                 assert(memtype(memid, rmp[spn].view().spec_gpn()).is_sm_int());
-                // Justification: this is exactly the prior rmp_inv_memid_int permission fact for unchanged perms.
                 assert(!vmpl_perm.contains(Perm::Write));
                 assert(!new[spn].view().check_vmpl(vmpl, Perm::Write));
             },
             RmpOp::RmpAdjust(page_id, param) => {
                 let update_spn = page_id.page;
-                // Justification: rmpadjust preserves GPN and only narrows permissions after access checks;
-                // SMT does not unfold the update for arbitrary spn in this quantified proof.
                 assert(new[spn].view().spec_gpn() === rmp[spn].view().spec_gpn());
                 assert(memtype(memid, rmp[spn].view().spec_gpn()).is_sm_int());
                 assert(!vmpl_perm.contains(Perm::Write));
-                // Justification: check_vmpl reads the same non-write permission for this VMPL after rmpadjust.
                 assert(!new[spn].view().check_vmpl(vmpl, Perm::Write));
             },
             RmpOp::RmpUpdate(_, _) => {
                 if new[spn] != rmp[spn] {
                     assert(vmpl.as_int() > memid.to_vmpl().as_int());
-                    // Justification: HV RmpUpdate initializes non-VMPL0 permissions to empty;
-                    // generated map/index axioms do not instantiate for arbitrary vmpl in this quantified proof.
                     assert(new_vmpl_perm === PagePerm::empty());
                     assert(!new_vmpl_perm.contains(Perm::Write));
                 } else {
@@ -290,21 +280,15 @@ pub proof fn rmp_lemma_pvalidate_sw_inv(rmp: &RmpMap, op: RmpOp<SysPhy>, memid: 
             &&& (#[trigger] new[spn]).view().spec_validated()
             &&& (#[trigger] new[spn]).view().spec_asid() === memid.to_asid()
         } implies (rmp_reverse(&new, memid, rmp[spn].view().spec_gpn()) === spn) by {
-        // Justification: rmp_inv_sw uniqueness is preserved by pvalidate; SMT loses the reverse-map witness
-        // through rmp_op's single-entry update.
         assert(rmp.dom().contains(spn));
         if op_memid.to_vmpl() is VMPL0 && memid.to_asid() === op_memid.to_asid() {
             if !val {
                 assert(rmp[spn].view().spec_validated());
-                // Justification: pvalidate(false) for the same VM leaves unrelated entries unchanged;
-                // map update extensionality is not triggered for arbitrary spn.
                 assert(rmp[spn] === new[spn]);
                 assert(rmp_reverse(rmp, memid, rmp[spn].view().spec_gpn()) === spn)
             } else {
                 assert(!rmp_has_gpn_memid(rmp, gpn, memid));
                 if rmp[spn] !== new[spn] {
-                    // Justification: a successful validating pvalidate writes the requested GPN to the target entry;
-                    // the fact is hidden behind RmpEntry::check_access/pvalidate expansion.
                     assert(new[spn].view().spec_gpn() === gpn) by {
                         reveal(RmpEntry::check_access);
                     }
@@ -322,13 +306,11 @@ pub proof fn rmp_lemma_pvalidate_sw_inv(rmp: &RmpMap, op: RmpOp<SysPhy>, memid: 
             }
         } else {
             if !(op_memid.to_vmpl() is VMPL0) {
-                // Justification: non-VMPL0 pvalidate is rejected by rmp_op; SMT does not unfold the error condition here.
                 assert(is_error);
                 assert(new[spn] === rmp[spn]);
             }
             if memid.to_asid() !== op_memid.to_asid() {
                 if op_spn === spn {
-                    // Justification: pvalidate for a different ASID cannot update this memid and errors at target SPN.
                     assert(is_error);
                 }
                 assert(new[spn] === rmp[spn]);
@@ -342,15 +324,12 @@ pub proof fn rmp_lemma_pvalidate_sw_inv(rmp: &RmpMap, op: RmpOp<SysPhy>, memid: 
                         === rmp[spn].view().spec_gpn())
                     &&& new[spn_test].view().spec_validated()
                 } implies spn_test === spn by {
-                // Justification: outside the pvalidate target, entries are unchanged; map extensionality is not triggered.
                 assert(new[spn_test] === rmp[spn_test]);
                 assert(rmp_inv_sw(rmp, memid));
                 assert((rmp_reverse(rmp, memid, rmp[spn].view().spec_gpn()) === spn_test));
             }
         }
     }
-    // Justification: the quantified reverse-map proof above establishes rmp_inv_sw for the pvalidate result;
-    // SMT does not fold the invariant predicate after the single-entry update.
 }
 
 pub proof fn rmp_lemma_hv_update_inv(rmp: &RmpMap, newrmp: RmpMap, hv_id: MemID)
@@ -366,8 +345,6 @@ pub proof fn rmp_lemma_hv_update_inv(rmp: &RmpMap, newrmp: RmpMap, hv_id: MemID)
         let spn_id = PageID { page: i, memid: hv_id };
         RmpEntry::lemma_trans_inv(rmp[i], RmpOp::RmpUpdate(spn_id, newrmp[i]));
     }
-    // Justification: the quantified proof above establishes every entry in rmp_hv_update is invariant;
-    // SMT does not fold opaque rmp_inv over the updated map.
 }
 
 pub proof fn rmp_lemma_hv_update_restrict(rmp: &RmpMap, newrmp: RmpMap, hv_id: MemID)
@@ -385,8 +362,6 @@ pub proof fn rmp_lemma_hv_update_restrict(rmp: &RmpMap, newrmp: RmpMap, hv_id: M
     broadcast use {RmpEntry::axiom_spec_new, HiddenRmpEntryForPSP::axiom_spec_new};
 
     reveal(rmp_inv);
-    // Justification: rmp_hv_update changes entries exactly by HV RmpUpdate, which clears validation
-    // and resets permissions for changed entries; SMT does not fold this into the quantified postcondition.
 }
 
 pub proof fn rmp_lemma_hv_update_restrict_at(
@@ -419,8 +394,6 @@ pub proof fn rmp_lemma_hv_update_restrict_at(
             reveal(RmpEntry::check_access);
         }
     } else {
-        // Justification: HV update cannot modify a guest-validated entry that passes this access check;
-        // the restriction lemma's trigger does not fire for this indexed map expression.
         assert(rmp2[spn] === rmp[spn]);
     }
 }

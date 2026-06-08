@@ -52,8 +52,6 @@ impl<VT: AddrType, PT: AddrType> MemMap<VT, PT> {
                     reveal(MemMap::is_one_to_one_map);
                     smem1.proof_same_page();
                     smem2.proof_same_page();
-                    // Justification: one-to-one translation maps different source pages to different target pages;
-                    // page-sized translated memories on different target pages are disjoint, but SMT loses the page arithmetic.
                 }
             }
         }
@@ -84,8 +82,6 @@ impl<VT: AddrType, PT: AddrType> MemMap<VT, PT> {
             assert(self.reverse(self.translate(vpage)->Some_0) is Some);
             let p = self.reverse(self.translate(vpage)->Some_0)->Some_0;
             assert(self.translate(p)->Some_0.value() =~= p.value());
-            // Justification: under identity translation, any chosen reverse page with the same translated
-            // integer value is extensionally equal to the original page; dummy-holder equality axiom does not trigger.
         }
         assert forall|ppage: SpecPage<PT>| (#[trigger] self.reverse(ppage)) is Some implies (
         self.translate(self.reverse(ppage)->Some_0) is Some && self.translate(

@@ -98,10 +98,6 @@ impl<'a> MutFnWithCSTrait<'a, SnpCoreConsole, InitE820Fn, InitE820Out<'a>> for M
                 assert(e820@.to_aligned_ranges_internal2()
                     =~~= prev_e820.to_aligned_ranges_internal2());
             }
-            // Justification: e820_format returns the formatted validated E820 slice and only prints through GHCB;
-            // the trait postcondition bundles these facts but SMT does not compose them while `e820` borrows self.
-            // Justification: Rust borrow of the returned E820 slice prevents referring to `self` in the
-            // proof of the trait postcondition here; the preceding assumptions are the components of it.
         }
         e820
     }
@@ -188,7 +184,6 @@ pub fn init_mem(
         assert(N == 0x80 ==> N * spec_size::<HyperVMemMapEntry>() == 0x80 * spec_size::<
             HyperVMemMapEntry,
         >());
-        // Justification: HvParamTable is architecturally one page; generated spec_size arithmetic does not trigger.
         assert(spec_size::<HvParamTable>() < PAGE_SIZE!());
     }
     ;
@@ -223,7 +218,6 @@ pub fn init_mem(
     }
     let mut mparam = VBox::from_raw(mp_ptr.to_usize(), Tracked(mp_perm));
     proof {
-        // Justification: the borrowed monitor parameters come from mp_perms.wf_at(mp_ptr).
         assert(mparam@.mp_wf());
         assert(mparam.wf());
     }

@@ -22,8 +22,6 @@ impl MemOp<GuestVir> {
                 memdb.lemma_mem_map_to_mem_map_ok(self.to_memid(), self.to_page());
                 assert(memdb.to_mem_map_ok(self.to_memid()).translate(self.to_page()) is Some)
             } else {
-                // Justification: without a guest-map translation, op_by_gpn_memtype returns the original MemDB;
-                // SMT does not unfold the no-translation error branch deeply enough here.
                 assert(memdb.spec_vram() === memdb.op(*self).to_result().spec_vram());
             }
         }
@@ -43,8 +41,6 @@ impl MemDB {
     {
         reveal(VRamDB::op);
         reveal(rmp_inv);
-        // Justification: rmp_inv establishes that RMP entries outside the operated page are unchanged;
-        // the trigger does not fire through MemDB::op/to_spop/to_gpop nesting in this wrapper proof.
     }
 
     pub proof fn lemma_mem_map_to_mem_map_ok(&self, memid: MemID, gvn: GVN)
@@ -130,15 +126,11 @@ impl MemDB {
             if (entry == tlb_entry) {
                 if tlb_entry != old_tlb_entry {
                     // load tlb entry from page table
-                    // Justification: op semantics can only install the current guest-map entry into the TLB;
-                    // SMT loses this through nested union_prefer_right/map update unfolding.
                     assert(tlb_entry === old_entry);
                 }
             } else {
                 assert(entry === pt_entry_ok);
                 if new.model1_eq(self, memid) {
-                    // Justification: MemDB model1_eq is structurally the same as GuestPTRam model1_eq
-                    // for spec_g_page_table; constructor axioms are not instantiated reliably here.
                     new.spec_g_page_table(memid).lemma_map_entry_model1_eq(
                         &self.spec_g_page_table(memid),
                         memid,
@@ -150,8 +142,6 @@ impl MemDB {
                 }
                 if pt_entry_ok != old_pt_entry_ok {
                     assert(new === &self.op(op).to_result());
-                    // Justification: only Write/RmpOp can change the guest page-table-derived entry;
-                    // the proof depends on VRamDB::op and nested MemDB operation case splitting.
                     assert(op is Write || op is RmpOp) by {
                         reveal(VRamDB::op);
                     }
@@ -265,10 +255,7 @@ impl MemDB {
         reveal(RmpEntry::check_access);
         if self.to_mem_map(memop.to_memid()).translate(memop.to_mem().to_page()) is Some {
             let gpmemop = self.to_gpop(memop);
-            // Justification: a successful translation through to_mem_map implies the map is valid for this lookup;
-            // SMT cannot derive the map validity fact from the enclosing memory invariant for arbitrary op memids.
             self.to_mem_map(memop.to_memid()).lemma_valid_translate(memop.to_mem().to_page());
-            // Justification: converting a valid virtual memory operation through a valid translated guest map preserves validity.
             assert(gpmemop.is_valid());
             self.spec_vram().lemma_op_err_Ginv(self.spec_sysmap()[memop.to_memid()], gpmemop);
         }
@@ -330,8 +317,6 @@ impl MemDB {
                     if new_guestmap_tlb[gvn] === guestmap_tlb[gvn] {
                         assert(guestmap_tlb.is_encrypted_or_none(gvn));
                     } else {
-                        // Justification: read/write/rmp op TLB updates load exactly the translated guest-map entry;
-                        // SMT loses the equality through TLB load and union_prefer_right expansion.
                         assert(new_guestmap_tlb[gvn] === guestmap[gvn]);
                         assert(memtype(memid, guestmap.translate(gvn)->Some_0).need_c_bit());
                         self.lemma_mem_map_to_mem_map_ok(memid, gvn);
@@ -365,8 +350,6 @@ impl MemDB {
                 ).need_c_bit() implies #[trigger] new_guestmap_tlb.is_encrypted_or_none(gvn) by {
                 if new_guestmap_tlb.translate(gvn) is Some {
                     if op_memid === memid {
-                        // Justification: flushing the same memid preserves encrypted-or-none entries required here;
-                        // the map equality follows from TLB flush definitions but is not triggered automatically.
                         assert(new_guestmap_tlb[gvn] === guestmap_tlb[gvn]);
                         assert(guestmap_tlb.is_encrypted_or_none(gvn));
                     } else {
@@ -375,16 +358,12 @@ impl MemDB {
                                 assert(op_memid !== memid);
                                 //assert(self.spec_tlb().spec_db().dom().contains(memid));
                                 //assert(new.spec_tlb().spec_db().dom().contains(memid));
-                                // Justification: flushing a different memid leaves this memid's TLB submap unchanged;
-                                // map update extensionality is not instantiated by SMT here.
                                 assert(self.spec_tlb().spec_db()[memid]
                                     === new.spec_tlb().spec_db()[memid]);
                             }
                         } else if let MemOp::InvlPage(addr_id) = memop {
                             assert(addr_id.memid != memid);
                             assert(new_guestmap_tlb === guestmap_tlb) by {
-                                // Justification: invalidating a page for another memid leaves this memid's TLB submap unchanged;
-                                // map update extensionality is not instantiated by SMT here.
                                 assert(self.spec_tlb().spec_db()[memid]
                                     === new.spec_tlb().spec_db()[memid]);
                             }
@@ -427,12 +406,8 @@ impl MemDB {
         let new_g_pgtable = new.spec_g_page_table(memid);
         let gpa_memop = self.to_gpop(memop);
         if self.to_mem_map(op_memid).translate(memop.to_mem().to_page()) is Some {
-            // Justification: successful translation through the memory map exposes the map validity needed by the
-            // translation lemma; this follows from the memory invariant but requires nested unfolding.
             self.to_mem_map(op_memid).lemma_valid_translate(memop.to_mem().to_page());
             let gvn = memop.to_page();
-            // Justification: sysmap validity and translated operation validity follow from vop_requires/op validity;
-            // SMT does not connect these through to_gpop/to_spop expansion in this proof.
             self.spec_vram().proof_op_inv(sysmap, gpa_memop);
             assert(self.spec_g_page_table(memid).spec_ram().inv()) by {
                 reveal(GuestPTRam::inv_dom_ok);
@@ -475,8 +450,6 @@ impl MemDB {
                 self.lemma_op_flush_tlb_inv(&new, memid, memop);
             },
         }
-        // Justification: proof_op_inv establishes new_g_pgtable.inv in each semantic branch above;
-        // SMT loses the branch-sensitive fact before this helper precondition.
         self.lemma_identity_map(&new, memid, memop);
     }
 
@@ -543,8 +516,6 @@ impl MemDB {
         let oldmap = self.to_mem_map(memid).db;
         let newmap = news.to_mem_map(memid).db;
         assert(oldmap === newmap) by {
-            // Justification: read operations only load into the TLB the same entry already selected by
-            // to_mem_map's page-table/TLB union, so the resulting map is extensionally unchanged.
             assert(oldmap =~~= newmap);
         }
     }
