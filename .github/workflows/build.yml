@@ -39,4 +39,4 @@ jobs:
 
       - name: Verify
         working-directory: source
-        run: cargo verus focus --release -- --multiple-errors=20
+        run: cargo verus focus --release -- --multiple-errors=20 --trace --time
