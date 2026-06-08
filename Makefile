@@ -19,7 +19,7 @@ verify: verifyonly fs
 
 verifyonly:
 	cd source/verismo_main &&\
-	(cargo verify --release 1> verus-stderr.log)
+	(cargo verus build --release 1> verus-stderr.log)
 
 
 ${CURDIR}/source/target/target/release/verismo_main:
@@ -28,7 +28,7 @@ ${CURDIR}/source/target/target/release/verismo_main:
 ${CURDIR}/source/target/target/${DEBUG}/verismo_main: buildonly
 
 buildonly:
-	cd source/verismo_main && cargo verify --release --feature noverify
+	cd source/verismo_main && cargo verus build --release
 
 
 $(LINUX_OUT):
