@@ -34,7 +34,7 @@ pub struct BootInfo {
     pub cmdline: [u8; 256],
     #[def_offset]
     pub ccblob: CCBlobSevInfo, // 40
-    pub reserved: [u8; {4096 - 48 - 256 - 256}], //4096 - 40 - 256 - 256 (32 * 8)
+    pub reserved: [u8; 3536], // 4096 - 48 - 256 - 256 (32 * 8)
 }
 
 #[repr(C, align(1))]
@@ -119,6 +119,7 @@ impl<'a, 'b> MutFnTrait<'a, BootUpdate<'b>, u8> for BootParams {
                 e820_entries <= e820@.len(),
                 self.e820@.take(i as int) =~~= e820@.take(i as int),
                 *self === oldself.spec_set_e820(self.e820),
+            decreases e820_entries - i,
         {
             proof {
                 assert(self.e820@.update(i as int, e820[i as int]).take(i as int + 1)
@@ -480,7 +481,9 @@ pub fn load_bzimage_to_vmsa(
                 assert(entry.spec_start() <= i < entry.spec_end());
                 entry.proof_contains(i);
             }
-            assert forall|i: int| prefer_mem.contains_key(i) implies prefer_mem[i]@.wf_not_null(
+            assert forall|i: int|
+                #![trigger prefer_mem.contains_key(i)]
+                prefer_mem.contains_key(i) implies prefer_mem[i]@.wf_not_null(
                 (i.to_addr(), PAGE_SIZE as nat),
             ) && entry.spec_start() <= i < entry.spec_end() by {
                 entry.proof_contains(i);
@@ -617,7 +620,9 @@ pub fn load_bzimage_to_vmsa(
         Tracked(&mut cs.snpcore),
     );
     let mut i = 0;
-    while i < osmem.len() {
+    while i < osmem.len()
+        decreases osmem.len() - i,
+    {
         osmem[i].leak_debug();
         i = i + 1;
     }

@@ -8,8 +8,17 @@ use crate::vcell::*;
 
 verus! {
 
+broadcast use {
+    SecType::axiom_spec_new,
+    SecType::axiom_ext_equal,
+    SnpPPtr::axiom_id_equal,
+    axiom_size_from_cast_bytes,
+    axiom_size_from_cast_secbytes_def,
+};
+
 impl SpinLock {
     // requires: check no deadlock
+    #[verifier::exec_allows_no_decreases_clause]
     pub fn lock(
         &self,
         Tracked(lockperm): Tracked<LockPermRaw>,
@@ -32,7 +41,7 @@ impl SpinLock {
         {
             if let Some(tmpperm) = self.trylock(Tracked(&mut tmplockperm), Tracked(core)) {
                 perm = tmpperm;
-                break ;
+                break;
             }
         }
         (Tracked(tmplockperm), perm)
@@ -101,7 +110,7 @@ impl<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> VSpinLock<T>
     ) -> bool {
         &&& (lockperm).is_locked(cpu, self.lockid(), self.ptr_range())
         &&& (lockperm).invfn.inv(memperm.get_value())
-        &&& memperm.value.is_Some()
+        &&& memperm.value is Some
         &&& memperm.wf_at(self.lockid())
         &&& self.is_constant()
     }
@@ -196,11 +205,17 @@ impl<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> VSpinLock<T>
             self.ensures_unlock(old(lockperm)@, lockperm@, perm@),
             lockperm@.wf(),
     {
+        let ghost old_invfn = old(lockperm)@.invfn;
         proof {
-            lockperm@.invfn.lemma_inv::<T>();
+            old_invfn.lemma_inv::<T>();
         }
         let tracked rawperm = perm.trusted_into_raw();
         self.lock.unlock(Tracked(lockperm), Tracked(rawperm), Tracked(core));
+        proof {
+            broadcast use LockPermToRaw::axiom_spec_new;
+
+            assert(lockperm@.points_to.bytes() =~~= perm@.get_value().vspec_cast_to());
+        }
     }
 
     pub const fn new(value: T) -> Self {

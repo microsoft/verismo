@@ -9,8 +9,14 @@ macro_rules! BIT64 {
 }
 
 verus! {
-    pub open spec fn has_bit_closure(input: u64) -> spec_fn(u64) -> bool {
-        |b: u64| spec_has_bit_set(input, b)
+    pub struct HasBitPred {
+        pub input: u64,
+    }
+
+    impl U64Predicate for HasBitPred {
+        open spec fn call(&self, b: u64) -> bool {
+            spec_has_bit_set(self.input, b)
+        }
     }
 
     #[verifier(inline)]
@@ -36,6 +42,7 @@ seq_macro::seq!(N in 0..64 {
     ensures
         input == 0
     {
+        // Required to prove lemma_zeroval_bits postcondition from per-bit facts.
         assert(input == 0 )by(bit_vector)
         requires
             #(
@@ -51,6 +58,7 @@ seq_macro::seq!(N in 0..64 {
     ensures
         val == nbits_mask(add(h, 1))
     {
+        // Required to prove mask equality from has_bits_until per-bit facts.
         assert(val == nbits_mask(add(h, 1))) by(bit_vector)
         requires
             #(
@@ -64,7 +72,7 @@ seq_macro::seq!(N in 0..64 {
 
 verus! {
     pub open spec fn is_highest_bit(input: u64, bit: u64) -> bool {
-        is_upper_bound_satisfy_cond(has_bit_closure(input), bit, 63)
+        is_upper_bound_satisfy_cond(&HasBitPred { input }, bit, 63)
     }
 
     #[verifier(inline)]
@@ -116,27 +124,27 @@ verus! {
         0 <= ret < 64,
     {
         let high_bit = choose |b: u64| is_highest_bit(input, b);
-        let cond_fn = has_bit_closure(input);
+        let cond = HasBitPred { input };
         let exist_high_bit = exists |b: u64| is_highest_bit(input, b);
-        let exist_has_bit = exists |b: u64| #[trigger]cond_fn(b) && b <= 63 ;
+        let exist_has_bit = exists |b: u64| #[trigger] cond.call(b) && b <= 63 ;
         if  !exist_high_bit {
-            assert forall |b: u64| !#[trigger]is_upper_bound_satisfy_cond(cond_fn, b, 63) by{
+            // Required so proof_has_conditional_upper_bound implies no in-range set bit exists.
+            assert forall |b: u64| !#[trigger]is_upper_bound_satisfy_cond(&cond, b, 63) by{
                 assert(!is_highest_bit(input, b));
-                assert(is_highest_bit(input, b) === is_upper_bound_satisfy_cond(cond_fn, b, 63));
-                assert(!is_upper_bound_satisfy_cond(cond_fn, b, 63));
+                assert(is_highest_bit(input, b) === is_upper_bound_satisfy_cond(&cond, b, 63));
+                assert(!is_upper_bound_satisfy_cond(&cond, b, 63));
             }
-            assert(!exists |b: u64| is_upper_bound_satisfy_cond(cond_fn, b, 63));
-            proof_has_conditional_upper_bound(cond_fn, 63);
+            assert(!exists |b: u64| is_upper_bound_satisfy_cond(&cond, b, 63));
+            proof_has_conditional_upper_bound(&cond, 63);
+            // Required to establish lemma_zeroval_bits precondition from absence of upper bound.
             assert(!exist_has_bit);
             assert forall |b: u64| 0 <= b < 64
             implies !spec_has_bit_set(input, b)
             by{
-                assert(!cond_fn(b));
+                assert(!cond.call(b));
             }
             lemma_zeroval_bits(input);
         }
-        assert(exist_high_bit);
-        assert(is_highest_bit(input, high_bit));
         high_bit
     }
 
@@ -188,18 +196,17 @@ verus! {
         ret == nbits_mask(add(spec_highest_bit(input),1)),
     {
         let ret = spec_fill_ones_exe(input);
-        assert((!ret & input) == 0 && ((ret & input) == input)) by(bit_vector)
-        requires
-            ret == spec_fill_ones_exe(input);
         let high_bit = proof_get_highest_bit(input);
+        // Required to satisfy lemma_fill_ones_bit_steps nbits == BIT64!(round).
         assert(1 == BIT64!(0u64)) by(bit_vector);
+        // Required to satisfy lemma_fill_ones_bit_steps has_bits_until precondition.
         assert(has_bits_until(input, 1, high_bit)) by {
             assert forall |b: u64| (high_bit < b < 64)
             implies !spec_has_bit_set(input, b)
             by {
                 assert(is_highest_bit(input, high_bit));
                 if spec_has_bit_set(input, b) {
-                    assert(has_bit_closure(input)(b) && b <= 63);
+                    assert(HasBitPred { input }.call(b) && b <= 63);
                     assert(b <= high_bit);
                 }
             }
@@ -207,19 +214,18 @@ verus! {
         lemma_fill_ones_bit_steps(input, 1, high_bit, 0);
         bit64_shl_auto();
 
+        // Required to connect executable spec_fill_ones_exe with recursive fill_ones proof.
         assert(ret == fill_ones(input)) by {
             reveal_with_fuel(_fill_ones, 7);
         }
-        assert(ret == nbits_mask(add(high_bit,1)));
+        // Required to discharge lemma_fill_ones shift-bound postcondition.
         assert((ret >> 1) < u64::MAX) by(bit_vector);
-        assert(ret >= 1) by(bit_vector)
-        requires
-            0 <= high_bit < 64,
-            ret == nbits_mask(add(high_bit,1));
+        // Required to prove lemma_fill_ones masking and lower-bound postconditions.
         assert((!ret & input) == 0 && (ret / 2 < input) && (ret >= input)) by(bit_vector)
         requires
             input != 0,
             ret == spec_fill_ones_exe(input);
+        // Required to prove lemma_fill_ones preserves all input bits.
         assert((ret & input) == input) by(bit_vector)
         requires
             input != 0,
@@ -233,22 +239,20 @@ verus! {
         ret == spec_prev_power_of_two_exe(input),
     {
         if input == 0 {
-            assert(spec_is_prev_power_of_two(0, 0));
             0
         } else {
             let ret = lemma_fill_ones(input);
             let ret_last = add((ret >> 1u64), 1u64);
             let high_bit = proof_get_highest_bit(input);
-            assert(add((ret >> 1u64), 1u64) == BIT64!(high_bit)) by(bit_vector)
-            requires
-                ret == nbits_mask(add(high_bit, 1)),
-                0 <= high_bit < 64;
+            // Required to establish spec_is_prev_power_of_two power-of-two postcondition.
             assert(spec_bit64_is_shl_by_bits(ret_last)) by(bit_vector)
             requires
                 ret == nbits_mask(add(high_bit, 1)),
                 ret_last == add((ret >> 1u64), 1u64),
                 0 <= high_bit < 64;
+            // Required to prove input / 2 lower bound in spec_is_prev_power_of_two.
             assert(input >> 1 == input / 2) by(bit_vector);
+            // Required to prove spec_is_prev_power_of_two range postcondition.
             assert((input >> 1) < ret_last <= input) by(bit_vector)
             requires
                 input != 0,
@@ -268,17 +272,13 @@ verus! {
     {
         if input <= 1 {
             bit64_shl_values_auto();
-            assert(spec_bit64_is_shl_by_bits(1));
             1
         } else {
             let input1 = sub(input, 1);
             let fill_ones = lemma_fill_ones(input1);
             let high_bit = proof_get_highest_bit(input1);
             let ret = add(fill_ones, 1);
-            assert(fill_ones < u64::MAX) by(bit_vector)
-            requires
-                0 < input1 < POW2!(63),
-                fill_ones/2 < input1;
+            // Required to prove lemma_next_power_of_two power-of-two postconditions.
             assert(spec_bit64_is_shl_by_bits(ret)) by(bit_vector)
             requires
                 fill_ones == nbits_mask(add(high_bit, 1)),
@@ -319,20 +319,20 @@ verus! {
         ret.1 == BIT64!(add(round, 1)),
         has_bits_until(ret.0, ret.1, h),
     {
+        // Required to satisfy later bit-vector assertions' nbits range requirements.
         assert(0 < nbits < 64) by {
             bit64_shl_auto();
             assert(BIT64!(round) < BIT64!(6u64)) by(bit_vector)
             requires round < 6;
         }
         let nbits2: u64 = BIT64!(add(round, 1));
+        // Required to relate the next fill width to the previous width.
         assert(nbits2 == add(nbits, nbits)) by(bit_vector)
         requires
             nbits == BIT64!(round),
             nbits2 == BIT64!(add(round, 1)),
             round < 6
         ;
-        assert(BIT64!(round) <= 32) by(bit_vector)
-        requires round < 6;
         let ret = input | (input >> nbits);
         assert forall |b: u64|
             b <= h  && sub(h, b) < nbits2
@@ -343,8 +343,8 @@ verus! {
             bit64_and_auto();
             if b <= h  && sub(h, b) < nbits {
                 proof_bit64_has_bit_property(input, (input >> nbits),  b);
-                assert(spec_has_bit_set(input, b));
             } else {
+                // Required to show shifted input contributes the requested bit to ret.
                 assert(spec_has_bit_set(input >> nbits, b)) by(bit_vector)
                 requires
                     0 < h < 64,
@@ -352,9 +352,6 @@ verus! {
                     spec_has_bit_set(input, add(b, nbits)),
                     b <= h,
                     sub(h, add(b, nbits)) < nbits;
-                assert(spec_has_bit_set(ret, b)) by {
-                    proof_bit64_has_bit_property((input >> nbits),  input, b);
-                }
             }
         }
         assert forall |b: u64|
@@ -362,7 +359,7 @@ verus! {
         implies
             !spec_has_bit_set(ret, b)
         by {
-            assert(!spec_has_bit_set(input, b));
+            // Required to prove shifted input has no bits above the high bit.
             assert(!spec_has_bit_set(input >> nbits, b)) by{
                 if add(b, nbits) < 64 {
                     assert(!spec_has_bit_set(input >> nbits, b)) by(bit_vector)
@@ -379,6 +376,7 @@ verus! {
                         add(b, nbits) >= 64;
                 }
             }
+            // Required to establish the upper no-bits clause for ret.
             assert(!spec_has_bit_set(input | (input >> nbits), b)) by(bit_vector)
             requires
                 0 < nbits < 64,
@@ -406,14 +404,10 @@ verus! {
         if round < 6 {
             let (t, nbits2) = lemma_fill_ones_bit_step(input, nbits, h, round);
             lemma_fill_ones_bit_steps(t, nbits2, h, add(round, 1));
-            assert(has_bits_until(_fill_ones(t, nbits2, add(round, 1)), 64, h));
-            assert(ret == _fill_ones(t, nbits2, add(round, 1)));
-            assert(has_bits_until(ret, 64, h));
         } else {
+            // Required to establish base case nbits == 64 for has_bits_until.
             assert(BIT64!(round) == 64) by(bit_vector)
             requires round == 6;
-            assert(has_bits_until(input, 64, h));
-            assert(ret == input);
         }
         lemma_has_64bits_until_to_mask(ret, h);
         ret

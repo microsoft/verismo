@@ -5,7 +5,7 @@ use crate::tspec_e::*;
 
 mod core_exit_t;
 mod core_perm_s;
-mod msr_perm_s;
+pub(crate) mod msr_perm_s;
 #[macro_use]
 mod msr_t;
 mod reg_trait_t;

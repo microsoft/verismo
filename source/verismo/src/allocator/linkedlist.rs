@@ -108,6 +108,13 @@ impl LinkedListAllocator {
 } // verus!
 verus! {
 
+broadcast use {
+    SecType::axiom_spec_new,
+    SecType::axiom_ext_equal,
+    SnpPPtr::axiom_id_equal,
+    axiom_size_from_cast_bytes,
+};
+
 impl LinkedListAllocator {
     #[inline]
     pub fn minsize() -> (ret: usize)
@@ -132,7 +139,7 @@ impl LinkedListAllocator {
             addr.is_constant(),
         ensures
             self@.free_list.contains_ptr_at(ret.0, ret.1@),
-            forall|i| ret.1@ <= i < self@.len() ==> self@.free_list@[i].val < addr,
+            forall|i| ret.1@ <= i < self@.len() ==> (#[trigger] self@.free_list@[i]).val < addr,
     {
         let mut node_ptr = self.free_list.head_ptr();
         let mut prev_ptr = SnpPPtr::nullptr();
@@ -148,19 +155,21 @@ impl LinkedListAllocator {
                 (idx == 0) == (node_ptr.is_null()),
                 self@.free_list.contains_ptr_at(prev_ptr, idx),
                 idx > 0 ==> self@.free_list.contains_ptr_at(node_ptr, idx - 1),
-                forall|i: int| idx <= i < self@.len() ==> self.free_list@[i].val < addr,
+                forall|i: int|
+                    idx <= i < self@.len() ==> (#[trigger] self.free_list@[i]).val < addr,
             ensures
                 prev_ptr.is_constant(),
                 0 <= idx <= self@.len(),
-                forall|i| idx <= i < self@.len() ==> self.free_list@[i].val < addr,
+                forall|i| idx <= i < self@.len() ==> (#[trigger] self.free_list@[i]).val < addr,
                 self@.free_list.contains_ptr_at(prev_ptr, idx),
+            decreases idx,
         {
             let ghost i = idx - 1;
             let node = self.free_list.node_at(node_ptr.clone(), Ghost(i));
             let start = node.val;
             assert(self@.wf_perm(i as nat));
             if start >= addr {
-                break ;
+                break;
             }
             prev_ptr = node_ptr;
             node_ptr = node.next_ptr();
@@ -322,7 +331,8 @@ impl LinkedListAllocator {
         let Tracked(nodep) = self.free_list.remove(prev_ptr, Ghost(i));
         let tracked mut perm;
         proof {
-            perm = map_lib::tracked_seq_remove(self.perms.borrow_mut(), i as nat, self@.len() + 1);
+            let ghost len = self@.len();
+            perm = map_lib::tracked_seq_remove(self.perms.borrow_mut(), i as nat, len + 1);
             let tracked nodep = nodep.trusted_into_raw();
             perm = perm.trusted_join(nodep);
             assert forall|k: nat| k < self@.len() implies self@.wf_perm(k) by {
@@ -354,13 +364,13 @@ impl LinkedListAllocator {
         ensures
             self@.inv(),
             size.is_constant(),
-            ret.is_Some() ==> (u64::MAX - align as int) > (ret.get_Some_0().0 as int),
-            ret.is_Some() ==> valid_free_ptr(*size, ret.get_Some_0()),
-            ret.is_Some() ==> *old(size) <= *size,
-            ret.is_Some() ==> ret.get_Some_0().is_constant(),
-            ret.is_Some() ==> inside_range(
-                (spec_align_up(ret.get_Some_0().0 as int, align as int), *old(size) as nat),
-                (ret.get_Some_0().0 as int, *size as nat),
+            ret is Some ==> (u64::MAX - align as int) > (ret->Some_0.0 as int),
+            ret is Some ==> valid_free_ptr(*size, ret->Some_0),
+            ret is Some ==> *old(size) <= *size,
+            ret is Some ==> ret->Some_0.is_constant(),
+            ret is Some ==> inside_range(
+                (spec_align_up(ret->Some_0.0 as int, align as int), *old(size) as nat),
+                (ret->Some_0.0 as int, *size as nat),
             ),
     {
         let mut node_ptr = self.free_list.head_ptr();
@@ -389,23 +399,22 @@ impl LinkedListAllocator {
                 idx < self@.len() ==> node_ptr.id() == self.free_list@[self.free_list.reverse_index(
                     idx,
                 )].ptr.id(),
-                ret.is_Some() == ret_perm.is_Some(),
-                !ret.is_Some(),
+                ret is Some == ret_perm is Some,
+                !(ret is Some),
             ensures
                 self@.inv(),
                 self.free_list.is_constant(),
-                ret.is_Some() ==> ret_perm.get_Some_0()@.wf_freemem(
-                    (ret.get_Some_0() as int, *size as nat),
+                ret is Some ==> ret_perm->Some_0@.wf_freemem((ret->Some_0 as int, *size as nat)),
+                ret is Some ==> inside_range(
+                    (spec_align_up(ret->Some_0 as int, align as int), expect_size as nat),
+                    ret_perm->Some_0@.range(),
                 ),
-                ret.is_Some() ==> inside_range(
-                    (spec_align_up(ret.get_Some_0() as int, align as int), expect_size as nat),
-                    ret_perm.get_Some_0()@.range(),
-                ),
-                (!node_ptr.not_null()) ==> ret.is_None(),
-                ret.is_Some() == ret_perm.is_Some(),
-                ret.is_Some() ==> ret.get_Some_0().is_constant(),
+                (!node_ptr.not_null()) ==> ret is None,
+                ret is Some == ret_perm is Some,
+                ret is Some ==> ret->Some_0.is_constant(),
                 size.is_constant(),
-                ret.is_Some() ==> (u64::MAX) - align as int > ret.get_Some_0() as int,
+                ret is Some ==> (u64::MAX) - align as int > ret->Some_0 as int,
+            decreases self@.len() - idx,
         {
             let ghost i = self.free_list.reverse_index(idx);
             let ghost prev_i = self.free_list.reverse_index(idx - 1);
@@ -457,14 +466,14 @@ impl LinkedListAllocator {
                     proof { ret_perm = Some(perm) }
                     ;
                     ret = Some(start);
-                    break ;
+                    break;
                 }
             }
             prev_ptr = node_ptr;
             node_ptr = node.next_ptr();
             proof {
                 idx = idx + 1;
-                assert(!ret.is_Some());
+                assert(!(ret is Some));
             }
         }
         if ret.is_some() {
@@ -487,10 +496,12 @@ impl LinkedListAllocator {
         ensures
             self@.inv(),
             self.wf(),
-            ret.is_Some() ==> alloc_valid_ptr(size, ret.get_Some_0()),
-            ret.is_Some() ==> ret.get_Some_0().is_constant(),
-            ret.is_Some() ==> (spec_align_up(ret.get_Some_0().0 as int, align as int), size as nat)
-                === (ret.get_Some_0().0 as int, size as nat),
+            ret is Some ==> alloc_valid_ptr(size, ret->Some_0),
+            ret is Some ==> ret->Some_0.is_constant(),
+            ret is Some ==> (spec_align_up(ret->Some_0.0 as int, align as int), size as nat) === (
+                ret->Some_0.0 as int,
+                size as nat,
+            ),
     {
         let mut real_size = size;
         let ghost old_size = size as nat;
@@ -554,11 +565,11 @@ impl LinkedListAllocator {
         ensures
             self@.inv(),
             self.wf(),
-            ret.is_None() ==> (*self) =~~= (*old(self)),
-            ret.is_Some() == (old(self)@.len() > 0),
-            ret.is_Some() ==> self@.len() <= (old(self)@.len() - 1),
-            ret.is_Some() ==> ret.get_Some_0().1@@.wf_const_default(
-                (ret.get_Some_0().0.0 as int, ret.get_Some_0().0.1 as nat),
+            ret is None ==> (*self) =~~= (*old(self)),
+            ret is Some == (old(self)@.len() > 0),
+            ret is Some ==> self@.len() <= (old(self)@.len() - 1),
+            ret is Some ==> ret->Some_0.1@@.wf_const_default(
+                (ret->Some_0.0.0 as int, ret->Some_0.0.1 as nat),
             ),
     {
         let mut prev_ptr = SnpPPtr::<Node<usize_t>>::nullptr();

@@ -9,6 +9,21 @@ use crate::*;
 
 verus! {
 
+broadcast use {
+    crate::arch::addr_s::page::group_addr_default,
+    crate::arch::pgtable::memmap_s::group_pgtable_memmap_default,
+    crate::arch::rmp::perm_s::group_rmp_perm_default,
+    crate::arch::x64::x64_s::group_x64_default,
+    crate::linkedlist::group_linkedlist_default,
+    crate::ptr::ptr_s::group_ptr_ptr_default,
+    crate::ptr::raw_ptr_s::group_raw_ptr_default,
+    crate::ptr::snp::snp_u::group_snp_attr_default,
+    crate::registers::msr_perm_s::group_msr_perm_default,
+};
+
+} // verus!
+verus! {
+
 impl RamDB {
     #[verifier(external_body)]
     pub broadcast proof fn axiom_ram_len1(&self)
@@ -30,6 +45,8 @@ impl RamDB {
         ensures
             self.write_raw(asid, spmem, bytes).inv(),
     {
+        broadcast use RamDB::axiom_spec_new;
+
         reveal(RamDB::inv);
         let new = self.write_raw(asid, spmem, bytes);
         assert forall|spa: SPA| (0 <= spa.as_int() < self.spec_data().len()) implies (
@@ -52,6 +69,8 @@ impl RamDB {
                 bytes,
             ),
     {
+        broadcast use RamDB::axiom_spec_new;
+
         reveal(RamDB::write_raw);
     }
 
@@ -107,10 +126,13 @@ impl RamDB {
                 rspa,
             ),
     {
+        broadcast use RamDB::axiom_spec_new;
+
         reveal(RamDB::write_raw);
         let new = self.write_raw(asid, spmem, bytes);
         if !memrange_contains_block(spmem, idx(rspa)) {
             assert(self.to_write(rspa, asid, spmem, bytes) === self.spec_data()[rspa.as_int()]);
+            self.lemma_write_raw(rspa, asid, spmem, bytes);
             assert(self.to_write(SPA::new(rspa.as_int()), asid, spmem, bytes) === self.write_raw(
                 asid,
                 spmem,
@@ -139,9 +161,12 @@ impl RamDB {
                 rspa,
             ),
     {
+        broadcast use RamDB::axiom_spec_new;
+
         reveal(RamDB::write_raw);
         let new = self.write_raw(asid, spmem, bytes);
         assert(self.to_write(rspa, asid, spmem, bytes) == self.data[rspa.as_int()]);
+        self.lemma_write_raw(rspa, asid, spmem, bytes);
         assert(self.to_write(rspa, asid, spmem, bytes) == new.data[rspa.as_int()]);
     }
 
@@ -153,6 +178,8 @@ impl RamDB {
         ensures
             self.write_raw(asid, spmem, bytes).read_bytes_by_asid(asid, spmem) === bytes,
     {
+        broadcast use RamDB::axiom_spec_new;
+
         reveal(RamDB::read_bytes_by_asid);
         reveal(RamDB::write_raw);
         let new = self.write_raw(asid, spmem, bytes);
@@ -163,7 +190,9 @@ impl RamDB {
             |i: int| self.to_write(SPA::new(i), asid, spmem, bytes),
         ));
         assert(bytes.len() === spmem.len());
+        spmem.proof_same_page();
         assert forall|k| 0 <= k < bytes.len() implies (bytes[k] === read_bytes[k]) by {
+            spmem.proof_same_page();
             let i = spmem[k].as_int();
             assert(k == i - spmem[0].as_int());
             assert(spmem[k].to_page() === spmem.to_page());
@@ -206,6 +235,12 @@ impl RamDB {
             assert(new_bytes =~~= (bytes));
         }
     }
+}
+
+pub broadcast group group_ramdb_default {
+    RamDB::axiom_ram_len1,
+    RamDB::axiom_ram_len2,
+    RamDB::axiom_spec_new,
 }
 
 } // verus!

@@ -12,5 +12,5 @@ mod def_s;
 pub use def_s::*;
 
 mod x64_p;
-mod x64_s;
+pub(crate) mod x64_s;
 mod x64_u;

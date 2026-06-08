@@ -74,7 +74,7 @@ impl RmpAttrSpec {
     }
 
     pub open spec fn valid_vmpl(&self) -> bool {
-        VMPL::spec_from_int(self.spec_vmpl() as int).is_Some()
+        VMPL::spec_from_int(self.spec_vmpl() as int) is Some
     }
 
     pub open spec fn from(vmpl: VMPL, vmsa: bool, perms: u8) -> Self {
@@ -105,7 +105,7 @@ impl RmpAttr {
 }
 
 impl SwSnpMemAttr {
-    pub spec fn pte(&self) -> PTAttr;
+    pub uninterp spec fn pte(&self) -> PTAttr;
 
     #[verifier(external_body)]
     pub broadcast proof fn axiom_pte(&self)
@@ -167,7 +167,7 @@ impl SwSnpMemAttr {
         val: Option<T>,
         ret: T,
     ) -> bool {
-        &&& val.is_Some() && self.is_vmpl0_private() ==> { val === Some(ret) }
+        &&& val is Some && self.is_vmpl0_private() ==> { val === Some(ret) }
         &&& ret.wf()
         &&& !self.is_confidential_to(1) ==> ret.is_constant_to(1)
         &&& !self.is_confidential_to(2) ==> ret.is_constant_to(2)
@@ -202,7 +202,7 @@ pub ghost struct SnpMemAttr {
 impl SnpMemAttr {
     pub proof fn proof_valid_access(self, vaddr: int, size: nat, p: Perm)
         requires
-            p.is_Write() || p.is_Read(),
+            p is Write || p is Read,
             self.valid_access(vaddr, size, p),
             self.wf(),
         ensures
@@ -212,6 +212,16 @@ impl SnpMemAttr {
 
     {
         assert(self.hw.rmp@.inv_hvupdate_rel(self.sw.rmp@));
+        if self.sw.is_vmpl0_private() {
+            self.sw.axiom_pte();
+            self.hw.axiom_pte();
+            rmp_perm_track_dom(self.hw.rmp@.perms, VMPL::VMPL1);
+            rmp_perm_track_dom(self.hw.rmp@.perms, VMPL::VMPL2);
+            rmp_perm_track_dom(self.hw.rmp@.perms, VMPL::VMPL3);
+            rmp_perm_track_dom(self.sw.rmp@.perms, VMPL::VMPL1);
+            rmp_perm_track_dom(self.sw.rmp@.perms, VMPL::VMPL2);
+            rmp_perm_track_dom(self.sw.rmp@.perms, VMPL::VMPL3);
+        }
         if self.hw.is_vmpl0_private() {
             assert(self.sw.is_vm_confidential());
         }
@@ -382,6 +392,10 @@ impl SnpMemAttr {
         // vmpl-x secret must be stored in vmpl-x's confidential memory.
 
     }
+}
+
+pub broadcast group group_snp_attr_default {
+    SwSnpMemAttr::axiom_pte,
 }
 
 } // verus!

@@ -18,3 +18,7 @@ richos/module/*.dwo
 **.rust_verify
 **.bin
 **.log
+
+# Worktrees for parallel agent verification (ignored)
+.worktrees/
+.verus-log/

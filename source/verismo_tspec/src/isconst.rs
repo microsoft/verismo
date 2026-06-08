@@ -64,12 +64,12 @@ verus! {
 impl<T: IsConstant> IsConstant for Option<T> {
     #[verifier(inline)]
     open spec fn is_constant(&self) -> bool {
-        self.is_Some() ==> self.get_Some_0().is_constant()
+        self is Some ==> self->Some_0.is_constant()
     }
 
     #[verifier(inline)]
     open spec fn is_constant_to(&self, vmpl: nat) -> bool {
-        self.is_Some() ==> self.get_Some_0().is_constant_to(vmpl)
+        self is Some ==> self->Some_0.is_constant_to(vmpl)
     }
 }
 

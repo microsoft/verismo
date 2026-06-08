@@ -21,12 +21,11 @@ pub fn e820_format<const N: usize_t>(
         e820_entries.is_constant(),
         e820_entries < old(e820tb)@.len(),
     ensures
-        ret.is_Some() ==> e820tb.is_constant(),
-        ret.is_Some() ==> (ret.get_Some_0()@.is_constant() && ret.get_Some_0()@.len() <= (
-        e820_entries as nat)),
-        ret.is_Some() ==> ret.get_Some_0()@ === e820tb@.take(ret.get_Some_0()@.len() as int),
-        ret.is_Some() ==> format_range_ensures(
-            ret.get_Some_0()@,
+        ret is Some ==> e820tb.is_constant(),
+        ret is Some ==> (ret->Some_0@.is_constant() && ret->Some_0@.len() <= (e820_entries as nat)),
+        ret is Some ==> ret->Some_0@ === e820tb@.take(ret->Some_0@.len() as int),
+        ret is Some ==> format_range_ensures(
+            ret->Some_0@,
             old(e820tb)@.take(e820_entries as int),
             e820_entries as nat,
         ),
@@ -55,16 +54,19 @@ pub fn e820_format<const N: usize_t>(
         assert(e820.is_constant()) by {
             assert(prev_e820.is_constant());
             assert(format_range_ensures(e820, prev_e820, visited as nat));
-            assert forall|i| 0 <= i < (e820_len as int) implies is_format_entry(
+            assert forall|i| #![trigger e820[i]] 0 <= i < (e820_len as int) implies is_format_entry(
                 e820[i],
                 prev_e820,
             ) by {};
-            assert forall|i| 0 <= i < e820.len() implies e820[i].is_constant() by {
+            assert forall|i|
+                #![trigger e820[i]]
+                0 <= i < e820.len() implies e820[i].is_constant() by {
                 let entry = e820[i];
                 assert(is_format_entry(entry, prev_e820));
                 proof_into_is_constant::<_, u64_s>(entry.spec_real_range().0);
                 proof_into_is_constant::<_, u64_s>(entry.spec_real_range().1);
                 let j = choose|j|
+                    #![trigger prev_e820[j]]
                     entry === prev_e820[j].spec_set_range(entry.spec_real_range()) && (0 <= j) && j
                         < prev_e820.len();
                 assert(prev_e820[j].is_constant());
@@ -72,7 +74,9 @@ pub fn e820_format<const N: usize_t>(
             }
         }
         assert(e820tb.is_constant()) by {
-            assert forall|i| 0 <= i < e820tb@.len() implies e820tb@[i].is_constant() by {
+            assert forall|i|
+                #![trigger e820tb@[i]]
+                0 <= i < e820tb@.len() implies e820tb@[i].is_constant() by {
                 assert(prev_e820tb[i].is_constant());
                 if i >= e820.len() {
                     assert(prev_e820tb.contains(e820tb@[i]));

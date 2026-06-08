@@ -83,14 +83,9 @@ pub proof fn lemma_to_set(first: int, n: nat) -> (ret: Set<int>)
                 first,
                 (n - 1) as nat,
             ).contains(v) || v === (first + (n - 1)) by {
-                assert(first <= v < first + n);
                 if (first <= v < first + n - 1) {
                     assert(range_to_set(first, (n - 1) as nat).contains(v));
                 } else {
-                    assert(v == first + n - 1);
-                    assert(v == (first + (n - 1)));
-                    assert(v == (first + (n - 1)));
-                    assert(v === first + (n - 1));
                 }
             }
             assert forall|v|
@@ -132,6 +127,7 @@ pub proof fn lemma_ranges_disjoint_insert(r2: (int, nat), range: (int, nat), rs:
 {
     let rs2 = rs.insert(range);
     assert forall|r|
+        #![auto]
         inside_range(r, r2) && r.1 != 0 && ranges_disjoint(rs, r) implies ranges_disjoint(
         rs2,
         r,
@@ -146,6 +142,7 @@ pub proof fn lemma_ranges_disjoint_insert(r2: (int, nat), range: (int, nat), rs:
         }
     }
     assert forall|r|
+        #![auto]
         inside_range(r, r2) && r.1 != 0 && ranges_disjoint(
             rs.insert(range),
             r,
@@ -165,21 +162,11 @@ pub proof fn lemma_range_set_disjoint(f1: int, n1: nat, f2: int, n2: nat) -> (re
     let set1 = lemma_to_set(f1, n1);
     let set2 = lemma_to_set(f2, n2);
     if ret {
-        assert forall|a| set1.contains(a) implies !set2.contains(a) by {}
     } else {
-        assert(set1.contains(f1)) by {
-            assert(f1 <= f1);
-            assert(n1 > 0);
-            assert(f1 < f1 + n1 as int);
-        }
-        assert(set2.contains(f2));
         if !set2.contains(f1) {
-            assert(set1.contains(f2));
         }
         if !set1.contains(f2) {
-            assert(set2.contains(f1));
         }
-        assert(!set1.disjoint(set2));
     }
     ret
 }
@@ -197,7 +184,6 @@ pub proof fn lemma_range_set_low_high(f1: int, n1: nat, n2: nat)
 {
     let s1 = range_to_set(f1, n2);
     let s2 = range_to_set(f1, n1).union(range_to_set(f1 + n1 as int, (n2 - n1) as nat));
-    assert forall|i| s1.contains(i) === s2.contains(i) by {}
 }
 
 pub proof fn proof_union_auto<int>()

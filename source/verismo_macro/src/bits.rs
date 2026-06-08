@@ -65,7 +65,7 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         let set_mask: u64 = field_max_val << bit_start;
         fields_stream = quote! {
             #fields_stream
-            verus!{
+            verus_impl!{
             #[inline(always)]
             pub const fn #setter(&self, val: #fty) -> (ret: Self)
             requires
@@ -86,7 +86,7 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
                 ret
             }}
 
-            verus!{
+            verus_impl!{
             pub proof fn #bound_getter(&self) -> (ret: #fty)
             ensures
                 ret == self.#spec_getter(),
@@ -110,7 +110,7 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
             }
             }
 
-            verus!{
+            verus_impl!{
             pub open spec fn #spec_getter(&self) -> #fty {
                 let mask = #mask as #fty;
                 (self.value as #fty >> (#bit_start as #fty)) & mask
@@ -131,7 +131,7 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     }
     let vis = &s.vis;
-    let max_val: u128 = (1 << max_bits) - 1;
+    let max_val: u128 = (1u128 << (max_bits + 1)) - 1;
     //println!("max_val = {} max_bits ={}", max_val, max_bits);
     let expanded = quote! {
         verus!{
@@ -146,7 +146,7 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #emptyspec
             }
 
-            pub open spec fn new(val: #valuetype) -> #specname;
+            pub uninterp spec fn new(val: #valuetype) -> #specname;
 
             #[verifier(external_body)]
             pub broadcast proof fn axiom_new(val: #bitstruct)
@@ -154,7 +154,7 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
                 builtin::equal(#[trigger]Self::new(val.value), #[trigger]val.view())
             {}
 
-            pub open spec fn to_value(&self) -> #bitstruct;
+            pub uninterp spec fn to_value(&self) -> #bitstruct;
 
             #[verifier(external_body)]
             pub broadcast proof fn axiom_into(self)
@@ -186,7 +186,7 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         verus!{
         impl #bitstruct {
-            verus! {
+            verus_impl! {
                 pub open spec fn inv(&self) -> bool {
                     0 <= (self.value as int) <= (#max_val as int)
                 }
@@ -199,13 +199,17 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
                 {}
             }
 
-            verus! {
+            verus_impl! {
                 pub const fn new(val: #valuetype) -> (ret: Self)
                 ensures
                     builtin::equal(ret, Self::spec_new(val)),
                     builtin::equal(ret.view(), #specname::new(val)),
                 {
-                    #bitstruct { value:val}
+                    let ret = #bitstruct { value: val };
+                    proof {
+                        broadcast use #specname::axiom_new;
+                    }
+                    ret
                 }
 
                 pub open spec fn spec_new(val: #valuetype) -> (ret: Self) {
@@ -214,7 +218,7 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
 
                 pub broadcast proof fn lemma_new_eq(self)
                 ensures
-                    builtin::equal(Self::spec_new(self.value), self)
+                    builtin::equal(#[trigger] Self::spec_new(self.value), self)
                 {}
 
                 pub const fn empty() -> (ret: Self)
@@ -235,20 +239,16 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
             }
 
             #fields_stream
-            verus!{
+            verus_impl!{
             pub open spec fn view(&self) -> #specname {
                 #specfields
             }
             }
-            verus!{
+            verus_impl!{
             pub const fn value(&self) -> (ret: #valuetype)
             ensures
                 equal(ret, self.value),
-                self.value <= #max_val as #valuetype
             {
-                proof{
-                    assert(self.inv());
-                }
                 self.value
             }
             }

@@ -8,6 +8,11 @@ use crate::ptr::rmp::*;
 
 verus! {
 
+broadcast use crate::group_verismo_default;
+
+} // verus!
+verus! {
+
 pub fn init_allocator_e820(
     allocator: &mut VeriSMoAllocator,
     e820: &[E820Entry],
@@ -56,7 +61,9 @@ pub fn init_allocator_e820(
             start_addr <= end_addr,
             prev_end.is_constant(),
             prev_end.spec_valid_addr_with(0),
-            forall|i| 0 <= i < index as int ==> prev_end as int >= e820@[i].spec_end(),
+            forall|i|
+                #![trigger e820@[i]]
+                0 <= i < index as int ==> prev_end as int >= e820@[i].spec_end(),
             (prev_end < end_addr && prev_end > start_addr) ==> prev_end as int == e820@[index as int
                 - 1].spec_end(),
             (index as int == 0 && index < n) ==> prev_end === start_addr,
@@ -65,6 +72,7 @@ pub fn init_allocator_e820(
             memperm.wf(),
             memperm.contains_default_except(mem_range, e820@.to_valid_ranges()),
             allocator@.inv(),
+        decreases n - index, end_addr as int - prev_end as int,
     {
         let to_add_start = prev_end;
         let ghost prev_memperm = memperm;
@@ -117,7 +125,8 @@ pub fn init_allocator_e820(
                         r,
                         to_add_range,
                     ) by {
-                        let ee = choose|ee| e820@.contains(ee) && ee.spec_range() === r;
+                        let ee = choose|ee|
+                            e820@.contains(ee) && (#[trigger] ee.spec_range()) === r;
                         assert(e820@.contains(ee));
                         let j = choose|j| e820@[j] === ee && 0 <= j < e820@.len();
                         assert(e820@[j] === ee);

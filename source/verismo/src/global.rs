@@ -46,7 +46,7 @@ pub static _PCR: VSpinLock<Vec<SHA512Type>> = VSpinLock::new(Vec::new());
 
 verus! {
 
-pub closed spec fn g_range(id: Globals) -> (int, nat);
+pub uninterp spec fn g_range(id: Globals) -> (int, nat);
 
 } // verus!
 use self::trusted::_ALLOCATOR;

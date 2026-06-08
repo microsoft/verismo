@@ -1,5 +1,5 @@
 use super::mshv_fmt::FmtHvParamCall;
-use super::mshv_init::process_vm_mem;
+use super::mshv_init::{init_vm_mem_requires, process_vm_mem};
 use super::*;
 use crate::allocator::VeriSMoAllocator;
 use crate::arch::addr_s::VM_MEM_SIZE;
@@ -10,6 +10,11 @@ use crate::boot::monitor_params::SimpleMonitorParams;
 use crate::lock::{LockPermRaw, MapLockContains, MapRawLockTrait};
 use crate::vbox::{MutFnTrait, MutFnWithCSTrait, VBox};
 
+verus! {
+
+broadcast use crate::group_verismo_default;
+
+} // verus!
 verus! {
 
 spec fn init_prepare_e820_ensures(

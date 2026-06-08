@@ -3,7 +3,6 @@ use crate::tspec::*;
 
 verus! {
 
-#[is_variant]
 pub enum Perm {
     Read,
     Write,
@@ -14,7 +13,17 @@ pub enum Perm {
 
 pub type PagePerm = Set<Perm>;
 
-impl IntValue for PagePerm {
+// `IntValue` (defined in `verismo_tspec`) cannot be implemented directly for
+// `PagePerm` because `PagePerm` is a type alias for `Set<Perm>` and both the
+// trait and `Set` are foreign to this crate. We expose the same operations
+// via a local trait, which the orphan rule does allow.
+pub trait PagePermInt: Sized {
+    spec fn as_int(&self) -> int;
+
+    spec fn from_int(val: int) -> Self;
+}
+
+impl PagePermInt for PagePerm {
     open spec fn as_int(&self) -> int {
         let v1: int = if self.contains(Perm::Read) {
             1
@@ -87,7 +96,7 @@ pub open spec fn rmp_perm_init() -> RmpPerm {
     Map::new(
         |vmpl: VMPL| true,
         |vmpl: VMPL|
-            if vmpl.is_VMPL0() {
+            if vmpl is VMPL0 {
                 PagePerm::full()
             } else {
                 PagePerm::empty()
@@ -112,8 +121,12 @@ pub open spec fn rmp_perm_is_valid(p: RmpPerm) -> bool {
 #[verifier(external_body)]
 pub broadcast proof fn rmp_perm_track_dom(p: RmpPerm, vmpl: VMPL)
     ensures
-        p.dom().contains(vmpl),
+        #[trigger] p.dom().contains(vmpl),
 {
+}
+
+pub broadcast group group_rmp_perm_default {
+    rmp_perm_track_dom,
 }
 
 } // verus!

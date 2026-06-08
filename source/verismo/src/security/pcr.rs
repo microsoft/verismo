@@ -17,14 +17,14 @@ verismo_simple! {
 pub struct ExtendPCRReq {
     #[def_offset]
     pub val: Array<u8, 64>,
-    pub reserved: [u8; {0x1000 - 64}],
+    pub reserved: [u8; 4032], // 0x1000 - 64
 }
 }
 
 verus! {
 
 pub open spec fn pcr_invfn() -> spec_fn(Vec<SHA512Type>) -> bool {
-    |vec: Vec<SHA512Type>| vec.len() >= 1 && forall|i| 0 < i < vec.len() ==> vec[i].wf()
+    |vec: Vec<SHA512Type>| vec.len() >= 1 && forall|i| 0 < i < vec.len() ==> #[trigger] vec[i].wf()
 }
 
 } // verus!
@@ -63,7 +63,7 @@ pub fn extend_pcr(
         let pcr_data = pcr[index].clone();
         pcr.set(index, cal2_sha512(&pcr_data, data));
     }
-    assert forall|i| 0 < i < pcr.len() implies pcr[i].wf() by {}
+    assert forall|i| 0 < i < pcr.len() implies #[trigger] pcr[i].wf() by {}
     assert(pcr_invfn()(pcr));
     pcr_ptr.put(Tracked(&mut pcr_perm), pcr);
     PCR().release(Tracked(&mut pcr_lock), Tracked(pcr_perm), Tracked(&cs.snpcore.coreid));

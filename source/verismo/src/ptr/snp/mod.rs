@@ -1,6 +1,6 @@
 pub mod rmp;
 mod snp_s;
-mod snp_u;
+pub(crate) mod snp_u;
 
 pub use rmp::*;
 pub use snp_s::*;

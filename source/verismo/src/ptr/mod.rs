@@ -8,13 +8,13 @@ use crate::tspec::*;
 extern crate alloc;
 
 mod def_s;
-mod ptr_s;
+pub(crate) mod ptr_s;
 mod ptr_t;
 mod ptr_u;
-mod snp;
+pub(crate) mod snp;
 
 mod ptr_e;
-mod raw_ptr_s;
+pub(crate) mod raw_ptr_s;
 mod raw_ptr_t;
 
 pub use def_s::*;

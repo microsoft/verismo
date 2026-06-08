@@ -134,7 +134,7 @@ impl MonitorParamPermsToData {
 
     pub open spec fn e820(&self) -> Seq<E820Entry> {
         let mp: SnpPointsToData<MonitorParams> = self.mp.vspec_cast_to();
-        let mp_value = mp.value().get_Some_0();
+        let mp_value = mp.value()->Some_0;
         let e820 = mp_value.validated_e820@;
         let n = mp_value.validated_entries;
         e820.take(n.vspec_cast_to())
@@ -142,7 +142,7 @@ impl MonitorParamPermsToData {
 
     pub open spec fn wf_param_value(&self) -> bool {
         let mp: SnpPointsToData<MonitorParams> = self.mp.vspec_cast_to();
-        let mp_value = mp.value().get_Some_0();
+        let mp_value = mp.value()->Some_0;
         let n = mp_value.validated_entries;
         &&& self.global_perms.wf_value(mp_value)
         &&& self.hvparampage.wf_const_default((mp_value.hv_param as int, PAGE_SIZE!() as nat))

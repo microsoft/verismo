@@ -271,12 +271,12 @@ verus! {
 
 pub open spec fn osmem_wf(osmem: Seq<OSMemEntry>) -> bool {
     &&& osmem.is_constant()
-    &&& forall|i| 0 <= i < osmem.len() ==> osmem[i].wf()
+    &&& forall|i| 0 <= i < osmem.len() ==> #[trigger] osmem[i].wf()
 }
 
 pub open spec fn osmem_wf_kern_cleared(osmem: Seq<OSMemEntry>) -> bool {
     &&& osmem.is_constant()
-    &&& forall|i| 0 <= i < osmem.len() ==> osmem[i].wf_kern_cleared()
+    &&& forall|i| 0 <= i < osmem.len() ==> #[trigger] osmem[i].wf_kern_cleared()
 }
 
 pub fn osmem_adjust(
@@ -435,7 +435,8 @@ pub fn osmem_add(
         ).set_vmsa(0);
         proof {
             assert(start_page.spec_valid_pn_with(npages as nat));
-            assert forall|i| old_page_perms.contains_key(i) implies spec_rmpadjmem_requires_at(
+            assert forall|i| #[trigger]
+                old_page_perms.contains_key(i) implies spec_rmpadjmem_requires_at(
                 old_page_perms[i],
                 i,
                 attr@,
@@ -461,7 +462,7 @@ pub fn osmem_add(
     };
     osmem.push(entry);
     proof {
-        assert forall|i| 0 <= i < osmem.len() implies osmem[i].wf() by {
+        assert forall|i| 0 <= i < osmem.len() implies #[trigger] osmem[i].wf() by {
             if i == osmem.len() - 1 {
                 assert forall|k| page_perms.contains_key(k) implies spec_contains_page_perm(
                     page_perms,
@@ -567,9 +568,8 @@ pub fn osmem_find(osmem: &Vec<OSMemEntry>, vpage: usize) -> (ret: Option<usize>)
     requires
         osmem_wf(osmem@),
     ensures
-        ret.is_Some() ==> (0 <= ret.unwrap() < osmem.len()
-            && osmem[ret.unwrap() as int].spec_start() <= vpage
-            < osmem[ret.unwrap() as int].spec_end()),
+        ret is Some ==> (0 <= ret.unwrap() < osmem.len() && osmem[ret.unwrap() as int].spec_start()
+            <= vpage < osmem[ret.unwrap() as int].spec_end()),
 {
     let mut i = 0;
     while i < osmem.len()
@@ -579,6 +579,7 @@ pub fn osmem_find(osmem: &Vec<OSMemEntry>, vpage: usize) -> (ret: Option<usize>)
         ensures
             0 <= i <= osmem.len(),
             i < osmem.len() ==> osmem[i as int].spec_start() <= vpage < osmem[i as int].spec_end(),
+        decreases osmem.len() - i,
     {
         let (start_page, npages): (usize, usize) = (
             osmem[i].start_page.into(),
@@ -589,7 +590,7 @@ pub fn osmem_find(osmem: &Vec<OSMemEntry>, vpage: usize) -> (ret: Option<usize>)
         }
         let end_page = start_page + npages;
         if vpage >= start_page && vpage < end_page {
-            break ;
+            break;
         }
         i = i + 1;
     }
@@ -620,6 +621,7 @@ pub fn osmem_check(osmem: &Vec<OSMemEntry>, ppage: usize, osperm: OSMemPerm) -> 
         osmem_wf(osmem@),
     ensures
         ret ==> (osperm.value == 0 || exists|i|
+            #![trigger spec_ensure_check_osperm(ppage as int, osperm, osmem[i])]
             0 <= i < osmem.len() && spec_ensure_check_osperm(ppage as int, osperm, osmem[i])),
 {
     match osmem_find(osmem, ppage) {
@@ -633,11 +635,10 @@ pub fn osmem_check_and_get(osmem: &mut Vec<OSMemEntry>, ppage: usize, osperm: OS
     requires
         osmem_wf(old(osmem)@),
     ensures
-        ret.is_None() ==> old(osmem) === osmem,
-        ret.is_Some() ==> osmem@ === old(osmem)@.remove(ret.get_Some_0().0 as int)
-            && ret.get_Some_0().1 === old(osmem)@[ret.get_Some_0().0 as int] && 0
-            <= ret.get_Some_0().0 < old(osmem)@.len(),
-        ret.is_Some() ==> spec_ensure_check_osperm(ppage as int, osperm, ret.get_Some_0().1),
+        ret is None ==> *old(osmem) === *osmem,
+        ret is Some ==> osmem@ === old(osmem)@.remove(ret->Some_0.0 as int) && ret->Some_0.1
+            === old(osmem)@[ret->Some_0.0 as int] && 0 <= ret->Some_0.0 < old(osmem)@.len(),
+        ret is Some ==> spec_ensure_check_osperm(ppage as int, osperm, ret->Some_0.1),
 {
     match osmem_find(osmem, ppage) {
         Some(i) if OSMemPerm::new(osmem[i].osperm.into()).is_super_of(&osperm) => {
@@ -659,12 +660,12 @@ pub fn osmem_check_and_get_page<T: IsConstant + SpecSize + WellFormed + VTypeCas
         old(cs).inv(),
     ensures
         osmem_wf(osmem@),
-        ret.is_Some() ==> ret.get_Some_0().0.wf(),
-        ret.is_Some() ==> ret.get_Some_0().0.is_page(),
-        ret.is_Some() ==> ret.get_Some_0().0.snp().encrypted(),
-        ret.is_Some() ==> ret.get_Some_0().0.snp().rmp@.spec_validated(),
-        ret.is_Some() ==> ret.get_Some_0().0.id() == (ppage as int).to_addr(),
-        ret.is_Some() ==> os_mem_valid_snp(ret.get_Some_0().1, ret.get_Some_0().0.snp()),
+        ret is Some ==> ret->Some_0.0.wf(),
+        ret is Some ==> ret->Some_0.0.is_page(),
+        ret is Some ==> ret->Some_0.0.snp().encrypted(),
+        ret is Some ==> ret->Some_0.0.snp().rmp@.spec_validated(),
+        ret is Some ==> ret->Some_0.0.id() == (ppage as int).to_addr(),
+        ret is Some ==> os_mem_valid_snp(ret->Some_0.1, ret->Some_0.0.snp()),
         cs.inv(),
         (*cs).only_lock_reg_updated((*old(cs)), set![], set![spec_PT().lockid()]),
 {
@@ -737,18 +738,19 @@ pub fn _osmem_add_ram_from_allocator(
             *snpcore === prevcore,
             allocator@.inv(),
             allocator.wf(),
-            range_mem.is_None() ==> (allocator@.len() == 0),
-            range_mem.is_Some() ==> range_mem.get_Some_0().1@@.wf_const_default(
-                (range_mem.get_Some_0().0.0 as int, range_mem.get_Some_0().0.1 as nat),
+            range_mem is None ==> (allocator@.len() == 0),
+            range_mem is Some ==> range_mem->Some_0.1@@.wf_const_default(
+                (range_mem->Some_0.0.0 as int, range_mem->Some_0.0.1 as nat),
             ),
         ensures
             osmem_wf(tmposmem@),
-            range_mem.is_None(),
+            range_mem is None,
             allocator@.inv(),
             allocator.wf(),
             allocator@.len() == 0,
             snpcore.inv(),
             *snpcore === prevcore,
+        decreases allocator@.len(),
     {
         let (range, perm) = range_mem.unwrap();
         let start_addr: usize = page_align_up(range.0);
@@ -787,7 +789,7 @@ pub fn _osmem_add_ram_from_allocator(
                     assert(aligned_perm@.bytes().is_constant());
                     assert(page_perms[i]@.bytes().is_constant()) by {
                         let b = page_perms[i]@.bytes();
-                        assert forall|k| 0 <= k < b.len() implies b[k].is_constant() by {
+                        assert forall|k| 0 <= k < b.len() implies #[trigger] b[k].is_constant() by {
                             let sub = aligned_perm@.bytes().subrange(
                                 offset,
                                 offset + PAGE_SIZE as int,
@@ -835,6 +837,7 @@ pub fn add_osmem_to_e820(e820: VBox<E820Table>, e820_count: usize, osmem: &Vec<O
             e820@.is_constant(),
             e820.snp().is_vmpl0_private(),
             osmem_wf(osmem@),
+        decreases osmem.len() - i,
     {
         let entry = &osmem[i];
         assert(osmem[i as int].wf());
@@ -869,6 +872,7 @@ pub fn add_osmem_to_mut_e820(e820: &mut E820Table, e820_count: usize, osmem: &Ve
             e820_count + osmem@.len() <= E820Table::spec_len(),
             e820@.is_constant(),
             osmem_wf(osmem@),
+        decreases osmem.len() - i,
     {
         let entry = &osmem[i];
         assert(osmem[i as int].wf());
@@ -901,8 +905,8 @@ pub fn osmem_add_ram_from_allocator(
     ensures
         osmem_wf((osmem)@),
         0 <= *(e820_size) <= e820@@.len(),
-        ret.is_Ok() ==> ret.get_Ok_0().only_val_updated(e820),
-        ret.is_Ok() ==> ret.get_Ok_0()@.is_constant(),
+        ret is Ok ==> ret->Ok_0.only_val_updated(e820),
+        ret is Ok ==> ret->Ok_0@.is_constant(),
         cs.inv(),
         cs.only_lock_reg_coremode_updated(*old(cs), set![], set![spec_ALLOCATOR_lockid()]),
 {
@@ -935,9 +939,9 @@ pub fn add_ram_from_allocator(
         0 <= *old(e820_size) <= old(e820)@.len(),
         old(cs).inv(),
     ensures
-        ret.is_Ok() ==> osmem_wf(ret.get_Ok_0()@),
+        ret is Ok ==> osmem_wf(ret->Ok_0@),
         0 <= *(e820_size) <= e820@.len(),
-        ret.is_Ok() ==> e820@.is_constant(),
+        ret is Ok ==> e820@.is_constant(),
         cs.inv(),
         cs.only_lock_reg_coremode_updated(*old(cs), set![], set![spec_ALLOCATOR_lockid()]),
 {
@@ -1044,6 +1048,7 @@ fn _lock_kernel(
             (start as int).spec_valid_pn_with((end - start) as nat),
             snpcore.inv(),
             *snpcore === *old(snpcore),
+        decreases end - start,
     {
         if let Some(e) = osmem_check_and_get(osmem, start, OSMemPerm::ram()) {
             let (i, mut entry) = e;
@@ -1094,7 +1099,7 @@ fn _lock_kernel(
             }
             start = tmp_end;
         } else {
-            break ;
+            break;
         }
     }
     return start;
@@ -1141,6 +1146,7 @@ fn clear_kern_if_private(entry: OSMemEntry, Tracked(cs): Tracked<&mut SnpCoreSha
                 (tmp_start - start) as nat,
                 osperm,
             ),
+        decreases end - tmp_start,
     {
         let attr = RmpAttr::empty().set_vmpl(RICHOS_VMPL as u64).set_perms(
             osperm.value as u64,
@@ -1227,6 +1233,7 @@ fn _clear_kern_exe(osmem: &mut OSMem, Tracked(cs): Tracked<&mut SnpCoreSharedMem
             osmem_wf_kern_cleared(osmem@.take(i as int)),
             cs.inv(),
             cs.only_lock_reg_updated((*old(cs)), set![], set![spec_PT().lockid()]),
+        decreases osmem.len() - i,
     {
         let mut entry = osmem.remove(i);
         proof {
@@ -1247,6 +1254,7 @@ pub fn lock_kernel(
     requires
         osmem_wf(old(osmem)@),
         forall|i|
+            #![trigger (ranges@[i].0 as int).spec_valid_pn_with(ranges@[i].1 as nat)]
             0 <= i < ranges@.len() ==> (ranges@[i].0 as int).spec_valid_pn_with(
                 ranges@[i].1 as nat,
             ),
@@ -1262,11 +1270,13 @@ pub fn lock_kernel(
         invariant
             osmem_wf(osmem@),
             forall|i|
+                #![trigger (ranges@[i].0 as int).spec_valid_pn_with(ranges@[i].1 as nat)]
                 0 <= i < ranges@.len() ==> (ranges@[i].0 as int).spec_valid_pn_with(
                     ranges@[i].1 as nat,
                 ),
             cs.inv(),
             cs.only_lock_reg_updated((*old(cs)), set![], set![spec_PT().lockid()]),
+        decreases ranges.len() - i,
     {
         let range = &ranges[i];
         let end = _lock_kernel(osmem, range, Tracked(&mut cs.snpcore));

@@ -47,7 +47,7 @@ impl Archx64Op {
     }
 
     pub open spec fn memop(&self) -> MemOp<GuestVir> {
-        self.get_MemOp_0()
+        self->MemOp_0
     }
 }
 
@@ -55,14 +55,14 @@ impl Archx64 {
     #[verifier(external_body)]
     pub broadcast proof fn axiom_reg_dom(&self, cpumemid: CpuMemID)
         ensures
-            self.spec_regdb().dom().contains(cpumemid),
+            #[trigger] self.spec_regdb().dom().contains(cpumemid),
     {
     }
 
     #[verifier(external_body)]
     pub broadcast proof fn axiom_entities_dom(&self, memid: MemID)
         ensures
-            self.spec_entities().dom().contains(memid),
+            #[trigger] self.spec_entities().dom().contains(memid),
     {
     }
 
@@ -161,7 +161,7 @@ impl Archx64 {
                         ExceptionCode::PFault(Archx64Op::MemOp(memop, op.cpu())),
                     ),
             ),
-            MemError::RmpOp(fault, memop) => if memop.is_RmpOp() {
+            MemError::RmpOp(fault, memop) => if memop is RmpOp {
                 match fault {
                     RmpFault::Unsupported => {
                         (
@@ -259,8 +259,8 @@ impl Archx64 {
                         ResultWithErr::Ok(newmem) => {
                             let new = init.spec_set_memdb(newmem);
                             let cpu = op.start_cpu_with_vmsa();
-                            if cpu.is_Some() {
-                                new.start_cpu(op.to_memid(), cpu.get_Some_0())
+                            if cpu is Some {
+                                new.start_cpu(op.to_memid(), cpu->Some_0)
                             } else {
                                 new
                             }
@@ -331,6 +331,11 @@ impl Archx64 {
             _ => { Archx64Ret::None },
         }
     }
+}
+
+pub broadcast group group_x64_default {
+    Archx64::axiom_reg_dom,
+    Archx64::axiom_entities_dom,
 }
 
 } // verus!

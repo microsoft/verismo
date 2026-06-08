@@ -27,12 +27,12 @@ impl CoreMode {
                 (prev_ghcbperm.value.vspec_cast_to(), ghcbperm.value.vspec_cast_to()),
             ),
         ).spec_set_sent_mem(
-            if memperm.is_Some() {
+            if memperm is Some {
                 prev.sent_mem.push(
                     (
-                        memperm.get_Some_0()@.range(),
-                        prev_memperm.get_Some_0()@.bytes(),
-                        memperm.get_Some_0()@.bytes(),
+                        memperm->Some_0@.range(),
+                        prev_memperm->Some_0@.bytes(),
+                        memperm->Some_0@.bytes(),
                     ),
                 )
             } else {
@@ -48,7 +48,7 @@ pub tracked struct CoreIdPerm {
 }
 
 impl CoreIdPerm {
-    pub spec fn view(&self) -> CoreMode;
+    pub uninterp spec fn view(&self) -> CoreMode;
 }
 
 pub open spec fn spec_cpumap_contains_cpu(ap_ids: Map<int, CoreIdPerm>, i: int, vmpl: nat) -> bool {

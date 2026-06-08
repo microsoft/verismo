@@ -31,14 +31,14 @@ fn num_to_char(n: u8) -> (ret: u8)
 }
 
 #[verifier(external_body)]
-fn bytes_to_str<const N: usize_t, 'a>(arr: &'a Array<u8_t, N>) -> (ret: StrSlice<'a>)
+fn bytes_to_str<const N: usize_t, 'a>(arr: &'a Array<u8_t, N>) -> (ret: &'a str)
     ensures
         ret.is_ascii(),
         ret@.len() <= arr@.len(),
-        forall|i| 0 <= i < ret@.len() ==> arr@[i] == ret@[i] as u8,
+        forall|i| 0 <= i < ret@.len() ==> #[trigger] arr@[i] == ret@[i] as u8,
 {
     let slice = arr.array.as_slice();
-    StrSlice::from_rust_str(core::str::from_utf8(slice).unwrap())
+    core::str::from_utf8(slice).unwrap()
 }
 
 } // verus!
@@ -53,7 +53,7 @@ fn int2bytes(input: u64, base: u64) -> (ret: (Array<u8_t, 66>, usize))
     ensures
         ascii_is_num(ret.0@[0]),
         3 <= ret.1 <= 66,
-        (forall|k: int| 2 <= k < (ret.1 as int) ==> ascii_is_num(ret.0@[k])),
+        (forall|k: int| 2 <= k < (ret.1 as int) ==> #[trigger] ascii_is_num(ret.0@[k])),
 {
     let mut n = input;
     let mut bytes: Array<u8, 66> = Array::new(0);
@@ -77,7 +77,8 @@ fn int2bytes(input: u64, base: u64) -> (ret: (Array<u8_t, 66>, usize))
             i < 64 ==> n <= u64::MAX / (1u64 << i as u64),
             i == 64 ==> n == 0,
             n == 0 ==> i > 0,
-            forall|k| 0 <= k < i ==> ascii_is_num(bytes@[k]),
+            forall|k| 0 <= k < i ==> #[trigger] ascii_is_num(bytes@[k]),
+        decreases 64 - i,
     {
         proof {
             assert(n as u64 / base as u64 <= n as u64 / 2) by (nonlinear_arith)
@@ -93,7 +94,7 @@ fn int2bytes(input: u64, base: u64) -> (ret: (Array<u8_t, 66>, usize))
                 assert(pow2 == (pow1 * 2) as u64);
                 assert(pow1 * 2 == (pow1 * 2) as u64);
                 assert(u64::MAX / pow2 == u64::MAX / ((pow1 * 2) as u64));
-                assume(u64::MAX / ((pow1 * 2) as u64) == u64::MAX / pow1 / 2);  // TODO: add nonlinear proof
+                assert(u64::MAX / ((pow1 * 2) as u64) == u64::MAX / pow1 / 2);
             }
             assert(u64::MAX / (1u64 << 63u64) / 2 == 0);
         }
@@ -135,6 +136,7 @@ fn bytes2u64(s: &[u8], start: usize_t, size: usize_t) -> (ret: u64_t)
             start + size <= s@.len(),
             size < 8,
             s@.len() < u64::MAX,
+        decreases start + size - i,
     {
         let c: u64 = (*slice_index_get(s, i)) as u64;
         let offset = (i - start) as u64;
@@ -161,8 +163,9 @@ fn str2u64(s: &StrSlice, start: usize_t, size: usize_t) -> (ret: u64_t)
             size < 8,
             s.is_ascii(),
             s@.len() < u64::MAX,
+        decreases start + size - i,
     {
-        let c: u64 = s.get_ascii(i) as u64;
+        let c: u64 = s.as_bytes()[i] as u64;
         let offset = (i - start) as u64;
         ret = ret | (c << (offset * 8));
         i = i + 1;
@@ -215,7 +218,7 @@ fn ghcb_prints_with_lock2<'a>(
         print_ensures_snp_c(*old(snpcore), (console), *snpcore, ret.1@),
 {
     let mut index: usize = 0;
-    let n = s.unicode_len();
+    let n = s.len();
     let ghost prevcore = *snpcore;
     let tracked perm = snpcore.regs.tracked_borrow(GHCB_REGID());
     fence();
@@ -233,6 +236,7 @@ fn ghcb_prints_with_lock2<'a>(
             snpcore_console_wf(*snpcore, console),
             snpcore.only_reg_coremode_updated(prevcore, set![GHCB_REGID()]),
             console@.only_val_updated(oldconsole),
+        decreases n - index,
     {
         let len = min(6, n as u64 - index as u64) as usize;
         let val: u64_t = GHCB_HV_DEBUG;
@@ -312,6 +316,7 @@ fn ghcb_print_bytes_with_lock2<'a>(
             snpcore_console_wf(*snpcore, console),
             snpcore.only_reg_coremode_updated(prevcore, set![GHCB_REGID()]),
             console@.only_val_updated(oldconsole@),
+        decreases n - index,
     {
         let len = min(6, n as u64 - index as u64) as usize;
         let val: u64_t = GHCB_HV_DEBUG;
@@ -337,7 +342,7 @@ fn ghcb_print_bytes_with_lock2<'a>(
 } // verus!
 verus! {
 
-impl<'a> VPrint for StrSlice<'a> {
+impl<'a> VPrint for &'a str {
     open spec fn early_print_requires(&self) -> bool {
         &&& self@.len() < u64::MAX - 64
         &&& self.is_ascii()
@@ -419,9 +424,6 @@ impl<T1: VPrint, T2: VPrint> VPrint for (T1, T2) {
         Tracked(snpcore): Tracked<&mut SnpCore>,
         Tracked(console): Tracked<SnpPointsToRaw>,
     ) -> (newconsole: Tracked<SnpPointsToRaw>) {
-        proof {
-            reveal_strlit(" ");
-        }
         let Tracked(console) = self.0.early_print2(Tracked(snpcore), Tracked(console));
         let Tracked(console) = new_strlit(" ").early_print2(Tracked(snpcore), Tracked(console));
         self.1.early_print2(Tracked(snpcore), Tracked(console))
@@ -436,31 +438,32 @@ impl<T: ?Sized + VPrint> VPrintLock for T {
 
     #[inline]
     fn print(&self, Tracked(cs): Tracked<&mut SnpCoreSharedMem>) {
-        let ghost oldlockperms = cs.lockperms;
         let console_ref = CONSOLE();
         let tracked consolelock = cs.lockperms.tracked_remove(console_ref.lockid());
-        let ghost oldconsolelock = consolelock;
+        proof {
+            broadcast use crate::global::axiom_global_CONSOLE;
 
-        assert(cs.lockperms.inv(cs.snpcore.cpu()));
-        assert(console_ref.is_constant());
+        }
         let (_, Tracked(console), Tracked(mut consolelock)) = console_ref.acquire(
             Tracked(consolelock),
             Tracked(&cs.snpcore.coreid),
         );
         let tracked console = console.trusted_into_raw();
-        assert(console.is_console());
         let Tracked(mut console) = self.early_print2(Tracked(&mut cs.snpcore), Tracked(console));
+        let tracked console_perm = console.trusted_into();
+        proof {
+            broadcast use LockPermToRaw::axiom_spec_new;
+
+        }
         console_ref.release(
             Tracked(&mut consolelock),
-            Tracked(console.trusted_into()),
+            Tracked(console_perm),
             Tracked(&cs.snpcore.coreid),
         );
         proof {
             cs.lockperms.tracked_insert(console_ref.lockid(), consolelock);
-            assert(consolelock@.points_to.only_val_updated(oldconsolelock@.points_to));
-            //assert(consolelock@.points_to.bytes() =~~= oldconsolelock@.points_to.bytes());
-            //assert(consolelock@ === oldconsolelock@);
-            assert(cs.lockperms.updated_lock(&oldlockperms, set![console_ref.lockid()]));
+            broadcast use crate::global::axiom_global_auto;
+
         }
     }
 }

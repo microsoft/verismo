@@ -33,26 +33,7 @@ pub fn SM_TERM_RICHOS_ERR(subcode: u64_t) -> (ret: u64_t)
     (SM_TERM_RICHOS + (subcode << SUBCODE_OFFSET))
 }
 
-} // verus!
-verus! {
-
 pub const GHCB_HV_DEBUG: u64 = 0xf03;
-
-} // verus!
-/*
-#[verifier::external]
-pub mod trust {
-    use alloc::fmt;
-
-    use super::*;
-    impl fmt::Write for GHCBProto {
-        fn write_str(&mut self, s: &str) -> fmt::Result {
-            GHCBProto::print_str(s);
-            Ok(())
-        }
-    }
-}*/
-verus! {
 
 pub open spec fn GHCB_REGID() -> RegName {
     RegName::MSR(MSR_GHCB_BASE)
@@ -165,6 +146,7 @@ pub fn ghcb_msr_send(
     //ghcb_msr.write_vmgexit(val, Tracked(&mut ghcbperm), Tracked(&mut snpcore.coreid), Tracked(memperm));
     proof {
         let ghcb_write_val: nat = ghcbperm.val::<u64_s>().vspec_cast_to();
+        // MSR_GHCB.write just stored val into ghcbperm.
         assert(ghcb_write_val == val as nat);
     }
     vmgexit(Tracked(&mut ghcbperm), Tracked(&mut snpcore.coreid), Tracked(memperm));
@@ -236,7 +218,8 @@ pub fn ghcb_msr_proto(val: u64, Tracked(snpcore): Tracked<&mut SnpCore>) -> (ret
 } // verus!
 verus! {
 
-fn vc_terminate_s(reason_code: u64, Tracked(snpcore): Tracked<&mut SnpCore>) -> (ret: !)
+#[verifier::exec_allows_no_decreases_clause]
+fn vc_terminate_s(reason_code: u64, Tracked(snpcore): Tracked<&mut SnpCore>) -> !
     requires
         (*old(snpcore)).inv_reg_cpu(),
         reason_code.is_constant(),
@@ -249,7 +232,7 @@ fn vc_terminate_s(reason_code: u64, Tracked(snpcore): Tracked<&mut SnpCore>) -> 
     }
 }
 
-pub fn vc_terminate(reason_code: u64_t, Tracked(snpcore): Tracked<&mut SnpCore>) -> (ret: !)
+pub fn vc_terminate(reason_code: u64_t, Tracked(snpcore): Tracked<&mut SnpCore>) -> !
     requires
         (*old(snpcore)).inv_reg_cpu(),
     ensures
@@ -259,10 +242,7 @@ pub fn vc_terminate(reason_code: u64_t, Tracked(snpcore): Tracked<&mut SnpCore>)
     vc_terminate_s(reason_code, Tracked(snpcore))
 }
 
-pub fn early_vc_terminate_debug(
-    reason_code: u64_t,
-    Tracked(cc): Tracked<&mut SnpCoreConsole>,
-) -> (ret: !)
+pub fn early_vc_terminate_debug(reason_code: u64_t, Tracked(cc): Tracked<&mut SnpCoreConsole>) -> !
     requires
         old(cc).wf(),
     ensures
@@ -271,8 +251,7 @@ pub fn early_vc_terminate_debug(
     vc_terminate_s(reason_code, Tracked(&mut cc.snpcore))
 }
 
-pub fn vc_terminate_debug(reason_code: u64_t, Tracked(cs): Tracked<&mut SnpCoreSharedMem>) -> (ret:
-    !)
+pub fn vc_terminate_debug(reason_code: u64_t, Tracked(cs): Tracked<&mut SnpCoreSharedMem>) -> !
     requires
         old(cs).inv(),
     ensures
@@ -303,7 +282,7 @@ proof fn trusted_ghcb_change_page_state(
         old(perm)@.wf(),
     ensures
         perm@.range() === old(perm)@.range(),
-        perm@.snp().ensures_rmpupdate(old(perm)@.snp(), op.is_Shared(), op.is_Unsmash()),
+        perm@.snp().ensures_rmpupdate(old(perm)@.snp(), op is Shared, op is Unsmash),
         perm@.wf(),
 {
 }

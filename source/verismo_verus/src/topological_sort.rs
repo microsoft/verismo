@@ -7,7 +7,8 @@ pub struct TopologicalSort<T> {
 }
 
 impl<T> TopologicalSort<T>
-where T: std::cmp::Eq + std::hash::Hash + Clone
+where
+    T: std::cmp::Eq + std::hash::Hash + Clone,
 {
     pub fn new() -> Self {
         TopologicalSort { values: vec![], nodes: HashMap::new(), edges_rev: vec![] }

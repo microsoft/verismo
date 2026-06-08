@@ -4,7 +4,6 @@ use crate::tspec::*;
 
 verus! {
 
-#[is_variant]
 pub enum RegName {
     // register fields
     Rflags,
@@ -28,7 +27,6 @@ pub enum RegName {
 }
 
 #[derive(SpecIntEnum)]
-#[is_variant]
 pub enum RflagBit {
     CF = 0,  // Carry flag
     R1 = 1,
@@ -72,8 +70,16 @@ pub type RegDB = FMap<RegName, RegValType>;
 
 verus! {
 
-impl RegDB {
-    pub open spec fn reg_inv(&self) -> bool {
+// `RegDB` is a type alias for `FMap<..>`, which is foreign (from
+// `verismo_tspec`). Inherent impls on foreign types are forbidden, so we
+// expose `reg_inv` via a local trait. (Orphan rule allows local-trait +
+// foreign-type impls.)
+pub trait RegDbInv {
+    spec fn reg_inv(&self) -> bool;
+}
+
+impl RegDbInv for RegDB {
+    open spec fn reg_inv(&self) -> bool {
         &&& self[RegName::Cpl] == 0
     }
 }

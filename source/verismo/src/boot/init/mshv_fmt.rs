@@ -8,7 +8,7 @@ verus! {
 
 pub closed spec fn get_hv_mem_count_ensures(arr: Seq<HyperVMemMapEntry>, ret: nat) -> bool {
     &&& ret <= arr.len()
-    &&& forall|i: int| 0 <= i < (ret as int) ==> arr[i].numpages@.val != 0
+    &&& forall|i: int| #![trigger arr[i]] 0 <= i < (ret as int) ==> arr[i].numpages@.val != 0
     &&& ret < arr.len() ==> arr[ret as int].numpages@.val == 0
 }
 
@@ -18,7 +18,7 @@ pub fn get_hv_mem_count(arr: &HyperVMemMapTable) -> (ret: usize_t)
     ensures
         ret <= arr@.len(),
         ret.is_constant(),
-        forall|i: int| 0 <= i < (ret as int) ==> arr@[i].numpages@.val != 0,
+        forall|i: int| #![trigger arr@[i]] 0 <= i < (ret as int) ==> arr@[i].numpages@.val != 0,
         ret < arr@.len() ==> arr@[ret as int].numpages@.val == 0,
         get_hv_mem_count_ensures(arr@, ret as nat),
 {
@@ -31,15 +31,16 @@ pub fn get_hv_mem_count(arr: &HyperVMemMapTable) -> (ret: usize_t)
             ret.is_constant(),
             len.is_constant(),
             arr.is_constant(),
-            forall|i: int| 0 <= i < (ret as int) ==> arr@[i].numpages@.val != 0,
+            forall|i: int| #![trigger arr@[i]] 0 <= i < (ret as int) ==> arr@[i].numpages@.val != 0,
         ensures
             ret < arr@.len() ==> arr@[ret as int].numpages@.val == 0,
             ret <= arr@.len(),
             ret.is_constant(),
-            forall|i: int| 0 <= i < (ret as int) ==> arr@[i].numpages@.val != 0,
+            forall|i: int| #![trigger arr@[i]] 0 <= i < (ret as int) ==> arr@[i].numpages@.val != 0,
+        decreases len - ret,
     {
         if arr.index(ret).numpages.reveal_value() == 0 {
-            break ;
+            break;
         }
         ret = ret + 1usize;
     }
@@ -68,16 +69,13 @@ pub fn fmt_hvparam<'a>(hv_param: &'a mut HvParamTable, n: usize_t) -> (ret: Opti
         old(hv_param).is_constant(),
         n <= old(hv_param).mem_table@.len(),
         n.is_constant(),
-        forall|i: int| 0 <= i < (n as int) ==> old(hv_param).mem_table@[i].numpages@.val != 0,
+        forall|i: int|
+            #![trigger old(hv_param).mem_table@[i]]
+            0 <= i < (n as int) ==> old(hv_param).mem_table@[i].numpages@.val != 0,
         n < old(hv_param).mem_table@.len() ==> old(hv_param).mem_table@[n as int].numpages@.val
             == 0,
     ensures
-        ret.is_Some() ==> fmt_hvparam_ensures(
-            *old(hv_param),
-            *hv_param,
-            n as nat,
-            ret.get_Some_0(),
-        ),
+        ret is Some ==> fmt_hvparam_ensures(*old(hv_param), *hv_param, n as nat, ret->Some_0),
 {
     let ghost hvslice = hv_param.mem_table@.subrange(0, n as int);
     proof {
@@ -99,11 +97,14 @@ pub fn fmt_hvparam<'a>(hv_param: &'a mut HvParamTable, n: usize_t) -> (ret: Opti
         assert(format_range_ensures(memtb, prev_memtb, visited as nat));
         assert(forall|i| 0 <= i < memtb.len() ==> is_format_entry(#[trigger] memtb[i], prev_memtb));
         assert(memtb.is_constant()) by {
-            assert forall|i| 0 <= i < memtb.len() implies memtb[i].is_constant() by {
+            assert forall|i|
+                #![trigger memtb[i]]
+                0 <= i < memtb.len() implies memtb[i].is_constant() by {
                 let entry = memtb[i];
                 if i < validn as int {
                     assert(is_format_entry(entry, prev_memtb));
                     let j = choose|j|
+                        #![trigger prev_memtb[j]]
                         entry === prev_memtb[j].spec_set_range(entry.spec_real_range()) && 0 <= j
                             && j < prev_memtb.len();
                     assert(entry === prev_memtb[j].spec_set_range(entry.spec_real_range()));

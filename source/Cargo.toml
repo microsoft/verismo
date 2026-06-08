@@ -1,17 +1,29 @@
 [workspace]
+resolver = "2"
 members = [
     "verismo_main",
     "verismo",
-    "verismo_macro"
+    "verismo_macro",
+    "verismo_tspec"
 ]
 
 [workspace.dependencies]
-# Verus repos
-builtin = { git = "https://github.com/ziqiaozhou/verus", rev ="7c4a5274a4d74522f3965eb038bb7e22fa5eebef" }
-vstd = { git = "https://github.com/ziqiaozhou/verus", rev ="7c4a5274a4d74522f3965eb038bb7e22fa5eebef", features = ["alloc"], default-features = false }
-builtin_macros = { git = "https://github.com/ziqiaozhou/verus", rev ="7c4a5274a4d74522f3965eb038bb7e22fa5eebef" }
-syn_verus = { git = "https://github.com/ziqiaozhou/verus", rev ="7c4a5274a4d74522f3965eb038bb7e22fa5eebef", features = ["full", "visit-mut", "extra-traits"] }
-prettyplease_verus = { git = "https://github.com/ziqiaozhou/verus", rev ="7c4a5274a4d74522f3965eb038bb7e22fa5eebef" }
+# Verus crates from crates.io.
+# `builtin` and `builtin_macros` are kept as the local crate names (via the
+# `package = ...` rename) so we don't have to touch the `use builtin::*;` /
+# `use builtin_macros::*;` statements scattered through the codebase.
+builtin = { package = "verus_builtin", version = "=0.0.0-2026-05-17-0151", default-features = false }
+builtin_macros = { package = "verus_builtin_macros", version = "=0.0.0-2026-05-24-0157", features = ["vpanic"], default-features = false }
+verus_state_machines_macros = { version = "=0.0.0-2026-05-24-0157", default-features = false }
+vstd = { version = "=0.0.0-2026-05-24-0157", features = ["alloc", "allow_panic"], default-features = false }
+
+# `syn_verus` and `prettyplease_verus` are used only by the project's own
+# proc-macro crates (`verismo_macro` and `verismo_verus`). They are pinned to
+# the old syn-1.x-based fork because the rest of those macros are written
+# against the syn-1.x API (e.g. `token::Colon2`, `NestedMeta`, etc.); the
+# current upstream `verus_syn` is a syn-2.0 fork with a different API.
+syn_verus = { git = "https://github.com/verus-lang/verus", rev ="7c4a5274a4d74522f3965eb038bb7e22fa5eebef", features = ["full", "visit-mut", "extra-traits"] }
+prettyplease_verus = { git = "https://github.com/verus-lang/verus", rev ="7c4a5274a4d74522f3965eb038bb7e22fa5eebef" }
 
 # the profile used for `cargo build`
 [profile.dev]

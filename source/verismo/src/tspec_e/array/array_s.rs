@@ -7,15 +7,8 @@ verismo! {
         }
     }
 
-    impl<T: IsConstant + WellFormed> IsConstant for [T] {
-        open spec fn is_constant(&self) -> bool {
-            self@.is_constant()
-        }
-
-        open spec fn is_constant_to(&self, vmpl: nat) -> bool {
-            self@.is_constant_to(vmpl)
-        }
-    }
+    // `impl IsConstant for [T]` was moved into `verismo_tspec::vec_spec`
+    // (orphan rule: both `IsConstant` and `[T]` are foreign to verismo).
 
     impl<T: IsConstant + WellFormed, const N: IndexType> IsConstant for Array<T, N> {
         open spec fn is_constant(&self) -> bool {

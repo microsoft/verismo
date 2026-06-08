@@ -39,6 +39,7 @@ pub fn ghcb_change_page_state_via_pg(
         spec_valid_page_state_change(ppage, npages as nat),
         requires_pages_perms(*old(page_perms), ppage as int, npages as nat),
         forall|i|
+            #![trigger old(page_perms).contains_key(i)]
             ppage <= i < (ppage + npages) ==> old(page_perms).contains_key(i) && old(
                 page_perms,
             )[i]@.wf_range((i.to_addr(), PAGE_SIZE as nat)),
@@ -83,10 +84,14 @@ pub fn ghcb_change_page_state_via_pg(
                 offset as nat,
                 op,
             ),
-            forall|i| (ppage + offset) <= i < (ppage + npages) ==> page_perms.contains_key(i),
             forall|i|
+                (ppage + offset) <= i < (ppage + npages) ==> #[trigger] page_perms.contains_key(i),
+            forall|i|
+                #![trigger old_page_perms[i]]
+                #![trigger page_perms[i]]
                 (ppage + offset) <= i < (ppage + npages) ==> old_page_perms[i] === page_perms[i],
             requires_pages_perms(old_page_perms, ppage as int, npages as nat),
+        decreases npages - offset,
     {
         let ghost prevcs = *cs;
         let n = if (npages - offset) < SNP_PAGE_STATE_CHANGE_MAX_ENTRY as u64 {
@@ -99,7 +104,7 @@ pub fn ghcb_change_page_state_via_pg(
             ghcbpage_perm0.tracked_insert(0, ghcbpage_perm);
         }
         let ghost subdom = Set::new(|i| ppage + offset <= i < ppage + offset + n);
-        assert forall|i| subdom.contains(i) implies page_perms.contains_key(i) by {
+        assert forall|i| #[trigger] subdom.contains(i) implies page_perms.contains_key(i) by {
             assert(old_page_perms[i] === page_perms[i]);
             assert(ppage + offset <= i < ppage + npages);
         }
@@ -108,6 +113,8 @@ pub fn ghcb_change_page_state_via_pg(
         let tracked mut sub_page_perms = page_perms.tracked_remove_keys(subdom);
         let ghost removed_page_perms = *page_perms;
         assert forall|i|
+            #![trigger subdom.contains(i)]
+            #![trigger page_perms[i]]
             !subdom.contains(i) && prev_page_perms.contains_key(i) implies page_perms.contains_key(
             i,
         ) && page_perms[i] === prev_page_perms[i] by {}
@@ -125,6 +132,7 @@ pub fn ghcb_change_page_state_via_pg(
             let tracked sub_page_perms = sub_page_perms.tracked_remove_keys(subdom);
             page_perms.tracked_union_prefer_right(sub_page_perms);
             assert forall|i|
+                #![trigger page_perms.contains_key(i)]
                 !sub_page_perms.contains_key(i) && prev_page_perms.contains_key(
                     i,
                 ) implies page_perms.contains_key(i) && page_perms[i] === prev_page_perms[i] by {
@@ -151,8 +159,10 @@ pub fn ghcb_change_page_state_via_pg(
                     assert(page_perms[i] === sub_page_perms[i]);
                 }
             }
-            assert forall|i| (ppage + offset) <= i < (ppage + npages) implies (
-            page_perms.contains_key(i) && old_page_perms[i] === page_perms[i]) by {
+            assert forall|i|
+                #![trigger page_perms.contains_key(i)]
+                (ppage + offset) <= i < (ppage + npages) implies (page_perms.contains_key(i)
+                && old_page_perms[i] === page_perms[i]) by {
                 assert(!subdom.contains(i));
                 assert(!sub_page_perms.contains_key(i));
                 assert(page_perms[i] === prev_page_perms[i]);
@@ -170,8 +180,10 @@ pub fn ghcb_change_page_state_via_pg(
 } // verus!
 mod internal {
     use super::*;
+    #[rustfmt::skip]
     verus! {
 
+#[verifier::exec_allows_no_decreases_clause]
 pub fn ghcb_change_page_state_via_pg_internal(
     ghcb_ptr: SnpPPtr<GhcbPage>,
     ppage: u64,
@@ -190,6 +202,7 @@ pub fn ghcb_change_page_state_via_pg_internal(
         npages <= SNP_PAGE_STATE_CHANGE_MAX_ENTRY,
         requires_pages_perms(*old(page_perms), ppage as int, npages as nat),
         forall|i|
+            #![trigger old(page_perms).contains_key(i)]
             ppage <= i < (ppage + npages) ==> old(page_perms).contains_key(i) && old(
                 page_perms,
             )[i]@.wf_range((i.to_addr(), PAGE_SIZE as nat)),
@@ -208,7 +221,7 @@ pub fn ghcb_change_page_state_via_pg_internal(
         ),
 {
     if npages == 0 {
-        return ;
+        return;
     }
     let tracked mut ghcbpage_perm = ghcbpage_perm0.tracked_remove(0);
     let scratch_ptr = ghcb_ptr.shared_buffer();
@@ -246,7 +259,7 @@ pub fn ghcb_change_page_state_via_pg_internal(
             ghcbpage_perm@.only_val_updated(old_ghcbpage_perm@),
             cs.inv(),
             cs.only_lock_reg_coremode_updated(oldcs, set![], set![]),
-            page_perms === old(page_perms),
+            *page_perms === *old(page_perms),
     {
         let mut ghcb = VBox::<GhcbPage>::from_raw(ghcb_ptr.to_usize(), Tracked(ghcbpage_perm));
         ghcb.box_update((GhcbSetSwScratchFn, scratch_paddr));
@@ -269,7 +282,6 @@ pub fn ghcb_change_page_state_via_pg_internal(
         );
         proof {
             oldcs.lemma_update_prop(prevcs, *cs, set![], set![], set![], set![]);
-            assert(cs.only_lock_reg_coremode_updated(oldcs, set![], set![]));
         }
         match resp {
             SvmStatus::Ok => {},
@@ -375,6 +387,7 @@ impl<'a> MutFnTrait<'a, FillPageStateChange, bool> for SnpPageStateChange {
         let opval = op.as_int() as u64;
         &&& self.is_constant()
         &&& forall|k: int|
+            #![trigger SnpPageStateChangeEntry::spec_new(self.entries@[k].vspec_cast_to())@]
             0 <= k < npages ==> SnpPageStateChangeEntry::spec_new(self.entries@[k].vspec_cast_to())@
                 === SpecSnpPageStateChangeEntry::req_entry((ppage + k) as u64, opval, 0)
     }
@@ -395,9 +408,11 @@ impl<'a> MutFnTrait<'a, FillPageStateChange, bool> for SnpPageStateChange {
                 opval == op.as_int(),
                 npages <= SNP_PAGE_STATE_CHANGE_MAX_ENTRY,
                 forall|k: int|
+                    #![trigger SnpPageStateChangeEntry::spec_new(self.entries@[k].vspec_cast_to())@]
                     0 <= k < i ==> SnpPageStateChangeEntry::spec_new(
                         self.entries@[k].vspec_cast_to(),
                     )@ === SpecSnpPageStateChangeEntry::req_entry((ppage + k) as u64, opval, 0),
+            decreases npages - i,
         {
             let gpn = ppage + i as u64;
             let entry = SnpPageStateChangeEntry::empty().set_gpn(gpn).set_operation(

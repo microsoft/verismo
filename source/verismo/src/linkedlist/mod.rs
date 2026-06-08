@@ -53,15 +53,15 @@ impl<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> SnpPPtr<Node
         Tracked<SnpPointsTo<Node<T>>>)
         requires
             (perm)@.ptr_not_null_wf(*self),
-            perm@.value().is_Some(),
+            perm@.value() is Some,
             next.wf(),
             next.is_constant(),
         ensures
             newperm@@.ptr_not_null_wf(*self),
-            newperm@@.value().get_Some_0().next === next,
-            newperm@@.value().get_Some_0().val === (perm)@.value().get_Some_0().val,
+            newperm@@.value()->Some_0.next === next,
+            newperm@@.value()->Some_0.val === (perm)@.value()->Some_0.val,
             newperm@@.snp() === perm@.snp(),
-            newperm@@.value().is_Some(),
+            newperm@@.value() is Some,
     {
         let tracked mut mp = perm;
         let tracked mut mp1;
@@ -70,21 +70,21 @@ impl<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> SnpPPtr<Node
         proof {
             let value = mp@.value();
             let tracked tmp = mp.trusted_into_raw();
-            assert(tmp@.bytes() === value.get_Some_0().vspec_cast_to());
+            assert(tmp@.bytes() === value->Some_0.vspec_cast_to());
             let tracked (rmp1, rmp2) = tmp.trusted_split(spec_size::<usize>());
             assert(rmp1@.snp() === rmp2@.snp());
             mp1 = rmp1.trusted_into();
             mp2 = rmp2;
-            let bytes1 = old_perm@.value().get_Some_0().next.sec_bytes();
-            let bytes2 = old_perm@.value().get_Some_0().val.sec_bytes();
-            let bytes3 = old_perm@.value().get_Some_0().sec_bytes();
+            let bytes1 = old_perm@.value()->Some_0.next.sec_bytes();
+            let bytes2 = old_perm@.value()->Some_0.val.sec_bytes();
+            let bytes3 = old_perm@.value()->Some_0.sec_bytes();
             assert(bytes3.subrange(bytes1.len() as int, bytes3.len() as int) =~~= bytes2);
             assert(mp2@.bytes() === bytes2);
             assert(mp1@.snp() === mp2@.snp());
-            assert(mp1@.value().is_Some());
-            assert(mp1@.value().get_Some_0() === value.get_Some_0().next) by {
-                let v1 = mp1@.value().get_Some_0();
-                let v2 = value.get_Some_0();
+            assert(mp1@.value() is Some);
+            assert(mp1@.value()->Some_0 === value->Some_0.next) by {
+                let v1 = mp1@.value()->Some_0;
+                let v2 = value->Some_0;
                 assert(v1 === v1.sec_bytes().vspec_cast_to());
                 assert(v2.next === v2.next.sec_bytes().vspec_cast_to());
                 assert(v1.sec_bytes() =~~= v2.next.sec_bytes());
@@ -94,19 +94,19 @@ impl<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> SnpPPtr<Node
         proof {
             let value = mp1@.value();
             mp = mp1.trusted_into_raw().trusted_join(mp2).trusted_into();
-            let v2 = mp@.value().get_Some_0();
-            let v1 = value.get_Some_0();
+            let v2 = mp@.value()->Some_0;
+            let v1 = value->Some_0;
             assert(v1.sec_bytes() =~~= (v2.sec_bytes().subrange(0, spec_size::<usize>() as int)));
             //Node::<T>::trusted_to_stream(v2);
             assert(v2.sec_bytes().take(spec_size::<usize>() as int) =~~= (v2.next.sec_bytes()));
             proof_cast_from_seq_unique(v2);
             proof_cast_from_seq_unique(v1);
-            assert(mp2@.bytes() =~~= old_perm@.value().get_Some_0().val.sec_bytes());
+            assert(mp2@.bytes() =~~= old_perm@.value()->Some_0.val.sec_bytes());
             assert(v2.sec_bytes().skip(spec_size::<usize>() as int) =~~= v2.val.sec_bytes());
             assert(mp2@.bytes() =~~= v2.sec_bytes().skip(spec_size::<usize>() as int));
-            proof_cast_from_seq_unique(mp@.value().get_Some_0().val);
-            proof_cast_from_seq_unique(old_perm@.value().get_Some_0().val);
-            assert(mp@.value().get_Some_0().next === value.get_Some_0());
+            proof_cast_from_seq_unique(mp@.value()->Some_0.val);
+            proof_cast_from_seq_unique(old_perm@.value()->Some_0.val);
+            assert(mp@.value()->Some_0.next === value->Some_0);
         }
         Tracked(mp)
     }
@@ -129,13 +129,13 @@ impl<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> LinkedList<T
         recommends
             i < self.ptrs@.len(),
     {
-        let val = self.perms@[i]@.value().get_Some_0();
+        let val = self.perms@[i]@.value()->Some_0;
         //&&& self.head.is_constant() == val.is_constant()
         &&& self.head.is_constant() == val.next.is_constant()
-        &&& self.perms@[i].view().value().is_Some()
-        &&& (i > 0 ==> self.perms@[i].view().value().get_Some_0().next as int == self.ptrs@[i
+        &&& self.perms@[i].view().value() is Some
+        &&& (i > 0 ==> self.perms@[i].view().value()->Some_0.next as int == self.ptrs@[i
             - 1 as int].ptr.id())
-        &&& (i == 0) == (!self.perms@[i].view().value().get_Some_0().next.spec_valid_addr_with(
+        &&& (i == 0) == (!self.perms@[i].view().value()->Some_0.next.spec_valid_addr_with(
             spec_size::<Node<T>>(),
         ))
     }
@@ -149,7 +149,7 @@ impl<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> LinkedList<T
         &&& self.perms@.dom().contains(i)
         &&& point_to.ptr_not_null_wf(spec_item.ptr)
         &&& point_to.snp() === spec_item.snp
-        &&& point_to.value().get_Some_0().val === spec_item.val
+        &&& point_to.value()->Some_0.val === spec_item.val
         &&& self.perms@[i]@.is_valid_private()
         &&& self.wf_perm_val(i)
     }
@@ -220,7 +220,7 @@ impl<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> LinkedList<T
 verus! {
 
 impl<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> SpecDefault for LinkedList<T> {
-    spec fn spec_default() -> Self;
+    uninterp spec fn spec_default() -> Self;
 }
 
 } // verus!
@@ -241,12 +241,12 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
             old(self).spec_valid_item(ptr, perm),
             (*old(self)).inv(),
             ptr.is_constant(),
-            perm@.value().get_Some_0().next.is_constant(),
-            perm@.value().is_Some(),
+            perm@.value()->Some_0.next.is_constant(),
+            perm@.value() is Some,
         ensures
             (*self).inv(),
             self@ === old(self)@.push(
-                SpecListItem { ptr, snp: perm@.snp(), val: perm@.value().get_Some_0().val },
+                SpecListItem { ptr, snp: perm@.snp(), val: perm@.value()->Some_0.val },
             ),
     {
         self.insert(SnpPPtr::nullptr(), ptr, Ghost(self@.len() as int), Tracked(perm));
@@ -257,7 +257,7 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
         ptr: SnpPPtr<Node<T>>,
         perm: SnpPointsTo<Node<T>>,
     ) -> bool {
-        let next = perm@.value().get_Some_0().next;
+        let next = perm@.value()->Some_0.next;
         &&& perm@.ptr_not_null_private_wf(
             ptr,
         )
@@ -276,7 +276,7 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
             &&& new@ === olds@.drop_last()
             &&& olds@.last().ptr.id() === ptr.0.id()
             &&& olds@.last().snp === ptr.1@@.snp()
-            &&& olds@.last().val === ptr.1@@.value().get_Some_0().val
+            &&& olds@.last().val === ptr.1@@.value()->Some_0.val
             &&& new.spec_valid_item(ptr.0, ptr.1@)
         } else {
             &&& len == 0
@@ -296,7 +296,7 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
             &&& olds@.last().ptr.id() === ptr.0.id()
             &&& olds@.last().snp === ptr.1@@.snp()
             &&& olds@.last().val
-                === ptr.1@@.value().get_Some_0().val
+                === ptr.1@@.value()->Some_0.val
             //&&& new.spec_valid_item(ptr.0, ptr.1@)
 
         } else {
@@ -306,7 +306,7 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
     }
 
     pub closed spec fn spec_node(&self, i: nat) -> Node<T> {
-        self.perms@[i]@.value().get_Some_0()
+        self.perms@[i]@.value()->Some_0
     }
 
     #[verifier(inline)]
@@ -318,13 +318,13 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
         if self@.len() > 0 && self.head == id {
             (self@.len() - 1)
         } else {
-            choose|i: int| id == self@[i].ptr.id() && 0 <= i < self@.len()
+            choose|i: int| id == (#[trigger] self@[i]).ptr.id() && 0 <= i < self@.len()
         }
     }
 
     pub open spec fn _spec_has_index_of(&self, nodeptr: int) -> bool {
         &&& self@.len() > 0
-        &&& exists|i| nodeptr == self@[i].ptr.id() && 0 <= i < self@.len()
+        &&& exists|i| nodeptr == (#[trigger] self@[i]).ptr.id() && 0 <= i < self@.len()
     }
 
     pub open spec fn spec_has_index_of(&self, nodeptr: SnpPPtr::<Node<T>>) -> bool {
@@ -398,13 +398,12 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
             let ret = Some((SnpPPtr::from_usize(ret), Tracked(first_perm)));
             proof {
                 assert(self.ptrs@ === old(self).ptrs@.drop_last());
-                assert(ret.get_Some_0().0.id() == ret.get_Some_0().1@@.pptr());
-                assert(ret.get_Some_0().1@ === old(self).perms@[(old(self).ptrs@.len()
-                    - 1) as nat]);
+                assert(ret->Some_0.0.id() == ret->Some_0.1@@.pptr());
+                assert(ret->Some_0.1@ === old(self).perms@[(old(self).ptrs@.len() - 1) as nat]);
             }
             // Strange: Need to call wf and is_constant explicitly to ensure tracked is true.
-            assert(ret.get_Some_0().1.wf());
-            assert(ret.get_Some_0().1.is_constant());
+            assert(ret->Some_0.1.wf());
+            assert(ret->Some_0.1.is_constant());
             ret
         }
     }
@@ -416,16 +415,18 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
     ) -> (ret: (Self, Ghost<Seq<int>>, Ghost<Seq<int>>))
         requires
             old(self).inv(),
-            forall|var: SnpPPtr<Node<T>>| var.is_constant() ==> cond_fn.requires((var,)),
+            forall|var: SnpPPtr<Node<T>>|
+                (#[trigger] var.is_constant()) ==> cond_fn.requires((var,)),
         ensures
             self.inv(),
             ret.0@.len() <= max_len as nat,
             ret.0@.len() < max_len as nat ==> forall|k: int|
-                0 <= k < self@.len() ==> cond_fn.ensures((self@[k].ptr,), false),
-            forall|k: int| 0 <= k < ret.0@.len() ==> cond_fn.ensures((ret.0@[k].ptr,), true),
+                0 <= k < self@.len() ==> cond_fn.ensures(((#[trigger] self@[k]).ptr,), false),
+            forall|k: int|
+                0 <= k < ret.0@.len() ==> cond_fn.ensures(((#[trigger] ret.0@[k]).ptr,), true),
             is_subseq_via_index(ret.0@, old(self)@, ret.1@),
             is_subseq_via_index(self@, old(self)@, ret.2@),
-            (ret.0@.len() == 0) ==> old(self) === self,
+            (ret.0@.len() == 0) ==> *old(self) === *self,
             ret.0@.len() == 1 ==> self@ =~~= old(self)@.remove(ret.1@[0]),
             ret.0.inv(),
     {
@@ -449,7 +450,8 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
             invariant
                 self.inv(),
                 ret.inv(),
-                forall|var: SnpPPtr<Node<T>>| var.is_constant() ==> cond_fn.requires((var,)),
+                forall|var: SnpPPtr<Node<T>>|
+                    (#[trigger] var.is_constant()) ==> cond_fn.requires((var,)),
                 old(self).is_constant(),
                 self.is_constant(),
                 removed.is_constant(),
@@ -473,8 +475,12 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
                 keep_idx.len() + removed_idx.len() == old(self)@.len(),
                 removed_idx.len() == removed as nat,
                 forall|k: int|
-                    self@.len() - d <= k < self@.len() ==> cond_fn.ensures((self@[k].ptr,), false),
-                forall|k: int| 0 <= k < ret@.len() ==> cond_fn.ensures((ret@[k].ptr,), true),
+                    self@.len() - d <= k < self@.len() ==> cond_fn.ensures(
+                        ((#[trigger] self@[k]).ptr,),
+                        false,
+                    ),
+                forall|k: int|
+                    0 <= k < ret@.len() ==> cond_fn.ensures(((#[trigger] ret@[k]).ptr,), true),
                 is_subseq_via_index(self@, old(self)@, keep_idx),
                 is_subseq_via_index(ret@, old(self)@, removed_idx),
                 ret@.len() == 0 ==> (old(self) === self && keep_idx === Seq::new(
@@ -482,6 +488,7 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
                     |i: int| i,
                 ) && removed_idx === Seq::empty()),
                 ret@.len() == 1 ==> self@ =~~= old(self)@.remove(removed_idx[0]),
+            decreases self@.len() - d,
         {
             let ghost prev_self = *self;
             let ghost prev_ret = ret;
@@ -527,24 +534,23 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
                     let ghost cur_ptr_perm = SpecListItem {
                         ptr: cur_ptr,
                         snp: cur_perm@@.snp(),
-                        val: cur_perm@@.value().get_Some_0().val,
+                        val: cur_perm@@.value()->Some_0.val,
                     };
+                    let ghost keep_idx0 = keep_idx;
+                    let ghost removed_idx0 = removed_idx;
+                    let ghost removed_original_idx = keep_idx0[i];
                     proof {
                         assert(self@ =~~= prev_self@.remove(i));
-                        if removed == 0 {
-                            assert(keep_idx[i] == i);
-                        }
-                        proof_remove_keep(
+                        lemma_remove_keep(
                             old(self)@,
                             keep,
                             removeditems,
-                            &mut keep_idx,
-                            &mut removed_idx,
+                            keep_idx0,
+                            removed_idx0,
                             i,
                         );
-                        if removed_idx.len() == 1 {
-                            assert(removed_idx[removed_idx.len() - 1] == i);
-                        }
+                        keep_idx = keep_idx0.remove(i);
+                        removed_idx = removed_idx0.push(removed_original_idx);
                     }
                     assert(cur_ptr.id() === old(self)@[removed_idx.last()].ptr.id());
                     assert(cur_ptr === old(self)@[removed_idx.last()].ptr) by {
@@ -572,7 +578,7 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
                 d = d + 1;
                 let ghost i = self@.len() - d - 1;
                 assert forall|k: int| i < k < self@.len() implies cond_fn.ensures(
-                    (self@[k].ptr,),
+                    ((#[trigger] self@[k]).ptr,),
                     false,
                 ) by {
                     if self@.len() != prev_self@.len() {
@@ -583,7 +589,7 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
                     }
                 }
                 assert forall|k: int| 0 <= k < ret@.len() implies cond_fn.ensures(
-                    (ret@[k].ptr,),
+                    ((#[trigger] ret@[k]).ptr,),
                     true,
                 ) by {
                     if ret@.len() != prev_ret@.len() {
@@ -615,14 +621,12 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
             old(self).inv(),
         ensures
             self.inv(),
-            ret.is_Some() ==> self@ =~~= old(self)@.remove(i),
+            ret is Some ==> self@ =~~= old(self)@.remove(i),
             (old(self)@.len() > 0) ==> self@.len() + 1 == old(self)@.len(),
-            (old(self)@.len() == 0) ==> ret.is_None(),
-            (old(self)@.len() > 0) ==> ret === Some((cur, ret.get_Some_0().1))
-                && ret.get_Some_0().1@ === old(self).perms@[i as nat] && old(self).spec_valid_item(
-                cur,
-                ret.get_Some_0().1@,
-            ),
+            (old(self)@.len() == 0) ==> ret is None,
+            (old(self)@.len() > 0) ==> ret === Some((cur, ret->Some_0.1)) && ret->Some_0.1@ === old(
+                self,
+            ).perms@[i as nat] && old(self).spec_valid_item(cur, ret->Some_0.1@),
     {
         if self.is_empty() {
             return None;
@@ -684,8 +688,8 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
                 } else {
                     assert(old_self.wf_perm(j + 1));
                     assert(self.ptrs@[j as int] === old_self.ptrs@[(j + 1) as int]);
-                    assert(self.perms@[i as nat]@.value().get_Some_0().next
-                        == old_self.perms@[i as nat]@.value().get_Some_0().next);
+                    assert(self.perms@[i as nat]@.value()->Some_0.next
+                        == old_self.perms@[i as nat]@.value()->Some_0.next);
                     assert(self.perms@[i as nat]@.pptr() === old_self.perms@[i as nat + 1]@.pptr());
                     assert(self.perms@[i as nat]@.snp() === old_self.perms@[i as nat + 1]@.snp());
                     if j != i {
@@ -699,6 +703,10 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
         }
         Some((cur, Tracked(cur_perm)))
     }
+}
+
+pub broadcast group group_linkedlist_default {
+    LinkedList::<_>::axiom_default,
 }
 
 } // verus!
@@ -723,7 +731,7 @@ where
             ),
             self@.len() == old(self)@.len() - 1,
             ret@@.ptr_not_null_wf(old(self)@[idx].ptr),
-            ret@@.value().is_Some(),
+            ret@@.value() is Some,
             ret@@.snp() === old(self)@[idx].snp,
         {
             let ghost i = idx;
@@ -780,7 +788,7 @@ where
 
                 if prev.not_null() {
                     assert(self.perms@[i as nat] === prev_perms@[(i + 1) as nat]);
-                    assert(self.perms@[i as nat]@.value().get_Some_0().next == old_self.perms@[i as nat]@.value().get_Some_0().next);
+                    assert(self.perms@[i as nat]@.value()->Some_0.next == old_self.perms@[i as nat]@.value()->Some_0.next);
                     assert(self.perms@[i as nat]@.pptr() === old_self.perms@[i as nat + 1]@.pptr());
                     assert(self.perms@[i as nat]@.snp() === old_self.perms@[i as nat+ 1]@.snp());
                 }
@@ -812,16 +820,16 @@ where
             old(self).spec_valid_item(ptr, perm),
             (*old(self)).inv(),
             ptr.is_constant(),
-            perm@.value().get_Some_0().next.is_constant() == old(self).head.is_constant(),
+            perm@.value()->Some_0.next.is_constant() == old(self).head.is_constant(),
             ptr.uptr.is_constant() == old(self).head.is_constant(),
-            perm@.value().is_Some(),
+            perm@.value() is Some,
             old(self).contains_ptr_at(prev_ptr, idx),
         ensures
             (prev_ptr.not_null()) ==> (self@ =~~= old(self)@.insert(
             idx,
-            SpecListItem{ptr: ptr, snp: perm@.snp(), val: perm@.value().get_Some_0().val})),
+            SpecListItem{ptr: ptr, snp: perm@.snp(), val: perm@.value()->Some_0.val})),
             prev_ptr.is_null() ==> self@ =~~= old(self)@.push(
-                SpecListItem{ptr: ptr, snp: perm@.snp(), val: perm@.value().get_Some_0().val}),
+                SpecListItem{ptr: ptr, snp: perm@.snp(), val: perm@.value()->Some_0.val}),
             self@.len() == old(self)@.len() + 1,
             self.inv(),
         {
@@ -858,7 +866,7 @@ where
                 assert(self@ =~~= old_self@);
                 let ghost tmp_perms = self.perms;
                 self.ptrs@ = self.ptrs@.insert(i as int,
-                    SpecListItem{ptr: ptr, snp: old_perm@.snp(), val: old_perm@.value().get_Some_0().val});
+                    SpecListItem{ptr: ptr, snp: old_perm@.snp(), val: old_perm@.value()->Some_0.val});
                 let convert = |j: nat|
                     if j < i {j} else if j == i {(self.ptrs@.len() - 1) as nat} else {(j-1) as nat};
 
@@ -881,7 +889,7 @@ where
 
                 assert(self.perms@[i] === perm);
                 if i > 0 {
-                    assert(self.perms@[i].view().value().get_Some_0().next as int == self.ptrs@[i-1 as int].ptr.id());
+                    assert(self.perms@[i].view().value()->Some_0.next as int == self.ptrs@[i-1 as int].ptr.id());
                 }
                 assert(self.wf_perm(i));
 
@@ -1008,7 +1016,7 @@ impl<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> LinkedList<T
             assert forall |k: nat|
                 0 <= k < self@.len() && k != i
             implies
-                self@[k as int] === prev@[k as int]
+                #[trigger] self@[k as int] === prev@[k as int]
             by{
                 assert(prev.wf_perm(k));
                 assert(self.perms@[k] === prev.perms@[k]);
@@ -1031,8 +1039,8 @@ impl<T: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> LinkedList<T
                         assert(self@[i - 1].snp === prev@[i - 1].snp);
                     }
                     assert(self.perms@[i] === perm);
-                    assert(self.perms@[i]@.value().get_Some_0().val === v);
-                    assert(self.perms@[i]@.value().get_Some_0().next === prev.perms@[i]@.value().get_Some_0().next);
+                    assert(self.perms@[i]@.value()->Some_0.val === v);
+                    assert(self.perms@[i]@.value()->Some_0.next === prev.perms@[i]@.value()->Some_0.next);
                     assert(self.wf_perm(i));
                 }
             }

@@ -2,6 +2,11 @@ use super::*;
 
 verus! {
 
+broadcast use crate::group_verismo_default;
+
+} // verus!
+verus! {
+
 impl RmpEntry {
     pub proof fn lemma_trans_inv(entry: RmpEntry, op: RmpOp<SysPhy>)
         requires
@@ -9,6 +14,8 @@ impl RmpEntry {
         ensures
             entry.trans(op).to_result().inv(),
     {
+        broadcast use {RmpEntry::axiom_spec_new, HiddenRmpEntryForPSP::axiom_spec_new};
+
         match op {
             RmpOp::RmpUpdate(_, newentry) => {
                 assert(entry.rmpupdate(newentry).to_result().inv());
@@ -28,12 +35,14 @@ impl RmpEntry {
     pub proof fn lemma_hvtrans_inv(entry: RmpEntry, op: RmpOp<SysPhy>) -> (next: RmpEntry)
         requires
             entry.inv(),
-            op.is_RmpUpdate(),
+            op is RmpUpdate,
         ensures
             next === entry.trans(op).to_result(),
             next.inv(),
             next@.inv_hvupdate_rel(entry@),
     {
+        broadcast use {RmpEntry::axiom_spec_new, HiddenRmpEntryForPSP::axiom_spec_new};
+
         let next = entry.trans(op).to_result();
         if (next !== entry) {
             assert(next@.perms =~~= super::perm_s::rmp_perm_init());
@@ -52,13 +61,16 @@ impl RmpEntry {
         requires
             entry.inv(),
             entry@.inv_hvupdate_rel(prev_entry@),
-            op.is_RmpUpdate(),
+            op is RmpUpdate,
         ensures
             next === entry.trans(op).to_result(),
             next.inv(),
             next@.inv_hvupdate_rel(prev_entry@),
     {
-        entry.trans(op).to_result()
+        broadcast use {RmpEntry::axiom_spec_new, HiddenRmpEntryForPSP::axiom_spec_new};
+
+        let next = entry.trans(op).to_result();
+        next
     }
 }
 

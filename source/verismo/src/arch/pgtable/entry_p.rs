@@ -94,7 +94,7 @@ impl PTLevel {
 
     proof fn test_spec_next_lvl()
         ensures
-            PTLevel::L2.parent_lvl().get_Some_0() == PTLevel::L3,
+            PTLevel::L2.parent_lvl()->Some_0 == PTLevel::L3,
     {
     }
 }

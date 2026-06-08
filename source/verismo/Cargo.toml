@@ -1,6 +1,7 @@
 [package]
 name = "verismo"
 version = "0.1.0"
+edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -14,10 +15,11 @@ vstd = { workspace = true, features = ["alloc"], default-features = false }
 #builtin_macros = { path = "../../tools/verus/source/builtin_macros"}
 #vstd = {path = "../../tools/verus/source/vstd", features = ["alloc"], default-features = false }
 # Trusted
-hacl-sys = {git = "https://github.com/ziqiaozhou/hacl-packages", rev = "e12108dc04f79edb19c10f9ea4fa12bb49ca9da2"}
+hacl-sys = {git = "https://github.com/ziqiaozhou/hacl-packages", rev = "e02b4182d7afe346ebd04da6f96a54dc29488892"}
 # Useful macros
 verismo_macro = {path = "../verismo_macro"}
 verismo_verus = {path = "../verismo_verus"}
+verismo_tspec = {path = "../verismo_tspec"}
 paste = "1.0"
 seq-macro = "0.3"
 vops = {path = "../vops"}
@@ -33,3 +35,6 @@ alloc = []
 
 [package.metadata.rust-analyzer]
 rustc_private=true
+
+[package.metadata.verus]
+verify = true

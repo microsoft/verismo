@@ -204,6 +204,7 @@ impl<T: Copy, const N: IndexType> Array<T, N> {
                     start as int,
                     end as int,
                 ).to_multiset(),
+            decreases last as int - j as int,
         {
             proof {
                 assert(self@.len() == Self::spec_len());
@@ -273,7 +274,7 @@ impl<T: Copy, const N: IndexType> Array<T, N> {
         decreases end as int - start as int,
     {
         if start >= end || start + 1 >= end {
-            return ;
+            return;
         }
         let ghost s0 = self@;
         let ghost ss0 = s0.subrange(start as int, end as int);

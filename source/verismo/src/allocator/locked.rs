@@ -4,6 +4,13 @@ use crate::registers::CoreIdPerm;
 
 verus! {
 
+broadcast use {
+    SecType::axiom_spec_new,
+    SecType::axiom_ext_equal,
+    SnpPPtr::axiom_id_equal,
+    axiom_size_from_cast_bytes,
+};
+
 impl VSpinLock<VeriSMoAllocator> {
     pub open spec fn lock_alloc_requires(&self, cpu: nat, alloc_lockperm: LockPermToRaw) -> bool {
         &&& self.lock_default_mem_requires(cpu, alloc_lockperm)
@@ -24,11 +31,12 @@ impl VSpinLock<VeriSMoAllocator> {
             spec_bit64_is_pow_of_2(align as int),
         ensures
             self.lock_alloc_requires(coreid@.cpu, res.1@@),
-            res.0.is_Ok() ==> talloc_valid_ptr(size, res.0.get_Ok_0()) && (
-            res.0.get_Ok_0().0 as int) % (align as int) == 0,
+            res.0 is Ok ==> talloc_valid_ptr(size, res.0->Ok_0) && (res.0->Ok_0.0 as int) % (
+            align as int) == 0,
     {
         let tracked alloc_lockperm = alloc_lockperm;
         (new_strlit("\n new")).leak_debug();
+        let ghost old_invfn = alloc_lockperm@.invfn;
         let (ptr, Tracked(mut allocperm), Tracked(alloc_lockperm)) = self.acquire(
             Tracked(alloc_lockperm),
             Tracked(coreid),
@@ -36,7 +44,15 @@ impl VSpinLock<VeriSMoAllocator> {
         (new_strlit(":")).leak_debug();
         let mut allocator = ptr.take(Tracked(&mut allocperm));
         let mut size = size;
+        proof {
+            old_invfn.lemma_inv::<VeriSMoAllocator>();
+            assert(old_invfn.value_invfn::<VeriSMoAllocator>() === VeriSMoAllocator::invfn());
+            assert(VeriSMoAllocator::invfn()(allocator) == allocator@.inv());
+        }
         let result = allocator.alloc_inner(size, align);
+        proof {
+            assert(inv_snp_value(allocperm@.snp(), allocator));
+        }
         ptr.put(Tracked(&mut allocperm), allocator);
         self.release(Tracked(&mut alloc_lockperm), Tracked(allocperm), Tracked(coreid));
         if let Some((addr, perm)) = result {
@@ -63,8 +79,8 @@ impl VSpinLock<VeriSMoAllocator> {
         ensures
             alloc_lockperm0.contains_key(0),
             self.lock_alloc_requires(coreid@.cpu, alloc_lockperm0[0]@),
-            res.is_Ok() ==> talloc_valid_ptr(size, res.get_Ok_0()) && (res.get_Ok_0().0 as int) % (
-            align as int) == 0,
+            res is Ok ==> talloc_valid_ptr(size, res->Ok_0) && (res->Ok_0.0 as int) % (align as int)
+                == 0,
     {
         let tracked alloc_perm = alloc_lockperm0.tracked_remove(0);
         let (ret, Tracked(alloc_perm)) = self.alloc_(

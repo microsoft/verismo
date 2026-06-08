@@ -12,6 +12,7 @@ pub proof fn lemam_bit_or_mask_bound(val: u64, align: u64) -> (mask: u64)
         (val | mask) < u64::MAX,
 {
     let mask = sub(align, 1);
+    // Required to prove bit-or mask upper bound postcondition.
     assert((val | mask) < u64::MAX) by (bit_vector)
         requires
             val <= sub(u64::MAX, align),
@@ -29,6 +30,7 @@ seq_macro::seq!(N in 0..64 {
             ensures
                 val % align == (val & sub(align, 1)),
             {
+                // Required so seq_macro expands uniquely and proves modulus/bit-and relation.
                 #(
                     assert(val % (1u64 << N) == (val & sub((1u64 << N), 1))) by(bit_vector);
                 )*
@@ -55,10 +57,7 @@ pub proof fn proof_align_down(val: nat, align: nat) -> (ret: (u64, u64, u64))
     let ret = val - val % align;
     let align64 = (1u64 << bits);
     bit64_shl_values_auto();
-    assert(val / align * align == val - val % align) by (nonlinear_arith)
-        requires
-            align != 0,
-    ;
+    // Required to connect nat and u64 division in align_down postconditions.
     assert(val64 / align as u64 == val / align) by (nonlinear_arith)
         requires
             align != 0,
@@ -67,7 +66,7 @@ pub proof fn proof_align_down(val: nat, align: nat) -> (ret: (u64, u64, u64))
     ;
     bit64_shr_div_rel(val64, bits);
     bit64_shl_mul_rel(val64 >> bits, bits);
-    assert((val64 >> bits) << bits == val64 / align64 * align64);
+    // Required to prove align_down bit-mask postcondition.
     assert(val64 & !sub((1u64 << bits), 1) == ((val64 >> bits) << bits)) by (bit_vector)
         requires
             bits < 64,
@@ -105,15 +104,11 @@ pub proof fn proof_align_up(val: nat, align: nat) -> (ret: (u64, u64, u64, u64))
     let tmp = val64 | mask;
     let ret2 = add(tmp, 1);
     bit64_shl_values_auto();
-    assert(val / align * align == val - val % align) by (nonlinear_arith)
-        requires
-            align != 0,
-    ;
     bit64_shr_div_rel(val64, bits);
     lemma_bit_and_mod_rel(val64, align64);
-    assert(val % align == (val64 % align64));
     lemam_bit_or_mask_bound(val64, align64);
     if val64 & mask != 0 {
+        // Required to relate arithmetic align-up result to bit-mask expression.
         assert(add(val64, sub(align64, val64 & mask)) == ret2) by (bit_vector)
             requires
                 align64 == 1u64 << bits,
@@ -152,6 +147,7 @@ pub proof fn proof_align_is_aligned(val: int, align: int)
     let k = proof_div_mod_rel(val, align);
     let up = spec_align_up(val, align);
     let down = spec_align_down(val, align);
+    // Required to show align_up/down are exact multiples of align.
     assert(down == k * align);
     assert(up == k * align + align || up == k * align);
     assert(k * align + align == (k + 1) * align) by (nonlinear_arith);
@@ -197,12 +193,7 @@ pub proof fn proof_modeq_propogation(a: int, b: int, c: int)
     proof_mul_exchange(j, c);
     proof_mul_exchange(j * i, c);
     let aa = proof_mul_div_rel(j * i, c);
-    assert(a == b * i);
-    assert(b == c * j);
-    assert(a == c * j * i);
     proof_mul_dist(c, j, i);
-    assert(aa == j * i * c);
-    assert(a == aa);
     proof_div_mod_rel(a, c);
 }
 

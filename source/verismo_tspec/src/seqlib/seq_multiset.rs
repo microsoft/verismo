@@ -36,7 +36,7 @@ pub proof fn seq_to_multi_set_to_set<T>(s1: Seq<T>)
 {
     s1.to_multiset_ensures();
     assert(s1.to_set() =~~= s1.to_multiset().dom()) by {
-        assert forall|a| s1.contains(a) == s1.to_multiset().dom().contains(a) by {
+        assert forall|a| #![auto] s1.contains(a) == s1.to_multiset().dom().contains(a) by {
             assert(s1.contains(a) == (s1.to_multiset().count(a) > 0));
         }
     }
@@ -57,6 +57,7 @@ pub proof fn proof_seq_to_multiset_insert<A>(s1: Seq<A>, i: int, v: A)
     let middle = Seq::empty().push(v);
     let left2 = left + middle;
     let right = s1.skip(i);
+    // Required to normalize insert into take/skip form before multiset conversion.
     assert(s1 =~~= left + right);
     assert(s2 =~~= left + middle + right);
     assert(s2 === left2 + right);
@@ -125,6 +126,7 @@ pub proof fn proof_seq_to_seq_eq_multiset<A, B>(s1: Seq<A>, s2: Seq<A>, op: spec
         assert(ss1.to_multiset() =~~= ss2.to_multiset());
         proof_seq_to_seq_eq_multiset(ss1, ss2, op);
     } else {
+        // Required to close the empty-sequence multiset equivalence base case.
         assert(s1 =~~= s2);
     }
 }

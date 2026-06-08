@@ -2,6 +2,7 @@ use vstd::slice::slice_index_get;
 
 use super::*;
 use crate::arch::addr_s::VM_MEM_SIZE;
+use crate::arch::reg::RegName;
 use crate::ptr::rmp::*;
 
 verus! {
@@ -56,6 +57,8 @@ proof fn lemma_validate_e820_single(
 {
     let end_init_range = range(end_addr as int, VM_MEM_SIZE as int);
     assert forall|r: (int, nat)|
+        #![trigger ranges_disjoint(pre_validated, r)]
+        #![trigger memperm.contains_range(r)]
         r.1 != 0 && inside_range(r, validated_range) && ranges_disjoint(
             pre_validated,
             r,
@@ -104,6 +107,8 @@ proof fn lemma_validate_e820_single(
             pre_validated,
         );
         assert forall|r: (int, nat)|
+            #![trigger ranges_disjoint(pre_validated, r)]
+            #![trigger memperm.contains_range(r)]
             r.1 != 0 && inside_range(r, next_init_range) && ranges_disjoint(
                 pre_validated,
                 r,
@@ -137,6 +142,36 @@ spec fn validate_e820_loop_inv(
     &&& mem_range_formatted(e820)
 }
 
+pub proof fn lemma_snp_core_self_frame(snpcore: crate::registers::SnpCore, regs: Set<RegName>)
+    ensures
+        snpcore.only_reg_coremode_updated(snpcore, regs),
+{
+}
+
+impl E820Entry {
+    pub proof fn lemma_formatted_implies_cmp_max_requires(e820: Seq<E820Entry>, i: int)
+        requires
+            e820.is_constant(),
+            mem_range_formatted(e820),
+            0 <= i < e820.len(),
+        ensures
+            e820[i].spec_cmp_max_requires(),
+    {
+        let entry = e820[i];
+    }
+}
+
+// Init memory is unvalidated, so it satisfies the precondition for pvalidate(true).
+pub proof fn lemma_init_perm_requires_pvalidate(perm: SnpPointsToRaw, r: (int, nat))
+    requires
+        perm@.snp() === SwSnpMemAttr::init(),
+        perm@.snp_wf_range(r),
+    ensures
+        spec_perm_requires_pvalidate(perm, r.0, r.1, true),
+{
+}
+
+#[verifier::spinoff_prover]
 proof fn lemma_validated_range_disjoint_e820(
     e820: Seq<E820Entry>,
     i: int,
@@ -156,7 +191,8 @@ proof fn lemma_validated_range_disjoint_e820(
         toval_range,
         r,
     ) by {
-        let k = choose|k: int| e820[k].spec_aligned_range() === r && 0 <= k && k < e820.len();
+        let k = choose|k: int|
+            (#[trigger] e820[k]).spec_aligned_range() === r && 0 <= k && k < e820.len();
         assert(e820[k].spec_aligned_range() === r);
         assert(pre_validated.contains(r));
     }
@@ -188,6 +224,8 @@ spec fn validate_e820_iter_val_range(e820: Seq<E820Entry>, i: int, start: int, e
     )
 }
 
+#[verifier::spinoff_prover]
+#[verifier::rlimit(10)]
 pub fn validate_e820(
     e820: &[E820Entry],
     start_addr: usize_t,
@@ -209,6 +247,11 @@ pub fn validate_e820(
         newmemcc@.wf_core(memcc.cc.snpcore.cpu()),
         newmemcc@.cc.snpcore.only_reg_coremode_updated(memcc.cc.snpcore, set![GHCB_REGID()]),
         forall|r|
+            #![trigger range_disjoint_(r, range(start_addr as int, end_addr as int))]
+            #![trigger newmemcc@.memperm.contains_range(r)]
+            #![trigger memcc.memperm.contains_range(r)]
+            #![trigger newmemcc@.memperm[r]]
+            #![trigger memcc.memperm[r]]
             range_disjoint_(r, range(start_addr as int, end_addr as int))
                 ==> newmemcc@.memperm.eq_at(memcc.memperm, r),
         newmemcc@.memperm.contains_default_except(
@@ -239,6 +282,7 @@ pub fn validate_e820(
             SwSnpMemAttr::spec_default(),
             pre_validated,
         );
+        lemma_snp_core_self_frame(cc.snpcore, set![GHCB_REGID()]);
     }
     while val_end < end_addr && index < n
         invariant
@@ -255,6 +299,11 @@ pub fn validate_e820(
             memperm.contains_init_except(range(val_end as int, VM_MEM_SIZE as int), pre_validated),
             memperm.contains_init_except(range(end_addr as int, VM_MEM_SIZE as int), pre_validated),
             forall|r|
+                #![trigger range_disjoint_(r, range(start_addr as int, end_addr as int))]
+                #![trigger memperm.contains_range(r)]
+                #![trigger oldmemcc.memperm.contains_range(r)]
+                #![trigger memperm[r]]
+                #![trigger oldmemcc.memperm[r]]
                 range_disjoint_(r, range(start_addr as int, end_addr as int)) ==> memperm.eq_at(
                     oldmemcc.memperm,
                     r,
@@ -267,6 +316,7 @@ pub fn validate_e820(
                 start_addr as int,
                 end_addr as int,
             ),
+        decreases n - index,
     {
         let ghost prev_end: int = val_end as int;
         let ghost prev_memperm = memperm;
@@ -283,6 +333,7 @@ pub fn validate_e820(
                 assert(pre_validated.contains(entry_r));
             }
             assert(entry.wf_range());
+            E820Entry::lemma_formatted_implies_cmp_max_requires(e820@, index as int);
         }
         let cur_addr = entry.aligned_start().reveal_value();
         let cur_end = page_align_up(entry.end().reveal_value());

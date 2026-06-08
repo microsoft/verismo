@@ -9,7 +9,6 @@ use crate::tspec::*;
 
 verus! {
 
-#[is_variant]
 pub enum Archx64Op {
     MemOp(MemOp<GuestVir>, CPU),
     RegWrite(CpuMemID, RegName, RegValType),
@@ -18,14 +17,13 @@ pub enum Archx64Op {
     LoopHalt(CpuMemID),
 }
 
-#[is_variant]
 pub enum Archx64Ret {
     None,
     ReadRet(ByteStream),
     RegValue(RegValType),
 }
 
-pub spec fn current_cpu() -> CPU;
+pub uninterp spec fn current_cpu() -> CPU;
 
 #[derive(SpecGetter, SpecSetter)]
 pub struct Archx64 {
@@ -34,7 +32,6 @@ pub struct Archx64 {
     pub entities: Map<MemID, Map<CPU, bool>>,
 }
 
-#[is_variant]
 pub enum AECode {
     Mc,
     Intr,
@@ -51,7 +48,6 @@ pub enum AECode {
     Others,
 }
 
-#[is_variant]
 pub enum NAECode {
     Npf,
     Vmmcall,
@@ -61,7 +57,6 @@ pub enum NAECode {
     Others,
 }
 
-#[is_variant]
 pub enum ExceptionCode {
     PFault(Archx64Op),
     GP(Archx64Op),

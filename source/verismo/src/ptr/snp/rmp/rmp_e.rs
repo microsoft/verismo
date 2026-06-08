@@ -137,6 +137,7 @@ pub fn pvalmem2(
             snpcore.inv(),
             snpcore.coreid@.vmpl == 0,
             old_snpcore === *snpcore,
+        decreases end as int - vaddr as int,
     {
         let ghost pn = (vaddr as int).to_page();
         proof {
@@ -211,6 +212,8 @@ pub fn pvalmem(
     ensures
         ret@@.snp_wf_range((start as int, (end - start) as nat)),
         ret@@.snp().ensures_pvalidated(perm@.snp(), val),
+        val && perm@.snp() === SwSnpMemAttr::init() ==> ret@@.snp()
+            === SwSnpMemAttr::spec_default(),
         spec_perm_ensures_pvalidate(ret@, perm, start as int, (end - start) as nat, val),
         snpcore.inv(),
         *old(snpcore) === *snpcore,
@@ -252,6 +255,7 @@ pub fn pvalmem(
             old_perm@.bytes().wf() ==> retp@.bytes().wf(),
             snpcore.coreid@.vmpl == 0,
             oldsnpcore === *snpcore,
+        decreases end as int - vaddr as int,
     {
         let ghost prev_perm = perm;
         let tracked (mut current_perm, next_perm) = perm.trusted_split(PAGE_SIZE as nat);
@@ -384,6 +388,7 @@ pub fn rmpadjmem(
             snpcore.inv(),
             snpcore.coreid@.vmpl == 0,
             *snpcore === old_snpcore,
+        decreases npages - i,
     {
         let page = start_page + i;
         let vaddr = page.to_addr() as u64;

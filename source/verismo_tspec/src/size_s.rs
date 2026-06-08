@@ -2,6 +2,11 @@ use vstd::prelude::*;
 
 use super::*;
 
+verus! {
+
+global size_of usize == 8;
+
+} // verus!
 macro_rules! impl_spec_size_for_basic  {
     ($([$baset: ty, $size: literal]),* $(,)*) => {
         $(
@@ -19,7 +24,7 @@ macro_rules! impl_spec_size_for_basic  {
 }
 verus! {
 
-pub open spec fn spec_max_count<T>() -> nat;
+pub uninterp spec fn spec_max_count<T>() -> nat;
 
 // pub spec fn spec_field_offset<T>(i: nat) -> nat;
 pub trait SpecSize {
@@ -27,7 +32,10 @@ pub trait SpecSize {
 }
 
 // For core::mem:sizeof
-pub open spec fn spec_size<T>() -> nat;
+#[verifier::inline]
+pub open spec fn spec_size<T>() -> nat {
+    vstd::layout::size_of::<T>()
+}
 
 pub trait ExecStruct {
 
@@ -100,7 +108,7 @@ pub broadcast proof fn axiom_size_from_cast_bytes<T: SpecSize>()
 #[verifier(external_body)]
 pub broadcast proof fn axiom_size_from_cast_bytes_def<T: SpecSize + VTypeCast<Seq<u8>>>(val: T)
     ensures
-        T::spec_size_def() == VTypeCast::<Seq<u8>>::vspec_cast_to(val).len(),
+        T::spec_size_def() == (#[trigger] VTypeCast::<Seq<u8>>::vspec_cast_to(val)).len(),
 {
 }
 
@@ -139,7 +147,7 @@ impl<T: SpecSize, M> SpecSize for SecType<T, M> {
 }
 
 impl<T> SpecSize for Option<T> {
-    closed spec fn spec_size_def() -> nat;
+    uninterp spec fn spec_size_def() -> nat;
 }
 
 } // verus!

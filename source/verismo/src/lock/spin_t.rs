@@ -17,25 +17,25 @@ pub struct SpinLock {
 verus! {
 
 impl IsConstant for SpinLock {
-    open spec fn is_constant(&self) -> bool;
+    uninterp spec fn is_constant(&self) -> bool;
 
-    open spec fn is_constant_to(&self, vmpl: nat) -> bool;
+    uninterp spec fn is_constant_to(&self, vmpl: nat) -> bool;
 }
 
 impl WellFormed for SpinLock {
-    open spec fn wf(&self) -> bool;
+    uninterp spec fn wf(&self) -> bool;
 }
 
 impl VTypeCast<SecSeqByte> for SpinLock {
-    open spec fn vspec_cast_to(self) -> SecSeqByte;
+    uninterp spec fn vspec_cast_to(self) -> SecSeqByte;
 }
 
 impl SpecSize for SpinLock {
-    open spec fn spec_size_def() -> nat;
+    uninterp spec fn spec_size_def() -> nat;
 }
 
 impl SpinLock {
-    pub spec fn id(self) -> int;
+    pub uninterp spec fn id(self) -> int;
 
     #[verifier(external_body)]
     pub const fn new() -> (ret: Self) {
@@ -62,7 +62,7 @@ impl SpinLock {
         &&& ret_perm.snp() === oldp.points_to.snp()
         &&& ret_perm.range_id() === oldp.points_to.range()
         &&& ret_perm.wf()
-        &&& ret_perm.value().is_Some()
+        &&& ret_perm.value() is Some
         &&& oldp.invfn.inv(ret_perm.get_value())
     }
 
@@ -84,8 +84,8 @@ impl SpinLock {
         requires
             old(lockperm)@.is_unlocked(core@.cpu, self.id(), old(lockperm)@.points_to.range()),
         ensures
-            ret.is_Some() ==> self.ensures_lock(old(lockperm)@, lockperm@, ret.get_Some_0()@@),
-            ret.is_None() ==> lockperm === old(lockperm),
+            ret is Some ==> self.ensures_lock(old(lockperm)@, lockperm@, ret->Some_0@@),
+            ret is None ==> *lockperm === *old(lockperm),
     {
         if self.unverified_trylock() {
             Some(Tracked::assume_new())
@@ -117,7 +117,7 @@ impl SpinLock {
         loop {
             let h: u64 = self.holder.load(Ordering::Acquire);
             if h == ticket {
-                break ;
+                break;
             }
         }
         true

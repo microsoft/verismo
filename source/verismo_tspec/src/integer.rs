@@ -48,7 +48,7 @@ impl<T1: IntValue> VSpecSub<T1, int> for T1 {
 }
 
 impl<T1: IntValue> VSpecEuclideanDiv<int, T1> for T1 {
-    open spec fn spec_euclidean_div(self, rhs: int) -> T1 {
+    open spec fn spec_euclidean_or_real_div(self, rhs: int) -> T1 {
         T1::from_int(self.as_int() / rhs)
     }
 }
@@ -66,28 +66,6 @@ impl<T1: IntValue> VSpecMul<int, T1> for T1 {
 }
 
 } // verus!
-/*
-macro_rules! impl_ordint_for_basic_inner {
-    ($itype: ty) => {
-        verus! {
-            impl IntOrd for $itype {
-                #[verifier(inline)]
-                open spec fn ord_int(&self) -> int {
-                    *self as int
-                }
-            }
-        }
-    }
-}
-
-macro_rules! impl_ordint_for_basic {
-    ($($itype: ty),* $(,)?) => {
-        $(
-            impl_ordint_for_basic_inner!($itype);
-        )*
-    }
-}
-*/
 macro_rules! impl_cmp_with_basic {
     ($basict: ty, $($fname: ident),* $(,)?) => {
         paste::paste! {verus! {

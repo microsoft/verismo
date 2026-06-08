@@ -76,8 +76,6 @@ impl MemRangeInterface for HyperVMemMapEntry {
             assert(self.reserved === oldself.spec_set_range(r).reserved);
             assert(self.mem_type === oldself.spec_set_range(r).mem_type);
             lemma_eq_hv_mementry(oldself.spec_set_range(r), *self);
-            // BUG(verus):
-            assume(oldself.spec_set_range(r) === *self);
         }
     }
 

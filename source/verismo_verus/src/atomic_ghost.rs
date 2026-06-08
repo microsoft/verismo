@@ -75,16 +75,7 @@ impl Parse for AG {
         let _: Token![=>] = input.parse()?;
         let block: Block = input.parse()?;
 
-        Ok(AG {
-            inner_macro_path,
-            atomic,
-            op_name,
-            operands,
-            prev_next,
-            ret,
-            ghost_name,
-            block,
-        })
+        Ok(AG { inner_macro_path, atomic, op_name, operands, prev_next, ret, ghost_name, block })
     }
 }
 
@@ -162,11 +153,7 @@ fn atomic_ghost_main(ag: AG) -> parse::Result<TokenStream> {
                 crate::syntax::rewrite_expr_node(erase, false, operand, false);
             }
 
-            let mut block_expr = Expr::Block(ExprBlock {
-                attrs: vec![],
-                label: None,
-                block,
-            });
+            let mut block_expr = Expr::Block(ExprBlock { attrs: vec![], label: None, block });
             crate::syntax::rewrite_expr_node(false, true, &mut block_expr, false);
             if let Expr::Block(expr_block) = block_expr {
                 block = expr_block.block;

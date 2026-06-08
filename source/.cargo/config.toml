@@ -1,11 +1,11 @@
-[unstable]
-build-std-features = ["compiler-builtins-mem"]
-build-std = ["core","alloc", "compiler_builtins"]
-unstable-options = true
-
 [build]
-target = "target.json"
+target = "x86_64-unknown-none"
 incremental = true
+
+[env]
+RUSTC_BOOTSTRAP = { value = "1", force = true }
+CARGO_UNSTABLE_JSON_TARGET_SPEC = { value = "true", force = true }
+CARGO_UNSTABLE_UNSTABLE_OPTIONS = { value = "true", force = true }
 
 [profile.dev]
 incremental = true

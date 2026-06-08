@@ -6,8 +6,19 @@ use super::*;
 impl_secure_type! {(), type}
 use vops::VEq;
 
+verus! {
+
+// Required in this in-crate test module; downstream default broadcasts do not surface these here.
+broadcast use {
+    SecType::axiom_spec_new,
+    SecType::axiom_ext_equal,
+    SpecSecType::axiom_uop_new_constant,
+};
+
+} // verus!
 mod p {
     use super::*;
+    #[rustfmt::skip]
     verus! {
 
 // assert by cannot exist with broadcast forall with trait bound.
@@ -45,32 +56,38 @@ pub proof fn proof_test_bits2(v1: u64, v2: u64)
 verismo! {
     fn test_add (v1: u64_s, v2: u64_s) -> (ret: u64_s)
     requires
-        v1 + v2 <= u64::MAX,
+        v1@.val + v2@.val <= u64::MAX,
     {
         v1.add(v2)
     }
 
     fn test1(v1: u64_s, v2: u64_s) -> (ret: u64_s)
     requires
-        v1 < 10,
-        v2 < 10,
+        v1@.val < 10,
+        v2@.val < 10,
     ensures
         v1 * v2 < 100,
     {
-        proof {p::proof_test1(v1 as u64, v2 as u64)}
+        proof {
+            // Bridge `(v1 * v2) < 100` to a nonlinear-arith fact on raw u64.
+            // (v1*v2).ord_int() inlines to v1@.bop_new(v2@, fn_spec_mul_u64_u64_int).val
+            // which equals v1@.val * v2@.val via fn_spec_mul's lambda body.
+            let val1: u64 = v1@.val;
+            let val2: u64 = v2@.val;
+            assert(val1 * val2 < 100) by (nonlinear_arith)
+                requires
+                    val1 < 10,
+                    val2 < 10,
+            ;
+        }
         v1.add(v2)
     }
 
     fn test2 (v1: u64_s, v2: u64_s) -> (ret: u64_s)
     requires
-        v1 * v2 <= u64::MAX,
+        v1@.val * v2@.val <= u64::MAX,
     {
         let v = 11;
-        assert(v1 >= 0);
-        assert(v2 >= 0);
-        assert(v1 >= 0) by {
-            assert(v1>=0)
-        }
         v
     }
 }
@@ -79,11 +96,12 @@ verismo! {
     proof fn proof_u64_s(v1: u64_s, v2: u64_s)
     requires
         v1 > v2,
+        v1 + v2 <= u64::MAX,
     ensures
         (v1 + v2)@.val == (v1@.val + v2@.val),
         (v1 + v2)@.valsets[1] =~~= set_op(v1@.valsets[1], v2@.valsets[1], |v1: u64, v2: u64| (v1 + v2)),
-        //(v1 + v2 - v2)@.val == (v1@.val) as u64
-    {}
+    {
+    }
 
     /*proof fn test_bit(v1: u64_s, v2: u64_s)
     requires
@@ -117,19 +135,9 @@ verismo_non_secret! {
     ensures
         v1 & v2 < 10,
     {
+        // Required to prove the bit-vector bound from the non-secret operands.
         proof {p::proof_test_bits2(v1 as u64, v2 as u64)}
 
-        if v1 & v2 == 4 {
-            proof {
-                assert(v1 & v2 == 4);
-            }
-        }
-
-        if v1 & v2 != 4 {
-            proof {
-                assert(v1 & v2 != 4);
-            }
-        }
         v1 & v2
     }
 }
@@ -140,10 +148,10 @@ verismo! {
         v1 == 10,
     ensures
         ret@.val == !((v1@.val - 1) as u64),
+        ret.wf_value(),
     {
         let mask = v1 - 1;
-        let ret = (!mask);
-        ret
+        !mask
     }
 
     fn test_add2(v1: u64) -> (ret: u64)

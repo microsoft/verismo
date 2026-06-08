@@ -14,14 +14,14 @@ impl<V: IsConstant + WellFormed + SpecSize> SnpPPtr<V> {
     #[verifier(external_body)]
     pub broadcast proof fn axiom_id_equal(&self, other: Self)
         ensures
-            (self.id() == other.id()) == (*self === other),
+            (#[trigger] self.id() == #[trigger] other.id()) == (*self === other),
     {
     }
 }
 
 impl<V: IsConstant + WellFormed + SpecSize> SnpMemAttrTrait for SnpPointsToData<V> {
     open spec fn snp(&self) -> SwSnpMemAttr {
-        self.snp.sw
+        self.snp.sw.spec_set_rmpmap(Map::empty()).spec_set_sysmap(Map::empty())
     }
 
     open spec fn hw_snp(&self) -> HwSnpMemAttr {
@@ -35,9 +35,9 @@ impl<V: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> SnpPointsToD
     >(self, prev: Self, offset: nat, val: Option<F>) -> bool {
         &&& if let Some(v) = val {
             &&& field_set(prev.get_value(), self.get_value(), offset, v)
-            &&& self.value().is_Some()
+            &&& self.value() is Some
         } else {
-            self.value().is_None()
+            self.value() is None
         }
         &&& self.ptr == prev.ptr
         &&& self.snp() === prev.snp()
@@ -51,7 +51,7 @@ impl<V: IsConstant + WellFormed + SpecSize + VTypeCast<SecSeqByte>> VTypeCast<
     open spec fn vspec_cast_to(self) -> SnpPointsToBytes {
         SnpPointsToBytes {
             pptr: self.ptr,
-            snp_bytes: self.value().get_Some_0().vspec_cast_to(),
+            snp_bytes: self.value()->Some_0.vspec_cast_to(),
             snp: self.snp,
         }
     }
@@ -67,16 +67,16 @@ impl<V: IsConstant + WellFormed + SpecSize> SnpPointsToData<V> {
     pub open spec fn only_val_updated(self, rhs: Self) -> bool {
         &&& self.snp() === rhs.snp()
         &&& self.id() === rhs.id()
-        &&& self.value().is_Some()
+        &&& self.value() is Some
         &&& self.wf()
     }
 
     pub open spec fn spec_write_rel(self, prev: Self, val: Option<V>) -> bool {
         &&& if let Some(v) = val {
-            &&& self.value().get_Some_0() === v
-            &&& self.value().is_Some()
+            &&& self.value()->Some_0 === v
+            &&& self.value() is Some
         } else {
-            self.value().is_None()
+            self.value() is None
         }
         &&& self.ptr == prev.ptr
         &&& self.snp() === prev.snp()
@@ -84,8 +84,8 @@ impl<V: IsConstant + WellFormed + SpecSize> SnpPointsToData<V> {
     }
 
     pub open spec fn spec_read_rel(self, val: V) -> bool {
-        &&& self.value().is_Some() && self.hw_snp().is_vmpl0_private() ==> {
-            self.value().get_Some_0() === val
+        &&& self.value() is Some && self.hw_snp().is_vmpl0_private() ==> {
+            self.value()->Some_0 === val
         }
         &&& inv_snp_value(self.snp(), val)
         &&& self.snp.valid_access(self.id(), spec_size::<V>(), crate::arch::rmp::perm_s::Perm::Read)
@@ -94,11 +94,11 @@ impl<V: IsConstant + WellFormed + SpecSize> SnpPointsToData<V> {
 
 impl<V: IsConstant + WellFormed + SpecSize> IsConstant for SnpPointsToData<V> {
     open spec fn is_constant_to(&self, vmpl: nat) -> bool {
-        self.value.is_Some() && self.value.get_Some_0().is_constant_to(vmpl)
+        self.value is Some && self.value->Some_0.is_constant_to(vmpl)
     }
 
     open spec fn is_constant(&self) -> bool {
-        self.value.is_Some() && self.value.get_Some_0().is_constant()
+        self.value is Some && self.value->Some_0.is_constant()
     }
 }
 
@@ -106,7 +106,7 @@ impl<V: IsConstant + WellFormed + VTypeCast<SecSeqByte> + SpecSize> SnpPointsTo<
     #[verifier(external_body)]
     pub proof fn trusted_into_raw(tracked self) -> (tracked points_to_raw: SnpPointsToRaw)
         requires
-            self@.value.is_Some(),
+            self@.value is Some,
             self@.wf(),
         ensures
             points_to_raw@ === self@.vspec_cast_to(),
@@ -118,7 +118,7 @@ impl<V: IsConstant + WellFormed + VTypeCast<SecSeqByte> + SpecSize> SnpPointsTo<
 
     pub proof fn tracked_into_raw(tracked self) -> (tracked points_to_raw: SnpPointsToRaw)
         requires
-            self@.value.is_Some(),
+            self@.value is Some,
             self@.wf(),
         ensures
             points_to_raw@ === self@.vspec_cast_to(),
@@ -133,6 +133,10 @@ impl<V: IsConstant + WellFormed + VTypeCast<SecSeqByte> + SpecSize> SnpPointsTo<
         proof_into_is_constant::<V, SecSeqByte>(self@.get_value());
         self.trusted_into_raw()
     }
+}
+
+pub broadcast group group_ptr_ptr_default {
+    SnpPPtr::<_>::axiom_id_equal,
 }
 
 } // verus!

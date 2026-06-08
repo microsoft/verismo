@@ -55,19 +55,19 @@ impl RegisterPerm {
         requires
             x.view::<T>() === y.view::<T>(),
         ensures
-            x === y,
+            (#[trigger] x.view::<T>() === #[trigger] y.view::<T>()) ==> x === y,
     {
     }
 
-    pub spec fn cpu(&self) -> nat;
+    pub uninterp spec fn cpu(&self) -> nat;
 
-    pub spec fn id(&self) -> RegName;
+    pub uninterp spec fn id(&self) -> RegName;
 
-    pub spec fn shared(&self) -> bool;
+    pub uninterp spec fn shared(&self) -> bool;
 
-    pub spec fn val<T>(&self) -> T where T: core::marker::Sized;
+    pub uninterp spec fn val<T>(&self) -> T where T: core::marker::Sized;
 
-    pub spec fn wf(&self) -> bool;
+    pub uninterp spec fn wf(&self) -> bool;
 
     #[verifier(inline)]
     pub open spec fn wf_notshared(&self) -> bool {
@@ -78,7 +78,7 @@ impl RegisterPerm {
     #[verifier(external_body)]
     pub broadcast proof fn axiom_wf<T: WellFormed + IsConstant>(&self)
         ensures
-            self.wf() == self.view::<T>().wf(),
+            self.wf() == #[trigger] self.view::<T>().wf(),
     {
     }
 
@@ -89,6 +89,11 @@ impl RegisterPerm {
         &&& ghcb_perm_view.wf()
         &&& ghcb_perm_view.shared()
     }
+}
+
+pub broadcast group group_msr_perm_default {
+    RegisterPerm::axiom_eq,
+    RegisterPerm::axiom_wf,
 }
 
 } // verus!

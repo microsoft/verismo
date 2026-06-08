@@ -96,6 +96,7 @@ impl GhcbHyperPageHandle {
                 handle.wf(),
                 (*cs).inv(),
                 (*cs).only_lock_reg_coremode_updated(oldcs, set![], set![]),
+            decreases HV_MAX_RETRY - i,
         {
             let ghost prevcs = (*cs);
             let (tmpret, tmphandle) = handle.hv_call(control, has_input, has_output, Tracked(cs));
@@ -110,13 +111,13 @@ impl GhcbHyperPageHandle {
                     let hvcall_code = (*hvcall_code) as u32 as u64;
                     ((new_strlit("status: "), hvcall_code), new_strlit("\n")).leak_debug();
                     if hvcall_code != HV_STATUS_TIMEOUT {
-                        break ;
+                        break;
                     }
-                    continue ;
+                    continue;
                 },
                 Err(code) => {
                     (new_strlit("err: "), code.as_u64()).leak_debug();
-                    break ;
+                    break;
                 },
             }
         }

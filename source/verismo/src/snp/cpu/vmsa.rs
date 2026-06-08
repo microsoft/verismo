@@ -124,6 +124,8 @@ pub type VmsaPage = Vmsa;
 
 verus! {
 
+broadcast use axiom_size_from_cast_bytes;
+
 proof fn proof_vmsa_size()
     ensures
         spec_size::<VmsaPage>() == spec_cast_integer::<_, nat>(PAGE_SIZE!()),

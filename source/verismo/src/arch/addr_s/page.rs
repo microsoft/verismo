@@ -1,6 +1,7 @@
 use super::*;
 use crate::tspec::*;
 use crate::*;
+use vstd::arithmetic::mul::{lemma_mul_inequality, lemma_mul_strict_inequality_converse};
 
 #[macro_export]
 /// Ensure dummy holder does not take effect when comparing
@@ -12,12 +13,6 @@ macro_rules! define_dummy_holder_axiom {
         ensures
             (left.value() == right.value()) == #[trigger](left =~= right),
             (left.value() == right.value()) == (left === right),
-        {}
-
-        #[verifier(external_body)]
-        pub broadcast proof fn axiom_addr_type_dummy_holder(&self)
-        ensures
-            self.dummy === arbitrary(),
         {}
     }
     };
@@ -280,7 +275,7 @@ impl<T> SpecMem<T> {
     #[verifier(external_body)]
     pub broadcast proof fn axiom_inv(&self)
         ensures
-            (self.offset() + self.len()) <= PAGE_SIZE!(),
+            (#[trigger] self.offset() + self.len()) <= PAGE_SIZE!(),
             self.offset() < PAGE_SIZE!(),
     {
     }
@@ -290,6 +285,7 @@ impl<T> SpecMem<T> {
             self.last().to_page() == self.to_page(),
             self.first().to_page() == self.to_page(),
     {
+        self.axiom_inv();
         let first_value = self.first().value();
         assert(first_value == self.to_page().to_addr().value() + self.offset());
         assert((self.to_page().to_addr().value() + self.offset()) / PAGE_SIZE!()
@@ -407,17 +403,33 @@ impl<T> SpecMem<T> {
         ensures
             mem1 === mem2 || mem1.disjoint(mem2),
     {
-        if !(mem1 =~= mem2) {
-            assert(!(mem1.first() =~= mem2.first()));
-            assert forall|i| 0 <= i < mem1.len() implies !#[trigger] mem2.contains(mem1[i]) by {
-                assert forall|j| 0 <= j < mem2.len() implies !(mem2[j] =~= mem1[i]) by {
-                    assert(mem2.first() != mem1.first());
-                    assert(mem2[j] == mem2.first() + j);
-                    assert(mem1[j] == mem1.first() + j);
-                }
+        if mem1 !== mem2 {
+            let f1 = mem1.first().as_int();
+            let f2 = mem2.first().as_int();
+            if f1 == f2 {
+                broadcast use SpecAddr::axiom_equal;
+
+                assert(mem1.first() === mem2.first());
+                assert(mem1.size == mem2.size);
+                assert(mem1 === mem2);
+            }
+            let k1 = proof_div_mod_rel(f1, align);
+            let k2 = proof_div_mod_rel(f2, align);
+            if f1 < f2 {
+                lemma_mul_strict_inequality_converse(k1, k2, 8);
+                lemma_mul_inequality(k1 + 1, k2, 8);
+            } else {
+                lemma_mul_strict_inequality_converse(k2, k1, 8);
+                lemma_mul_inequality(k2 + 1, k1, 8);
             }
         }
     }
+}
+
+pub broadcast group group_addr_default {
+    SpecAddr::<_>::axiom_equal,
+    SpecPage::<_>::axiom_equal,
+    SpecMem::<_>::axiom_inv,
 }
 
 } // verus!

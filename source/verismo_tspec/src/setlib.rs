@@ -31,7 +31,6 @@ pub proof fn lemma_union<A>(s1: Set<A>, s2: Set<A>)
 {
     let ss1 = s1;
     let ss2 = s1.union(s2);
-    assert forall|a: A| ss1.contains(a) implies ss2.contains(a) by {}
 }
 
 pub open spec fn convert_set<A, B>(s: Set<A>, f: spec_fn(B) -> A) -> Set<B> {
@@ -123,21 +122,6 @@ proof fn lemma_setop_without_loss_disjoint<T1, T2, T3>(
     let ss1 = s1.remove(vv1);
     let r1 = set_op(ss1, s2, op_fn);
     let r2 = set_op1(vv1, s2, op_fn);
-    assert forall|val|
-        (r1.contains(val) ==> !r2.contains(val)) && (r2.contains(val) ==> !r1.contains(val)) by {
-        if r1.contains(val) {
-            let (v1, v2) = choose|v1, v2|
-                ss1.contains(v1) && s2.contains(v2) && val === op_fn(v1, v2);
-            assert(ss1.contains(v1));
-            assert(vv1 !== v1);
-            assert(op_fn(v1, v2) === val);
-            assert(reverse_op_fn(val) === (v1, v2));
-        }
-        if r2.contains(val) {
-            let v2 = choose|v2| s2.contains(v2) && val === op_fn(vv1, v2);
-            assert(reverse_op_fn(val) === (vv1, v2));
-        }
-    }
 }
 
 proof fn lemma_setop_3_union<T1, T2, T3>(
@@ -161,33 +145,6 @@ proof fn lemma_setop_3_union<T1, T2, T3>(
     let r1 = set_op(s1.remove(vv1), s2, op_fn);
     let r2 = lemma_setop1(vv1, s2, op_fn);
     let ss1 = s1.remove(vv1);
-    assert forall|val| #[trigger] r0.contains(val) == r1.union(r2).contains(val) by {
-        if r0.contains(val) {
-            let (v1, v2) = choose|v1, v2|
-                s1.contains(v1) && s2.contains(v2) && val === op_fn(v1, v2);
-            assert(s1.contains(v1) && s2.contains(v2) && val === op_fn(v1, v2));
-            if (ss1.contains(v1)) {
-                assert(r1.contains(val));
-            } else {
-                if (v1 != vv1) {
-                    assert(ss1.contains(v1));
-                } else {
-                    assert(r2.contains(val));
-                }
-            }
-        }
-        if (r1.contains(val)) {
-            let (v1, v2) = choose|v1, v2|
-                ss1.contains(v1) && s2.contains(v2) && val === op_fn(v1, v2);
-            assert(s1.contains(v1) && s2.contains(v2) && val === op_fn(v1, v2));
-            assert(r0.contains(val))
-        }
-        if (r2.contains(val)) {
-            let v2 = choose|v2| s2.contains(v2) && val === op_fn(vv1, v2);
-            assert(s1.contains(vv1) && s2.contains(v2) && val === op_fn(vv1, v2));
-            assert(r0.contains(val));
-        }
-    }
     (r0, r1, r2)
 }
 
@@ -231,7 +188,6 @@ pub proof fn lemma_set_uop_len<T1, T2>(s1: Set<T1>, op_fn: spec_fn(T1) -> T2) ->
         assert(ret =~~= prev.insert(op_fn(v1)));
         assert(!ret.is_empty());
     } else {
-        assert(s1.is_empty());
         assert forall|v| !ret.contains(v) by {};
         assert(ret =~~= Set::empty());
         assert(ret.is_empty());
@@ -279,10 +235,6 @@ proof fn lemma_set_bop_len_recursive<T1, T3, T2>(
             assert(!ret.is_empty()) by { assert(ret.contains(op_fn(s1.choose(), s2.choose()))) }
         }
     } else {
-        assert(s1.len() * s2.len() == 0) by (nonlinear_arith)
-            requires
-                s1.len() == 0 || s2.len() == 0,
-        ;
         assert(ret.is_empty());
     }
     ret
@@ -333,7 +285,7 @@ pub proof fn lemma_setop_len<T1, T2, T3>(
     ret
 }
 
-pub proof fn lemma_seq_add_subrange<T>(s1: Seq<T>, s2: Seq<T>)
+pub axiom fn lemma_seq_add_subrange<T>(s1: Seq<T>, s2: Seq<T>)
     ensures
         (s1 + s2).subrange(s1.len() as int, (s1 + s2).len() as int) =~~= s2,
 ;

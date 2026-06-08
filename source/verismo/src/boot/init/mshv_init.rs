@@ -24,7 +24,7 @@ verismo_simple! {
         &&& static_end.is_constant()
         &&& static_start < static_end
         &&& unused_preval_memperm.wf()
-        &&& forall |r| e820@.to_aligned_ranges().contains(r) ==>
+        &&& forall |r| #![trigger e820@.to_aligned_ranges().contains(r)] e820@.to_aligned_ranges().contains(r) ==>
             unused_preval_memperm.contains_default_except(r, e820@.to_valid_ranges())
         &&& memcc.memperm.contains_init_except((0, VM_MEM_SIZE as nat), e820@.to_aligned_ranges())
     }
@@ -101,22 +101,25 @@ pub fn process_vm_mem(
         let prev_memperm = memperm;
         memperm.proof_remove_range_ensures(verismo_range);
         memperm.tracked_split(verismo_range);
-        assert forall|i: int| 0 <= i < hv_mem_slice@.len() implies memperm.contains_default_except(
+        assert forall|i: int|
+            #![trigger hv_mem_slice@[i]]
+            0 <= i < hv_mem_slice@.len() implies memperm.contains_default_except(
             hv_mem_slice@[i].range(),
             e820@.to_valid_ranges().insert(verismo_range),
         ) by {
             let excepted = e820@.to_valid_ranges().insert(verismo_range);
             assert forall|r|
+                #![trigger ranges_disjoint(excepted, r)]
+                #![trigger memperm.contains_range(r)]
                 inside_range(r, hv_mem_slice@[i].range()) && ranges_disjoint(excepted, r) && r.1
                     != 0 implies memperm.contains_range(r) && memperm.contains_default_mem(r) by {
                 assert(excepted.contains(verismo_range));
                 assert(range_disjoint_(verismo_range, r));
                 assert(memperm.eq_at(prev_memperm, r));
                 assert(ranges_disjoint(e820@.to_valid_ranges(), r)) by {
-                    assert forall|rr| e820@.to_valid_ranges().contains(rr) implies range_disjoint_(
-                        rr,
-                        r,
-                    ) by {
+                    assert forall|rr|
+                        #![trigger range_disjoint_(rr, r)]
+                        e820@.to_valid_ranges().contains(rr) implies range_disjoint_(rr, r) by {
                         assert(excepted.contains(rr));
                     }
                 }
@@ -199,6 +202,7 @@ verismo_simple! {
             forall |i: int| 0 <= i < idx as int ==>
                 prev_end as int >= (#[trigger]hv_mem_tb@[i]).range().end(),
             memcc.memperm.contains_init_except(range(prev_end as int, VM_MEM_SIZE!()), pre_validated),
+        decreases len - idx,
         {
             let entry = slice_index_get(hv_mem_tb, idx as usize_t);
             let start_gpn = entry.starting_gpn as usize;

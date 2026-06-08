@@ -5,6 +5,7 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -19,33 +20,11 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install specified rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: nightly-2023-12-22
-          target: x86_64-unknown-none
-          profile: minimal
-
-      - name: fetch verus via metadata
-        working-directory: source
+      - name: Install verus via prebuilt
+        working-directory: tools
         run: |
-            source ../tools/v-ci-setup.sh
+            ./install_verus --use-prebuilt
             echo "VERUS_PATH=$(echo $VERUS_PATH)" >> $GITHUB_ENV
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-directories: ${{ env.VERUS_PATH }}/source/target-verus
-          workspaces: |
-            ${{ github.workspace }}/source -> target
-            ${{ env.VERUS_PATH }}/source -> target
-            ${{ env.VERUS_PATH }}/tools/vargo -> target
-
-      - name: Install depdendencies
-        run: ./tools/activate.sh
-  
-      - name: Build
-        working-directory: source/verismo
-        run: cargo v build
 
       - name: Fmt
         run: cargo fmt --check
@@ -58,3 +37,6 @@ jobs:
       - name: Fmt verus code
         run: ./tools/fmt.sh --check
 
+      - name: Verify
+        working-directory: source
+        run: cargo verus focus --release -- --multiple-errors=20 --trace --time

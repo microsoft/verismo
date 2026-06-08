@@ -4,19 +4,18 @@ use crate::ptr::*;
 verus! {
 
 pub open spec fn is_none_or_sharedmem(memperm: Option<SnpPointsToRaw>) -> bool {
-    &&& memperm.is_Some() ==> (memperm.get_Some_0()@.snp().is_hv_shared()
-        || memperm.get_Some_0()@.size() == 0)
-    &&& memperm.is_Some() ==> memperm.get_Some_0()@.wf()
+    &&& memperm is Some ==> (memperm->Some_0@.snp().is_hv_shared() || memperm->Some_0@.size() == 0)
+    &&& memperm is Some ==> memperm->Some_0@.wf()
 }
 
 pub open spec fn hvupdate_none_or_sharedmem(
     memperm: Option<SnpPointsToRaw>,
     prevmemperm: Option<SnpPointsToRaw>,
 ) -> bool {
-    &&& prevmemperm.is_Some() == memperm.is_Some()
-    &&& prevmemperm.is_Some() ==> memperm.get_Some_0()@.spec_write_rel(
-        prevmemperm.get_Some_0()@,
-        memperm.get_Some_0()@.snp_bytes,
+    &&& prevmemperm is Some == memperm is Some
+    &&& prevmemperm is Some ==> memperm->Some_0@.spec_write_rel(
+        prevmemperm->Some_0@,
+        memperm->Some_0@.snp_bytes,
     )
 }
 

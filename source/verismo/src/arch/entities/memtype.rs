@@ -7,7 +7,6 @@ use crate::tspec::*;
 verus! {
 
 #[derive(PartialEq, Eq, Structural, SpecIntEnum)]
-#[is_variant]
 pub enum PTLevel {
     L3 = 0,
     L2,
@@ -18,7 +17,6 @@ pub enum PTLevel {
 /// In Init stage, there is only PTE, SmPrivCode, SmBootData, and some invalidated
 /// The Init process transition some invalidated pages to SmPrivData, SmVmplPage, and Others. In this stage, no data flow from private -> others;
 /// In PostInit, rmp change is not allowed for any private mem
-#[is_variant]
 pub enum MemType {
     PTE(PTLevel),  // page table
     SmPrivData,  // heap + secret page
@@ -43,18 +41,18 @@ impl MemType {
     // Both Hv and VMPL > 0 will fails the SM or will not change content
     #[verifier(inline)]
     pub open spec fn is_sm_int(&self) -> bool {
-        ||| self.is_SmPrivData()
-        ||| self.is_SmBootData()
-        ||| self.is_SmPrivCode()
-        ||| self.is_SmPrivStack()
-        ||| self.is_PTE()
+        ||| self is SmPrivData
+        ||| self is SmBootData
+        ||| self is SmPrivCode
+        ||| self is SmPrivStack
+        ||| self is PTE
     }
 
     // Is the data integrity important for the VM (for all VMPLs)?
     #[verifier(inline)]
     pub open spec fn is_vm_int(&self) -> bool {
         ||| self.is_sm_int()
-        ||| self.is_SmVmplPage()
+        ||| self is SmVmplPage
     }
 
     #[verifier(inline)]
@@ -67,7 +65,7 @@ impl MemType {
     // This is a correctness requirement
     #[verifier(inline)]
     pub open spec fn need_c_bit_cleared(&self) -> bool {
-        self.is_HvShared()
+        self is HvShared
     }
 }
 
@@ -76,7 +74,7 @@ verus! {
 
 /// gpn -> memory type.
 /// A software should strictly follows the memory layout defined by this fn.
-pub spec fn memtype_inner(gpn: GPN) -> MemType;
+pub uninterp spec fn memtype_inner(gpn: GPN) -> MemType;
 
 pub open spec fn memtype(memid: MemID, gpn: GPN) -> MemType {
     memtype_inner(gpn)

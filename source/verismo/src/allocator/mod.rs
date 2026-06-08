@@ -5,10 +5,10 @@ mod linkedlist;
 mod locked;
 mod trusted;
 
+pub use self::linkedlist::LinkedListAllocator;
 pub use bit_p::*;
 pub use buddy::BuddyAllocator;
 pub use buddy_new::new_array_linked_list32;
-pub use linkedlist::LinkedListAllocator;
 use verismo_macro::*;
 
 pub use self::trusted::*;

@@ -3,8 +3,6 @@ use crate::tspec_e::*;
 
 verus! {
 
-global size_of usize == 8;
-
 #[derive(Copy, Clone, VTypeCast, ExecStruct, NotPrimitive, VTypeCastSec, SpecSize, WellFormed, IsConstant)]
 pub struct GuestVir;
 
@@ -89,7 +87,6 @@ crate::macro_const_int! {
     pub const BLOCK_SIZE: usize = 1usize;
 }
 
-#[is_variant]
 #[derive(Copy, Clone, PartialEq, Eq, SpecIntEnum)]
 pub enum PageSize {
     Size4k = 0,

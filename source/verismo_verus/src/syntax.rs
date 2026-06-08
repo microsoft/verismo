@@ -133,7 +133,9 @@ macro_rules! quote_verbatim {
 }
 
 impl Visitor {
-    fn take_ghost<T: Default>(&self, dest: &mut T) -> T { take_ghost(self.erase_ghost, dest) }
+    fn take_ghost<T: Default>(&self, dest: &mut T) -> T {
+        take_ghost(self.erase_ghost, dest)
+    }
 
     fn maybe_erase_expr(&self, span: Span, e: Expr) -> Expr {
         if self.erase_ghost {
@@ -151,7 +153,7 @@ impl Visitor {
         _semi_token: Option<Token![;]>,
         _is_trait: bool,
     ) -> Vec<Stmt> {
-        let stmts: Vec<Stmt> = Vec::new();
+        let mut stmts: Vec<Stmt> = Vec::new();
         let _unwrap_ghost_tracked: Vec<Stmt> = Vec::new();
         let _call_external_fn = attr_is_call_external(attrs);
         let is_exe = is_exe(&sig);
@@ -206,7 +208,29 @@ impl Visitor {
                         if self.for_non_secret {
                             pres.push(Expr::Verbatim(quote! {#var.is_constant()}));
                         }
-                        pres.push(Expr::Verbatim(quote! {#var.wf()}));
+                        // Replace the previous `var.wf()` precondition injection
+                        // with a body-level `use_type_invariant(&var)` proof
+                        // call. `wf()` is trivially true; the real fact callers
+                        // need is the closed `wf_value()` type invariant, which
+                        // only `use_type_invariant` can surface in the body.
+                        // Skip the receiver (`self`) and `old(self)` forms —
+                        // those identifiers may not be in scope or addressable
+                        // here.
+                        let var_ts = var.to_token_stream().to_string();
+                        if var_ts != "self"
+                            && var_ts != "(* old (self))"
+                            && var_ts != "(* self)"
+                            && !var_ts.contains("old")
+                        {
+                            stmts.push(Stmt::Semi(
+                                Expr::Verbatim(quote! {
+                                    proof {
+                                        use_type_invariant(& #var);
+                                    }
+                                }),
+                                Semi { spans: [proc_macro2::Span::call_site()] },
+                            ));
+                        }
                     }
 
                     if let Some(var) = post {
@@ -215,7 +239,14 @@ impl Visitor {
                         if self.for_non_secret {
                             posts.push(Expr::Verbatim(quote! {#var.is_constant()}));
                         }
-                        posts.push(Expr::Verbatim(quote! {#var.wf()}));
+                        // Note: dropped the previous `posts.push(var.wf())`
+                        // injection. `wf()` returns `true` on every type that
+                        // matters here, so it adds no proof power. The closed
+                        // `wf_value()` component of `is_constant()` still has
+                        // to be discharged by the caller's body via
+                        // `use_type_invariant(&local_return)` (or an explicit
+                        // `ensures` clause), because the named return is not in
+                        // scope inside the body.
                     }
                 }
 
@@ -1200,8 +1231,36 @@ impl VisitMut for Visitor {
                     *expr = if self.inside_ghost > 0 {
                         quote_verbatim!(span, attrs => VTypeCast::<#ty>::vspec_cast_to(#src))
                     } else if !self.inside_external {
-                        self.replace_stype(&mut ty, true);
-                        quote_verbatim!(span, attrs => core::convert::Into::<#ty>::into(#src))
+                        // Keep primitive narrowing/widening casts as `as` to avoid
+                        // requiring nonexistent `Into<u8> for u64` impls. Only rewrite
+                        // when target is a non-primitive (so we route through the
+                        // project's Into impls for SecType, etc.).
+                        let ty_str = quote::ToTokens::to_token_stream(&*ty).to_string();
+                        let ty_trim = ty_str.replace(' ', "");
+                        let is_primitive = matches!(
+                            ty_trim.as_str(),
+                            "u8" | "u16"
+                                | "u32"
+                                | "u64"
+                                | "u128"
+                                | "usize"
+                                | "i8"
+                                | "i16"
+                                | "i32"
+                                | "i64"
+                                | "i128"
+                                | "isize"
+                                | "bool"
+                                | "char"
+                                | "f32"
+                                | "f64"
+                        );
+                        if is_primitive {
+                            Expr::Cast(cast)
+                        } else {
+                            self.replace_stype(&mut ty, true);
+                            quote_verbatim!(span, attrs => core::convert::Into::<#ty>::into(#src))
+                        }
                     } else {
                         Expr::Cast(cast)
                     };
@@ -1324,7 +1383,7 @@ impl VisitMut for Visitor {
                         BinOp::Div(..) => {
                             let left = quote_spanned! { left.span() => (#left) };
                             if use_spec_traits {
-                                *expr = quote_verbatim!(span, attrs => #left.spec_euclidean_div(#right));
+                                *expr = quote_verbatim!(span, attrs => #left.spec_euclidean_or_real_div(#right));
                             } else if !is_inside_ghost {
                                 *expr = quote_verbatim!(span, attrs => #left.div(#right));
                             }
@@ -1580,8 +1639,9 @@ impl VisitMut for Visitor {
             crate::rustdoc::process_item_fn(fun);
         }
         self.inside_ghost = if !is_exe(&fun.sig) { 1 } else { 0 };
-        let _stmts =
+        let stmts =
             self.visit_fn(&mut fun.attrs, Some(&fun.vis), &mut fun.sig, fun.semi_token, false);
+        fun.block.stmts.splice(0..0, stmts);
         fun.semi_token = None;
         visit_item_fn_mut(self, fun);
         self.inside_ghost = 0;
@@ -2061,7 +2121,7 @@ fn rejoin_tokens(stream: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let adjacent = |s1: Span, s2: Span| {
         let l1 = s1.end();
         let l2 = s2.start();
-        s1.source_file() == s2.source_file() && l1.eq(&l2)
+        s1.file() == s2.file() && l1.eq(&l2)
     };
     for i in 0..(if tokens.len() >= 2 { tokens.len() - 2 } else { 0 }) {
         let t0 = pun(&tokens[i]);

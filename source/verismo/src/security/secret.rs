@@ -43,6 +43,8 @@ verismo_simple! {
 
 verus! {
 
+broadcast use axiom_size_from_cast_bytes;
+
 impl SnpSecretsPageLayout {
     pub closed spec fn closed_wf_mastersecret(&self) -> bool {
         &&& self.vmpck0@.is_fullsecret()
@@ -303,9 +305,9 @@ pub fn enc_payload(
         payload_perm@.wf_default((payload_addr as int, len as nat)),
     ensures
         cs.inv(),
-        ret.0.is_Ok() ==> ret.0.get_Ok_0().wf(),
-        ret.0.is_Ok() ==> ret.0.get_Ok_0()@.is_constant(),
-        ret.0.is_Ok() ==> ret.0.get_Ok_0().snp() === SwSnpMemAttr::spec_default(),
+        ret.0 is Ok ==> ret.0->Ok_0.wf(),
+        ret.0 is Ok ==> ret.0->Ok_0@.is_constant(),
+        ret.0 is Ok ==> ret.0->Ok_0.snp() === SwSnpMemAttr::spec_default(),
         payload_perm == ret.1@,
         cs.only_lock_reg_coremode_updated(*old(cs), set![], set![spec_ALLOCATOR_lockid()]),
 {
@@ -352,6 +354,7 @@ pub fn cal2_sha512(input1: &SHA512Type, input2: &SHA512Type) -> (ret: SHA512Type
             0 <= i <= SHA512_LEN,
             forall|k: int| 0 <= k < i ==> tmp_buf[k] == input1[k],
             forall|k: int| 0 <= k < i ==> tmp_buf[k + SHA512_LEN] == input2[k],
+        decreases SHA512_LEN - i,
     {
         tmp_buf.set2(i, *(input1.index2(i)));
         tmp_buf.set2(i + SHA512_LEN, *(input2.index2(i)));

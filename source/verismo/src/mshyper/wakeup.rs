@@ -1,4 +1,5 @@
 use super::*;
+use crate::arch::rmp::PagePermInt;
 use crate::pgtable_e::va_to_pa;
 use crate::security::SnpSecretsPageLayout;
 use crate::snp::cpu::{InitAPParams, InitApVmsa, PerCpuData, GDT};
@@ -356,6 +357,7 @@ impl GhcbHyperPageHandle {
                 spec_ap_ids_wf_lowerbound(ap_ids, BSP as int, cpu as int),
                 secret.wf_mastersecret(),
                 gdt.is_constant(),
+            decreases cpu_count - cpu,
         {
             if cpu != BSP as u32 {
                 proof {
@@ -443,11 +445,12 @@ impl GhcbHandle {
                 snpcore.inv(),
                 snpcore.only_reg_coremode_updated(oldsnpcore, set![GHCB_REGID()]),
                 vmsa.is_vmsa_page(),
+            decreases 1nat,
         {
             let mut check_error = vmsa.copy_guest_error_code();
             check_error.declassify();
             if error_mask != check_error.reveal_value() {
-                break ;
+                break;
             }
             ghcb.box_update(GhcbClear);
             let ghost prev_ghcb = ghcb@;

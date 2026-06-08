@@ -4,7 +4,7 @@ use crate::tspec::*;
 verus! {
 
 impl CryptoMask {
-    pub spec fn get_mask<T>(&self) -> T;
+    pub uninterp spec fn get_mask<T>(&self) -> T;
 }
 
 } // verus!

@@ -6,6 +6,11 @@ use crate::boot::init::e820_init_alloc::init_allocator_e820;
 
 verus! {
 
+broadcast use crate::group_verismo_default;
+
+} // verus!
+verus! {
+
 pub open spec fn init_allocator_requires(
     allocator: VeriSMoAllocator,
     hv_mem_tb: &[HyperVMemMapEntry],
@@ -66,6 +71,7 @@ fn init_allocator(
     let tracked mut memcc = SnpMemCoreConsole { memperm, cc };
     proof {
         assert forall|i: int|
+            #![trigger hv_mem_tb@[i]]
             (idx as int) <= i < (len as int) implies memcc.memperm.contains_default_except(
             hv_mem_tb@[i].range(),
             except_ranges,
@@ -100,6 +106,7 @@ fn init_allocator(
             forall|i: int|
                 0 <= i < idx as int ==> prev_end as int >= (#[trigger] hv_mem_tb@[i]).range().end(),
             prev_end as int <= verismo_static.0 || prev_end as int >= verismo_static.end(),
+        decreases len - idx,
     {
         let entry = slice_index_get(hv_mem_tb, idx as usize_t);
         let start_gpn = entry.start().reveal_value();
@@ -233,6 +240,7 @@ fn init_allocator(
                     assert(hv_memperm.contains_default_except(used_range, e820@.to_valid_ranges()))
                         by {
                         assert forall|r|
+                            #![trigger hv_memperm.contains_range(r)]
                             (inside_range(r, used_range) && r.1 != 0 && ranges_disjoint(
                                 e820@.to_valid_ranges(),
                                 r,
@@ -273,6 +281,7 @@ fn init_allocator(
                 ));
                 assert(hv_memperm.contains_default_except(used_range, e820@.to_valid_ranges())) by {
                     assert forall|r|
+                        #![trigger hv_memperm.contains_range(r)]
                         inside_range(r, used_range) && r.1 != 0 && ranges_disjoint(
                             e820@.to_valid_ranges(),
                             r,
@@ -296,6 +305,7 @@ fn init_allocator(
         proof {
             memcc = SnpMemCoreConsole { memperm, cc };
             assert forall|i: int|
+                #![trigger hv_mem_tb@[i]]
                 (idx as int) <= i < (len as int) implies memcc.memperm.contains_default_except(
                 hv_mem_tb@[i].range(),
                 except_ranges,

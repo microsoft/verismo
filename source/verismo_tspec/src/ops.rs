@@ -37,7 +37,7 @@ pub trait VSpecMul<Rhs, Output> {
 }
 
 pub trait VSpecEuclideanDiv<Rhs, Output> {
-    spec fn spec_euclidean_div(self, rhs: Rhs) -> Output where Self: core::marker::Sized;
+    spec fn spec_euclidean_or_real_div(self, rhs: Rhs) -> Output where Self: core::marker::Sized;
 }
 
 pub trait VSpecEuclideanMod<Rhs, Output> {

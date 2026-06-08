@@ -10,7 +10,7 @@ pub open spec fn spec_default_<T: SpecDefault>() -> T {
 }
 
 impl SpecDefault for () {
-    open spec fn spec_default() -> Self;
+    uninterp spec fn spec_default() -> Self;
 }
 
 impl<T> SpecDefault for Ghost<T> {

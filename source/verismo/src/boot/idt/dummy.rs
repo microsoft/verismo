@@ -1,6 +1,7 @@
 use core::arch::global_asm;
 
 use super::*;
+use crate::allocator::VeriSMoAllocator;
 use crate::arch::reg::RegName;
 use crate::debug::VPrintAtLevel;
 use crate::lock::MapLockContains;
@@ -11,6 +12,11 @@ use crate::vbox::VBox;
 #[cfg(target_os = "none")]
 global_asm!(include_str!("isr.s"), options(att_syntax));
 
+verus! {
+
+broadcast use crate::group_verismo_default;
+
+} // verus!
 verus! {
 
 // Requires the exception code and stackframe is not secret.
@@ -92,7 +98,7 @@ impl IDTEntry {
     }
     }
 
-    verus! {
+    verus_impl! {
     pub fn from_addr_selector(addr: u64, gdt_selector: u16) -> (ret: Self)
     requires
         gdt_selector.is_constant(),
@@ -136,8 +142,9 @@ pub fn init_idt_content(idt: &mut InterruptDescriptorTable, gdt_selector: u16)
             dummy_handler == spec_isr_handler_addr_0(),
             dummy_handler.is_constant(),
             gdt_selector.is_constant(),
-            forall|k: int| 0 <= k < (i as int) ==> idt@[k].is_constant(),
+            forall|k: int| #![trigger idt@[k]] 0 <= k < (i as int) ==> idt@[k].is_constant(),
             i.is_constant(),
+        decreases idt@.len() - i as int,
     {
         idt.update(i, IDTEntry::from_addr_selector(dummy_handler as u64, gdt_selector));
         i = i + 1;
@@ -211,8 +218,6 @@ pub fn init_idt(Tracked(cs): Tracked<&mut SnpCoreSharedMem>)
     box_init_idt_content(&mut idt, gdt_selector);
     // convert vbox to raw mem.
     let (idt_addr, idt_memperm) = idt.into_raw();
-    // TODO: adjust pte.
-    assume(!idt_memperm@@.snp().pte().w);
     let dtp = Idtr { base: idt_addr.as_u64().into(), limit: 0xffffu64.into() };
     assert(dtp.is_constant());
     IdtBaseLimit.write(dtp, Tracked(&mut idt_perm));

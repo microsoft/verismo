@@ -21,7 +21,7 @@ mod mem;
 mod monitor;
 pub mod pcr;
 pub mod secret;
-pub use mem::*;
+pub use self::mem::*;
 pub use monitor::*;
 pub use secret::*;
 
@@ -46,6 +46,8 @@ pub const VERISMO_VMPCK_ID: u8 = 0;
 } // verus!
 verus! {
 
+broadcast use axiom_size_from_cast_bytes;
+
 pub open spec fn is_richos_vmsa_box(vmsa: VBox<VmsaPage>) -> bool {
     &&& vmsa.snp().is_vmpl0_private()
     &&& vmsa.is_page()
@@ -55,8 +57,9 @@ pub open spec fn is_richos_vmsa_box(vmsa: VBox<VmsaPage>) -> bool {
 pub open spec fn richos_vmsa_invfn() -> spec_fn(Vec<Option<VBox<VmsaPage>>>) -> bool {
     |vec: Vec<Option<VBox<VmsaPage>>>|
         forall|i|
-            0 <= i < vec@.len() ==> (vec[i].is_Some() ==> is_richos_vmsa_box(
-                #[trigger] vec[i].get_Some_0(),
+            #![trigger vec[i]]
+            0 <= i < vec@.len() ==> (vec[i] is Some ==> is_richos_vmsa_box(
+                #[trigger] vec[i]->Some_0,
             ))
 }
 

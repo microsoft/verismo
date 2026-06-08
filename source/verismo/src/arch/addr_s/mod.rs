@@ -1,6 +1,6 @@
 #[macro_use]
 mod def_s;
-mod page;
+pub(crate) mod page;
 
 pub use def_s::*;
 

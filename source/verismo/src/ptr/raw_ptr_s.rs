@@ -14,12 +14,12 @@ impl IsSnpPPtr for SnpPointsToBytes {
 }
 
 impl SnpPointsToRaw {
-    pub open spec fn view(&self) -> SnpPointsToBytes;
+    pub uninterp spec fn view(&self) -> SnpPointsToBytes;
 }
 
 impl SnpPointsToBytes {
     #[verifier(external_body)]
-    broadcast proof fn axiom_map_ext_equal(self, other: Self)
+    pub(crate) broadcast proof fn axiom_map_ext_equal(self, other: Self)
         ensures
             #[trigger] (self =~= other) == (self.bytes() =~~= other.bytes() && self.snp()
                 === other.snp() && self.range() === other.range()),
@@ -27,7 +27,7 @@ impl SnpPointsToBytes {
     }
 
     #[verifier(external_body)]
-    broadcast proof fn axiom_map_ext_equal_deep(self, other: Self)
+    pub(crate) broadcast proof fn axiom_map_ext_equal_deep(self, other: Self)
         ensures
             #[trigger] (self =~~= other) == (self.bytes() =~~= other.bytes() && self.snp
                 === other.snp && self.range() === other.range()),
@@ -378,7 +378,9 @@ impl SnpPointsToRaw {
             offsets.len() > 0,
         ensures
             forall|i: int| 0 <= i < offsets.len() ==> Self::wf_seq_perms(s, i),
-            forall|i: int| 0 <= i < offsets.len() ==> s[i]@.range().0 == offsets[i],
+            forall|i: int|
+                #![trigger s[i]@.range().0]
+                0 <= i < offsets.len() ==> s[i]@.range().0 == offsets[i],
             Self::merge_perm_ensures(s, offsets.len(), self),
         decreases offsets.len(),
     {
@@ -413,6 +415,11 @@ pub open spec fn wf_page_range(
     forall|i|
         start_page <= i < (start_page + npages) ==> #[trigger] page_perms.contains_key(i)
             && page_perms[i]@.wf_range((i.to_addr(), PAGE_SIZE as nat))
+}
+
+pub broadcast group group_raw_ptr_default {
+    SnpPointsToBytes::axiom_map_ext_equal,
+    SnpPointsToBytes::axiom_map_ext_equal_deep,
 }
 
 } // verus!

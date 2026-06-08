@@ -1,14 +1,15 @@
 use super::*;
-use crate::tspec_e::SecSeqByte;
+// `axiom_size_from_cast_secbytes_def` and `SecSeqByte` now live in
+// `tspec::security::sectype` (moved from `primitives_e/sectype.rs`).
+// `use super::*;` already pulls them in via the `tspec` re-exports.
 verus! {
+
+// Required here to make the constancy axiom available to cast proofs in this crate.
+broadcast use axiom_const_forall;
 
 pub trait VTypeCast<T> {
     // verus macro transform a as int to vspec_cast_to::<_, int>(a)
     spec fn vspec_cast_to(self) -> T where Self: core::marker::Sized;
-}
-
-pub trait SpecInto<T> {
-    spec fn spec_into(self) -> T where Self: core::marker::Sized;
 }
 
 pub open spec fn is_castable<T1: IsConstant + SpecSize, T2: IsConstant + SpecSize>(t1: T1) -> bool {
@@ -22,16 +23,10 @@ pub open spec fn is_castable<T1: IsConstant + SpecSize, T2: IsConstant + SpecSiz
 
 }
 
-impl<T2, T1: VTypeCast<T2>> SpecInto<T2> for T1 {
-    open spec fn spec_into(self) -> T2 {
-        self.vspec_cast_to()
-    }
-}
-
 #[verifier(external_body)]
 pub broadcast proof fn axiom_cast_to_seq_unique<T: VTypeCast<SecSeqByte>>(val: T)
     ensures
-        val === VTypeCast::<SecSeqByte>::vspec_cast_to(val).vspec_cast_to(),
+        val === (#[trigger] VTypeCast::<SecSeqByte>::vspec_cast_to(val)).vspec_cast_to(),
 {
 }
 
@@ -40,7 +35,7 @@ broadcast proof fn axiom_into_conversion_bytes<T1: VTypeCast<SecSeqByte> + IsCon
     b: SecSeqByte,
 )
     ensures
-        VTypeCast::<T1>::vspec_cast_to(b).vspec_cast_to() =~~= b,
+        #[trigger] VTypeCast::<T1>::vspec_cast_to(b).vspec_cast_to() =~~= b,
 {
 }
 
@@ -48,6 +43,7 @@ pub proof fn proof_cast_from_seq_unique<T: VTypeCast<SecSeqByte>>(val: T)
     ensures
         val === VTypeCast::<SecSeqByte>::vspec_cast_to(val).vspec_cast_to(),
 {
+    axiom_cast_to_seq_unique(val);
 }
 
 #[verifier(opaque)]
@@ -80,6 +76,7 @@ pub proof fn proof_field_set_at<
 >(prev_val: T, val: T, offset: nat, f: F)
     requires
         offset < spec_size::<T>(),
+        offset + spec_size::<F>() <= spec_size::<T>(),
         field_set(prev_val, val, offset, f),
     ensures
         field_at(val, offset) === f,
@@ -88,12 +85,23 @@ pub proof fn proof_field_set_at<
     reveal(field_at);
     proof_cast_from_seq_unique(f);
     let prev_bytes: SecSeqByte = prev_val.vspec_cast_to();
-    let bytes: SecSeqByte = val.vspec_cast_to();
+    let val_bytes: SecSeqByte = val.vspec_cast_to();
     let fb: SecSeqByte = f.vspec_cast_to();
-    let bytes = (prev_bytes.take(offset as int) + fb + prev_bytes.skip(
-        (offset + spec_size::<F>()) as int,
-    ));
-    assert(bytes.subrange(offset as int, (offset + spec_size::<F>()) as int) =~~= fb);
+    let end = (offset + spec_size::<F>()) as int;
+    // Required to instantiate size/cast axioms while proving field subranges.
+    broadcast use {axiom_size_from_cast_secbytes_def, axiom_size_from_cast_bytes};
+
+    axiom_size_from_cast_secbytes_def(prev_val);
+    axiom_size_from_cast_secbytes_def(val);
+    axiom_size_from_cast_secbytes_def(f);
+    let bytes = prev_bytes.take(offset as int) + fb + prev_bytes.skip(end);
+    assert(val_bytes =~~= bytes);
+    assert(VTypeCast::<SecSeqByte>::vspec_cast_to(prev_val).len() == vstd::layout::size_of::<T>());
+    assert(VTypeCast::<SecSeqByte>::vspec_cast_to(f).len() == vstd::layout::size_of::<F>());
+    assert(prev_bytes.len() == spec_size::<T>());
+    assert(fb.len() == spec_size::<F>());
+    assert(0 <= offset as int <= end <= prev_bytes.len());
+    assert(bytes.subrange(offset as int, end) =~~= fb);
 }
 
 pub broadcast proof fn proof_field_set_constant<
@@ -102,6 +110,7 @@ pub broadcast proof fn proof_field_set_constant<
 >(prev_val: T, val: T, offset: nat, f: F)
     requires
         offset < spec_size::<T>(),
+        offset + spec_size::<F>() <= spec_size::<T>(),
         f.is_constant(),
         prev_val.is_constant(),
         #[trigger] field_set(prev_val, val, offset, f),
@@ -109,9 +118,25 @@ pub broadcast proof fn proof_field_set_constant<
         val.is_constant(),
 {
     reveal(field_set);
+    let prev_bytes: SecSeqByte = prev_val.vspec_cast_to();
     let bytes: SecSeqByte = val.vspec_cast_to();
+    let fb: SecSeqByte = f.vspec_cast_to();
+    let end = (offset + spec_size::<F>()) as int;
+    // Required to instantiate size/cast axioms while proving field-set constancy.
+    broadcast use {axiom_size_from_cast_secbytes_def, axiom_size_from_cast_bytes};
+
+    axiom_size_from_cast_secbytes_def(prev_val);
+    axiom_size_from_cast_secbytes_def(val);
+    axiom_size_from_cast_secbytes_def(f);
+    assert(VTypeCast::<SecSeqByte>::vspec_cast_to(prev_val).len() == vstd::layout::size_of::<T>());
+    assert(prev_bytes.len() == spec_size::<T>());
+    assert(end <= prev_bytes.len());
     proof_into_is_constant::<_, SecSeqByte>(prev_val);
     proof_into_is_constant::<_, SecSeqByte>(f);
+    proof_subrange_is_constant(prev_bytes, 0, offset as int);
+    proof_subrange_is_constant(prev_bytes, end, prev_bytes.len() as int);
+    proof_bytes_add_is_constant(prev_bytes.take(offset as int), fb);
+    proof_bytes_add_is_constant(prev_bytes.take(offset as int) + fb, prev_bytes.skip(end));
     assert(bytes.is_constant());
     proof_into_is_constant::<_, T>(bytes)
 }
@@ -153,13 +178,28 @@ pub proof fn proof_subrange_is_constant_to(b: SecSeqByte, start: int, end: int, 
 {
 }
 
+pub proof fn proof_subrange_is_constant(b: SecSeqByte, start: int, end: int)
+    requires
+        b.is_constant(),
+        0 <= start,
+        start <= end,
+        end <= b.len(),
+    ensures
+        b.subrange(start, end).is_constant(),
+{
+    proof_subrange_is_constant_to(b, start, end, 1);
+    proof_subrange_is_constant_to(b, start, end, 2);
+    proof_subrange_is_constant_to(b, start, end, 3);
+    proof_subrange_is_constant_to(b, start, end, 4);
+}
+
 pub proof fn proof_bytes_add_is_constant_to(b1: SecSeqByte, b2: SecSeqByte, vmpl: nat)
     ensures
         (b1.is_constant_to(vmpl) && b2.is_constant_to(vmpl)) <==> (b1 + b2).is_constant_to(vmpl),
 {
     let b = (b1 + b2);
     if (b1.is_constant_to(vmpl) && b2.is_constant_to(vmpl)) {
-        assert forall|i| 0 <= i < b.len() implies b[i].is_constant_to(vmpl) by {
+        assert forall|i| #![trigger b[i]] 0 <= i < b.len() implies b[i].is_constant_to(vmpl) by {
             if i < b1.len() {
                 assert(b[i] === b1[i]);
             } else {

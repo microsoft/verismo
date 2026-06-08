@@ -30,7 +30,7 @@ impl<T: core::marker::Copy, const N: usize> Clone for Array<T, N> {
 verus! {
 
 impl<T, const N: IndexType> Array<T, N> {
-    pub spec fn _spec_index(&self, i: int) -> T;
+    pub uninterp spec fn _spec_index(&self, i: int) -> T;
 
     pub open spec fn view(&self) -> Seq<T> {
         Seq::new(Self::spec_len(), |i| self._spec_index(i))

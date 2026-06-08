@@ -20,8 +20,8 @@ pub proof fn tracked_seq_remove<T>(tracked m: &mut Map<nat, T>, i: nat, n: nat) 
         old(m).is_seq(n),
         i < n,
     ensures
-        forall|k: nat| k < i ==> m[k] === old(m)[k] && m.contains_key(k),
-        forall|k: nat| i <= k < (n - 1) ==> m[k] === old(m)[k + 1] && m.contains_key(k),
+        forall|k: nat| #![auto] k < i ==> m[k] === old(m)[k] && m.contains_key(k),
+        forall|k: nat| #![auto] i <= k < (n - 1) ==> m[k] === old(m)[k + 1] && m.contains_key(k),
         ret === old(m)[i],
 {
     let oldm = *m;
@@ -48,8 +48,9 @@ pub proof fn tracked_seq_insert<T>(tracked m: &mut Map<nat, T>, i: nat, tracked 
     ensures
         m[i] === v,
         m.contains_key(i),
-        forall|k: nat| k < i ==> m[k] === old(m)[k] && m.contains_key(k),
+        forall|k: nat| #![auto] k < i ==> m[k] === old(m)[k] && m.contains_key(k),
         forall|k: nat|
+            #![auto]
             i + 1 <= k < (n + 1) ==> m[k] === old(m)[(k - 1) as nat] && m.contains_key(k),
 {
     let oldm = *m;

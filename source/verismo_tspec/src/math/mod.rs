@@ -10,13 +10,13 @@ pub mod pow_s;
 pub use align_s::*;
 #[macro_use]
 pub use bits_p::*;
+pub use self::integer::*;
 pub use cond_bound::*;
-pub use integer::*;
 pub use minmax_s::*;
 pub use nonlinear::*;
 pub use pow_p::*;
 pub use pow_s::*;
 
 use self::minmax_s::*;
-use crate::tspec::*;
+use crate::*;
 use crate::*;

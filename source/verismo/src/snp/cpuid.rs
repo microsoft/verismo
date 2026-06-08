@@ -55,6 +55,8 @@ pub struct SnpCpuidTable {
 
 verus! {
 
+broadcast use axiom_size_from_cast_bytes;
+
 impl SnpCpuidTable {
     pub proof fn lemma_size() -> (ret: nat)
         ensures
@@ -107,7 +109,7 @@ pub const EVERCRYPT_USED_FEATURES: u32 = X86_FEATURE_AES | X86_FEATURE_PCLMULQDQ
 pub const X86_FEATURE_VPCLMULQDQ: u32 = BIT32!(10);
 
 } // verus!
-// return regflag if feature is set
+/// return regflag if feature is set
 macro_rules! feature {
     ($reg: ident, $feature: ident, $regflag: expr) => {
         if $reg & $feature == $feature {
@@ -126,9 +128,10 @@ pub fn process_cpuid(eax: u32, ecx: u32, xcr0: u64, xss: u64, cpuid_table: &[Snp
         cpuid_table@.is_constant(),
     ensures
         ret.is_constant(),
-        ret.is_Some() ==> exists|i|
+        ret is Some ==> exists|i|
+            #![trigger cpuid_table@[i].eax_in@.val]
             0 <= i < cpuid_table@.len() && cpuid_table@[i].eax_in@.val == eax
-                && cpuid_table@[i].ecx_in@.val == ecx && ret.get_Some_0() === cpuid_table@[i].rets,
+                && cpuid_table@[i].ecx_in@.val == ecx && ret->Some_0 === cpuid_table@[i].rets,
 {
     let mut i: usize = 0;
     let mut ret = None;
@@ -140,20 +143,22 @@ pub fn process_cpuid(eax: u32, ecx: u32, xcr0: u64, xss: u64, cpuid_table: &[Snp
             i.is_constant(),
             0 <= (i as int) <= n,
             forall|k: int|
+                #![trigger cpuid_table@[k].eax_in@.val]
                 0 <= k < (i as int) ==> !(cpuid_table@[k].eax_in@.val == eax
                     && cpuid_table@[k].ecx_in@.val == ecx),
-            ret.is_None(),
+            ret is None,
         ensures
-            (0 <= (i as int) < n) == ret.is_Some(),
-            (i == n) == ret.is_None(),
-            ret.is_Some() ==> cpuid_table@[i as int].eax_in@.val == eax
-                && cpuid_table@[i as int].ecx_in@.val == ecx && ret.get_Some_0()
+            (0 <= (i as int) < n) == ret is Some,
+            (i == n) == ret is None,
+            ret is Some ==> cpuid_table@[i as int].eax_in@.val == eax
+                && cpuid_table@[i as int].ecx_in@.val == ecx && ret->Some_0
                 === cpuid_table@[i as int].rets,
+        decreases n - i,
     {
         let leaf = slice_index_get(cpuid_table, i);
         if (eax == leaf.eax_in.into()) && (ecx == leaf.ecx_in.into()) {
             ret = Some(leaf.rets);
-            break ;
+            break;
         }
         i = i + 1;
     }
