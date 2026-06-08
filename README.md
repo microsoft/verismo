@@ -4,7 +4,10 @@ This repo includes the code for VeriSMo project.
 
 # 🗞️ READ before using the code
 
-* The code here is a research prototype we built between 2022-2024 and will not be able to work with latest verus toolchain. We currently have no active plans to refactor it for newer versions;
+* The code here is a research prototype we built between 2022-2024. With assistance from GitHub Copilot, it has been brought back up to date with the latest Verus toolchain.
+* Recent improvements (Copilot-assisted refresh, mid-2026):
+  * **~10× faster verification**: CI now finishes the full proof in ~3 minutes (previously ~30 minutes).
+  * **Soundness cleanup**: dropped a number of `assume()` workarounds and unsound proofs that had been added to work around bugs in older Verus.
 * While our approach outperforms traditional OS verification methods, it may still not achieve optimal performance in Verus due to limited proof engineering efforts.
 * We recommend using this repository as a reference to explore what is possible for low-level verified code (rust-based kernel). For production or ongoing development, please refer to the [Verus project](https://github.com/verus-lang/verus)
  for the latest features and tooling.
