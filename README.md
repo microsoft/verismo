@@ -2,13 +2,18 @@
 
 This repo includes the code for VeriSMo project.
 
+# 📰 News
+
+* **mid-2026 — Copilot-assisted refresh**: verismo now builds and verifies against the latest Verus toolchain.
+  * **~10× faster verification**: CI finishes the full proof in ~3 minutes (previously ~30 minutes).
+  * **Soundness cleanup**: dropped `assume()` workarounds and unsound proofs that had been added to work around bugs in older Verus.
+
 # 🗞️ READ before using the code
 
-* The code here is a research prototype we built between 2022-2024 and will not be able to work with latest verus toolchain. We currently have no active plans to refactor it for newer versions;
-* While our approach outperforms traditional OS verification methods, it may still not achieve optimal performance in Verus due to limited proof engineering efforts.
+* The code here is a research prototype originally built between 2022-2024; The build and verification still work in this project. However it may not work with current HyperV due to ABI mismatch. The steps to run it in a VM is not tested in recent release; 
 * We recommend using this repository as a reference to explore what is possible for low-level verified code (rust-based kernel). For production or ongoing development, please refer to the [Verus project](https://github.com/verus-lang/verus)
  for the latest features and tooling.
-* The current implementation does not fully separate executable code from specification/proof code due to the old style of Verus code. However, we are actively exploring incremental verification of real-world systems. For example, [COCONUT-SVSM](https://github.com/coconut-svsm/svsm) is the first open-source project that successfully integrated Verus-based verification into an existing codebase without a full rewrite. You could expect it as a more developer-friendly Rust code with a better verification performance in the future.
+* The current implementation does not fully separate executable code from specification/proof code. We are actively exploring incremental verification of real-world systems. For example, [COCONUT-SVSM](https://github.com/coconut-svsm/svsm) is the first open-source project that successfully integrated Verus-based verification into an existing codebase without a full rewrite. You could expect it as a more developer-friendly Rust code with a better verification performance in the future.
 
 ## Files 📁
 
@@ -52,23 +57,23 @@ Now, run verification checks and build the binary.
 Run
 
 ```
-make verify
-``` 
-
-or  
-
-```
-cd source/verismo_main; cargo verify --release;
+cd source; cargo verus focus --release;
 ```
 
 ### b. To verify a single module, which is useful for development:
+
 ```
-cd source/verismo; verismo_VERUS_ARGS="--verify-module security::monitor" cargo verify --release;
+cd source; cargo verus focus --release -- --verify-module security::monitor
 ```
 
 ### c. Understand results:
 
-A fully verified result should have "verified": 2138, "errors": 0,
+A fully verified result should have 
+
+```
+verification results:: 852 verified, 0 errors
+verification results:: 1280 verified, 0 errors
+```
 
 
 ### d. Build without verification 🛠️
@@ -82,7 +87,7 @@ make debugbuild
 or  
 
 ```
-cd source/verismo_main; cargo build --feature noverify --release;
+cd source/verismo_main; cargo verus build -- --no-verify;
 ```
 
 ## 4. Create VM image (skip if you run `make` or `make verify`)
