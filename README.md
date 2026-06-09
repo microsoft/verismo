@@ -63,8 +63,10 @@ cd legacy/source; cargo verus focus --release;
 ### b. To verify a single module, which is useful for development:
 
 ```
-cd legacy/source; cargo verus focus --release -- --verify-module security::monitor
+cd legacy/source; cargo verus focus -p verismo --release -- --verify-module security::monitor
 ```
+
+(Pass `-p verismo` or `-p verismo_tspec` to select the package; `--verify-only-module` also works for a single module without dependents.)
 
 ### c. Understand results:
 
@@ -72,7 +74,7 @@ A fully verified result should have
 
 ```
 verification results:: 852 verified, 0 errors
-verification results:: 1280 verified, 0 errors
+verification results:: 1281 verified, 0 errors
 ```
 
 
