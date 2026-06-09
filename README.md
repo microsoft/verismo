@@ -19,12 +19,12 @@ This repo includes the code for VeriSMo project.
 
 - tools/ : includes verifier and compiler tools and scripts.
 - deps/ : includes hacl package
-- source/ : verismo code
-- source/verismo : verified code for verismo
-- source/verismo_main : main executable bin, which only defines a unverified Rust panic handler.
-- source/verismo/src/arch : model
-- source/verismo/src/entry.s : a small and unverified assembly code.
-- source/target.json : target configuration
+- legacy/source/ : verismo code
+- legacy/source/verismo : verified code for verismo
+- legacy/source/verismo_main : main executable bin, which only defines a unverified Rust panic handler.
+- legacy/source/verismo/src/arch : model
+- legacy/source/verismo/src/entry.s : a small and unverified assembly code.
+- legacy/source/target.json : target configuration
 
 
 ## 0. Pre-requirements
@@ -57,13 +57,13 @@ Now, run verification checks and build the binary.
 Run
 
 ```
-cd source; cargo verus focus --release;
+cd legacy/source; cargo verus focus --release;
 ```
 
 ### b. To verify a single module, which is useful for development:
 
 ```
-cd source; cargo verus focus --release -- --verify-module security::monitor
+cd legacy/source; cargo verus focus --release -- --verify-module security::monitor
 ```
 
 ### c. Understand results:
@@ -78,7 +78,7 @@ verification results:: 1280 verified, 0 errors
 
 ### d. Build without verification 🛠️
 
-If no changes are made in `source/verismo`, we recommend to build without verification to speed up the build process.
+If no changes are made in `legacy/source/verismo`, we recommend to build without verification to speed up the build process.
 
 ```
 make debugbuild
@@ -87,15 +87,15 @@ make debugbuild
 or  
 
 ```
-cd source/verismo_main; cargo verus build -- --no-verify;
+cd legacy/source/verismo_main; cargo verus build -- --no-verify;
 ```
 
 ## 4. Create VM image (skip if you run `make` or `make verify`)
 
-1. Download linux submodule: `git submodule update --init richos/snplinux`
+1. Download linux submodule: `git submodule update --init legacy/richos/snplinux`
 2. Build guest OS and drivers: `make fs -f Makefile.default`
-1. Run `sh source/target/target/release/verismo/igvm.sh` to generate the verismo in IGVM format for Hyper-V: `source/target/target/release/verismo/verismo-rust.bin`
-2. Run `make fs` to generate a vhdx file  as filesystem for the VM: `richos/test-fs/verismo.vhdx`
+1. Run `sh legacy/source/target/target/release/verismo/igvm.sh` to generate the verismo in IGVM format for Hyper-V: `legacy/source/target/target/release/verismo/verismo-rust.bin`
+2. Run `make fs` to generate a vhdx file  as filesystem for the VM: `legacy/richos/test-fs/verismo.vhdx`
 
 ## 5. Deploy and run
 
@@ -108,8 +108,8 @@ cd source/verismo_main; cargo verus build -- --no-verify;
 ### Steps
 
 Move following files to your AMD SEV-SNP machine.
-- `source/target/target/release/verismo/verismo-rust.bin`
-- `richos/test-fs/verismo.vhdx`
+- `legacy/source/target/target/release/verismo/verismo-rust.bin`
+- `legacy/richos/test-fs/verismo.vhdx`
 - `tools/vm/*`
 
 #### 1. Create a SNP VM from powershell with admin permission.
@@ -160,11 +160,11 @@ VeriSMo boot log is not accessible from guest OS.
 
 ### Replace rustc with verus-rustc
 
-In source/.cargo/config.toml, we replaced rustc with verus-rustc.
+In legacy/source/.cargo/config.toml, we replaced rustc with verus-rustc.
 verus-rustc will call `verus` to compile `vstd` (a verus library), `verismo` and `verismo-main` package, and call `rustc` to compile all other packages (hacl, core, etc.).
 
 ### Add build.rs to pass additional options to verus tool
-See `source/verismo/build.rs`
+See `legacy/source/verismo/build.rs`
 
 ### Features
 - noverify: build source without verification

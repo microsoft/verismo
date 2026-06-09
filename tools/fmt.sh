@@ -10,7 +10,7 @@ fi
 
 TOOLS_DIR=$SCRIPT_DIR
 
-SOURCE_DIR=$TOOLS_DIR/../source/
+SOURCE_DIR=$TOOLS_DIR/../legacy/source/
 for f in `find $SOURCE_DIR -type f -name "*.rs"`
 do
 output=$(verusfmt $f $1 2>&1)

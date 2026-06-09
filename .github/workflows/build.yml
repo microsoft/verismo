@@ -38,5 +38,5 @@ jobs:
         run: ./tools/fmt.sh --check
 
       - name: Verify
-        working-directory: source
+        working-directory: legacy/source
         run: cargo verus focus --release -- --multiple-errors=20 --trace --time
