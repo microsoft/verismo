@@ -55,9 +55,6 @@ driver: kernel
 fs: driver
 	make -C richos/fs test-fs/verismo.vhdx
 
-upload: $(IMAGE)
-	sh scripts/upload.sh $(IMAGE)
-
 clean:
 	cd source && cargo clean
 
