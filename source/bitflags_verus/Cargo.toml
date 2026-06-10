@@ -1,0 +1,23 @@
+[package]
+name = "bitflags_verus"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Verus specification for generated code by bitflags"
+homepage = "https://github.com/microsoft/verismo/tree/main/source/bitflags_verus"
+repository = "https://github.com/microsoft/verismo"
+readme = "README.md"
+keywords = ["verus", "verified-rust", "verification", "bitflags"]
+categories = ["specifications"]
+
+
+[dependencies]
+paste = {workspace = true}
+vstd = {workspace = true}
+bitflags = { workspace = true }
+
+[package.metadata.verus]
+verify = true
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(verus_only)'] }

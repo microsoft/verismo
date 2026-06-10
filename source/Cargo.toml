@@ -4,10 +4,17 @@ members = [
     "verismo_main",
     "verismo",
     "verismo_macro",
-    "verismo_tspec"
+    "verismo_tspec",
+    "bitflags_verus",
+]
+exclude = [
+    "bitflags_verus/tests"
 ]
 
 [workspace.dependencies]
+bitflags = "2.13"
+paste = "1.0"
+
 # Verus crates from crates.io.
 # `builtin` and `builtin_macros` are kept as the local crate names (via the
 # `package = ...` rename) so we don't have to touch the `use builtin::*;` /
@@ -16,6 +23,7 @@ builtin = { package = "verus_builtin", version = "=0.0.0-2026-05-17-0151", defau
 builtin_macros = { package = "verus_builtin_macros", version = "=0.0.0-2026-05-24-0157", features = ["vpanic"], default-features = false }
 verus_state_machines_macros = { version = "=0.0.0-2026-05-24-0157", default-features = false }
 vstd = { version = "=0.0.0-2026-05-24-0157", features = ["alloc", "allow_panic"], default-features = false }
+
 
 # `syn_verus` and `prettyplease_verus` are used only by the project's own
 # proc-macro crates (`verismo_macro` and `verismo_verus`). They are pinned to
