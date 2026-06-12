@@ -6,8 +6,6 @@ members = [
     "verismo_macro",
     "verismo_tspec",
     "bitflags_verus",
-]
-exclude = [
     "bitflags_verus/tests"
 ]
 
