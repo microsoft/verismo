@@ -1,0 +1,15 @@
+[package]
+name = "bitflags_verus_tests"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+bitflags_verus = { path = ".." }
+bitflags = "2.11.0"
+paste = "1.0"
+vstd = { version = "=0.0.0-2026-05-24-0157", features = ["alloc", "allow_panic"], default-features = false }
+
+[package.metadata.verus]
+verify = true
+
