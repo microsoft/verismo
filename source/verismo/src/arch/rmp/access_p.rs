@@ -46,9 +46,7 @@ impl RmpEntry {
         let next = entry.trans(op).to_result();
         if (next !== entry) {
             assert(next@.perms =~~= super::perm_s::rmp_perm_init());
-            assert(next@.perms[VMPL::VMPL0] =~~= super::perm_s::PagePerm::new_assuming_finite(
-                |_p| true,
-            ));
+            assert(next@.perms[VMPL::VMPL0] =~~= spec_full_set::<super::perm_s::Perm>());
             assert(next@.perms[VMPL::VMPL0] =~~= entry@.perms[VMPL::VMPL0]);
             assert(next@.perms[VMPL::VMPL1].subset_of(entry@.perms[VMPL::VMPL1]));
         }

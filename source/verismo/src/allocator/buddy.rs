@@ -248,7 +248,7 @@ impl SpecBuddyAllocator {
         &&& self.perms.contains_key((bucket as nat, oldlen))
         &&& self.perms.dom().remove((bucket as nat, oldlen)) === old_self.perms.dom()
         &&& old_self.perms =~~= Map::new(
-            Set::new_assuming_finite(|key| old_self.perms.contains_key(key)),
+            old_self.perms.dom(),
             |k: (nat, nat)|
                 if k.0 != bucket || k.1 < idx {
                     self.perms[k]
@@ -780,7 +780,7 @@ impl BuddyAllocator {
                     removed_perm =
                     removed_node_perm.trusted_into_raw().trusted_join(removed_free_perm);
                     let key_map = Map::new(
-                        Set::new_assuming_finite(
+                        spec_full_set::<(nat, nat)>().filter(
                             |k: (nat, nat)|
                                 k.0 < ORDER && k.1 < prev_self.free_lists[k.0 as int]@.len() && k
                                     !== (current_bucket as nat, (prev_list@.len() - 1) as nat),

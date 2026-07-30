@@ -174,9 +174,7 @@ pub open spec fn spec_contains_page_perms(
 ) -> bool {
     &&& forall|i| #[trigger]
         page_perms.contains_key(i) ==> spec_contains_page_perm(page_perms, i, osperm)
-    &&& page_perms.dom() =~~= Set::new_assuming_finite(
-        |i: int| start_page <= i < start_page + npages,
-    )
+    &&& page_perms.dom() =~~= Set::<int>::range(start_page as int, (start_page + npages) as int)
 }
 
 } // verus!
@@ -308,8 +306,9 @@ pub fn osmem_adjust(
     }
     let ghost old_page_perms = entry.page_perms@;
     proof {
-        assert(old_page_perms.dom() =~~= Set::new_assuming_finite(
-            |i| start_page as int <= i < start_page + npages,
+        assert(old_page_perms.dom() =~~= Set::<int>::range(
+            start_page as int,
+            (start_page + npages) as int,
         ));
     }
     let Tracked(mut page_perms) = entry.page_perms;
@@ -367,8 +366,9 @@ pub fn osmem_adjust(
     proof {
         assert(entry.start_page.spec_valid_pn_with(npages as nat));
         assert(entry.page_perms@.dom() =~~= old_page_perms.dom());
-        assert(entry.page_perms@.dom() =~~= Set::new_assuming_finite(
-            |i| start_page as int <= i < start_page + npages,
+        assert(entry.page_perms@.dom() =~~= Set::<int>::range(
+            start_page as int,
+            (start_page + npages) as int,
         ));
         assert forall|i| #[trigger] page_perms.contains_key(i) implies spec_contains_page_perm(
             page_perms,
@@ -428,7 +428,7 @@ pub fn osmem_add(
 {
     let tracked mut page_perms = page_perms;
     let tracked mut page_perms = page_perms.tracked_remove_keys(
-        Set::new_assuming_finite(|k| start_page <= k < (start_page + npages)),
+        Set::<int>::range(start_page as int, (start_page + npages) as int),
     );
     let ghost old_page_perms = page_perms;
     if !shared {
@@ -478,8 +478,9 @@ pub fn osmem_add(
                     assert(os_mem_valid_snp(osperm, page_perms[k]@.snp()));
                     assert(page_perms[k]@.bytes() === old_page_perms[k]@.bytes());
                 }
-                assert(page_perms.dom() =~~= Set::new_assuming_finite(
-                    |k| start_page <= k < (start_page + npages),
+                assert(page_perms.dom() =~~= Set::<int>::range(
+                    start_page as int,
+                    (start_page + npages) as int,
                 ));
                 assert(spec_contains_page_perms(
                     page_perms,
@@ -540,13 +541,13 @@ pub fn osmem_entry_split(entry: OSMemEntry, start: usize, npages: usize) -> (ret
 {
     let Tracked(mut page_perms) = entry.page_perms;
     let tracked perms0 = page_perms.tracked_remove_keys(
-        Set::new_assuming_finite(|i| entry.spec_start() <= i < start),
+        Set::<int>::range(entry.spec_start() as int, start as int),
     );
     let tracked perms1 = page_perms.tracked_remove_keys(
-        Set::new_assuming_finite(|i| start <= i < start + npages),
+        Set::<int>::range(start as int, (start + npages) as int),
     );
     let tracked perms2 = page_perms.tracked_remove_keys(
-        Set::new_assuming_finite(|i| start + npages <= i < entry.spec_end()),
+        Set::<int>::range((start + npages) as int, entry.spec_end() as int),
     );
     let entry0 = OSMemEntry {
         start_page: entry.start_page,
@@ -1091,8 +1092,9 @@ fn _lock_kernel(
                     assert(spec_contains_page_perm(page_perms, i, mid.spec_osperm()));
                     assert(page_perms[i]@.wf_range((i.to_addr(), PAGE_SIZE as nat)));
                 }
-                assert(page_perms.dom() =~~= Set::new_assuming_finite(
-                    |i| tmp_start <= i < (tmp_start + tmp_npages),
+                assert(page_perms.dom() =~~= Set::<int>::range(
+                    tmp_start as int,
+                    (tmp_start + tmp_npages) as int,
                 ));
             }
             rmpadjmem(tmp_start, tmp_npages, attr, Tracked(snpcore), Tracked(&mut page_perms));
@@ -1128,8 +1130,9 @@ fn clear_kern_if_private(entry: OSMemEntry, Tracked(cs): Tracked<&mut SnpCoreSha
     let npages: usize = npages.into();
     let ghost start = tmp_start;
     proof {
-        assert(page_perms.dom() =~~= Set::new_assuming_finite(
-            |i| tmp_start <= i < (tmp_start + npages),
+        assert(page_perms.dom() =~~= Set::<int>::range(
+            tmp_start as int,
+            (tmp_start + npages) as int,
         ));
     }
     (new_strlit("\nClear Kern_exe "), (tmp_start, npages)).leak_debug();
@@ -1210,8 +1213,9 @@ fn clear_kern_if_private(entry: OSMemEntry, Tracked(cs): Tracked<&mut SnpCoreSha
                     assert(page_perm@.bytes().is_constant_to(RICHOS_VMPL as nat));
                 }
             }
-            assert(new_page_perms.dom() =~~= Set::new_assuming_finite(
-                |i: int| start <= i < tmp_start + 1,
+            assert(new_page_perms.dom() =~~= Set::<int>::range(
+                start as int,
+                (tmp_start + 1) as int,
             ));
         }
         tmp_start = tmp_start + 1;

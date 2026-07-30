@@ -114,6 +114,15 @@ pub broadcast group group_tspec_default {
     axiom_size_from_cast_bytes_def,
     axiom_max_count_size_rel,
     axiom_set_full_max_count_rel,
+    axiom_full_set,
+    vstd::set::lemma_set_filter,
+    // Int-range set membership/length (range_to_set / range2set)
+    lemma_range_to_set_contains,
+    lemma_range_to_set_len,
+    vstd::set_lib::range_set_properties,
+    // set_op / set_uop image-set membership
+    lemma_set_uop_contains,
+    lemma_set_op_contains,
     // FMap
     FMap::axiom_inv,
     FMap::axiom_equal,

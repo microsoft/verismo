@@ -673,7 +673,7 @@ impl<T> LinkedList<T> where T: IsConstant + WellFormed + SpecSize + VTypeCast<Se
                     (j + 1) as nat
                 };
             let key_map = Map::<nat, nat>::new(
-                Set::new_assuming_finite(|j: nat| 0 <= j < self.ptrs@.len()),
+                Set::<nat>::range(0, self.ptrs@.len()),
                 |j: nat| convert(j),
             );
             assert forall|j: nat| key_map.dom().contains(j) implies self.perms@.dom().contains(
@@ -771,7 +771,7 @@ where
 
                 let convert = |j: nat| if j < i {j} else {(j+1) as nat};
                 let key_map = Map::<nat, nat>::new(
-                    Set::new_assuming_finite(|j: nat| 0 <= j < self.ptrs@.len()),
+                    Set::<nat>::range(0, self.ptrs@.len()),
                     |j: nat| convert(j)
                 );
                 assert forall |j: nat|
@@ -871,7 +871,7 @@ where
                     if j < i {j} else if j == i {(self.ptrs@.len() - 1) as nat} else {(j-1) as nat};
 
                 let key_map = Map::<nat, nat>::new(
-                    Set::new_assuming_finite(|j: nat| 0 <= j < self.ptrs@.len()),
+                    Set::<nat>::range(0, self.ptrs@.len()),
                     |j: nat| convert(j)
                 );
                 assert forall |j: nat|

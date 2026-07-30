@@ -1,11 +1,12 @@
 use vstd::prelude::*;
+use vstd::set_lib::{lemma_int_range, range_set_properties, set_int_range};
 
 use super::*;
 
 verus! {
 
 pub open spec fn range_to_set(first: int, n: nat) -> Set<int> {
-    Set::new_assuming_finite(|i: int| first <= i < first + (n as int))
+    set_int_range(first, first + n)
 }
 
 pub open spec fn range(first: int, end: int) -> (int, nat) {
@@ -18,7 +19,24 @@ pub open spec fn range(first: int, end: int) -> (int, nat) {
 
 #[verifier(inline)]
 pub open spec fn range2set(range: (int, nat)) -> Set<int> {
-    Set::new_assuming_finite(|i: int| within_range(i, range))
+    set_int_range(range.0, range.0 + range.1)
+}
+
+/// Membership for `range_to_set`/`range2set`, kept broadcast so downstream
+/// proofs see it automatically (replaces the deprecated `new_assuming_finite`).
+pub broadcast proof fn lemma_range_to_set_contains(first: int, n: nat, v: int)
+    ensures
+        #[trigger] range_to_set(first, n).contains(v) <==> first <= v < first + n,
+{
+    broadcast use range_set_properties;
+
+}
+
+pub broadcast proof fn lemma_range_to_set_len(first: int, n: nat)
+    ensures
+        (#[trigger] range_to_set(first, n)).len() == n,
+{
+    lemma_int_range(first, first + n);
 }
 
 pub trait VRange {
@@ -62,38 +80,10 @@ pub open spec fn after_range(x: (int, nat), range: (int, nat)) -> bool {
 pub proof fn lemma_to_set(first: int, n: nat) -> (ret: Set<int>)
     ensures
         ret.len() == n,
-        ret.finite(),
         ret === range_to_set(first, n),
-    decreases n,
 {
-    let ret = range_to_set(first, n);
-    if n == 0 {
-        assert forall|v: int| !range_to_set(first, n).contains(v) by {
-            assert(!(first < v && v < first));
-        }
-        assert(range_to_set(first, n) =~= Set::empty());
-        //assert(ret=~~=(Set::empty()));
-    }
-    if n > 0 {
-        let prev = lemma_to_set(first, (n - 1) as nat);
-        assert(range_to_set(first, n) =~~= (range_to_set(first, (n - 1) as nat).insert(
-            first + (n - 1),
-        ))) by {
-            assert forall|v| range_to_set(first, n).contains(v) implies range_to_set(
-                first,
-                (n - 1) as nat,
-            ).contains(v) || v === (first + (n - 1)) by {
-                if (first <= v < first + n - 1) {
-                    assert(range_to_set(first, (n - 1) as nat).contains(v));
-                } else {
-                }
-            }
-            assert forall|v|
-                range_to_set(first, (n - 1) as nat).contains(v) || v === (first + (n
-                    - 1)) implies range_to_set(first, n).contains(v) by {}
-        }
-    }
-    ret
+    lemma_range_to_set_len(first, n);
+    range_to_set(first, n)
 }
 
 pub open spec fn range_disjoint(f1: int, n1: nat, f2: int, n2: nat) -> bool {

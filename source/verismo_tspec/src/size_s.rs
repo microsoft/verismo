@@ -82,10 +82,22 @@ pub broadcast proof fn axiom_max_count_size_rel<T>()
 {
 }
 
+// The full set of all values of an exec type `T`. Every exec type is finite
+// (see `axiom_full_set`), so this is a proper finite `Set<T>`; it replaces the
+// deprecated `Set::new_assuming_finite(|a: T| true)` for generic `T`.
+pub uninterp spec fn spec_full_set<T>() -> Set<T>;
+
+#[verifier(external_body)]
+pub broadcast proof fn axiom_full_set<T>(a: T)
+    ensures
+        #[trigger] spec_full_set::<T>().contains(a),
+{
+}
+
 #[verifier(external_body)]
 pub broadcast proof fn axiom_set_full_max_count_rel<T>()
     ensures
-        Set::<T>::new_assuming_finite(|a: T| true).len() == #[trigger] spec_max_count::<T>(),
+        (#[trigger] spec_full_set::<T>()).len() == spec_max_count::<T>(),
 {
 }
 

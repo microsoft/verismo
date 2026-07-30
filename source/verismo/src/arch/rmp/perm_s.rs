@@ -94,10 +94,10 @@ verus! {
 #[verifier(inline)]
 pub open spec fn rmp_perm_init() -> RmpPerm {
     Map::new(
-        Set::new_assuming_finite(|vmpl: VMPL| true),
+        spec_full_set::<VMPL>(),
         |vmpl: VMPL|
             if vmpl is VMPL0 {
-                PagePerm::new_assuming_finite(|_p| true)
+                spec_full_set::<Perm>()
             } else {
                 PagePerm::empty()
             },
@@ -106,7 +106,7 @@ pub open spec fn rmp_perm_init() -> RmpPerm {
 
 #[verifier(inline)]
 pub open spec fn rmp_perm_is_init(p: RmpPerm) -> bool {
-    &&& p[VMPL::VMPL0] === PagePerm::new_assuming_finite(|_p| true)
+    &&& p[VMPL::VMPL0] === spec_full_set::<Perm>()
     &&& p[VMPL::VMPL1] === PagePerm::empty()
     &&& p[VMPL::VMPL2] === PagePerm::empty()
     &&& p[VMPL::VMPL3] === PagePerm::empty()
@@ -114,8 +114,8 @@ pub open spec fn rmp_perm_is_init(p: RmpPerm) -> bool {
 
 #[verifier(inline)]
 pub open spec fn rmp_perm_is_valid(p: RmpPerm) -> bool {
-    &&& p.index(VMPL::VMPL0) === PagePerm::new_assuming_finite(|_p| true)
-    &&& p.dom() === Set::new_assuming_finite(|_a| true)
+    &&& p.index(VMPL::VMPL0) === spec_full_set::<Perm>()
+    &&& p.dom() === spec_full_set::<VMPL>()
 }
 
 #[verifier(external_body)]

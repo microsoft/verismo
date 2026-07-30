@@ -7,10 +7,10 @@ verus! {
 
 pub proof fn lemma_ret_is_empty<A>(s: Set<A>) -> (b: bool)
     ensures
-        b <==> s.finite() && s.len() == 0,
+        b <==> s.len() == 0,
         b <==> s =~= Set::empty(),
 {
-    if s.finite() && s.len() == 0 {
+    if s.len() == 0 {
         s.lemma_len0_is_empty();
     }
     s =~= Set::empty()
@@ -33,30 +33,86 @@ pub proof fn lemma_union<A>(s1: Set<A>, s2: Set<A>)
     let ss2 = s1.union(s2);
 }
 
-pub open spec fn convert_set<A, B>(s: Set<A>, f: spec_fn(B) -> A) -> Set<B> {
-    Set::new_assuming_finite(|a| s.contains(f(a)))
-}
-
 pub open spec fn uop_to_bop<T1, T2, T3>(op: spec_fn(T1) -> T3) -> spec_fn(T1, T2) -> T3 {
     |v1: T1, v2: T2| op(v1)
 }
 
-#[verifier(inline)]
+// Image of `s1` under `op_fn`: `{ op_fn(v1) : v1 in s1 }`. Defined via
+// `Set::map` so it is finite by construction (was `new_assuming_finite`).
+pub open spec fn set_uop<T1, T2>(s1: Set<T1>, op_fn: spec_fn(T1) -> T2) -> Set<T2> {
+    s1.map(op_fn)
+}
+
+// Curried inner mapping used by `set_op`: `v1 |-> { op_fn(v1, v2) : v2 in s2 }`.
+// Naming it (instead of an inline closure) lets proofs reference the exact same
+// function value that `set_op`'s definition uses.
+pub open spec fn set_op_map_fn<T1, T2, T3>(s2: Set<T2>, op_fn: spec_fn(T1, T2) -> T3) -> spec_fn(
+    T1,
+) -> Set<T3> {
+    |v1: T1| set_op1(v1, s2, op_fn)
+}
+
+// Image of the product `s1 x s2` under `op_fn`. Built via `map`/`flatten` so
+// it is finite by construction (was `new_assuming_finite`).
 pub open spec fn set_op<T1, T2, T3>(s1: Set<T1>, s2: Set<T2>, op_fn: spec_fn(T1, T2) -> T3) -> Set<
     T3,
 > {
-    Set::new_assuming_finite(
-        |val: T3| exists|v1, v2| s1.contains(v1) && s2.contains(v2) && val === op_fn(v1, v2),
-    )
+    s1.map(set_op_map_fn(s2, op_fn)).flatten()
 }
 
-#[verifier(inline)]
-pub open spec fn set_uop<T1, T2>(s1: Set<T1>, op_fn: spec_fn(T1) -> T2) -> Set<T2> {
-    Set::new_assuming_finite(
-        |val: T2| exists|v1| s1.contains(v1) && val === op_fn(v1),
-    )
-    //set_op(s1, Set::empty().insert(arbitrary::<T1>()), uop_to_bop(op_fn))
+pub broadcast proof fn lemma_set_uop_contains<T1, T2>(s1: Set<T1>, op_fn: spec_fn(T1) -> T2, v: T2)
+    ensures
+        #[trigger] set_uop(s1, op_fn).contains(v) <==> exists|v1: T1|
+            s1.contains(v1) && v === op_fn(v1),
+{
+    broadcast use Set::lemma_map_contains;
 
+}
+
+pub broadcast proof fn lemma_set_op_contains<T1, T2, T3>(
+    s1: Set<T1>,
+    s2: Set<T2>,
+    op_fn: spec_fn(T1, T2) -> T3,
+    v: T3,
+)
+    ensures
+        #[trigger] set_op(s1, s2, op_fn).contains(v) <==> exists|v1: T1, v2: T2|
+            s1.contains(v1) && s2.contains(v2) && v === op_fn(v1, v2),
+{
+    let g = set_op_map_fn(s2, op_fn);
+    let mapped = s1.map(g);
+    broadcast use {Set::lemma_map_contains, Set::lemma_flatten_contains};
+
+    assert forall|v1: T1|
+        #![trigger s1.contains(v1)]
+        g(v1) === set_op1(v1, s2, op_fn) && (set_op1(v1, s2, op_fn).contains(v) <==> (exists|v2: T2|
+
+            s2.contains(v2) && v === op_fn(v1, v2))) by {
+        lemma_set_uop_contains(s2, |v2: T2| op_fn(v1, v2), v);
+    }
+    if set_op(s1, s2, op_fn).contains(v) {
+        assert(set_op(s1, s2, op_fn) === mapped.flatten());
+        assert(mapped.flatten().contains(v));
+        mapped.lemma_flatten_contains(v);
+        assert(exists|s: Set<T3>| mapped.contains(s) && s.contains(v));
+        let s = choose|s: Set<T3>| mapped.contains(s) && s.contains(v);
+        assert(mapped.contains(s) && s.contains(v));
+        s1.lemma_map_contains(g, s);
+        assert(exists|v1: T1| s1.contains(v1) && s === g(v1));
+        let v1 = choose|v1: T1| s1.contains(v1) && s === g(v1);
+        assert(s1.contains(v1) && g(v1).contains(v));
+    }
+    if exists|v1: T1, v2: T2| s1.contains(v1) && s2.contains(v2) && v === op_fn(v1, v2) {
+        let (v1, v2) = choose|v1: T1, v2: T2|
+            s1.contains(v1) && s2.contains(v2) && v === op_fn(v1, v2);
+        assert(g(v1).contains(v)) by {
+            assert(s2.contains(v2) && v === op_fn(v1, v2));
+        }
+        assert(mapped.contains(g(v1))) by {
+            s1.lemma_map_contains(g, g(v1));
+            assert(s1.contains(v1) && g(v1) === g(v1));
+        }
+    }
 }
 
 spec fn set_bop_recursive<T1, T2, T3>(
@@ -64,20 +120,14 @@ spec fn set_bop_recursive<T1, T2, T3>(
     s2: Set<T2>,
     op_fn: spec_fn(T1, T2) -> T3,
 ) -> Set<T3>
-    recommends
-        s1.finite(),
     decreases s1.len(),
 {
-    if s1.finite() {
-        if !s1.is_empty() {
-            let ss1 = s1.remove(s1.choose());
-            if (ss1.len() < s1.len()) {
-                set_bop_recursive(ss1, s2, op_fn).union(set_op1(s1.choose(), s2, op_fn))
-            } else {
-                // unreacheable
-                Set::empty()
-            }
+    if !s1.is_empty() {
+        let ss1 = s1.remove(s1.choose());
+        if (ss1.len() < s1.len()) {
+            set_bop_recursive(ss1, s2, op_fn).union(set_op1(s1.choose(), s2, op_fn))
         } else {
+            // unreacheable
             Set::empty()
         }
     } else {
@@ -86,7 +136,7 @@ spec fn set_bop_recursive<T1, T2, T3>(
 }
 
 #[verifier(inline)]
-spec fn set_op1<T1, T2, T3>(v1: T1, s2: Set<T2>, op_fn: spec_fn(T1, T2) -> T3) -> Set<T3> {
+pub open spec fn set_op1<T1, T2, T3>(v1: T1, s2: Set<T2>, op_fn: spec_fn(T1, T2) -> T3) -> Set<T3> {
     set_uop(s2, |v2| op_fn(v1, v2))
 }
 
@@ -94,11 +144,9 @@ proof fn lemma_setop1<T1, T2, T3>(v1: T1, s2: Set<T2>, op_fn: spec_fn(T1, T2) ->
     T3,
 >)
     requires
-        s2.finite(),
     ensures
         ret =~~= set_op1(v1, s2, op_fn),
         ret.len() <= s2.len(),
-        ret.finite(),
     decreases s2.len(),
 {
     let ret = set_op1(v1, s2, op_fn);
@@ -135,14 +183,14 @@ proof fn lemma_setop_3_union<T1, T2, T3>(
     requires
         s1.len() > 0,
         s1.contains(vv1),
-        s1.finite(),
-        s2.finite(),
     ensures
         ret.0 =~~= set_op(s1, s2, op_fn),
         ret.1 =~~= set_op(s1.remove(vv1), s2, op_fn),
         ret.2 =~~= set_op1(vv1, s2, op_fn),
         ret.0 =~~= ret.1.union(ret.2),
 {
+    broadcast use {lemma_set_op_contains, lemma_set_uop_contains};
+
     let r0 = set_op(s1, s2, op_fn);
     let r1 = set_op(s1.remove(vv1), s2, op_fn);
     let r2 = lemma_setop1(vv1, s2, op_fn);
@@ -164,23 +212,21 @@ pub proof fn lemma_op_exchange<T1, T2, T3>(
 ) -> (ret: Set<T3>)
     requires
         s1.len() > 0,
-        s1.finite(),
-        s2.finite(),
     ensures
         ret =~~= set_op(s1, s2, op_fn),
         ret =~~= set_op(s2, s1, exchange_spec_fn(op_fn)),
 {
+    broadcast use {lemma_set_op_contains, lemma_set_uop_contains};
+
     set_op(s1, s2, op_fn)
 }
 
 pub proof fn lemma_set_uop_len<T1, T2>(s1: Set<T1>, op_fn: spec_fn(T1) -> T2) -> (ret: Set<T2>)
     requires
-        s1.finite(),
     ensures
         ret =~~= set_uop(s1, op_fn),
         (ret.len() == 0) == (s1.len() == 0),
         ret.len() <= s1.len(),
-        ret.finite(),
     decreases s1.len(),
 {
     let ret = set_uop(s1, op_fn);
@@ -203,13 +249,10 @@ proof fn lemma_set_bop_len_recursive<T1, T3, T2>(
     op_fn: spec_fn(T1, T2) -> T3,
 ) -> (ret: Set<T3>)
     requires
-        s1.finite(),
-        s2.finite(),
     ensures
         ret =~~= set_bop_recursive(s1, s2, op_fn),
         (ret.len() == 0) == (s1.len() == 0 || s2.len() == 0),
         ret.len() <= s1.len() * s2.len(),
-        ret.finite(),
     decreases s1.len(),
 {
     let ret = set_bop_recursive(s1, s2, op_fn);
@@ -248,8 +291,6 @@ proof fn lemma_setop_eq_recursive<T1, T2, T3>(
     op_fn: spec_fn(T1, T2) -> T3,
 ) -> (ret: Set<T3>)
     requires
-        s1.finite(),
-        s2.finite(),
     ensures
         ret =~~= set_op(s1, s2, op_fn),
         ret =~~= set_bop_recursive(s1, s2, op_fn),
@@ -273,13 +314,10 @@ pub proof fn lemma_setop_len<T1, T2, T3>(
     op_fn: spec_fn(T1, T2) -> T3,
 ) -> (ret: Set<T3>)
     requires
-        s1.finite(),
-        s2.finite(),
     ensures
         ret =~~= set_op(s1, s2, op_fn),
         (ret.len() == 0) == (s1.len() == 0 || s2.len() == 0),
         ret.len() <= s1.len() * s2.len(),
-        ret.finite(),
 {
     let ret = set_op(s1, s2, op_fn);
     lemma_setop_eq_recursive(s1, s2, op_fn);

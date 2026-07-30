@@ -87,7 +87,7 @@ pub open spec fn rmp_inv_memid_int(rmp: &RmpMap, memid: MemID) -> bool {
 
 pub open spec fn rmp_hv_update(rmp: &RmpMap, newrmp: RmpMap, memid: MemID) -> RmpMap {
     RmpMap::new(
-        Set::new_assuming_finite(|spn: SPN| rmp.dom().contains(spn)),
+        rmp.dom(),
         |spn: SPN| { rmp.spec_index(spn).rmpupdate(newrmp.spec_index(spn)).to_result() },
     )
 }
