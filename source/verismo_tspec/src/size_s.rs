@@ -85,7 +85,7 @@ pub broadcast proof fn axiom_max_count_size_rel<T>()
 #[verifier(external_body)]
 pub broadcast proof fn axiom_set_full_max_count_rel<T>()
     ensures
-        Set::<T>::full().len() == #[trigger] spec_max_count::<T>(),
+        Set::<T>::new_assuming_finite(|a: T| true).len() == #[trigger] spec_max_count::<T>(),
 {
 }
 

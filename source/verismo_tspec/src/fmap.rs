@@ -33,7 +33,7 @@ impl<K, V> FMap<K, V> {
 
     #[verifier(inline)]
     pub open spec fn update(&self, fv: spec_fn(K) -> V) -> Self {
-        self.spec_set_map(Map::new(|K| true, |k: K| fv(k)))
+        self.spec_set_map(Map::new(Set::new_assuming_finite(|K| true), |k: K| fv(k)))
     }
 
     #[verifier(inline)]

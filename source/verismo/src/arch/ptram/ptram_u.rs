@@ -178,7 +178,9 @@ impl GuestPTRam {
 
     pub open spec fn to_mem_map_ok(&self, memid: MemID) -> MemMap<GuestVir, GuestPhy> {
         let map = Map::new(
-            |gvn: GVN| gvn.is_valid() && self.map_entry_ok(memid, gvn, PTLevel::L0) is Some,
+            Set::new_assuming_finite(
+                |gvn: GVN| gvn.is_valid() && self.map_entry_ok(memid, gvn, PTLevel::L0) is Some,
+            ),
             |gvn: GVN| self.map_entry_ok(memid, gvn, PTLevel::L0)->Some_0,
         );
         MemMap { db: map }

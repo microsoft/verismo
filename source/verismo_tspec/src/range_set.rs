@@ -5,7 +5,7 @@ use super::*;
 verus! {
 
 pub open spec fn range_to_set(first: int, n: nat) -> Set<int> {
-    Set::new(|i: int| first <= i < first + (n as int))
+    Set::new_assuming_finite(|i: int| first <= i < first + (n as int))
 }
 
 pub open spec fn range(first: int, end: int) -> (int, nat) {
@@ -18,7 +18,7 @@ pub open spec fn range(first: int, end: int) -> (int, nat) {
 
 #[verifier(inline)]
 pub open spec fn range2set(range: (int, nat)) -> Set<int> {
-    Set::new(|i: int| within_range(i, range))
+    Set::new_assuming_finite(|i: int| within_range(i, range))
 }
 
 pub trait VRange {

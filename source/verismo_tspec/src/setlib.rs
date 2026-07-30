@@ -34,7 +34,7 @@ pub proof fn lemma_union<A>(s1: Set<A>, s2: Set<A>)
 }
 
 pub open spec fn convert_set<A, B>(s: Set<A>, f: spec_fn(B) -> A) -> Set<B> {
-    Set::new(|a| s.contains(f(a)))
+    Set::new_assuming_finite(|a| s.contains(f(a)))
 }
 
 pub open spec fn uop_to_bop<T1, T2, T3>(op: spec_fn(T1) -> T3) -> spec_fn(T1, T2) -> T3 {
@@ -45,12 +45,14 @@ pub open spec fn uop_to_bop<T1, T2, T3>(op: spec_fn(T1) -> T3) -> spec_fn(T1, T2
 pub open spec fn set_op<T1, T2, T3>(s1: Set<T1>, s2: Set<T2>, op_fn: spec_fn(T1, T2) -> T3) -> Set<
     T3,
 > {
-    Set::new(|val: T3| exists|v1, v2| s1.contains(v1) && s2.contains(v2) && val === op_fn(v1, v2))
+    Set::new_assuming_finite(
+        |val: T3| exists|v1, v2| s1.contains(v1) && s2.contains(v2) && val === op_fn(v1, v2),
+    )
 }
 
 #[verifier(inline)]
 pub open spec fn set_uop<T1, T2>(s1: Set<T1>, op_fn: spec_fn(T1) -> T2) -> Set<T2> {
-    Set::new(
+    Set::new_assuming_finite(
         |val: T2| exists|v1| s1.contains(v1) && val === op_fn(v1),
     )
     //set_op(s1, Set::empty().insert(arbitrary::<T1>()), uop_to_bop(op_fn))

@@ -532,10 +532,10 @@ pub fn load_bzimage_to_vmsa(
                 proof_bytes_add_is_constant_to(b1, b2, vmpl as nat);
                 assert(page_perm.bytes().is_constant_to(vmpl as nat));
             }
-            assert(old_prefer_mem.dom() =~~= Set::new(
+            assert(old_prefer_mem.dom() =~~= Set::new_assuming_finite(
                 |i: int| entry.spec_start() <= i < entry.spec_end(),
             ));
-            assert(prefer_mem.dom() =~~= Set::new(
+            assert(prefer_mem.dom() =~~= Set::new_assuming_finite(
                 |i: int| entry.spec_start() <= i < entry.spec_end(),
             ));
         }

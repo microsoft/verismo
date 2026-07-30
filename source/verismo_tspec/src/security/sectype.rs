@@ -118,7 +118,7 @@ impl<T, M> SecType<T, M> {
     #[verifier(external_body)]
     pub exec fn upgrade_secret(&mut self, Ghost(vmpl): Ghost<nat>)
         requires
-            old(self)@.valsets[vmpl] =~~= Set::full() || old(self)@.labels[vmpl] is TrustedRandom,
+            old(self)@.valsets[vmpl] =~~= Set::new_assuming_finite(|a| true) || old(self)@.labels[vmpl] is TrustedRandom,
         ensures
             self@ == old(self)@.spec_set_labels(old(self)@.labels.insert(vmpl, DataLabel::Secret)),
     {
@@ -188,7 +188,7 @@ impl<T, M> SecType<T, M> {
 
 impl<T, M> IsFullSecret for SpecSecType<T, M> {
     open spec fn is_fullsecret_to(&self, vmpl: nat) -> bool {
-        self.valsets[vmpl] =~~= Set::full()
+        self.valsets[vmpl] =~~= Set::new_assuming_finite(|a| true)
     }
 }
 
@@ -280,8 +280,8 @@ impl<T, M> SpecSecType<T, M> {
         vmpl: nat,
     ) -> bool {
         //&&& valsets[vmpl] =~~= Set::full() ==> labels[vmpl] is Symbol
-        &&& labels[vmpl] is TrustedRandom ==> valsets[vmpl] =~~= Set::full()
-        &&& labels[vmpl] is Secret ==> valsets[vmpl] =~~= Set::full()
+        &&& labels[vmpl] is TrustedRandom ==> valsets[vmpl] =~~= Set::new_assuming_finite(|a| true)
+        &&& labels[vmpl] is Secret ==> valsets[vmpl] =~~= Set::new_assuming_finite(|a| true)
         &&& labels.contains_key(vmpl)
         &&& valsets.contains_key(vmpl)
         &&& valsets[vmpl].len() > 0
@@ -306,10 +306,10 @@ impl<T, M> SpecSecType<T, M> {
             val: op(self.val, rhs.val),
             _unused: rhs._unused,
             valsets: Map::new(
-                |vmpl| 1 <= vmpl <= 4,
+                Set::new_assuming_finite(|vmpl| 1 <= vmpl <= 4),
                 |vmpl| set_op(self.valsets[vmpl], rhs.valsets[vmpl], op),
             ),
-            labels: Map::new(|vmpl| 1 <= vmpl <= 4, |vmpl| DataLabel::Symbol),
+            labels: Map::new(Set::new_assuming_finite(|vmpl| 1 <= vmpl <= 4), |vmpl| DataLabel::Symbol),
         }
     }
 
@@ -413,8 +413,8 @@ impl<T, M> SpecSecType<T, M> {
         SpecSecType {
             val,
             _unused: None,
-            valsets: Map::new(|vmpl| 1 <= vmpl <= 4, |vmpl| Set::<T>::empty().insert(val)),
-            labels: Map::new(|vmpl| 1 <= vmpl <= 4, |vmpl| DataLabel::Symbol),
+            valsets: Map::new(Set::new_assuming_finite(|vmpl| 1 <= vmpl <= 4), |vmpl| Set::<T>::empty().insert(val)),
+            labels: Map::new(Set::new_assuming_finite(|vmpl| 1 <= vmpl <= 4), |vmpl| DataLabel::Symbol),
         }
     }
 }
@@ -657,12 +657,20 @@ macro_rules! impl_exe_bops_for_stype {
                 }
             }
 
+            impl<M> vstd::std_specs::ops::[<$trt Assign SpecImpl>]<SecType<$baset, M>> for SecType<$baset, M> {
+                open spec fn [<obeys_ $fname _assign_spec>]() -> bool { true }
+                open spec fn [<$fname _assign_req>](&self, rhs: SecType<$baset, M>) -> bool {
+                    &&& $baset::MIN as int <= (self@.val $op rhs@.val) <= $baset::MAX as int
+                    &&& rhs@.val $check $val
+                }
+                open spec fn [<$fname _assign_spec>](&self, rhs: SecType<$baset, M>) -> &Self {
+                    &SecType::spec_new((self@ $op rhs@).$use_cast())
+                }
+            }
+
             impl<M> core::ops::[<$trt Assign>]<SecType<$baset, M>> for SecType<$baset, M> {
                 #[verifier::spinoff_prover]
                 fn [<$fname _assign>](&mut self, other: SecType<$baset, M>)
-                requires
-                    $baset::MIN as int <= (old(self)@.val $op other@.val) <= $baset::MAX as int,
-                    other@.val $check $val,
                 ensures
                     (*old(self) $op other)@.$use_cast() === self@,
                     (old(self).is_constant() && other.is_constant()) ==> self.is_constant(),
@@ -781,12 +789,20 @@ macro_rules! impl_exe_bops_for_stype_by_assume {
                 }
             }
 
+            impl<M> vstd::std_specs::ops::[<$trt Assign SpecImpl>]<SecType<$baset, M>> for SecType<$baset, M> {
+                open spec fn [<obeys_ $fname _assign_spec>]() -> bool { true }
+                open spec fn [<$fname _assign_req>](&self, rhs: SecType<$baset, M>) -> bool {
+                    &&& $baset::MIN as int <= (self@.val $op rhs@.val) <= $baset::MAX as int
+                    &&& rhs@.val $check $val
+                }
+                open spec fn [<$fname _assign_spec>](&self, rhs: SecType<$baset, M>) -> &Self {
+                    &SecType::spec_new((self@ $op rhs@).$use_cast())
+                }
+            }
+
             impl<M> core::ops::[<$trt Assign>]<SecType<$baset, M>> for SecType<$baset, M> {
                 #[verifier::spinoff_prover]
                 fn [<$fname _assign>](&mut self, other: SecType<$baset, M>)
-                requires
-                    $baset::MIN as int <= (old(self)@.val $op other@.val) <= $baset::MAX as int,
-                    other@.val $check $val,
                 ensures
                     (*old(self) $op other)@.$use_cast() === self@,
                     (old(self).is_constant() && other.is_constant()) ==> self.is_constant(),

@@ -430,7 +430,7 @@ pub trait MemRangeSeqInterface {
 }
 
 pub open spec fn empty_ranges() -> Set<(int, nat)> {
-    Set::new(|r: (int, nat)| r.1 == 0)
+    Set::new_assuming_finite(|r: (int, nat)| r.1 == 0)
 }
 
 impl<T: MemRangeInterface> MemRangeSeqInterface for Seq<T>
@@ -459,7 +459,7 @@ impl<T: MemRangeInterface> MemRangeSeqInterface for Seq<T>
 
     open spec fn to_valid_ranges_internal(&self) -> Set<(int, nat)> {
         //let s = self.to_range_seq();
-        Set::new(|r: (int, nat)| r.1 != 0 &&
+        Set::new_assuming_finite(|r: (int, nat)| r.1 != 0 &&
             exists |i: int| 0 <= i && i < self.len() &&
                 (#[trigger]self[i]).spec_range() === r)
         //s.to_set().difference(empty_ranges())
@@ -475,7 +475,7 @@ impl<T: MemRangeInterface> MemRangeSeqInterface for Seq<T>
 
     open spec fn to_aligned_ranges_internal(&self) -> Set<(int, nat)>
     {
-        Set::new(|r: (int, nat)|
+        Set::new_assuming_finite(|r: (int, nat)|
             self.has_aligned_ranges_internal(r)
         )
     }
