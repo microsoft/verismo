@@ -95,7 +95,7 @@ impl GuestPTRam {
     // pt_rmp: is a RMP table with only spa whose gpa is of PTE type.
     pub open spec fn to_mem_map(&self, sysmap: SysMap, memid: MemID) -> MemMap<GuestVir, GuestPhy> {
         let map = Map::new(
-            Set::new_assuming_finite(
+            spec_full_set::<GVN>().filter(
                 |gvn: GVN|
                     gvn.is_valid() && self.map_entry(sysmap, memid, gvn, PTLevel::L0) is Some,
             ),

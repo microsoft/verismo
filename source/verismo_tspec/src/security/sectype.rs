@@ -118,7 +118,7 @@ impl<T, M> SecType<T, M> {
     #[verifier(external_body)]
     pub exec fn upgrade_secret(&mut self, Ghost(vmpl): Ghost<nat>)
         requires
-            old(self)@.valsets[vmpl] =~~= Set::new_assuming_finite(|a| true) || old(self)@.labels[vmpl] is TrustedRandom,
+            old(self)@.valsets[vmpl] =~~= spec_full_set() || old(self)@.labels[vmpl] is TrustedRandom,
         ensures
             self@ == old(self)@.spec_set_labels(old(self)@.labels.insert(vmpl, DataLabel::Secret)),
     {
@@ -188,7 +188,7 @@ impl<T, M> SecType<T, M> {
 
 impl<T, M> IsFullSecret for SpecSecType<T, M> {
     open spec fn is_fullsecret_to(&self, vmpl: nat) -> bool {
-        self.valsets[vmpl] =~~= Set::new_assuming_finite(|a| true)
+        self.valsets[vmpl] =~~= spec_full_set()
     }
 }
 
@@ -280,12 +280,11 @@ impl<T, M> SpecSecType<T, M> {
         vmpl: nat,
     ) -> bool {
         //&&& valsets[vmpl] =~~= Set::full() ==> labels[vmpl] is Symbol
-        &&& labels[vmpl] is TrustedRandom ==> valsets[vmpl] =~~= Set::new_assuming_finite(|a| true)
-        &&& labels[vmpl] is Secret ==> valsets[vmpl] =~~= Set::new_assuming_finite(|a| true)
+        &&& labels[vmpl] is TrustedRandom ==> valsets[vmpl] =~~= spec_full_set()
+        &&& labels[vmpl] is Secret ==> valsets[vmpl] =~~= spec_full_set()
         &&& labels.contains_key(vmpl)
         &&& valsets.contains_key(vmpl)
         &&& valsets[vmpl].len() > 0
-        &&& valsets[vmpl].finite()
     }
 
     pub open spec fn wf_value(&self) -> bool {
@@ -306,10 +305,10 @@ impl<T, M> SpecSecType<T, M> {
             val: op(self.val, rhs.val),
             _unused: rhs._unused,
             valsets: Map::new(
-                Set::new_assuming_finite(|vmpl| 1 <= vmpl <= 4),
+                set![1, 2, 3, 4],
                 |vmpl| set_op(self.valsets[vmpl], rhs.valsets[vmpl], op),
             ),
-            labels: Map::new(Set::new_assuming_finite(|vmpl| 1 <= vmpl <= 4), |vmpl| DataLabel::Symbol),
+            labels: Map::new(set![1, 2, 3, 4], |vmpl| DataLabel::Symbol),
         }
     }
 
@@ -330,12 +329,11 @@ impl<T, M> SpecSecType<T, M> {
     {
         let ret = self.bop_new(rhs, op);
         assert forall|i| 1 <= i <= 4 implies ret.valsets[i].len() <= self.valsets[i].len()
-            * rhs.valsets[i].len() && ret.valsets[i].len() >= 1 && ret.valsets[i].finite()
+            * rhs.valsets[i].len() && ret.valsets[i].len() >= 1
             && #[trigger] SpecSecType::<T2, M>::wf_vmpl(ret.valsets, ret.labels, i) by {
             lemma_setop_len(self.valsets[i], rhs.valsets[i], op);
             assert(ret.valsets[i].len() <= self.valsets[i].len() * rhs.valsets[i].len());
             assert(ret.valsets[i].len() >= 1);
-            assert(ret.valsets[i].finite());
             assert(SpecSecType::<T2, M>::wf_vmpl(ret.valsets, ret.labels, i));
             //assert(set_op(self.valsets[i], rhs.valsets[i], op).len() <= 1);
         }
@@ -344,6 +342,8 @@ impl<T, M> SpecSecType<T, M> {
             assert(ret._is_constant()) by {
                 assert forall|i: nat| 1 <= i <= 4 implies
                     #[trigger] ret.valsets[i] =~~= set![ret.val] by {
+                    broadcast use {lemma_set_op_contains, lemma_set_uop_contains};
+
                     lemma_setop_len(self.valsets[i], rhs.valsets[i], op);
                     assert(self.valsets[i] =~~= set![self.val]);
                     assert(rhs.valsets[i] =~~= set![rhs.val]);
@@ -376,6 +376,8 @@ impl<T, M> SpecSecType<T, M> {
         if self._is_constant() {
             assert forall|i: nat| 1 <= i <= 4 implies
                 #[trigger] ret.valsets[i] =~~= set![ret.val] by {
+                broadcast use {lemma_set_op_contains, lemma_set_uop_contains};
+
                 let other = SpecSecType::<T, M>::constant(arbitrary::<T>());
                 lemma_setop_len(self.valsets[i], other.valsets[i], uop_to_bop(op));
                 assert(self.valsets[i] =~~= set![self.val]);
@@ -413,8 +415,8 @@ impl<T, M> SpecSecType<T, M> {
         SpecSecType {
             val,
             _unused: None,
-            valsets: Map::new(Set::new_assuming_finite(|vmpl| 1 <= vmpl <= 4), |vmpl| Set::<T>::empty().insert(val)),
-            labels: Map::new(Set::new_assuming_finite(|vmpl| 1 <= vmpl <= 4), |vmpl| DataLabel::Symbol),
+            valsets: Map::new(set![1, 2, 3, 4], |vmpl| Set::<T>::empty().insert(val)),
+            labels: Map::new(set![1, 2, 3, 4], |vmpl| DataLabel::Symbol),
         }
     }
 }

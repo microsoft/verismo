@@ -125,7 +125,6 @@ impl<T> SpecAddr<T> {
     pub proof fn lemma_to_set(&self, n: nat) -> (ret: Set<int>)
         ensures
             ret.len() == n,
-            ret.finite(),
             ret === self.to_set(n),
             n == 0 ==> ret.is_empty(),
     {
@@ -209,7 +208,6 @@ impl<T> SpecPage<T> {
     pub proof fn lemma_to_set(&self, n: nat) -> (ret: Set<int>)
         ensures
             ret.len() == n,
-            ret.finite(),
             ret === self.to_set(n),
             n == 0 <==> ret.is_empty(),
     {
@@ -382,7 +380,6 @@ impl<T> SpecMem<T> {
     pub proof fn lemma_to_set(&self) -> (ret: Set<int>)
         ensures
             ret.len() == self.len(),
-            ret.finite(),
             ret === self.to_set(),
             ret === self.first().to_set(self.len()),
     {

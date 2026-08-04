@@ -103,7 +103,7 @@ pub fn ghcb_change_page_state_via_pg(
         proof {
             ghcbpage_perm0.tracked_insert(0, ghcbpage_perm);
         }
-        let ghost subdom = Set::new_assuming_finite(|i| ppage + offset <= i < ppage + offset + n);
+        let ghost subdom = Set::<int>::range(ppage + offset, (ppage + offset + n) as int);
         assert forall|i| #[trigger] subdom.contains(i) implies page_perms.contains_key(i) by {
             assert(old_page_perms[i] === page_perms[i]);
             assert(ppage + offset <= i < ppage + npages);

@@ -32,10 +32,7 @@ pub proof fn tracked_seq_remove<T>(tracked m: &mut Map<nat, T>, i: nat, n: nat) 
         } else {
             (j + 1) as nat
         };
-    let key_map = Map::<nat, nat>::new(
-        Set::new_assuming_finite(|j: nat| 0 <= j < (n - 1)),
-        |j: nat| convert(j),
-    );
+    let key_map = Map::<nat, nat>::new(Set::<nat>::range(0, (n - 1) as nat), |j: nat| convert(j));
     assert forall|j: nat| key_map.contains_key(j) implies m.contains_key(convert(j)) by {
         assert(oldm.contains_key(j));
         assert(oldm.contains_key(j + 1));
@@ -66,10 +63,7 @@ pub proof fn tracked_seq_insert<T>(tracked m: &mut Map<nat, T>, i: nat, tracked 
         } else {
             (j - 1) as nat
         };
-    let key_map = Map::<nat, nat>::new(
-        Set::new_assuming_finite(|j: nat| 0 <= j < n + 1),
-        |j: nat| convert(j),
-    );
+    let key_map = Map::<nat, nat>::new(Set::<nat>::range(0, (n + 1) as nat), |j: nat| convert(j));
     assert forall|j: nat| key_map.contains_key(j) implies m.contains_key(convert(j)) by {
         if j < i {
             assert(oldm.contains_key(j));

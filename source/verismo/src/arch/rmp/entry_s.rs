@@ -13,7 +13,7 @@ impl HiddenRmpEntryForPSP {
         //&&& self.validated ==> (self.perms === preventry.perms && self.asid === preventry.asid && preventry.validated && self.vmsa == preventry.vmsa && self.size == preventry.size)
         //&&& (self !== preventry)  ==> ((self.perms === super::perm_s::rmp_perm_init()))
         &&& (self !== preventry) ==> {
-            &&& self.perms[VMPL::VMPL0] =~~= PagePerm::new_assuming_finite(|_p| true)
+            &&& self.perms[VMPL::VMPL0] =~~= spec_full_set::<super::perm_s::Perm>()
             &&& self.perms[VMPL::VMPL0] =~~= preventry.perms[VMPL::VMPL0]
             &&& self.perms[VMPL::VMPL1].subset_of(preventry.perms[VMPL::VMPL1])
             &&& self.perms[VMPL::VMPL2].subset_of(preventry.perms[VMPL::VMPL2])
@@ -67,9 +67,9 @@ impl HiddenRmpEntryForPSP {
     pub open spec fn is_valid(&self) -> bool {
         &&& (self.spec_asid() != 0 || !self.spec_assigned())
         &&& (!self.spec_validated() || (self.spec_assigned() && self.spec_asid() != 0))
-        &&& self.perms[VMPL::VMPL0] === Set::new_assuming_finite(
-            |_a| true,
-        )
+        &&& self.perms[VMPL::VMPL0] === spec_full_set::<
+            super::perm_s::Perm,
+        >()
         //&&& !self.validated ==> self.perms === super::perm_s::rmp_perm_init() Not Hold
 
     }

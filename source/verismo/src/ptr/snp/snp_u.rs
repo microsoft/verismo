@@ -122,10 +122,7 @@ impl SwSnpMemAttr {
     pub open spec fn deterministic_pte(&self) -> bool {
         &&& self.pte.len() == 1
         &&& self.pte() === self.pte.last()
-        &&& self.guestmap =~~= Map::new(
-            Set::new_assuming_finite(|gva: int| true),
-            |gva: int| spec_va_to_pa(gva),
-        )
+        &&& self.guestmap =~~= Map::new(spec_full_set::<int>(), |gva: int| spec_va_to_pa(gva))
     }
 
     pub open spec fn is_vm_confidential(&self) -> bool {
@@ -274,7 +271,7 @@ impl SwSnpMemAttr {
             rmp: arbitrary::<RmpEntry>().spec_set_val(rmp_psp),
             pte: seq![PTAttr::spec_default()],
             is_pte: false,
-            guestmap: Map::new(Set::new_assuming_finite(|gva: int| true), |gva: int| gva),
+            guestmap: Map::new(spec_full_set::<int>(), |gva: int| gva),
             rmpmap: Map::empty(),
             sysmap: Map::empty(),
         }
