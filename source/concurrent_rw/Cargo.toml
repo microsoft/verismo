@@ -1,0 +1,29 @@
+# Multiple-reader single-writer tokens, second implementation.
+[package]
+name = "concurrent_rw"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+# Which implementations the token library builds on. Off (the default): vstd's
+# resource library. On: verus_state_machines_macros
+#
+# For a standalone run, pass the same choice to verus directly:
+#   verus src/lib.rs --crate-type=lib --cfg 'feature="state_machine"'
+state_machine = ["dep:verus_state_machines_macros"]
+
+[dependencies]
+# Verus deps
+builtin_macros = { workspace = true }
+verus_state_machines_macros = { workspace = true, optional = true }
+vstd = { workspace = true, features = ["alloc"], default-features = false }
+
+[package.metadata.verus]
+verify = true
+
+[lints.rust]
+# Verus turns on `--cfg verus_only` during verification and sets
+# `verus_keep_ghost` itself; declaring both keeps a plain `cargo build`
+# warning-free.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(verus_only)', 'cfg(verus_keep_ghost)', 'cfg(verus_keep_ghost_body)'] }

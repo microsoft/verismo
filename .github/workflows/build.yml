@@ -40,3 +40,7 @@ jobs:
       - name: Verify
         working-directory: source
         run: cargo verus focus --release -- --multiple-errors=20 --trace --time
+      
+      - name: Verify-concurrent-rw
+        working-directory: source/concurrent-rw/tests
+        run: cargo verus verify --release --features state_machine -- --multiple-errors=20 --trace --time

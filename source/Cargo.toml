@@ -7,6 +7,8 @@ members = [
     "verismo_tspec",
     "bitflags_verus",
     "bitflags_verus/tests",
+    "concurrent_rw",
+    "concurrent_rw/tests",
 ]
 
 [workspace.dependencies]
