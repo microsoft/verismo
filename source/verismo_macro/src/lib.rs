@@ -1,5 +1,3 @@
-#![feature(proc_macro_span)]
-
 mod bits;
 mod clone;
 mod def;

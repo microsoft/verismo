@@ -94,8 +94,8 @@ pub broadcast proof fn lemma_set_op_contains<T1, T2, T3>(
         assert(set_op(s1, s2, op_fn) === mapped.flatten());
         assert(mapped.flatten().contains(v));
         mapped.lemma_flatten_contains(v);
-        assert(exists|s: Set<T3>| mapped.contains(s) && s.contains(v));
-        let s = choose|s: Set<T3>| mapped.contains(s) && s.contains(v);
+        //assert(exists|s: Set<T3>| mapped.contains(s) && s.contains(v));
+        let s = choose|s: Set<T3>| #[trigger] mapped.contains(s) && s.contains(v);
         assert(mapped.contains(s) && s.contains(v));
         s1.lemma_map_contains(g, s);
         assert(exists|v1: T1| s1.contains(v1) && s === g(v1));
