@@ -1,7 +1,7 @@
 //! **The construction.** One way of building tokens that satisfy
 //! [`crate::protocol::contract`].
 //!
-//! The contract says what a `Reader`, `Writer`, `Observed` and `PayloadTicket` are *for*. This
+//! The contract says what a `RWShared`, `WritePerm`, `Observed` and `PayloadTicket` are *for*. This
 //! module says what they *are*. Nothing here needs to be believed: [`contract_proof`]
 //! checks it against the contract, and a client that reads only `protocol` misses nothing.
 //!
@@ -11,29 +11,29 @@
 //!
 //! ```text
 //!     PointsTo<AtomicType>        exclusive: no read may run during a write
-//!            |  Reader::new       (the contract calls this RWContract::split)
+//!            |  RWShared::new       (the contract calls this RWContract::build_rw)
 //!            v
-//!     Writer + Reader + Observed  reads and the write may now overlap
+//!     WritePerm + RWShared + Observed  reads and the write may now overlap
 //! ```
 //!
-//! # `Writer` -- half the value
+//! # `WritePerm` -- half the value
 //!
-//! The value lives in a `FracGhost<T>` split in two: [`Writer`] holds one half, `ReaderState`
+//! The value lives in a `FracGhost<T>` split in two: [`WritePerm`] holds one half, `RWState`
 //! holds the other inside the reader's invariant. Neither can change the value alone, so a store
-//! must open the invariant and bring them together. Holding half is also the `Writer`'s type
-//! invariant, so a second `Writer` cannot be built -- there is no second half to build it from.
+//! must open the invariant and bring them together. Holding half is also the `WritePerm`'s type
+//! invariant, so a second `WritePerm` cannot be built -- there is no second half to build it from.
 //! That, and not a lock, is what "single writer" means here.
 //!
-//! # `Reader` -- held by every reader, opened by the writer too
+//! # `RWShared` -- held by every reader, opened by the writer too
 //!
-//! [`Reader`] is a handle on the `AtomicInvariant` holding `ReaderState`, plus a handle on the
-//! payload slot. There is one per pointer, but a read needs only `&Reader`, so that one token
+//! [`RWShared`] is a handle on the `AtomicInvariant` holding `RWState`, plus a handle on the
+//! payload slot. There is one per pointer, but a read needs only `&RWShared`, so that one token
 //! can be shared across threads. The writer opens the same invariant, which is why reads and the
 //! write may overlap: consistency comes from the invariant, not from keeping them apart.
 //!
 //! # `Observed` -- evidence that a pair was once current
 //!
-//! [`Observed`] is duplicable evidence of membership in `ReaderState::obs`, one `ObsHistory`
+//! [`Observed`] is duplicable evidence of membership in `RWState::obs`, one `ObsHistory`
 //! holding every value-and-payload pair anyone has seen. The set only grows, and the invariant
 //! says the pair now is reachable from every pair in it. Evidence about the past therefore
 //! becomes a claim about every future read -- property 1 of [`crate::protocol::contract`] --
@@ -41,7 +41,7 @@
 //!
 //! # The payload
 //!
-//! Beside the value, `ReaderState` holds a `PayloadHolder` -- tracked data too large or too
+//! Beside the value, `RWState` holds a `PayloadHolder` -- tracked data too large or too
 //! non-copyable to live in the value itself. The invariant keeps `value.has_published_payload()`
 //! equal to whether the slot really has, so the value cannot lie about it. That equation holds
 //! for every model, which is why `has_published_payload` sits in `RWModel` rather than in
@@ -52,9 +52,9 @@
 //! no ordinary work can run while holding it. Nor is anything promised across threads: the writer
 //! may replace it before anyone looks again.
 //!
-//! Publishing lifts both limits. `slot_version` lives in `ReaderConstant`, so every ticket is
+//! Publishing lifts both limits. `slot_version` lives in `RWConstant`, so every ticket is
 //! minted at one version and `payloads_agree` pins them all to a single payload for the
-//! `Reader`'s whole life; and `wf_payload` is re-derived from the invariant on each read, so the
+//! `RWShared`'s whole life; and `wf_payload` is re-derived from the invariant on each read, so the
 //! payload stays well-formed against whatever you read. Tickets are neither unique nor consumed:
 //! borrowing takes `&PayloadTicket`, and every read of a published value mints another. Property
 //! 3b is what makes that harmless.
@@ -96,7 +96,7 @@ pub mod obs_history;
 pub mod obs_history;
 
 /// The token types and their ghost operations -- everything described above. Re-exported below,
-/// so `tokens_impl::Reader` still names a `Reader`. `rw_exec`, the executable reads and writes,
+/// so `tokens_impl::RWShared` still names a `RWShared`. `rw_exec`, the executable reads and writes,
 /// is a child of it, and stays crate-private: `crate::protocol::contract` is the way in.
 #[path = "proof/rw.rs"]
 pub mod rw_proof;

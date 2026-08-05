@@ -32,7 +32,7 @@ verus! {
 #[verifier::accept_recursive_types(T)]
 #[verifier::accept_recursive_types(P)]
 pub tracked struct Snapshot<T, P> {
-    /// `Option` only to give the type a base case. A snapshot sits inside `Reader`, so it is
+    /// `Option` only to give the type a base case. A snapshot sits inside `RWShared`, so it is
     /// recursive -- a payload holds readers, and a reader's state holds a set of snapshots -- and
     /// Verus wants one way to build one that does not recurse. `new` is the only constructor
     /// anyone uses, and `value` and `payload` are meaningless without it.
@@ -101,7 +101,7 @@ pub trait RWModel: WithPayload + IsValidAtomicType + Sized {
     //
     // Defaults to `false`: most models never publish, and for them this is the right answer and
     // there is nothing to write. It stays in `RWModel` rather than moving to `PublishPayload`
-    // because `ReaderState`'s invariant ties it to whether the slot really has published, and
+    // because `RWState`'s invariant ties it to whether the slot really has published, and
     // that equation has to hold for every model, publishing or not.
     open spec fn has_published_payload(self) -> bool {
         false
@@ -127,14 +127,14 @@ pub trait RWModel: WithPayload + IsValidAtomicType + Sized {
 /// invariant block it came from.
 ///
 /// `RWModel` on its own already supports payloads, but only inside `open_atomic_invariant!` --
-/// see [`ReaderState::borrow_payload`]. That is enough to read a payload and copy plain data out
+/// see [`RWState::borrow_payload`]. That is enough to read a payload and copy plain data out
 /// of it, and a model that never needs more should stop there: it then never names
 /// [`PayloadTicket`] at all, and its reads return just a value and an `Observed`.
 ///
 /// Implementing this trait additionally enables the published route: `read_published` and
 /// `write_with_published_payload` on
 /// [`RWWithPublishPayloadContract`](crate::protocol::contract::RWWithPublishPayloadContract),
-/// plus [`Reader::borrow_published_payload`].
+/// plus [`RWShared::borrow_published_payload`].
 ///
 /// A model that opts in must also override `RWModel::has_published_payload`, which defaults to
 /// `false`. That spec function stays in `RWModel` because the reader's invariant ties it to

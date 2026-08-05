@@ -20,7 +20,7 @@
 //! ## Why the set, and not a relation
 //!
 //! See the state-machine observation-history implementation: the element is a snapshot, so a
-//! `Reader`, and a payload holds readers. The reachability guarantee lives in `ReaderState::inv`
+//! `RWShared`, and a payload holds readers. The reachability guarantee lives in `RWState::inv`
 //! instead, where the model's traits are in scope.
 use vstd::prelude::*;
 

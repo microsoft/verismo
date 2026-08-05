@@ -17,6 +17,8 @@ use vstd::iset::iset;
 use vstd::prelude::*;
 use vstd::raw_ptr::IsExposed;
 #[cfg(verus_only)]
+use vstd::raw_ptr::PointsTo;
+#[cfg(verus_only)]
 use vstd::std_specs::convert::{FromSpec, FromSpecImpl, IntoSpec};
 
 verus! {
@@ -90,7 +92,7 @@ impl PTEntry {
 }
 
 pub struct Extra {
-    reader: Seq<Reader<PTEntry, Extra>>,
+    reader: Seq<RWShared<PTEntry, Extra>>,
     provenance: IsExposed,
 }
 
@@ -101,7 +103,7 @@ impl WithPayload for PTEntry {
         self.present() ==> {
             &&& payload.reader.len() == 512
             &&& forall|i: int|
-                ((#[trigger] payload.reader[i]).ptr().addr() == self.next() + i * 8)
+                (#[trigger] payload.reader[i]).ptr().addr() == self.next() + i * 8
                 && payload.reader[i].ptr()@.provenance == payload.provenance@
         }
     }
@@ -159,8 +161,8 @@ impl RWModel for PTEntry {
 #[verifier::atomic]
 fn read_entry(
     ptr: *mut usize,
-    Tracked(reader): Tracked<&Reader<PTEntry, Extra>>,
-    Tracked(state): Tracked<&mut ReaderState<PTEntry, Extra>>,
+    Tracked(reader): Tracked<&RWShared<PTEntry, Extra>>,
+    Tracked(state): Tracked<&mut RWState<PTEntry, Extra>>,
 ) -> (out: (usize, Tracked<Observed<PTEntry>>, Tracked<IsExposed>))
     requires
         old(state).inv(),
@@ -201,14 +203,14 @@ fn read_entry(
 // its own location, and two whole fractions do not compose. Getting that takes a `&mut` to the
 // child, so the payload is lent out and put back untouched, which leaves the state as it was.
 proof fn child_namespace_differs(
-    tracked state: &mut ReaderState<PTEntry, Extra>,
-    c: ReaderConstant<PTEntry>,
-    tracked open: &Reader<PTEntry, Extra>,
+    tracked state: &mut RWState<PTEntry, Extra>,
+    c: RWConstant<PTEntry>,
+    tracked open: &RWShared<PTEntry, Extra>,
 )
     requires
-        <ReaderState<PTEntry, Extra> as InvariantPredicate<
-            ReaderConstant<PTEntry>,
-            ReaderState<PTEntry, Extra>,
+        <RWState<PTEntry, Extra> as InvariantPredicate<
+            RWConstant<PTEntry>,
+            RWState<PTEntry, Extra>,
         >>::inv(c, *old(state)),
         !old(state).value().has_published_payload(),
         old(state).value().present(),
@@ -223,7 +225,7 @@ proof fn child_namespace_differs(
 }
 
 proof fn namespaces_differ(
-    tracked r: &Reader<PTEntry, Extra>,
+    tracked r: &RWShared<PTEntry, Extra>,
     tracked o1: &Observed<PTEntry>,
     tracked credit: OpenInvariantCredit,
 )
@@ -242,7 +244,7 @@ proof fn namespaces_differ(
     });
 }
 proof fn namespaces_differ2(
-    tracked r: &Reader<PTEntry, Extra>,
+    tracked r: &RWShared<PTEntry, Extra>,
     tracked o1: &Observed<PTEntry>,
     tracked o2: &Observed<PTEntry>,
     tracked c1: OpenInvariantCredit,
@@ -284,9 +286,9 @@ proof fn namespaces_differ2(
 // everything but those. That is what lets the nested call typecheck: it opens all but
 // `opened + cur`, which is exactly what is left of this mask once `cur` is open.
 proof fn namespaces_differ_r_namespace<'a>(
-    tracked root: &Reader<PTEntry, Extra>,
-    tracked cur: &'a Reader<PTEntry, Extra>,
-    tracked opened: Seq<&'a Reader<PTEntry, Extra>>,
+    tracked root: &RWShared<PTEntry, Extra>,
+    tracked cur: &'a RWShared<PTEntry, Extra>,
+    tracked opened: Seq<&'a RWShared<PTEntry, Extra>>,
     tracked observed: &Seq<&'a Observed<PTEntry>>,
     tracked credits: Seq<OpenInvariantCredit>,
     k: nat,
@@ -366,7 +368,7 @@ proof fn namespaces_differ_r_namespace<'a>(
 }
 // The children in the chain all have distinct namespaces, and none of them is the root's.
 proof fn namespaces_differ_all(
-    tracked r: &Reader<PTEntry, Extra>,
+    tracked r: &RWShared<PTEntry, Extra>,
     tracked observed: &Seq<&Observed<PTEntry>>,
     tracked credits: Seq<OpenInvariantCredit>,
 )
@@ -391,7 +393,7 @@ proof fn namespaces_differ_all(
 {
     broadcast use vstd::iset::group_iset_lemmas;
 
-    let tracked opened: Seq<&Reader<PTEntry, Extra>> = Seq::tracked_empty();
+    let tracked opened: Seq<&RWShared<PTEntry, Extra>> = Seq::tracked_empty();
     assert(open_namespaces(opened) =~= ISet::empty());
     namespaces_differ_r_namespace(r, r, opened, observed, credits, 0);
 }
@@ -423,7 +425,7 @@ fn create_open_invariant_credits(n: usize) -> (out: Tracked<Seq<OpenInvariantCre
 // The namespaces a descent from `root` opens: its own, and each level it steps into. The last
 // reading is only looked at, never descended through, so its child is not among them.
 spec fn chain_namespaces(
-    root: &Reader<PTEntry, Extra>,
+    root: &RWShared<PTEntry, Extra>,
     observed: Seq<&Observed<PTEntry>>,
 ) -> ISet<int> {
     observed.remove(observed.len() - 1).map_values(
@@ -432,32 +434,32 @@ spec fn chain_namespaces(
 }
 
 // The namespaces whose invariants are already open.
-spec fn open_namespaces(opened: Seq<&Reader<PTEntry, Extra>>) -> ISet<int> {
-    opened.map_values(|r: &Reader<PTEntry, Extra>| r.namespace()).to_iset()
+spec fn open_namespaces(opened: Seq<&RWShared<PTEntry, Extra>>) -> ISet<int> {
+    opened.map_values(|r: &RWShared<PTEntry, Extra>| r.namespace()).to_iset()
 }
 
 // Pushing a reader onto `opened` adds exactly its namespace.
-proof fn open_namespaces_push(opened: Seq<&Reader<PTEntry, Extra>>, r: &Reader<PTEntry, Extra>)
+proof fn open_namespaces_push(opened: Seq<&RWShared<PTEntry, Extra>>, r: &RWShared<PTEntry, Extra>)
     ensures
         open_namespaces(opened.push(r)) =~= open_namespaces(opened).insert(r.namespace()),
 {
     broadcast use vstd::seq::Seq::lemma_to_iset_insert_commutes;
 
-    let f = |r: &Reader<PTEntry, Extra>| r.namespace();
+    let f = |r: &RWShared<PTEntry, Extra>| r.namespace();
     assert(opened.push(r).map_values(f) =~= opened.map_values(f) + seq![r.namespace()]);
 }
 
 // The child differs from every reader already open: one `distinct_namespace` per ancestor.
 proof fn child_differs_from_all(
-    tracked state: &mut ReaderState<PTEntry, Extra>,
-    c: ReaderConstant<PTEntry>,
-    tracked opened: &Seq<&Reader<PTEntry, Extra>>,
+    tracked state: &mut RWState<PTEntry, Extra>,
+    c: RWConstant<PTEntry>,
+    tracked opened: &Seq<&RWShared<PTEntry, Extra>>,
     n: nat,
 )
     requires
-        <ReaderState<PTEntry, Extra> as InvariantPredicate<
-            ReaderConstant<PTEntry>,
-            ReaderState<PTEntry, Extra>,
+        <RWState<PTEntry, Extra> as InvariantPredicate<
+            RWConstant<PTEntry>,
+            RWState<PTEntry, Extra>,
         >>::inv(c, *old(state)),
         !old(state).value().has_published_payload(),
         old(state).value().present(),
@@ -481,7 +483,7 @@ proof fn child_differs_from_all(
 #[verifier::atomic]
 fn read_level0(
     ptr_lvl0: *mut usize,
-    Tracked(r): Tracked<&Reader<PTEntry, Extra>>,
+    Tracked(r): Tracked<&RWShared<PTEntry, Extra>>,
 ) -> (out: (usize, Tracked<Observed<PTEntry>>, Tracked<IsExposed>))
     requires
         r.ptr() == ptr_lvl0,
@@ -514,7 +516,7 @@ fn read_level0(
 #[verifier::atomic]
 fn read_level1(
     ptr_lvl1: *mut usize,
-    Tracked(r): Tracked<&Reader<PTEntry, Extra>>,
+    Tracked(r): Tracked<&RWShared<PTEntry, Extra>>,
     Tracked(o1): Tracked<&Observed<PTEntry>>,
 ) -> (out: (usize, Tracked<Observed<PTEntry>>, Tracked<IsExposed>))
     requires
@@ -550,7 +552,7 @@ fn read_level1(
 #[verifier::atomic]
 fn read_level2(
     ptr_lvl2: *mut usize,
-    Tracked(r): Tracked<&Reader<PTEntry, Extra>>,
+    Tracked(r): Tracked<&RWShared<PTEntry, Extra>>,
     Tracked(o1): Tracked<&Observed<PTEntry>>,
     Tracked(o2): Tracked<&Observed<PTEntry>>,
 ) -> (out: (usize, Tracked<Observed<PTEntry>>, Tracked<IsExposed>))
@@ -594,7 +596,7 @@ fn read_level2(
 #[verifier::atomic]
 fn read_level3(
     ptr_lvl3: *mut usize,
-    Tracked(r): Tracked<&Reader<PTEntry, Extra>>,
+    Tracked(r): Tracked<&RWShared<PTEntry, Extra>>,
     Tracked(o1): Tracked<&Observed<PTEntry>>,
     Tracked(o2): Tracked<&Observed<PTEntry>>,
     Tracked(o3): Tracked<&Observed<PTEntry>>,
@@ -655,7 +657,7 @@ fn read_level3(
 // What one pass opens: its root's namespace, and its child's at every level it descends. Unlike
 // `chain_namespaces` this includes the deepest child, because the pass ends by reading it.
 spec fn level_namespaces(
-    r: &Reader<PTEntry, Extra>,
+    r: &RWShared<PTEntry, Extra>,
     observed: Seq<&Observed<PTEntry>>,
 ) -> ISet<int> {
     ISet::new(
@@ -668,8 +670,8 @@ spec fn level_namespaces(
 
 // Dropping the first level leaves its child's namespace, which the next pass opens as its root.
 proof fn level_namespaces_pop_front(
-    r: &Reader<PTEntry, Extra>,
-    child: &Reader<PTEntry, Extra>,
+    r: &RWShared<PTEntry, Extra>,
+    child: &RWShared<PTEntry, Extra>,
     observed: Seq<&Observed<PTEntry>>,
 )
     requires
@@ -708,7 +710,7 @@ proof fn level_namespaces_pop_front(
 }
 
 // `observed` records a descent from `r`, one reading per level, each level present.
-spec fn chain_from(r: &Reader<PTEntry, Extra>, observed: Seq<&Observed<PTEntry>>) -> bool {
+spec fn chain_from(r: &RWShared<PTEntry, Extra>, observed: Seq<&Observed<PTEntry>>) -> bool {
     &&& observed.len() > 0 ==> r.has_observed(*observed[0]) && observed[0].value().present()
     &&& forall|i: int|
         0 <= i < observed.len() - 1 ==> (#[trigger] observed[i + 1]).id()
@@ -717,7 +719,7 @@ spec fn chain_from(r: &Reader<PTEntry, Extra>, observed: Seq<&Observed<PTEntry>>
 
 // No two levels of the descent share a namespace, so each can be opened inside the last.
 spec fn chain_namespaces_distinct(
-    r: &Reader<PTEntry, Extra>,
+    r: &RWShared<PTEntry, Extra>,
     observed: Seq<&Observed<PTEntry>>,
 ) -> bool {
     &&& forall|i: int|
@@ -734,7 +736,7 @@ spec fn chain_namespaces_distinct(
 #[verifier::atomic]
 fn read_level_3(
     ptr_lvl3: *mut usize,
-    Tracked(r): Tracked<&Reader<PTEntry, Extra>>,
+    Tracked(r): Tracked<&RWShared<PTEntry, Extra>>,
     Tracked(o1): Tracked<&Observed<PTEntry>>,
     Tracked(o2): Tracked<&Observed<PTEntry>>,
     Tracked(o3): Tracked<&Observed<PTEntry>>,
@@ -768,7 +770,7 @@ fn read_level_3(
 
 // Depth 2: read a grandchild. Three passes, each one level deeper, because rebuilding a pointer
 // is not atomic, so a level is reached only by restarting from the root and descending further.
-fn walk_level2(ptr_lvl0: *mut usize, Tracked(r): Tracked<&Reader<PTEntry, Extra>>)
+fn walk_level2(ptr_lvl0: *mut usize, Tracked(r): Tracked<&RWShared<PTEntry, Extra>>)
     requires
         r.ptr() == ptr_lvl0,
 {
@@ -794,7 +796,7 @@ fn walk_level2(ptr_lvl0: *mut usize, Tracked(r): Tracked<&Reader<PTEntry, Extra>
 // recursive call would sit in an `open_atomic_invariant!` body, so it would need
 // `#[verifier::atomic]`, which Verus rejects on recursive functions. `pt::walk` recurses
 // because publishing reaches a child reader without holding the parent open.
-fn walk_level3(ptr_lvl0: *mut usize, Tracked(r): Tracked<&Reader<PTEntry, Extra>>)
+fn walk_level3(ptr_lvl0: *mut usize, Tracked(r): Tracked<&RWShared<PTEntry, Extra>>)
     requires
         r.ptr() == ptr_lvl0,
 {
@@ -829,7 +831,7 @@ fn walk_level3(ptr_lvl0: *mut usize, Tracked(r): Tracked<&Reader<PTEntry, Extra>
 /// value reachable from the one that token names.
 fn example_read_moves_forward(
     ptr: *mut usize,
-    Tracked(r): Tracked<&Reader<PTEntry, Extra>>,
+    Tracked(r): Tracked<&RWShared<PTEntry, Extra>>,
     Tracked(past): Tracked<Observed<PTEntry>>,
 )
     requires
@@ -842,6 +844,46 @@ fn example_read_moves_forward(
         // Whatever a concurrent writer did, it moved us forward and not back.
         assert(PTEntry::reachable(was, now.snapshot()));
     }
+}
+
+/// Rebuilds an unpublished location while an observation from the old history remains live.
+fn example_write_unrestricted(
+    ptr: *mut usize,
+    value: PTEntry,
+    Tracked(r): Tracked<RWShared<PTEntry, Extra>>,
+    Tracked(w): Tracked<&mut WritePerm<PTEntry>>,
+    Tracked(payload): Tracked<Extra>,
+    Tracked(old_observed): Tracked<&Observed<PTEntry>>,
+) -> (ret: (Tracked<RWShared<PTEntry, Extra>>, Tracked<Observed<PTEntry>>))
+    requires
+        r.ptr() == ptr,
+        r.id() == old(w).id(),
+        r.has_observed(*old_observed),
+        value.wf_payload(payload),
+        !value.has_published_payload(),
+    ensures
+        ret.0@.has_observed(ret.1@),
+        ret.1@@ == value,
+        final(w)@ == value,
+{
+    PTEntry::write_unrestricted(ptr, value, Tracked(r), Tracked(w), Tracked(payload))
+}
+
+/// Tearing down an unpublished instance returns the exclusive memory permission and payload.
+proof fn example_teardown_unpublished(
+    tracked r: RWShared<PTEntry, Extra>,
+    tracked w: WritePerm<PTEntry>,
+) -> (tracked out: (PointsTo<usize>, Extra))
+    requires
+        r.id() == w.id(),
+    ensures
+        out.0.is_init(),
+        out.0.ptr() == r.ptr(),
+        w@ === out.0.value().into_spec(),
+        w@.wf_payload(out.1),
+    opens_invariants [r.namespace()]
+{
+    PTEntry::teardown_rw(r, w)
 }
 
 } // verus!

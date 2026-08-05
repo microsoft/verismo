@@ -1,4 +1,4 @@
-//! **The tokens themselves.** What a `Reader`, `Writer`, `Observed` and `PayloadTicket` are,
+//! **The tokens themselves.** What a `RWShared`, `WritePerm`, `Observed` and `PayloadTicket` are,
 //! and the ghost operations over them. Entirely ghost: the operations that touch the pointer
 //! live in [`rw_exec`], a child module so that it can reach the private items here.
 //!
@@ -29,8 +29,6 @@ use crate::trusted_t::{axiom_loc_to_int_injective, loc_to_int};
 #[cfg(verus_only)]
 use vstd::invariant::OpenInvariantCredit;
 use vstd::invariant::{AtomicInvariant, InvariantPredicate};
-#[cfg(verus_only)]
-use vstd::modes::tracked_swap;
 #[cfg(verus_only)]
 use vstd::open_atomic_invariant;
 #[cfg(verus_only)]
@@ -74,12 +72,12 @@ verus! {
 // ---------------------------------------------------------------------------------------
 // The types.
 // ---------------------------------------------------------------------------------------
-pub struct ReaderConstant<T: IsValidAtomicType> {
+pub ghost struct RWConstant<T: IsValidAtomicType> {
     value_frac_id: FracId,  // frac id of the value fraction
     obs_id: ObsId,  // identity of the observation history
     ptr: *const T::AtomicType,  // the root pointer
     slot_id: SlotId,  // identity of the payload slot
-    slot_version: nat,  // the slot version this reader token is good for
+    slot_version: nat,  // the slot version this shared token is good for
 }
 
 /// Evidence that this reader saw this value, with this payload beside it.
@@ -87,33 +85,32 @@ pub tracked struct Observed<T: RWModel> {
     tracked inner: obs_history::Observed<Snapshot<T, T::Payload>>,
 }
 
-pub tracked struct ReaderState<T: IsValidAtomicType, Payload> {
+pub tracked struct RWState<T: IsValidAtomicType, Payload> {
     // The memory permission to the value, paired with the `IsExposed` provenance token of the
     // page it lives in. The token lets us rebuild the exec pointer to this entry at read time.
     pub tracked perm: PointsTo<T::AtomicType>,
     pub tracked payload: PayloadHolder<Payload>,
-    // Half of the value-and-payload pair; the `Writer` holds the other half, which is what makes
+    // Half of the value-and-payload pair; the `WritePerm` holds the other half, which is what makes
     // it the only writer.
     pub tracked value_frac: FracGhost<Snapshot<T, Payload>>,
     // Every pair anyone has observed, and the guarantee that each still reaches the present one.
     pub tracked obs: ObsHistory<Snapshot<T, Payload>>,
 }
 
-pub struct Writer<T: RWModel> {
+pub tracked struct WritePerm<T: RWModel> {
     perm: FracGhost<Snapshot<T, T::Payload>>,
 }
 
-// The **reader** capability for one location: it owns that location's atomic invariant. There
-// is one per pointer; the "multiple readers" is that a read needs only `&Reader`, so the token
-// can be shared across threads. Reads and writes open the *same* invariant, so consistency
-// comes from the invariant rather than from keeping them apart.
-pub struct Reader<T: IsValidAtomicType, Payload> {
-    // The invariant holding this reader's state. Opening it is the only way to reach an
-    // unpublished payload.
-    atom: AtomicInvariant<ReaderConstant<T>, ReaderState<T, Payload>, ReaderState<T, Payload>>,
-    // The reader's half of the payload slot's version claim. Holding it is what lets a reader
-    // borrow a published payload, and surrendering it is what lets the payload be reclaimed.
-    payload_handle: Tracked<SlotHandle<Payload>>,
+tracked struct RWSharedInner<T: IsValidAtomicType, Payload> {
+    tracked atom: AtomicInvariant<RWConstant<T>, RWState<T, Payload>, RWState<T, Payload>>,
+    tracked payload_handle: SlotHandle<Payload>,
+}
+
+// The shared capability for one location: it owns that location's atomic invariant. There is one
+// per pointer; multiple readers borrow it as `&RWShared`. Reads and writes open the same invariant,
+// so consistency comes from the invariant rather than from keeping them apart.
+pub tracked struct RWShared<T: IsValidAtomicType, Payload> {
+    inner: Tracked<RWSharedInner<T, Payload>>,
     // token representing the unique namespace of the atom.
     unique_ns: Tracked<Resource<FractionRA>>,
 }
@@ -121,8 +118,8 @@ pub struct Reader<T: IsValidAtomicType, Payload> {
 // ---------------------------------------------------------------------------------------
 // The operations.
 // ---------------------------------------------------------------------------------------
-impl<T: IsValidAtomicType> ReaderConstant<T> {
-    /// The id of the whole value fraction, which is what a `Writer` is a share of.
+impl<T: IsValidAtomicType> RWConstant<T> {
+    /// The id of the whole value fraction, which is what a `WritePerm` is a share of.
     pub closed spec fn value_frac_id(&self) -> FracId {
         self.value_frac_id
     }
@@ -143,8 +140,8 @@ impl<T: IsValidAtomicType> ReaderConstant<T> {
     }
 }
 
-impl<T: RWModel> ReaderConstant<T> {
-    /// Whether this token came from this reader's history. One id now, rather than one per
+impl<T: RWModel> RWConstant<T> {
+    /// Whether this token came from this shared location's history. One id now, rather than one per
     /// value: the history is a single instance, so the check no longer depends on what was seen.
     pub open spec fn has_observed(&self, observed: Observed<T>) -> bool {
         self.obs_id() == observed.id()
@@ -160,7 +157,7 @@ impl<T: RWModel> View for Observed<T> {
 }
 
 impl<T: RWModel> Observed<T> {
-    /// Which reader's history this came from.
+    /// Which shared location's history this came from.
     pub closed spec fn id(&self) -> ObsId {
         self.inner.id()
     }
@@ -192,7 +189,7 @@ impl<T: RWModel> Observed<T> {
     }
 }
 
-impl<T: RWModel> Writer<T> {
+impl<T: RWModel> WritePerm<T> {
     #[verifier::type_invariant]
     spec fn inv(&self) -> bool {
         self.perm.frac() == 0.5real
@@ -250,22 +247,22 @@ impl<T: RWModel> Writer<T> {
     }
 }
 
-impl<T: IsValidAtomicType, Payload> ReaderState<T, Payload> {
+impl<T: IsValidAtomicType, Payload> RWState<T, Payload> {
     /// The value this state holds.
     pub closed spec fn value(&self) -> T {
         self.value_frac@.value()
     }
 
-    // The id of the Reader, the real constant of the reader token. Open, and routed through
-    // `constant()`, so that a proof outside this module can tie it to the `Reader` the invariant
-    // came from -- see `Reader::id`.
+    // The id of the RWShared, the real constant of the shared token. Open, and routed through
+    // `constant()`, so that a proof outside this module can tie it to the `RWShared` the invariant
+    // came from -- see `RWShared::id`.
     pub open spec fn id(&self) -> FracId {
         self.constant().value_frac_id()
     }
 
     // Constant in AtomicInvariant
-    pub closed spec fn constant(&self) -> ReaderConstant<T> {
-        ReaderConstant {
+    pub closed spec fn constant(&self) -> RWConstant<T> {
+        RWConstant {
             value_frac_id: self.value_frac.id(),
             obs_id: self.obs.id(),
             ptr: self.perm.ptr(),
@@ -275,7 +272,7 @@ impl<T: IsValidAtomicType, Payload> ReaderState<T, Payload> {
     }
 }
 
-impl<T: RWModel> ReaderState<T, T::Payload> {
+impl<T: RWModel> RWState<T, T::Payload> {
     /// Pins the payload this state holds to a ticket for the same slot.
     ///
     /// `borrow_payload` alone says only "the payload right now", which is all a caller can want
@@ -285,7 +282,7 @@ impl<T: RWModel> ReaderState<T, T::Payload> {
     /// version, contents and well-formedness untouched.
     pub proof fn lemma_payload_agrees_with_ticket(
         tracked &mut self,
-        tracked r: &Reader<T, T::Payload>,
+        tracked r: &RWShared<T, T::Payload>,
         tracked ticket: &PayloadTicket<T::Payload>,
     )
         requires
@@ -311,11 +308,11 @@ impl<T: RWModel> ReaderState<T, T::Payload> {
 
     /// What `inv()` says about the memory permission, which is otherwise sealed inside it.
     ///
-    /// A client that opens a reader's invariant holds the state but can see nothing about `perm`,
-    /// because `inv` is closed and `ReaderConstant`'s fields are private. This relates the state
-    /// back to the `Reader` it came from: pair it with `Reader::borrow_atom`, whose `constant()`
+    /// A client that opens an `RWShared` invariant holds the state but can see nothing about `perm`,
+    /// because `inv` is closed and `RWConstant`'s fields are private. This relates the state
+    /// back to the `RWShared` it came from: pair it with `RWShared::borrow_atom`, whose `constant()`
     /// equality is what discharges the precondition.
-    pub proof fn lemma_inv_perm(tracked &self, tracked r: &Reader<T, T::Payload>)
+    pub proof fn lemma_inv_perm(tracked &self, tracked r: &RWShared<T, T::Payload>)
         requires
             self.inv(),
             self.constant() == r.constant(),
@@ -328,15 +325,15 @@ impl<T: RWModel> ReaderState<T, T::Payload> {
 
     /// Borrows the payload while it is still unpublished.
     ///
-    /// Only reachable inside `open_atomic_invariant!` on the `Reader` this state came from, and
+    /// Only reachable inside `open_atomic_invariant!` on the `RWShared` this state came from, and
     /// the borrow dies with the block: an unpublished payload cannot leave. The well-formedness
     /// handed back is against `value()`, the value *now*, not against any value read earlier --
     /// while a payload is unpublished a writer may replace it at any time, so there is nothing to
     /// carry a claim across blocks. Publishing is what removes that freedom.
-    pub proof fn borrow_payload<'a>(tracked &'a self, c: ReaderConstant<T>) -> (tracked out:
+    pub proof fn borrow_payload<'a>(tracked &'a self, c: RWConstant<T>) -> (tracked out:
         &'a T::Payload)
         requires
-            <Self as InvariantPredicate<ReaderConstant<T>, Self>>::inv(c, *self),
+            <Self as InvariantPredicate<RWConstant<T>, Self>>::inv(c, *self),
         ensures
             *out == self.payload_value(),
             self.value().wf_payload(*out),
@@ -350,14 +347,14 @@ impl<T: RWModel> ReaderState<T, T::Payload> {
     ///
     /// It cannot promise more. `current_snapshot()` is the value *and* the payload, so a payload
     /// that really changed moves it, and two clauses of `inv_frac` go with it -- `value_frac@`
-    /// and `obs.seen()`. Restoring those is `ReaderState::update`'s job: it needs the `Writer`'s
+    /// and `obs.seen()`. Restoring those is `RWState::update`'s job: it needs the `WritePerm`'s
     /// half of the fraction and an `obs.insert`, and neither can run after a borrow is handed
     /// back. What this is for is calling `&mut` proof functions that end where they started,
-    /// `Reader::distinct_namespace` above all.
-    pub proof fn borrow_payload_mut<'a>(tracked &'a mut self, c: ReaderConstant<T>) -> (tracked out:
+    /// `RWShared::distinct_namespace` above all.
+    pub proof fn borrow_payload_mut<'a>(tracked &'a mut self, c: RWConstant<T>) -> (tracked out:
         &'a mut T::Payload)
         requires
-            <Self as InvariantPredicate<ReaderConstant<T>, Self>>::inv(c, *old(self)),
+            <Self as InvariantPredicate<RWConstant<T>, Self>>::inv(c, *old(self)),
             !old(self).value().has_published_payload(),
         ensures
             *out == old(self).payload_value(),
@@ -403,9 +400,9 @@ impl<T: RWModel> ReaderState<T, T::Payload> {
         // The fraction agrees with the payload actually held.
         &&& self.value_frac@
             == self.current_snapshot()
-        // The whole guarantee a reader's token buys, kept here rather than inside the history:
+        // The whole guarantee an RWShared token buys, kept here rather than inside the history:
         // everything ever seen still reaches the pair stored now. `ObsHistory` cannot state it --
-        // the bound would land on `Reader`, and payloads hold readers -- but it does supply the
+        // the bound would land on `RWShared`, and payloads hold readers -- but it does supply the
         // one thing that makes it worth stating, which is that the set only grows.
         &&& self.obs.seen().contains(self.current_snapshot())
         &&& forall|x: Snapshot<T, T::Payload>| #[trigger]
@@ -414,7 +411,7 @@ impl<T: RWModel> ReaderState<T, T::Payload> {
 
     proof fn update_value_with_payload(
         tracked &mut self,
-        tracked writer: &mut Writer<T>,
+        tracked writer: &mut WritePerm<T>,
         value: T,
         tracked payload: T::Payload,
     ) -> (tracked observed: Observed<T>) where T: From<T::AtomicType> + Into<T::AtomicType>
@@ -451,7 +448,7 @@ impl<T: RWModel> ReaderState<T, T::Payload> {
     /// value that claims to have published and actually publishing, `inv_frac` does not hold.
     proof fn update(
         tracked &mut self,
-        tracked writer: &mut Writer<T>,
+        tracked writer: &mut WritePerm<T>,
         value: T,
         publish: bool,
         tracked payload: Option<T::Payload>,
@@ -524,7 +521,7 @@ impl<T: RWModel> ReaderState<T, T::Payload> {
 
     proof fn update_value(
         tracked &mut self,
-        tracked writer: &mut Writer<T>,
+        tracked writer: &mut WritePerm<T>,
         value: T,
     ) -> (tracked observed: Observed<T>) where T: From<T::AtomicType> + Into<T::AtomicType>
         requires
@@ -548,8 +545,8 @@ impl<T: RWModel> ReaderState<T, T::Payload> {
     ///
     /// `pub` because [`super::contract_proof`] discharges the contract from outside this module, and
     /// this is one of the two ghost steps a read is made of. It sits at the same layer as
-    /// [`Self::read_with_observed`]: both need `&mut ReaderState`, which is only reachable by
-    /// opening the reader's invariant.
+    /// [`Self::read_with_observed`]: both need `&mut RWState`, which is only reachable by
+    /// opening the shared location's invariant.
     pub proof fn observe(tracked &mut self) -> (tracked observed: Observed<T>) where
         T: From<T::AtomicType> + Into<T::AtomicType>,
 
@@ -582,7 +579,7 @@ impl<T: RWModel> ReaderState<T, T::Payload> {
 
     /// `pub` alongside [`Self::observe`]: [`super::contract_proof`] needs it to discharge
     /// `RWContract::read_exact`.
-    pub proof fn read_with_writer(tracked &self, tracked writer: &Writer<T>)
+    pub proof fn read_with_writer(tracked &self, tracked writer: &WritePerm<T>)
         requires
             self.inv(),
             self.id() == writer.id(),
@@ -594,16 +591,16 @@ impl<T: RWModel> ReaderState<T, T::Payload> {
     }
 }
 
-// The published-payload half of `ReaderState`, available only to a model that opted in with
+// The published-payload half of `RWState`, available only to a model that opted in with
 // `PublishPayload`. Everything here mints or consumes a `PayloadTicket`; a model that never
 // publishes never sees these, and never names `PayloadTicket`.
-impl<T: PublishPayload> ReaderState<T, T::Payload> {
+impl<T: PublishPayload> RWState<T, T::Payload> {
     // Writes a value that publishes its payload into the slot, and returns the first ticket for
     // it. From here on the payload stays put and readers may borrow it; it comes back out only
     // through `reclaim`, which consumes the reader's handle.
     proof fn update_value_publishing_payload(
         tracked &mut self,
-        tracked writer: &mut Writer<T>,
+        tracked writer: &mut WritePerm<T>,
         value: T,
         tracked payload: T::Payload,
     ) -> (tracked out: (Observed<T>, PayloadTicket<T::Payload>)) where
@@ -657,17 +654,17 @@ impl<T: PublishPayload> ReaderState<T, T::Payload> {
     }
 }
 
-impl<T: RWModel> InvariantPredicate<ReaderConstant<T>, ReaderState<T, T::Payload>> for ReaderState<
+impl<T: RWModel> InvariantPredicate<RWConstant<T>, RWState<T, T::Payload>> for RWState<
     T,
     T::Payload,
 > {
     // Open, so that a client opening the invariant can actually use what it is handed.
-    open spec fn inv(constant: ReaderConstant<T>, v: ReaderState<T, T::Payload>) -> bool {
+    open spec fn inv(constant: RWConstant<T>, v: RWState<T, T::Payload>) -> bool {
         v.inv() && v.constant() == constant
     }
 }
 
-impl<T: IsValidAtomicType, Payload> Reader<T, Payload> {
+impl<T: IsValidAtomicType, Payload> RWShared<T, Payload> {
     /// Two readers have different namespaces.
     ///
     /// Needs `&mut` on one side, and that is not a detail of the proof -- it is the claim. Two
@@ -689,8 +686,8 @@ impl<T: IsValidAtomicType, Payload> Reader<T, Payload> {
         axiom_loc_to_int_injective(self.unique_ns@.loc(), other.unique_ns@.loc());
     }
 
-    pub closed spec fn constant(&self) -> ReaderConstant<T> {
-        self.atom.constant()
+    pub closed spec fn constant(&self) -> RWConstant<T> {
+        self.inner@.atom.constant()
     }
 
     // The id of the whole value fraction.
@@ -699,28 +696,29 @@ impl<T: IsValidAtomicType, Payload> Reader<T, Payload> {
     }
 
     pub closed spec fn namespace(&self) -> int {
-        self.atom.namespace()
+        self.inner@.atom.namespace()
     }
 
     pub closed spec fn ptr(&self) -> *const T::AtomicType {
-        self.atom.constant().ptr
+        self.constant().ptr
     }
 
-    // Identity of this reader's payload slot. Open, and routed through `constant()`, so that a
-    // proof outside this module can connect it to the `ReaderConstant` it gets from opening the
+    // Identity of this shared location's payload slot. Open, and routed through `constant()`, so a
+    // proof outside this module can connect it to the `RWConstant` it gets from opening the
     // invariant.
     pub open spec fn slot_id(&self) -> SlotId {
         self.constant().slot_id()
     }
 
-    // Identity of this reader's observation history. Two readers with the same one accept each
+    // Identity of this shared location's observation history. Two shared tokens with the same one
+    // accept each
     // other's `Observed` tokens -- see `has_observed` -- which is what a client needs to say when
     // it wants an observation of a child to survive from one invariant block to the next.
     pub open spec fn obs_id(&self) -> ObsId {
         self.constant().obs_id()
     }
 
-    // The slot version this reader token is good for. A ticket from an earlier version no longer
+    // The slot version this shared token is good for. A ticket from an earlier version no longer
     // grants access, which is how reclaiming a payload cuts every reader off at once.
     pub open spec fn slot_version(&self) -> nat {
         self.constant().slot_version()
@@ -728,38 +726,38 @@ impl<T: IsValidAtomicType, Payload> Reader<T, Payload> {
 
     #[verifier::type_invariant]
     closed spec fn wf(&self) -> bool {
-        &&& self.payload_handle@.id() == self.slot_id()
-        &&& self.payload_handle@.version()
-            == self.slot_version()
         // A whole fraction, at the location the namespace names. Both halves matter: whole, so
         // it cannot be shared with another reader, and named, so the exclusivity reaches the
         // namespace.
         &&& self.unique_ns@.value() == FractionRA::Frac(1.0real)
-        &&& self.atom.namespace() == loc_to_int(self.unique_ns@.loc())
+        &&& self.inner@.payload_handle.id() == self.slot_id()
+        &&& self.inner@.payload_handle.version() == self.slot_version()
+        &&& self.namespace() == loc_to_int(self.unique_ns@.loc())
     }
 
-    // Hands out the reader's atomic invariant so a client can open it. Opening is the only way to
-    // reach an *unpublished* payload; see `ReaderState::borrow_payload`.
+    // Hands out the shared location's atomic invariant so a client can open it. This is the only way to
+    // reach an *unpublished* payload; see `RWState::borrow_payload`.
     pub proof fn borrow_atom(tracked &self) -> (tracked out: &AtomicInvariant<
-        ReaderConstant<T>,
-        ReaderState<T, Payload>,
-        ReaderState<T, Payload>,
+        RWConstant<T>,
+        RWState<T, Payload>,
+        RWState<T, Payload>,
     >)
         ensures
             out.constant() == self.constant(),
             out.namespace() == self.namespace(),
     {
-        &self.atom
+        use_type_invariant(self);
+        &self.inner.borrow().atom
     }
 }
 
-impl<T: RWModel, Payload> Reader<T, Payload> {
+impl<T: RWModel, Payload> RWShared<T, Payload> {
     pub open spec fn has_observed(&self, observed: Observed<T>) -> bool {
         self.constant().has_observed(observed)
     }
 }
 
-impl<T: RWModel> Reader<T, T::Payload> {
+impl<T: RWModel> RWShared<T, T::Payload> {
     /// Two readers guard disjoint memory.
     ///
     /// The pointers live inside the two invariants, so the only way to compare them is to hold
@@ -781,20 +779,22 @@ impl<T: RWModel> Reader<T, T::Payload> {
             final(self).ptr() as int + size_of::<T::AtomicType>() <= other.ptr() as int
                 || other.ptr() as int + size_of::<T::AtomicType>() <= final(self).ptr() as int,
             *final(self) == *old(self),
-        opens_invariants any
+        opens_invariants [self.namespace(), other.namespace()]
     {
         self.distinct_namespace(other);
-        open_atomic_invariant_in_proof!(credit_self => &self.atom => s1 => {
-            open_atomic_invariant_in_proof!(credit_other => &other.atom => s2 => {
+        let tracked self_atom = self.borrow_atom();
+        let tracked other_atom = other.borrow_atom();
+        open_atomic_invariant_in_proof!(credit_self => self_atom => s1 => {
+            open_atomic_invariant_in_proof!(credit_other => other_atom => s2 => {
                 s1.perm.is_disjoint(&s2.perm);
             });
         });
     }
 }
 
-// The published-payload half of `Reader`, available only to a model that opted in with
+// The published-payload half of `RWShared`, available only to a model that opted in with
 // `PublishPayload`.
-impl<T: PublishPayload> Reader<T, T::Payload> {
+impl<T: PublishPayload> RWShared<T, T::Payload> {
     // Looks at a published payload through a ticket for it, handing back a reference that outlives
     // the atomic-invariant block the ticket came from. This is the one thing an `AtomicInvariant`
     // cannot do on its own.
@@ -809,11 +809,11 @@ impl<T: PublishPayload> Reader<T, T::Payload> {
             *out == ticket.payload(),
     {
         use_type_invariant(self);
-        self.payload_handle.borrow().borrow(ticket)
+        self.inner.borrow().payload_handle.borrow(ticket)
     }
 }
 
-impl<T: RWModel> Reader<T, T::Payload> where
+impl<T: RWModel> RWShared<T, T::Payload> where
     T: From<T::AtomicType> + Into<T::AtomicType>,
     T::AtomicType: From<T>,
  {
@@ -821,7 +821,7 @@ impl<T: RWModel> Reader<T, T::Payload> where
         value: T,
         tracked points_to: PointsTo<T::AtomicType>,
         tracked payload: T::Payload,
-    ) -> (tracked ret: (Reader<T, T::Payload>, Writer<T>, Observed<T>))
+    ) -> (tracked ret: (RWShared<T, T::Payload>, WritePerm<T>, Observed<T>))
         requires
             points_to.is_init(),
             points_to.value().into_spec() === value,
@@ -837,10 +837,10 @@ impl<T: RWModel> Reader<T, T::Payload> where
     {
         let ghost snapshot = Snapshot::<T, T::Payload>::new(value, payload);
         let tracked mut value_frac = FracGhost::new(snapshot);
-        let tracked writer = Writer { perm: value_frac.split() };
+        let tracked writer = WritePerm { perm: value_frac.split() };
         let tracked (obs, first) = ObsHistory::new(snapshot);
         let tracked (payload, handle) = PayloadHolder::new(payload);
-        let tracked mut reader_state = ReaderState { perm: points_to, payload, value_frac, obs };
+        let tracked mut reader_state = RWState { perm: points_to, payload, value_frac, obs };
         T::into_from_obeys();
         assert(value == reader_state.value());
         let constant = reader_state.constant();
@@ -852,13 +852,47 @@ impl<T: RWModel> Reader<T, T::Payload> where
         // so no other reader can ever hold one at this location.
         let tracked ns = Resource::<FractionRA>::alloc(FractionRA::Frac(1.0real));
         let tracked invariant = AtomicInvariant::new(constant, reader_state, loc_to_int(ns.loc()));
-        let tracked reader = Reader {
-            atom: invariant,
-            payload_handle: Tracked(handle),
+        let tracked inner = RWSharedInner { atom: invariant, payload_handle: handle };
+        let tracked reader = RWShared {
+            inner: Tracked(inner),
             unique_ns: Tracked(ns),
         };
         let tracked out = (reader, writer, observed);
         out
+    }
+
+    /// Destroys the shared protocol and recovers the exclusive permission and payload.
+    pub proof fn teardown(
+        tracked self,
+        tracked writer: WritePerm<T>,
+    ) -> (tracked out: (PointsTo<T::AtomicType>, T::Payload))
+        requires
+            self.id() == writer.id(),
+        ensures
+            out.0.is_init(),
+            out.0.ptr() == self.ptr(),
+            out.0.value().into_spec() == writer@,
+            writer@.wf_payload(out.1),
+        opens_invariants [self.namespace()]
+    {
+        use_type_invariant(&self);
+        use_type_invariant(&writer);
+        let tracked RWShared {
+            inner: Tracked(inner),
+            unique_ns: _,
+        } = self;
+        let tracked RWSharedInner { atom, payload_handle: handle } = inner;
+        let tracked mut state = atom.into_inner();
+        let tracked WritePerm { perm: writer_perm } = writer;
+        state.value_frac.combine(writer_perm);
+        let tracked payload = state.payload.into_payload(handle);
+        let tracked RWState {
+            perm,
+            payload: _,
+            value_frac: _,
+            obs: _,
+        } = state;
+        (perm, payload)
     }
 }
 

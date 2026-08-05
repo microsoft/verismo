@@ -6,22 +6,22 @@
 //!
 //! # The trade
 //!
-//! A `PointsTo` is already a concurrency model -- shared xor mutable. [`RWContract::split`]
+//! A `PointsTo` is already a concurrency model -- shared xor mutable. [`RWContract::build_rw`]
 //! consumes it and hands back two tokens that may be used at the same time. There is no cell
 //! type here; these tokens are what replaces the `PointsTo`. Exactly one of each exists per
-//! pointer -- the "multiple readers" is that a read needs only `&Reader`, so the one token can
+//! pointer -- the "multiple readers" is that a read needs only `&RWShared`, so the one token can
 //! be shared across threads.
 //!
 //! ```text
 //!              PointsTo<T>
-//!                  | split
+//!                  | build_rw
 //!      +--------------------------------------+
 //!      v                                      v
-//!      Reader -- one, shared by &             Writer -- one, used by &mut
+//!      RWShared -- one, shared by &             WritePerm -- one, used by &mut
 //!      |                                      |
 //!      |                                      |  write
 //!      | read, read_published                 |   must land the store in
-//!      |   &Reader, plus optionally           |   reachable(pair now, pair new)
+//!      |   &RWShared, plus optionally           |   reachable(pair now, pair new)
 //!      |   an Observed, as `past`             |
 //!      v                                      |
 //!      Observed --- hand to the next read ----------+--> that read returns a pair
@@ -29,16 +29,16 @@
 //!      |
 //!      | read_published, when the value says it has published
 //!      v
-//!      PayloadTicket --- with &Reader ---> &Payload, outliving the block
+//!      PayloadTicket --- with &RWShared ---> &Payload, outliving the block
 //!                        borrow_published_payload
 //! ```
 //!
-//! The one `&mut` is on the `Writer`, and it separates writers from writers, never from readers:
-//! a read and the write both take `&Reader` and open the same invariant.
+//! The one `&mut` is on the `WritePerm`, and it separates writers from writers, never from readers:
+//! a read and the write both take `&RWShared` and open the same invariant.
 //!
 //! Exclusion is not the only way to make interference harmless: it prevents interference, where
 //! an ordering makes it survivable. Every store must land in `RWModel::reachable` of the pair it
-//! replaces ([`Writer::write_value_requires`]), so a reader that has fallen behind holds a value
+//! replaces ([`WritePerm::write_value_requires`]), so a reader that has fallen behind holds a value
 //! that is imprecise but never wrong. That is the trade -- overlap, bought with reads that return
 //! a reachable value rather than *the* stored one. The obligation is therefore all on the write:
 //! a read requires nothing but the right pointer, and [`RWContract::write`] is where the
@@ -81,12 +81,12 @@
 //! which is what lets a pointer built in one block still be the child's pointer in the next.
 //!
 //! Publishing does not freeze the payload's contents, only which payload the value is bound to.
-//! It is one-way while the `Reader` stays whole: `PayloadHolder::reclaim` must consume the
+//! It is one-way while the `RWShared` stays whole: `PayloadHolder::reclaim` must consume the
 //! reader's `SlotHandle`, and nothing in [`crate::tokens_impl`] surrenders that handle yet. What
 //! holds unconditionally is [`PublishPayload::payload_stays_published`]: no value reachable by
 //! *reading* ever un-publishes, so a concurrent write cannot undercut a ticket you hold.
 use crate::tokens_impl::payload_slot::PayloadTicket;
-use crate::tokens_impl::{Observed, PublishPayload, RWModel, Reader, Writer};
+use crate::tokens_impl::{Observed, PublishPayload, RWModel, RWShared, WritePerm};
 #[cfg(verus_only)]
 use vstd::invariant::OpenInvariantCredit;
 use vstd::prelude::*;
@@ -102,18 +102,18 @@ pub trait RWContract: RWModel + From<Self::AtomicType> + Into<Self::AtomicType> 
     /// Trades a `PointsTo` for an initialised location for MRSW access to it.
     ///
     /// Consumes the `PointsTo`, under which a read may never run during a write, and returns a
-    /// `Reader` and a `Writer` in its place. From here on reads and the write may overlap freely:
+    /// `RWShared` and a `WritePerm` in its place. From here on reads and the write may overlap freely:
     /// any number of readers may read while the single writer is writing. The price is that no
     /// read afterwards returns *the* stored value, only a reachable one -- see [`Self::read`].
     ///
     /// The third token is an `Observed` for the value stored at the moment of the trade. Whoever
     /// gives the `PointsTo` up knows what was in it, so this is where the first one comes from;
     /// every later read is a [`Self::read`] from one you already hold.
-    proof fn split(
+    proof fn build_rw(
         value: Self,
         tracked points_to: PointsTo<Self::AtomicType>,
         tracked payload: Self::Payload,
-    ) -> (tracked ret: (Reader<Self, Self::Payload>, Writer<Self>, Observed<Self>))
+    ) -> (tracked ret: (RWShared<Self, Self::Payload>, WritePerm<Self>, Observed<Self>))
         requires
             points_to.is_init(),
             points_to.value().into_spec() === value,
@@ -124,6 +124,27 @@ pub trait RWContract: RWModel + From<Self::AtomicType> + Into<Self::AtomicType> 
             ret.0.id() == ret.1.id(),
             ret.2@ == value,  // names the value stored at the hand-over
             ret.0.has_observed(ret.2),
+    ;
+
+    /// Reverses [`Self::build_rw`], recovering exclusive ownership of the location and payload.
+    ///
+    /// Consuming the `RWShared` proves no reader can open the invariant again. If the payload was
+    /// published, teardown reclaims it and advances the slot version, so tickets that remain in
+    /// ghost state no longer grant a borrow. The returned permission contains the value named by
+    /// the consumed writer token.
+    proof fn teardown_rw(
+        tracked r: RWShared<Self, Self::Payload>,
+        tracked w: WritePerm<Self>,
+    ) -> (tracked ret: (PointsTo<Self::AtomicType>, Self::Payload))
+        requires
+            r.id() == w.id(),
+        ensures
+            ret.0.is_init(),
+            ret.0.ptr() == r.ptr(),
+            ret.0.value().into_spec() == w@,
+            w@.wf_payload(ret.1),
+        opens_invariants
+            [r.namespace()]
     ;
 
     /// Reads, optionally holding an `Observed` for a value seen earlier.
@@ -137,7 +158,7 @@ pub trait RWContract: RWModel + From<Self::AtomicType> + Into<Self::AtomicType> 
     /// No payload comes back; see [`RWWithPublishPayloadContract::read_published`].
     fn read(
         ptr: *mut Self::AtomicType,
-        Tracked(r): Tracked<&Reader<Self, Self::Payload>>,
+        Tracked(r): Tracked<&RWShared<Self, Self::Payload>>,
         Tracked(past): Tracked<Option<&Observed<Self>>>,
     ) -> (ret: (Self, Tracked<Observed<Self>>))
         requires
@@ -155,17 +176,17 @@ pub trait RWContract: RWModel + From<Self::AtomicType> + Into<Self::AtomicType> 
         opens_invariants any
     ;
 
-    /// Reads with the `Writer` in hand, and gets *the* stored value.
+    /// Reads with the `WritePerm` in hand, and gets *the* stored value.
     ///
-    /// This thread: holds the only `Writer`, so no store can be in flight.
+    /// This thread: holds the only `WritePerm`, so no store can be in flight.
     /// Other threads: cannot be writing at all, which is why the value is exact, not reachable.
     ///
     /// PROPERTY 2 -- the relaxation in [`Self::read`] is the price of concurrency, and is
     /// refunded here, where there is none. No `past` is needed: the exact value is strictly more.
     fn read_exact(
         ptr: *mut Self::AtomicType,
-        Tracked(r): Tracked<&Reader<Self, Self::Payload>>,
-        Tracked(w): Tracked<&Writer<Self>>,
+        Tracked(r): Tracked<&RWShared<Self, Self::Payload>>,
+        Tracked(w): Tracked<&WritePerm<Self>>,
     ) -> (ret: (Self, Tracked<Observed<Self>>))
         requires
             r.ptr() == ptr,
@@ -187,8 +208,8 @@ pub trait RWContract: RWModel + From<Self::AtomicType> + Into<Self::AtomicType> 
     fn write(
         ptr: *mut Self::AtomicType,
         value: Self,
-        Tracked(r): Tracked<&Reader<Self, Self::Payload>>,
-        Tracked(w): Tracked<&mut Writer<Self>>,
+        Tracked(r): Tracked<&RWShared<Self, Self::Payload>>,
+        Tracked(w): Tracked<&mut WritePerm<Self>>,
     ) -> (ret: Tracked<Observed<Self>>)
         requires
             r.ptr() == ptr,
@@ -211,8 +232,8 @@ pub trait RWContract: RWModel + From<Self::AtomicType> + Into<Self::AtomicType> 
     fn write_with_payload(
         ptr: *mut Self::AtomicType,
         value: Self,
-        Tracked(r): Tracked<&Reader<Self, Self::Payload>>,
-        Tracked(w): Tracked<&mut Writer<Self>>,
+        Tracked(r): Tracked<&RWShared<Self, Self::Payload>>,
+        Tracked(w): Tracked<&mut WritePerm<Self>>,
         Tracked(payload): Tracked<Self::Payload>,
     ) -> (ret: Tracked<Observed<Self>>)
         requires
@@ -224,6 +245,34 @@ pub trait RWContract: RWModel + From<Self::AtomicType> + Into<Self::AtomicType> 
         ensures
             r.has_observed(ret@),
             ret@@ == value,
+            value == final(w)@,
+        opens_invariants any
+    ;
+
+    /// Replaces the value and unpublished payload without preserving the old observation history.
+    ///
+    /// Unlike [`Self::write_with_payload`], this operation does not require the replacement to be
+    /// reachable from the old value. It therefore consumes `RWShared`, destroys the old invariant,
+    /// and returns a rebuilt reader with a fresh observation history. Old observations remain
+    /// valid ghost values, but do not satisfy `has_observed` for the rebuilt reader.
+    fn write_unrestricted(
+        ptr: *mut Self::AtomicType,
+        value: Self,
+        Tracked(r): Tracked<RWShared<Self, Self::Payload>>,
+        Tracked(w): Tracked<&mut WritePerm<Self>>,
+        Tracked(payload): Tracked<Self::Payload>,
+    ) -> (ret: (Tracked<RWShared<Self, Self::Payload>>, Tracked<Observed<Self>>))
+        requires
+            r.ptr() == ptr,
+            r.id() == old(w).id(),
+            value.wf_payload(payload),
+            !value.has_published_payload(),
+        ensures
+            ret.0@.ptr() == ptr,
+            ret.0@.namespace() == r.namespace(),
+            ret.0@.id() == final(w).id(),
+            ret.0@.has_observed(ret.1@),
+            ret.1@@ == value,
             value == final(w)@,
         opens_invariants any
     ;
@@ -246,7 +295,7 @@ pub trait RWWithPublishPayloadContract: RWContract + PublishPayload {
     /// -- an empty entry -- and those yield no ticket.
     fn read_published(
         ptr: *mut Self::AtomicType,
-        Tracked(r): Tracked<&Reader<Self, Self::Payload>>,
+        Tracked(r): Tracked<&RWShared<Self, Self::Payload>>,
         Tracked(past): Tracked<Option<&Observed<Self>>>,
     ) -> (ret: (Self, Tracked<Observed<Self>>, Tracked<Option<PayloadTicket<Self::Payload>>>))
         requires
@@ -259,7 +308,7 @@ pub trait RWWithPublishPayloadContract: RWContract + PublishPayload {
             past is Some ==> Self::reachable(past->Some_0.snapshot(), ret.1@.snapshot()),
             // PROPERTY 3a -- a value that has published its payload always yields a ticket for it,
             // and the ticket is good at this reader's slot and version, so it can be presented to
-            // `Reader::borrow_published_payload`.
+            // `RWShared::borrow_published_payload`.
             ret.0.has_published_payload() ==> {
                 &&& ret.2@ is Some
                 &&& ret.2@->Some_0.id() == r.slot_id()
@@ -299,8 +348,8 @@ pub trait RWWithPublishPayloadContract: RWContract + PublishPayload {
     fn write_with_published_payload(
         ptr: *mut Self::AtomicType,
         value: Self,
-        Tracked(r): Tracked<&Reader<Self, Self::Payload>>,
-        Tracked(w): Tracked<&mut Writer<Self>>,
+        Tracked(r): Tracked<&RWShared<Self, Self::Payload>>,
+        Tracked(w): Tracked<&mut WritePerm<Self>>,
         Tracked(payload): Tracked<Self::Payload>,
     ) -> (ret: (Tracked<Observed<Self>>, Tracked<PayloadTicket<Self::Payload>>))
         requires
@@ -318,6 +367,36 @@ pub trait RWWithPublishPayloadContract: RWContract + PublishPayload {
             ret.1@.id() == r.slot_id(),
             ret.1@.version() == r.slot_version(),
             value.wf_payload(ret.1@.payload()),
+        opens_invariants any
+    ;
+
+    /// Unrestricted replacement that publishes the fresh payload and returns its first ticket.
+    fn write_published_unrestricted(
+        ptr: *mut Self::AtomicType,
+        value: Self,
+        Tracked(r): Tracked<RWShared<Self, Self::Payload>>,
+        Tracked(w): Tracked<&mut WritePerm<Self>>,
+        Tracked(payload): Tracked<Self::Payload>,
+    ) -> (ret: (
+        Tracked<RWShared<Self, Self::Payload>>,
+        Tracked<Observed<Self>>,
+        Tracked<PayloadTicket<Self::Payload>>,
+    ))
+        requires
+            r.ptr() == ptr,
+            r.id() == old(w).id(),
+            value.wf_payload(payload),
+            value.has_published_payload(),
+        ensures
+            ret.0@.ptr() == ptr,
+            ret.0@.namespace() == r.namespace(),
+            ret.0@.id() == final(w).id(),
+            ret.0@.has_observed(ret.1@),
+            ret.1@@ == value,
+            value == final(w)@,
+            ret.2@.id() == ret.0@.slot_id(),
+            ret.2@.version() == ret.0@.slot_version(),
+            value.wf_payload(ret.2@.payload()),
         opens_invariants any
     ;
 }

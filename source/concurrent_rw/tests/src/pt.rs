@@ -17,6 +17,8 @@ use concurrent_rw::*;
 use vstd::prelude::*;
 use vstd::raw_ptr::IsExposed;
 #[cfg(verus_only)]
+use vstd::raw_ptr::PointsTo;
+#[cfg(verus_only)]
 use vstd::std_specs::convert::{FromSpec, FromSpecImpl, IntoSpec};
 
 verus! {
@@ -90,7 +92,7 @@ impl PTEntry {
 }
 
 pub struct Extra {
-    reader: Seq<Reader<PTEntry, Extra>>,
+    reader: Seq<RWShared<PTEntry, Extra>>,
     provenance: IsExposed,
 }
 
@@ -101,7 +103,7 @@ impl WithPayload for PTEntry {
         self.present() ==> {
             &&& payload.reader.len() == 512
             &&& forall|i: int|
-                ((#[trigger] payload.reader[i]).ptr().addr() == self.next() + i * 8)
+                (#[trigger] payload.reader[i]).ptr().addr() == self.next() + i * 8
                     && payload.reader[i].ptr()@.provenance == payload.provenance@
         }
     }
@@ -164,7 +166,7 @@ impl PublishPayload for PTEntry {
 
 // End-to-end check: read an entry, and go on holding a reference to its payload after the atomic
 // invariant block has closed. This is the thing an `AtomicInvariant` cannot do by itself.
-fn example_borrow_outlives_invariant(ptr: *mut usize, Tracked(r): Tracked<&Reader<PTEntry, Extra>>)
+fn example_borrow_outlives_invariant(ptr: *mut usize, Tracked(r): Tracked<&RWShared<PTEntry, Extra>>)
     requires
         r.ptr() == ptr,
 {
@@ -191,7 +193,7 @@ fn example_borrow_outlives_invariant(ptr: *mut usize, Tracked(r): Tracked<&Reade
 // atomic invariant by hand: `read_published` on the parent, borrow the child readers, rebuild
 // the child pointer, `read` the child. No nesting, no namespace discipline, no direct atomic
 // load, and no argument that two separate borrows agree. That is what the ticket buys.
-fn example_read_child_entry(ptr: *mut usize, Tracked(r): Tracked<&Reader<PTEntry, Extra>>)
+fn example_read_child_entry(ptr: *mut usize, Tracked(r): Tracked<&RWShared<PTEntry, Extra>>)
     requires
         r.ptr() == ptr,
 {
@@ -230,7 +232,7 @@ fn example_read_child_entry(ptr: *mut usize, Tracked(r): Tracked<&Reader<PTEntry
 /// value reachable from the one that token names.
 fn example_read_moves_forward(
     ptr: *mut usize,
-    Tracked(r): Tracked<&Reader<PTEntry, Extra>>,
+    Tracked(r): Tracked<&RWShared<PTEntry, Extra>>,
     Tracked(past): Tracked<Observed<PTEntry>>,
 )
     requires
@@ -249,13 +251,45 @@ fn example_read_moves_forward(
     }
 }
 
+/// Rebuilds a published location while an observation and ticket from the old history remain live.
+fn example_write_published_unrestricted(
+    ptr: *mut usize,
+    value: PTEntry,
+    Tracked(r): Tracked<RWShared<PTEntry, Extra>>,
+    Tracked(w): Tracked<&mut WritePerm<PTEntry>>,
+    Tracked(payload): Tracked<Extra>,
+    Tracked(old_observed): Tracked<&Observed<PTEntry>>,
+    Tracked(old_ticket): Tracked<&PayloadTicket<Extra>>,
+) -> (ret: (
+    Tracked<RWShared<PTEntry, Extra>>,
+    Tracked<Observed<PTEntry>>,
+    Tracked<PayloadTicket<Extra>>,
+))
+    requires
+        r.ptr() == ptr,
+        r.id() == old(w).id(),
+        r.has_observed(*old_observed),
+        r.slot_id() == old_ticket.id(),
+        r.slot_version() == old_ticket.version(),
+        value.wf_payload(payload),
+        value.has_published_payload(),
+    ensures
+        ret.0@.has_observed(ret.1@),
+        ret.1@@ == value,
+        final(w)@ == value,
+        ret.2@.id() == ret.0@.slot_id(),
+        ret.2@.version() == ret.0@.slot_version(),
+{
+    PTEntry::write_published_unrestricted(ptr, value, Tracked(r), Tracked(w), Tracked(payload))
+}
+
 /// PROPERTY 2b, through the contract: two readers of one slot borrow the *same* payload.
 ///
 /// This is the reader-level corollary of `payloads_agree`, which is stated over tickets. It costs
 /// one line, which is why the contract states the ticket-level form.
 proof fn example_two_readers_see_one_payload(
-    tracked r1: &Reader<PTEntry, Extra>,
-    tracked r2: &Reader<PTEntry, Extra>,
+    tracked r1: &RWShared<PTEntry, Extra>,
+    tracked r2: &RWShared<PTEntry, Extra>,
     tracked t1: &PayloadTicket<Extra>,
     tracked t2: &PayloadTicket<Extra>,
 )
@@ -275,7 +309,7 @@ proof fn example_two_readers_see_one_payload(
 
 // End-to-end check: a *recursive* walk, which is the thing publishing makes possible.
 //
-// The unpublished counterpart cannot be written. There the child's `Reader` is borrowed out of the
+// The unpublished counterpart cannot be written. There the child's `RWShared` is borrowed out of the
 // parent's invariant and dies at the closing brace, so the child must be read inside the parent's
 // block. That forces one nested block per level, and Verus will not let a recursive function
 // produce them: the body of `open_atomic_invariant!` must be atomic, so the recursive call would
@@ -283,12 +317,12 @@ proof fn example_two_readers_see_one_payload(
 // `pt2::walk_level2` and `walk_level3`, which spell the nesting out by hand.
 //
 // Here `borrow_published_payload` hands back `&'s T::Payload` tied to the *ticket*, not to any
-// invariant. The ticket is owned by this stack frame, so the child's `Reader` borrow lives as long
+// invariant. The ticket is owned by this stack frame, so the child's `RWShared` borrow lives as long
 // as the frame, and the recursive call is an ordinary call at the top level. No invariant is
 // opened by hand anywhere in this function.
 fn walk(
     ptr: *mut usize,
-    Tracked(r): Tracked<&Reader<PTEntry, Extra>>,
+    Tracked(r): Tracked<&RWShared<PTEntry, Extra>>,
     index: usize,
     level: usize,
 ) -> (ret: usize)
@@ -320,6 +354,27 @@ fn walk(
     );
     let tracked next_reader = payload.reader.tracked_borrow(index as int);
     walk(child_ptr, Tracked(next_reader), index, level - 1)
+}
+
+/// Tearing the protocol down reclaims a published payload even while old tickets remain live.
+/// The tickets become historical ghost facts once the consumed `RWShared` bumps the slot version.
+proof fn example_teardown_with_stale_ticket(
+    tracked r: RWShared<PTEntry, Extra>,
+    tracked w: WritePerm<PTEntry>,
+    tracked ticket: PayloadTicket<Extra>,
+) -> (tracked out: (PointsTo<usize>, Extra))
+    requires
+        r.id() == w.id(),
+        r.slot_id() == ticket.id(),
+        r.slot_version() == ticket.version(),
+    ensures
+        out.0.is_init(),
+        out.0.ptr() == r.ptr(),
+        w@ === out.0.value().into_spec(),
+        w@.wf_payload(out.1),
+    opens_invariants [r.namespace()]
+{
+    PTEntry::teardown_rw(r, w)
 }
 
 } // verus!

@@ -21,11 +21,11 @@
 //!
 //! An earlier version tracked a `current` value and guaranteed that everything observed reaches
 //! it, along a preorder supplied as a trait bound. That cannot work: the element type is a
-//! snapshot, so the bound would land on `Reader`, and a payload holds readers -- the trait
+//! snapshot, so the bound would land on `RWShared`, and a payload holds readers -- the trait
 //! implementations chase each other in a circle.
 //!
 //! So this keeps only what needs a resource: monotonicity of the set. The reachability guarantee
-//! lives in `ReaderState::inv`, as "everything in the set reaches the pair stored now", where the
+//! lives in `RWState::inv`, as "everything in the set reaches the pair stored now", where the
 //! model's traits are in scope and transitivity can be applied. Nothing is lost -- a set that
 //! only grows is what makes such an invariant worth stating.
 //!

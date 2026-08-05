@@ -938,6 +938,28 @@ impl<P> PayloadHolder<P> {
         let tracked (slot, handle, payload) = slot.take(handle);
         (PayloadHolder { unpublished: Some(payload), slot }, handle)
     }
+
+    /// Consumes the holder and its reader handle, returning the payload wherever it currently is.
+    ///
+    /// A published payload is reclaimed first, which advances the slot version and invalidates
+    /// every outstanding ticket before the payload is removed from the private holder.
+    pub proof fn into_payload(tracked self, tracked handle: SlotHandle<P>) -> (tracked out: P)
+        requires
+            self.wf(),
+            self.id() == handle.id(),
+            self.version() == handle.version(),
+        ensures
+            out == self.payload(),
+    {
+        if self.is_published() {
+            let tracked (holder, _handle) = self.reclaim(handle);
+            let tracked PayloadHolder { unpublished, slot: _ } = holder;
+            unpublished.tracked_unwrap()
+        } else {
+            let tracked PayloadHolder { unpublished, slot: _ } = self;
+            unpublished.tracked_unwrap()
+        }
+    }
 }
 
 } // verus!
