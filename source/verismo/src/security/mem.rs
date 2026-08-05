@@ -466,7 +466,8 @@ pub fn osmem_add(
     proof {
         assert forall|i| 0 <= i < osmem.len() implies #[trigger] osmem[i].wf() by {
             if i == osmem.len() - 1 {
-                assert forall|k| page_perms.contains_key(k) implies spec_contains_page_perm(
+                assert forall|k|
+                    page_perms.contains_key(k) implies #[trigger] spec_contains_page_perm(
                     page_perms,
                     k,
                     osperm,

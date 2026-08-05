@@ -8,7 +8,7 @@ publish = false
 bitflags_verus = { path = ".." }
 bitflags = "2.11.0"
 paste = "1.0"
-vstd = { version = "=0.0.0-2026-07-27-0206", features = ["alloc", "allow_panic"], default-features = false }
+vstd = { workspace = true }
 
 [package.metadata.verus]
 verify = true
