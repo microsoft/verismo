@@ -53,6 +53,25 @@ pub proof fn proof_test_bits2(v1: u64, v2: u64)
 } // verus!
 }
 
+// `verismo_simple!` (update_conditions = false) still rewrites secure types
+// and operators, but never synthesizes a constantness contract: unlike
+// `verismo!`/`verismo_non_secret!`, no implicit `is_constant()` requires or
+// ensures are added, so any such fact must be requested explicitly, as done
+// here.
+verismo_simple! {
+    fn test_simple_add(v1: u64_s, v2: u64_s) -> (ret: u64_s)
+    requires
+        v1.is_constant(),
+        v2.is_constant(),
+        v1@.val + v2@.val <= u64::MAX,
+    ensures
+        ret@.val == v1@.val + v2@.val,
+        ret.is_constant(),
+    {
+        v1.add(v2)
+    }
+}
+
 verismo! {
     fn test_add (v1: u64_s, v2: u64_s) -> (ret: u64_s)
     requires
@@ -92,6 +111,50 @@ verismo! {
     }
 }
 
+verus! {
+
+// `test_simple_add` (via `verismo_simple!`) never has an `is_constant()`
+// contract synthesized for it, so its `ensures ret.is_constant()` above is
+// stated explicitly by the function author. This client satisfies the
+// explicit `is_constant()` preconditions with constant secure integers and
+// relies solely on that explicitly stated postcondition (not any
+// macro-synthesized fact) to establish the result is constant.
+fn test_simple_add_caller() {
+    let v1 = u64_s::constant(3);
+    let v2 = u64_s::constant(4);
+    let ret = test_simple_add(v1, v2);
+    assert(ret.is_constant());
+}
+
+// `test_add` above has no explicit `is_constant()` contract, and its
+// signature does not require constant inputs. Yet because it is defined
+// inside `verismo!` (update_conditions = true, for_non_secret = false), the
+// macro synthesizes an implicit `imply(inputs constant, output constant)`
+// postcondition. This client calls `test_add` with constant secure integers
+// and relies solely on that synthesized postcondition (no manual proof) to
+// establish the result is constant.
+fn test_add_constant_propagation() {
+    let v1 = u64_s::constant(3);
+    let v2 = u64_s::constant(4);
+    let ret = test_add(v1, v2);
+    assert(ret.is_constant());
+}
+
+// `verismo!` does not synthesize an `is_constant()` *precondition* for
+// `test_add`: its only requirement is the arithmetic overflow bound copied
+// from the function body. This client calls `test_add` with arbitrary
+// (non-constant) secure integers, satisfying only that arithmetic
+// precondition, to demonstrate the call type-checks and verifies without
+// any constantness requirement on the inputs. It makes no claim about the
+// constantness of the result.
+fn test_add_non_constant(v1: u64_s, v2: u64_s)
+    requires
+        v1@.val + v2@.val <= u64::MAX,
+{
+    let _ret = test_add(v1, v2);
+}
+
+} // verus!
 verismo! {
     proof fn proof_u64_s(v1: u64_s, v2: u64_s)
     requires
