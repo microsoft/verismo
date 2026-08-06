@@ -3,8 +3,8 @@ use std::hash::{Hash, Hasher};
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn_verus::spanned::Spanned;
-use syn_verus::{parse_macro_input, ItemFn, Signature};
+use verus_syn::spanned::Spanned;
+use verus_syn::{parse_macro_input, ItemFn, Signature};
 
 fn string_to_u64(s: &str) -> u64 {
     let mut hasher = DefaultHasher::new();
@@ -18,7 +18,7 @@ pub fn parse_global(
     non_zero: bool,
     need_extern: bool,
 ) -> TokenStream {
-    let input = parse_macro_input!(item as syn_verus::Item);
+    let input = parse_macro_input!(item as verus_syn::Item);
     let line = input.span().unwrap().start().line() as u64;
     let file = input.span().unwrap().file();
     let file = file.as_str();
@@ -29,14 +29,14 @@ pub fn parse_global(
     let gspec = quote! {crate::verismo::VeriSMoSpec};
     let vaddrty = quote! {crate::arch::addr::VAddr};
     let extra = match &input {
-        syn_verus::Item::Static(syn_verus::ItemStatic { ident, ty, .. }) => {
+        verus_syn::Item::Static(verus_syn::ItemStatic { ident, ty, .. }) => {
             //let file = ident.span().source_file().path().display().to_string();
             let addr_ident =
-                syn_verus::Ident::new(&format!("mem_{}", ident.to_string()), ident.span());
+                verus_syn::Ident::new(&format!("mem_{}", ident.to_string()), ident.span());
             let get_ident =
-                syn_verus::Ident::new(&format!("{}_get", ident.to_string()), ident.span());
+                verus_syn::Ident::new(&format!("{}_get", ident.to_string()), ident.span());
             let axiom_ident =
-                syn_verus::Ident::new(&format!("axiom_{}", ident.to_string()), ident.span());
+                verus_syn::Ident::new(&format!("axiom_{}", ident.to_string()), ident.span());
             quote! {
                 verus!{
                 impl #gspec {
@@ -72,7 +72,7 @@ pub fn parse_global(
             }
             }
         }
-        syn_verus::Item::Fn(ItemFn { sig: Signature { ident, .. }, .. }) => {
+        verus_syn::Item::Fn(ItemFn { sig: Signature { ident, .. }, .. }) => {
             quote! {
                     verus!{
                     impl #gspec {

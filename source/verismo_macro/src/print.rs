@@ -1,6 +1,6 @@
 use proc_macro;
 use quote::quote;
-use syn_verus::{parse_macro_input, Data, DeriveInput, Ident};
+use verus_syn::{parse_macro_input, Data, DeriveInput, Ident};
 
 use crate::def::{
     add_bound_to_generic, field_name_ty, gen_field_calls, gen_trait_bound, join_tokens,
@@ -48,7 +48,7 @@ pub fn verismo_print_expand(input: proc_macro::TokenStream) -> proc_macro::Token
     } else {
         quote! {}
     };
-    let mut print_generic: syn_verus::Generics = generics.clone();
+    let mut print_generic: verus_syn::Generics = generics.clone();
     add_bound_to_generic(
         &mut print_generic,
         gen_trait_bound(vec!["VPrint"], name.span()),

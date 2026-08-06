@@ -1,5 +1,5 @@
 use quote::quote;
-use syn_verus::{parse_macro_input, Data, DeriveInput, Ident, Type};
+use verus_syn::{parse_macro_input, Data, DeriveInput, Ident, Type};
 
 use crate::def::{
     add_bound_to_generic, field_name_ty, field_offset, field_offset_exe, gen_field_calls,
@@ -44,7 +44,7 @@ pub fn verismo_size_expand(input: proc_macro::TokenStream) -> proc_macro::TokenS
     let s = &s;
     for (i, field) in s.fields.iter().enumerate() {
         let (fname, ftype) = field_name_ty(&field, i, name.span());
-        if field.attrs.iter().any(|attr| attr.path.is_ident("def_offset")) {
+        if field.attrs.iter().any(|attr| attr.path().is_ident("def_offset")) {
             let field_name = &field.ident;
             let _field_offset_exe = field_offset_exe(&fname, name.span());
             let _field_copy = Ident::new(
@@ -159,7 +159,7 @@ pub fn verismo_defoffset_expand(input: proc_macro::TokenStream) -> proc_macro::T
     let s = &s;
     for (i, field) in s.fields.iter().enumerate() {
         let (fname, ftype) = field_name_ty(&field, i, name.span());
-        if field.attrs.iter().any(|attr| attr.path.is_ident("def_offset")) {
+        if field.attrs.iter().any(|attr| attr.path().is_ident("def_offset")) {
             let field_name = &field.ident;
             let field_offset_exe = field_offset_exe(&fname, name.span());
             let field_copy = Ident::new(

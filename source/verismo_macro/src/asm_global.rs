@@ -1,7 +1,7 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn_verus::parse::{Parse, ParseStream};
-use syn_verus::{parse_macro_input, Ident, Token};
+use verus_syn::parse::{Parse, ParseStream};
+use verus_syn::{parse_macro_input, Ident, Token};
 
 struct AsmInput {
     func_name: Ident,
@@ -9,7 +9,7 @@ struct AsmInput {
 }
 
 impl Parse for AsmInput {
-    fn parse(input: ParseStream) -> Result<Self, syn_verus::Error> {
+    fn parse(input: ParseStream) -> Result<Self, verus_syn::Error> {
         let func_name = input.parse()?;
         input.parse::<Token![=]>()?;
         let varname = input.parse()?;

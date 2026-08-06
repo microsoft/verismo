@@ -1,8 +1,8 @@
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
-use syn_verus::punctuated::Punctuated;
-use syn_verus::spanned::Spanned;
-use syn_verus::{
+use verus_syn::punctuated::Punctuated;
+use verus_syn::spanned::Spanned;
+use verus_syn::{
     AngleBracketedGenericArguments, DataStruct, Field, GenericArgument, GenericParam, Generics,
     Ident, Lit, LitInt, Path, PathArguments, PathSegment, TraitBound, TraitBoundModifier, Type,
     TypeParamBound, TypePath, Visibility,
@@ -35,9 +35,9 @@ pub fn new_path(names: &[&str], span: Span) -> Path {
             ident: proc_macro2::Ident::new(names[0], span),
             arguments: PathArguments::AngleBracketed(AngleBracketedGenericArguments {
                 colon2_token: None,
-                lt_token: syn_verus::token::Lt(span),
+                lt_token: verus_syn::token::Lt(span),
                 args: args,
-                gt_token: syn_verus::token::Gt(span),
+                gt_token: verus_syn::token::Gt(span),
             }),
         });
     } else {
@@ -122,8 +122,8 @@ pub fn type_to_type_generic(ty: &Type) -> Type {
 
                     // Always add the colon2 token since we want every generic to be in the desired format.
                     segment.arguments =
-                        PathArguments::AngleBracketed(syn_verus::AngleBracketedGenericArguments {
-                            colon2_token: Some(syn_verus::token::Colon2::default()),
+                        PathArguments::AngleBracketed(verus_syn::AngleBracketedGenericArguments {
+                            colon2_token: Some(<verus_syn::Token![::]>::default()),
                             ..args.clone()
                         });
                 }
@@ -212,15 +212,15 @@ pub fn get_field(fname: &proc_macro2::TokenStream, span: Span) -> Ident {
 }
 
 pub fn set_field(fname: &proc_macro2::TokenStream, span: Span) -> Ident {
-    syn_verus::Ident::new(&format!("spec_set_{}", fname.to_string()), span)
+    verus_syn::Ident::new(&format!("spec_set_{}", fname.to_string()), span)
 }
 
 pub fn field_offset(fname: &proc_macro2::TokenStream, span: Span) -> Ident {
-    syn_verus::Ident::new(&format!("spec_{}_offset", fname.to_string()), span)
+    verus_syn::Ident::new(&format!("spec_{}_offset", fname.to_string()), span)
 }
 
 pub fn field_offset_exe(fname: &proc_macro2::TokenStream, span: Span) -> Ident {
-    syn_verus::Ident::new(&format!("_{}_offset", fname.to_string()), span)
+    verus_syn::Ident::new(&format!("_{}_offset", fname.to_string()), span)
 }
 
 pub fn tspec_path() -> TokenStream {
@@ -233,7 +233,7 @@ pub fn generic_mod() -> TokenStream {
 }
 
 /*
-pub fn get_array_len(tyarray: &TypeArray) -> &syn_verus::LitInt {
+pub fn get_array_len(tyarray: &TypeArray) -> &verus_syn::LitInt {
     if let Expr::Lit(ExprLit {
         lit: Lit::Int(l),
         attrs: _,
