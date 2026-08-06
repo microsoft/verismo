@@ -17,17 +17,16 @@
 //! proof functions directly. A child module can see its parent's private items and the bodies of
 //! its `closed` spec functions, so the split costs no widening at all: nothing became `pub(crate)`
 //! and no spec function had to be opened to make it compile.
+use vstd::prelude::*;
 use super::*;
+use vstd::open_atomic_invariant;
+
 use crate::tokens_impl::payload_slot::PayloadTicket;
 use vstd::atomic::PAtomicUsize;
 #[cfg(verus_only)]
-use vstd::invariant::create_open_invariant_credit;
-#[cfg(verus_only)]
-use vstd::invariant::OpenInvariantCredit;
-use vstd::open_atomic_invariant;
+use vstd::invariant::{create_open_invariant_credit, OpenInvariantCredit};
 #[cfg(verus_only)]
 use vstd::open_atomic_invariant_in_proof;
-use vstd::prelude::*;
 #[cfg(verus_only)]
 use vstd::modes::tracked_swap;
 
@@ -387,7 +386,7 @@ fn write_unrestricted_inner<
         let ghost snapshot = Snapshot::<T, T::Payload>::new(value, payload);
         let tracked mut value_frac = FracGhost::new(snapshot);
         let tracked new_writer = WritePerm { perm: value_frac.split() };
-        let tracked (obs, first) = ObsHistory::new(snapshot);
+        let tracked (obs, first) = obs_history::ObsHistory::new(snapshot);
         let tracked (mut payload_holder, payload_handle) = PayloadHolder::new(payload);
         let tracked new_ticket = if _publish {
             Some(payload_holder.publish())
@@ -449,9 +448,6 @@ pub fn write_unrestricted<T: RWModel<AtomicType = usize> + From<usize> + Into<us
         Tracked(payload),
         false,
     );
-    proof {
-        assert(ticket is None);
-    }
     (Tracked(reader), Tracked(observed))
 }
 

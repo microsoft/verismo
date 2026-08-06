@@ -17,10 +17,9 @@ use vstd::resource::frac::FracGhost;
 pub use crate::protocol::model::{IsValidAtomicType, PublishPayload, RWModel, Snapshot, WithPayload};
 
 // The sibling modules by name: this file was `mod.rs` once, where they needed no import.
+use vstd::prelude::*;
+
 use crate::tokens_impl::obs_history;
-use crate::tokens_impl::obs_history::ObsHistory;
-#[cfg(verus_only)]
-use crate::tokens_impl::payload_slot;
 #[cfg(verus_only)]
 use crate::tokens_impl::payload_slot::PayloadTicket;
 use crate::tokens_impl::payload_slot::{PayloadHolder, SlotHandle};
@@ -30,10 +29,7 @@ use crate::trusted_t::{axiom_loc_to_int_injective, loc_to_int};
 use vstd::invariant::OpenInvariantCredit;
 use vstd::invariant::{AtomicInvariant, InvariantPredicate};
 #[cfg(verus_only)]
-use vstd::open_atomic_invariant;
-#[cfg(verus_only)]
-use vstd::open_atomic_invariant_in_proof;
-use vstd::prelude::*;
+use vstd::{open_atomic_invariant_in_proof, open_atomic_invariant};
 use vstd::raw_ptr::PointsTo;
 use vstd::resource::algebra::Resource;
 #[cfg(verus_only)]
@@ -43,29 +39,6 @@ use vstd::resource::frac::FractionRA;
 use vstd::resource::Loc;
 #[cfg(verus_only)]
 use vstd::std_specs::convert::{FromSpec, FromSpecImpl, IntoSpec};
-#[cfg(all(feature = "state_machine", verus_only))]
-use vstd::tokens::InstanceId;
-
-/// What identifies a `FracGhost` family: an `InstanceId` for the state-machine implementation, a
-/// `Loc` for vstd's.
-#[cfg(all(feature = "state_machine", verus_only))]
-type FracId = InstanceId;
-#[cfg(any(not(feature = "state_machine"), not(verus_only)))]
-type FracId = Loc;
-
-/// What identifies an observation history: an `InstanceId` for the state-machine
-/// implementation, a `Loc` for the resource-algebra one.
-#[cfg(all(feature = "state_machine", verus_only))]
-type ObsId = InstanceId;
-#[cfg(any(not(feature = "state_machine"), not(verus_only)))]
-type ObsId = Loc;
-
-/// What identifies a payload slot: an `InstanceId` for the state-machine implementation, a `Loc`
-/// for the `StorageResource` one.
-#[cfg(all(feature = "state_machine", verus_only))]
-type SlotId = InstanceId;
-#[cfg(any(not(feature = "state_machine"), not(verus_only)))]
-type SlotId = Loc;
 
 verus! {
 
@@ -73,10 +46,10 @@ verus! {
 // The types.
 // ---------------------------------------------------------------------------------------
 pub ghost struct RWConstant<T: IsValidAtomicType> {
-    value_frac_id: FracId,  // frac id of the value fraction
-    obs_id: ObsId,  // identity of the observation history
+    value_frac_id: Loc,  // frac id of the value fraction
+    obs_id: Loc,  // identity of the observation history
     ptr: *const T::AtomicType,  // the root pointer
-    slot_id: SlotId,  // identity of the payload slot
+    slot_id: Loc,  // identity of the payload slot
     slot_version: nat,  // the slot version this shared token is good for
 }
 
@@ -94,7 +67,7 @@ pub tracked struct RWState<T: IsValidAtomicType, Payload> {
     // it the only writer.
     pub tracked value_frac: FracGhost<Snapshot<T, Payload>>,
     // Every pair anyone has observed, and the guarantee that each still reaches the present one.
-    pub tracked obs: ObsHistory<Snapshot<T, Payload>>,
+    pub tracked obs: obs_history::ObsHistory<Snapshot<T, Payload>>,
 }
 
 pub tracked struct WritePerm<T: RWModel> {
@@ -120,12 +93,12 @@ pub tracked struct RWShared<T: IsValidAtomicType, Payload> {
 // ---------------------------------------------------------------------------------------
 impl<T: IsValidAtomicType> RWConstant<T> {
     /// The id of the whole value fraction, which is what a `WritePerm` is a share of.
-    pub closed spec fn value_frac_id(&self) -> FracId {
+    pub closed spec fn value_frac_id(&self) -> Loc {
         self.value_frac_id
     }
 
     /// Identity of the payload slot this reader is attached to.
-    pub closed spec fn slot_id(&self) -> SlotId {
+    pub closed spec fn slot_id(&self) -> Loc {
         self.slot_id
     }
 
@@ -135,7 +108,7 @@ impl<T: IsValidAtomicType> RWConstant<T> {
     }
 
     /// Identity of the observation history.
-    pub closed spec fn obs_id(&self) -> ObsId {
+    pub closed spec fn obs_id(&self) -> Loc {
         self.obs_id
     }
 }
@@ -158,7 +131,7 @@ impl<T: RWModel> View for Observed<T> {
 
 impl<T: RWModel> Observed<T> {
     /// Which shared location's history this came from.
-    pub closed spec fn id(&self) -> ObsId {
+    pub closed spec fn id(&self) -> Loc {
         self.inner.id()
     }
 
@@ -216,7 +189,7 @@ impl<T: RWModel> WritePerm<T> {
         self.perm@
     }
 
-    pub closed spec fn id(&self) -> FracId {
+    pub closed spec fn id(&self) -> Loc {
         self.perm.id()
     }
 
@@ -256,7 +229,7 @@ impl<T: IsValidAtomicType, Payload> RWState<T, Payload> {
     // The id of the RWShared, the real constant of the shared token. Open, and routed through
     // `constant()`, so that a proof outside this module can tie it to the `RWShared` the invariant
     // came from -- see `RWShared::id`.
-    pub open spec fn id(&self) -> FracId {
+    pub open spec fn id(&self) -> Loc {
         self.constant().value_frac_id()
     }
 
@@ -401,7 +374,7 @@ impl<T: RWModel> RWState<T, T::Payload> {
         &&& self.value_frac@
             == self.current_snapshot()
         // The whole guarantee an RWShared token buys, kept here rather than inside the history:
-        // everything ever seen still reaches the pair stored now. `ObsHistory` cannot state it --
+        // everything ever seen still reaches the pair stored now. `obs_history::ObsHistory` cannot state it --
         // the bound would land on `RWShared`, and payloads hold readers -- but it does supply the
         // one thing that makes it worth stating, which is that the set only grows.
         &&& self.obs.seen().contains(self.current_snapshot())
@@ -691,7 +664,7 @@ impl<T: IsValidAtomicType, Payload> RWShared<T, Payload> {
     }
 
     // The id of the whole value fraction.
-    pub open spec fn id(&self) -> FracId {
+    pub open spec fn id(&self) -> Loc {
         self.constant().value_frac_id()
     }
 
@@ -706,7 +679,7 @@ impl<T: IsValidAtomicType, Payload> RWShared<T, Payload> {
     // Identity of this shared location's payload slot. Open, and routed through `constant()`, so a
     // proof outside this module can connect it to the `RWConstant` it gets from opening the
     // invariant.
-    pub open spec fn slot_id(&self) -> SlotId {
+    pub open spec fn slot_id(&self) -> Loc {
         self.constant().slot_id()
     }
 
@@ -714,7 +687,7 @@ impl<T: IsValidAtomicType, Payload> RWShared<T, Payload> {
     // accept each
     // other's `Observed` tokens -- see `has_observed` -- which is what a client needs to say when
     // it wants an observation of a child to survive from one invariant block to the next.
-    pub open spec fn obs_id(&self) -> ObsId {
+    pub open spec fn obs_id(&self) -> Loc {
         self.constant().obs_id()
     }
 
@@ -838,7 +811,7 @@ impl<T: RWModel> RWShared<T, T::Payload> where
         let ghost snapshot = Snapshot::<T, T::Payload>::new(value, payload);
         let tracked mut value_frac = FracGhost::new(snapshot);
         let tracked writer = WritePerm { perm: value_frac.split() };
-        let tracked (obs, first) = ObsHistory::new(snapshot);
+        let tracked (obs, first) = obs_history::ObsHistory::new(snapshot);
         let tracked (payload, handle) = PayloadHolder::new(payload);
         let tracked mut reader_state = RWState { perm: points_to, payload, value_frac, obs };
         T::into_from_obeys();
