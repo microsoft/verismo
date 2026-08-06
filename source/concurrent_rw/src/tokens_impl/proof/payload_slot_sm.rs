@@ -50,8 +50,8 @@ pub struct SlotStatus<P> {
 }
 
 } // verus!
-// `accept_recursive_types(P)` because the real payload is recursive: it contains a
-// `Seq<RWShared<..>>`, which contains payloads again.
+  // `accept_recursive_types(P)` because the real payload is recursive: it contains a
+  // `Seq<RWShared<..>>`, which contains payloads again.
 tokenized_state_machine!(
     #[verifier::accept_recursive_types(P)]
     slot<P> {

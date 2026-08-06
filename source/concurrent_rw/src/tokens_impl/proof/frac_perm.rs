@@ -686,7 +686,7 @@ impl<T> FracPerm<vstd::raw_ptr::PointsTo<T>> {
 }
 
 } // verus!
-// Proof helpers for the multiset of fractional shares.
+  // Proof helpers for the multiset of fractional shares.
 verus! {
 
 /// Something that holds a share.

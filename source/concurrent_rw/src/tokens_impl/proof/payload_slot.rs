@@ -36,9 +36,7 @@
 use vstd::modes::tracked_swap;
 use vstd::prelude::*;
 #[cfg(verus_only)]
-use vstd::resource::storage_protocol::{
-    deposits, guards, incl, withdraws,
-};
+use vstd::resource::storage_protocol::{deposits, guards, incl, withdraws};
 use vstd::resource::storage_protocol::{Protocol, StorageResource};
 #[cfg(verus_only)]
 use vstd::resource::Loc;

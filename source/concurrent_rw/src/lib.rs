@@ -37,4 +37,4 @@ pub mod tokens_impl;
 pub use protocol::contract::{RWContract, RWWithPublishPayloadContract};
 pub use protocol::model::{IsValidAtomicType, PublishPayload, RWModel, Snapshot, WithPayload};
 pub use tokens_impl::payload_slot::{PayloadHolder, PayloadTicket, SlotHandle};
-pub use tokens_impl::{Observed, RWShared, RWConstant, RWState, WritePerm};
+pub use tokens_impl::{Observed, RWConstant, RWShared, RWState, WritePerm};

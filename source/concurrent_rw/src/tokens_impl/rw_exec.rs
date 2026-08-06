@@ -17,18 +17,18 @@
 //! proof functions directly. A child module can see its parent's private items and the bodies of
 //! its `closed` spec functions, so the split costs no widening at all: nothing became `pub(crate)`
 //! and no spec function had to be opened to make it compile.
-use vstd::prelude::*;
 use super::*;
 use vstd::open_atomic_invariant;
+use vstd::prelude::*;
 
 use crate::tokens_impl::payload_slot::PayloadTicket;
 use vstd::atomic::PAtomicUsize;
 #[cfg(verus_only)]
 use vstd::invariant::{create_open_invariant_credit, OpenInvariantCredit};
 #[cfg(verus_only)]
-use vstd::open_atomic_invariant_in_proof;
-#[cfg(verus_only)]
 use vstd::modes::tracked_swap;
+#[cfg(verus_only)]
+use vstd::open_atomic_invariant_in_proof;
 
 verus! {
 
@@ -183,12 +183,12 @@ pub fn read_exact<T: RWModel<AtomicType = usize> + From<usize> + Into<usize>>(
     }
     let tracked atom = r.borrow_atom();
     open_atomic_invariant!(atom => state => {
-            proof {
-                state.read_with_writer(w);
-                observed = state.observe();
-            }
-            value = PAtomicUsize::from_ptr_load(ptr, Tracked(&state.perm));
-        });
+        proof {
+            state.read_with_writer(w);
+            observed = state.observe();
+        }
+        value = PAtomicUsize::from_ptr_load(ptr, Tracked(&state.perm));
+    });
 
     (value.into(), Tracked(observed))
 }

@@ -14,7 +14,9 @@ use crate::tokens_impl::frac_perm_proof::FracGhost;
 #[cfg(any(not(feature = "state_machine"), not(verus_only)))]
 use vstd::resource::frac::FracGhost;
 
-pub use crate::protocol::model::{IsValidAtomicType, PublishPayload, RWModel, Snapshot, WithPayload};
+pub use crate::protocol::model::{
+    IsValidAtomicType, PublishPayload, RWModel, Snapshot, WithPayload,
+};
 
 // The sibling modules by name: this file was `mod.rs` once, where they needed no import.
 use vstd::prelude::*;
@@ -28,8 +30,6 @@ use crate::trusted_t::{axiom_loc_to_int_injective, loc_to_int};
 #[cfg(verus_only)]
 use vstd::invariant::OpenInvariantCredit;
 use vstd::invariant::{AtomicInvariant, InvariantPredicate};
-#[cfg(verus_only)]
-use vstd::{open_atomic_invariant_in_proof, open_atomic_invariant};
 use vstd::raw_ptr::PointsTo;
 use vstd::resource::algebra::Resource;
 #[cfg(verus_only)]
@@ -39,6 +39,8 @@ use vstd::resource::frac::FractionRA;
 use vstd::resource::Loc;
 #[cfg(verus_only)]
 use vstd::std_specs::convert::{FromSpec, FromSpecImpl, IntoSpec};
+#[cfg(verus_only)]
+use vstd::{open_atomic_invariant, open_atomic_invariant_in_proof};
 
 verus! {
 
