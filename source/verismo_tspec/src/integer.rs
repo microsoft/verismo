@@ -73,7 +73,7 @@ macro_rules! impl_cmp_with_basic {
             $(
             #[verifier(inline)]
             open spec fn [<$fname>](self, rhs: $basict) -> bool {
-                builtin::SpecOrd::$fname(self.ord_int(), rhs as int)
+                verus_builtin::SpecOrd::$fname(self.ord_int(), rhs as int)
             }
             )*
         }
@@ -88,7 +88,7 @@ macro_rules! impl_spec_eq_with_basic {
         impl VSpecEq<$rhs> for $basict {
             #[verifier(inline)]
             open spec fn spec_eq(self, rhs: $rhs) -> bool {
-                builtin::spec_eq(self, rhs)
+                verus_builtin::spec_eq(self, rhs)
             }
         }
         }
@@ -97,7 +97,7 @@ macro_rules! impl_spec_eq_with_basic {
         impl<T: IntOrd> VSpecEq<$basict> for T {
             #[verifier(inline)]
             open spec fn spec_eq(self, rhs: $basict) -> bool {
-                builtin::spec_eq(self.ord_int(), rhs as int)
+                verus_builtin::spec_eq(self.ord_int(), rhs as int)
             }
         }}
     }
@@ -127,14 +127,14 @@ macro_rules! impl_cmp_with_as_int {
             $(
             #[verifier(inline)]
             open spec fn [<$fname>](self, rhs: T2) -> bool {
-                builtin::SpecOrd::$fname(self.ord_int(), rhs.ord_int())
+                verus_builtin::SpecOrd::$fname(self.ord_int(), rhs.ord_int())
             }
             )*
         }
         impl<T: IntOrd, T2: IntOrd> VSpecEq<T2> for T {
             #[verifier(inline)]
             open spec fn spec_eq(self, rhs: T2) -> bool {
-                builtin::spec_eq(self.ord_int(), rhs.ord_int())
+                verus_builtin::spec_eq(self.ord_int(), rhs.ord_int())
             }
         }
         }

@@ -58,7 +58,7 @@ pub fn verismo_snp_expand2(
         if i > 0 {
             let prev = &snp[i - 1];
             let size_call = &size[i];
-            wf.push(quote! {builtin::imply(#size_call > 0, builtin::equal(#snp_call, #prev))});
+            wf.push(quote! {verus_builtin::imply(#size_call > 0, verus_builtin::equal(#snp_call, #prev))});
         }
     }
     let snp_call = if snp.len() > 0 {

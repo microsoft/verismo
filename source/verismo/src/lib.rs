@@ -55,7 +55,7 @@ mod tspec_e;
 mod vbox;
 mod vcell;
 
-builtin_macros::verus! {
+verus_builtin_macros::verus! {
 
 /// Top-level broadcast group bundling every axiom defined inside the
 /// `verismo` crate that used to auto-propagate under the legacy Verus

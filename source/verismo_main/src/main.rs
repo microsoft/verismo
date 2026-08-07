@@ -9,11 +9,11 @@ core::arch::global_asm!(include_str!("entry.s"), options(att_syntax));
 
 use core::panic::PanicInfo;
 
-use builtin::*;
-use builtin_macros::*;
 use verismo::debug::VEarlyPrintAtLevel;
 use verismo::snp::ghcb::*;
 use verismo::tspec::new_strlit;
+use verus_builtin::*;
+use verus_builtin_macros::*;
 use vstd::prelude::*;
 use vstd::string::*;
 

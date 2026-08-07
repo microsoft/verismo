@@ -7,12 +7,12 @@ edition = "2021"
 
 [dependencies]
 # Verus deps
-builtin = { workspace = true }
-builtin_macros = { workspace = true }
+verus_builtin = { workspace = true }
+verus_builtin_macros = { workspace = true }
 vstd = { workspace = true, features = ["alloc"], default-features = false }
 
-#builtin = { path = "../../tools/verus/source/builtin"}
-#builtin_macros = { path = "../../tools/verus/source/builtin_macros"}
+#verus_builtin = { path = "../../tools/verus/source/verus_builtin"}
+#verus_builtin_macros = { path = "../../tools/verus/source/verus_builtin_macros"}
 #vstd = {path = "../../tools/verus/source/vstd", features = ["alloc"], default-features = false }
 # Trusted
 hacl-sys = {git = "https://github.com/ziqiaozhou/hacl-packages", rev = "e02b4182d7afe346ebd04da6f96a54dc29488892"}

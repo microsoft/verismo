@@ -68,7 +68,7 @@ pub fn verismo_enum_int_expand(input: TokenStream) -> TokenStream {
                 if variant.fields.len() == 0 {
                     variant_stream_from = quote! {
                         #variant_stream_from
-                        builtin::equal(Self::spec_from_int(spec_cast_integer::<_, int> (#default)).get_Some_0(), #name::#ident),
+                        verus_builtin::equal(Self::spec_from_int(spec_cast_integer::<_, int> (#default)).get_Some_0(), #name::#ident),
                     };
                 }
 
@@ -124,7 +124,7 @@ pub fn verismo_enum_int_expand(input: TokenStream) -> TokenStream {
                 #[inline]
                 pub const fn from_u64(val: u64) -> (ret: Option<Self>)
                 ensures
-                    builtin::equal(ret, Self::spec_from_int(spec_cast_integer::<_, int>(val)))
+                    verus_builtin::equal(ret, Self::spec_from_int(spec_cast_integer::<_, int>(val)))
                 {
                     #variant_stream_from_u64
                     {

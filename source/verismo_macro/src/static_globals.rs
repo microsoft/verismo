@@ -79,8 +79,8 @@ pub fn gen_shared_globals(input: TokenStream) -> TokenStream {
                     pub broadcast proof fn #axiom_func_name()
                     ensures
                         g_range(#name::#variant_name).1 == spec_size::<#type_ident>(),
-                        builtin::equal(#spec_fn().ptr_range(), #memrange_fn()),
-                        builtin::equal(#spec_fn().lockid(), #lockid_fn()),
+                        verus_builtin::equal(#spec_fn().ptr_range(), #memrange_fn()),
+                        verus_builtin::equal(#spec_fn().lockid(), #lockid_fn()),
                         #[trigger] #spec_fn().is_constant(),
                     {
                     }
@@ -88,7 +88,7 @@ pub fn gen_shared_globals(input: TokenStream) -> TokenStream {
                     #[verifier(external_body)]
                     pub fn #variant_name() -> (ret: &'static VSpinLock<#type_ident>)
                     ensures
-                        builtin::equal(*ret, #spec_fn()),
+                        verus_builtin::equal(*ret, #spec_fn()),
                         ret.lockid() == #lockid_fn(),
                         ret.is_constant(),
                     {
@@ -98,16 +98,16 @@ pub fn gen_shared_globals(input: TokenStream) -> TokenStream {
                     #[verifier(inline)]
                     pub open spec fn #contains_fn(m: crate::lock::LockMap) -> bool {
                         m.contains_lock(#lockid_fn(), #memrange_fn()) &&
-                        builtin::equal(m[#lockid_fn()]@.invfn.value_invfn(), #invfn) &&
-                        builtin::equal(m[#lockid_fn()]@.points_to.snp(), SwSnpMemAttr::spec_default())
+                        verus_builtin::equal(m[#lockid_fn()]@.invfn.value_invfn(), #invfn) &&
+                        verus_builtin::equal(m[#lockid_fn()]@.points_to.snp(), SwSnpMemAttr::spec_default())
                     }
 
                     #[verifier(inline)]
                     pub open spec fn #islock_fn(lockperm: crate::lock::LockPermToRaw) -> bool {
                         lockperm.lockid() == #lockid_fn() &&
                         lockperm.ptr_range() == #memrange_fn() &&
-                        builtin::equal(lockperm.invfn.value_invfn(), #invfn) &&
-                        builtin::equal(lockperm.points_to.snp(), SwSnpMemAttr::spec_default())
+                        verus_builtin::equal(lockperm.invfn.value_invfn(), #invfn) &&
+                        verus_builtin::equal(lockperm.points_to.snp(), SwSnpMemAttr::spec_default())
                     }
                 });
             }
@@ -124,10 +124,10 @@ pub fn gen_shared_globals(input: TokenStream) -> TokenStream {
         #[verifier(external_body)]
         pub broadcast proof fn axiom_global_auto(v1: #name, v2: #name)
         ensures
-            builtin::imply(!builtin::equal(v1, v2),
+            verus_builtin::imply(!verus_builtin::equal(v1, v2),
                 #[trigger] g_range(v1).0 != #[trigger] g_range(v2).0
             ),
-            builtin::imply(!builtin::equal(v1, v2),
+            verus_builtin::imply(!verus_builtin::equal(v1, v2),
                 range_disjoint_(#[trigger] g_range(v1), #[trigger] g_range(v2))),
         {}
         #(#funcs)*

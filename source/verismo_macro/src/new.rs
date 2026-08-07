@@ -29,7 +29,7 @@ pub fn gen_new_fn(input: &DeriveInput) -> proc_macro2::TokenStream {
         let getter = get_field(&fname, name.span());
         new_fields = quote! {
             #new_fields
-            builtin::equal((#[trigger] Self::spec_new(#new_fields_param_body)).#getter(), #fname),
+            verus_builtin::equal((#[trigger] Self::spec_new(#new_fields_param_body)).#getter(), #fname),
         };
     }
 

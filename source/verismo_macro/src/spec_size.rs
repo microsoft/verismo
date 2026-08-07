@@ -227,7 +227,7 @@ pub fn verismo_defoffset_expand(input: proc_macro::TokenStream) -> proc_macro::T
                 #[verifier(external_body)]
                 pub broadcast proof fn #axiom_field(&self)
                 ensures
-                    builtin::equal(#[trigger] self.#getter(), field_at(*self, Self::#spec_field_offset()))
+                    verus_builtin::equal(#[trigger] self.#getter(), field_at(*self, Self::#spec_field_offset()))
                 {}
             };
             offset_counts = offset_counts + 1;
@@ -242,7 +242,7 @@ pub fn verismo_defoffset_expand(input: proc_macro::TokenStream) -> proc_macro::T
                     self.not_null(),
                 ensures
                     self.id() + #name::#spec_field_offset() == ret.id(),
-                    builtin::imply(self.is_constant(), ret.is_constant()),
+                    verus_builtin::imply(self.is_constant(), ret.is_constant()),
                 {
                     let offset: usize_s = #name::#field_offset_exe().into();
                     SnpPPtr::from_usize(self.uptr.add(offset))
@@ -258,7 +258,7 @@ pub fn verismo_defoffset_expand(input: proc_macro::TokenStream) -> proc_macro::T
                     }
 
                     open spec fn spec_borrow_ensures(&self, params: #copy_field_param, ret: #ftype) -> bool {
-                        builtin::equal(self.#spec_get_field(), ret)
+                        verus_builtin::equal(self.#spec_get_field(), ret)
                     }
 
                     //#[verifier(external_body)]
@@ -272,8 +272,8 @@ pub fn verismo_defoffset_expand(input: proc_macro::TokenStream) -> proc_macro::T
                     pub fn #field_copy(&self) -> (ret: #ftype)
                     ensures
                         ret.wf(),
-                        builtin::imply(self.snp().is_vmpl0_private(),
-                            builtin::equal(ret, self@.#spec_get_field())),
+                        verus_builtin::imply(self.snp().is_vmpl0_private(),
+                            verus_builtin::equal(ret, self@.#spec_get_field())),
                     {
                         return self.box_borrow(#copy_field_param);
                     }
@@ -289,7 +289,7 @@ pub fn verismo_defoffset_expand(input: proc_macro::TokenStream) -> proc_macro::T
                     }
 
                     open spec fn spec_update(&self, prev: &Self, params:  #update_field_param, ret: bool) -> bool {
-                        builtin::equal(*self, prev.#spec_set_fn(params.val))
+                        verus_builtin::equal(*self, prev.#spec_set_fn(params.val))
                     }
 
                     fn box_update(&'a mut self, params: #update_field_param) -> (ret: bool)
