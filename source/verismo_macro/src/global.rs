@@ -47,7 +47,7 @@ pub fn parse_global(
                     #[verifier(external_body)]
                     pub broadcast proof fn #axiom_ident()
                     ensures
-                        builtin::equal(#[trigger] #gspec::#ident().spec_vmem(),  #[trigger] #gspec::#addr_ident())
+                        verus_builtin::equal(#[trigger] #gspec::#ident().spec_vmem(),  #[trigger] #gspec::#addr_ident())
                     {}
 
                     #[verifier(inline)]
@@ -61,7 +61,7 @@ pub fn parse_global(
                     #[verifier(external_body)]
                     pub fn #ident() -> crate::verismo::data::VData<#ty>
                     {
-                        builtin::ensures(|ret: VData<#ty>|[builtin::equal(ret, #gspec::#ident())]);
+                        verus_builtin::ensures(|ret: VData<#ty>|[verus_builtin::equal(ret, #gspec::#ident())]);
                         let ret = unsafe {
                             &#ident as *const _ as u64
                         };
@@ -90,7 +90,7 @@ pub fn parse_global(
                         #[inline]
                         pub fn #ident() -> #vaddrty
                         {
-                            builtin::ensures(|ret: #vaddrty|[builtin::equal(ret.view(), #gspec::#ident().first())]);
+                            verus_builtin::ensures(|ret: #vaddrty|[verus_builtin::equal(ret.view(), #gspec::#ident().first())]);
                             let ret = unsafe {
                                 &#ident as *const _ as u64
                             };

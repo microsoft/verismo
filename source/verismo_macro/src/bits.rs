@@ -65,7 +65,7 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
             requires
                 val <= #field_max_val as #fty
             ensures
-                builtin::equal(ret.view(), self.view().#spec_setter(val))
+                verus_builtin::equal(ret.view(), self.view().#spec_setter(val))
             {
                 let mask = #set_mask as #fty;
                 let value = self.value();
@@ -75,7 +75,7 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
                 proof {
                     let actual_ret = ret.view();
                     let expected_ret = self.view().#spec_setter(val);
-                    assume(builtin::equal(actual_ret, expected_ret));
+                    assume(verus_builtin::equal(actual_ret, expected_ret));
                 }
                 ret
             }}
@@ -145,7 +145,7 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
             #[verifier(external_body)]
             pub broadcast proof fn axiom_new(val: #bitstruct)
             ensures
-                builtin::equal(#[trigger]Self::new(val.value), #[trigger]val.view())
+                verus_builtin::equal(#[trigger]Self::new(val.value), #[trigger]val.view())
             {}
 
             pub uninterp spec fn to_value(&self) -> #bitstruct;
@@ -153,7 +153,7 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
             #[verifier(external_body)]
             pub broadcast proof fn axiom_into(self)
             ensures
-                builtin::equal(#[trigger]self.to_value()@, self),
+                verus_builtin::equal(#[trigger]self.to_value()@, self),
             {}
             }
         }
@@ -170,7 +170,7 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
             #[verifier(external_body)]
             fn clone(&self) -> (ret: Self)
             ensures
-                builtin::equal(*self, ret),
+                verus_builtin::equal(*self, ret),
             {
                 #bitstruct { value: self.value }
             }
@@ -196,8 +196,8 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
             verus_impl! {
                 pub const fn new(val: #valuetype) -> (ret: Self)
                 ensures
-                    builtin::equal(ret, Self::spec_new(val)),
-                    builtin::equal(ret.view(), #specname::new(val)),
+                    verus_builtin::equal(ret, Self::spec_new(val)),
+                    verus_builtin::equal(ret.view(), #specname::new(val)),
                 {
                     let ret = #bitstruct { value: val };
                     proof {
@@ -212,12 +212,12 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
 
                 pub broadcast proof fn lemma_new_eq(self)
                 ensures
-                    builtin::equal(#[trigger] Self::spec_new(self.value), self)
+                    verus_builtin::equal(#[trigger] Self::spec_new(self.value), self)
                 {}
 
                 pub const fn empty() -> (ret: Self)
                 ensures
-                    builtin::equal(ret.view(), #specname::empty())
+                    verus_builtin::equal(ret.view(), #specname::empty())
                 {
                     let ret = #bitstruct { value: 0 };
                     proof{

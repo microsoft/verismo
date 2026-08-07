@@ -4,7 +4,7 @@
 //! syntax it is given (secure integer types and operators, the project's
 //! specification traits, the project's derives and the synthesized constantness
 //! contracts) and then delegates all standard Verus lowering to the upstream
-//! `builtin_macros::verus!` macro.
+//! `verus_builtin_macros::verus!` macro.
 mod syntax;
 
 use syntax::ContractMode;

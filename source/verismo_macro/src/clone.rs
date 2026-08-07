@@ -55,7 +55,7 @@ pub fn verismo_clone_expand(input: proc_macro::TokenStream) -> proc_macro::Token
             #[verifier(external_body)]
             fn clone(&self) -> (ret: Self)
             ensures
-                builtin::equal(ret, *self)
+                verus_builtin::equal(ret, *self)
             { #newstruct }
         }
     }

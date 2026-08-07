@@ -235,7 +235,7 @@ macro_rules! impl_typecast_trait_single {
         $(verus!{
             impl VTypeCast<$rt> for $lt {
                 open spec fn vspec_cast_to(self) -> $rt {
-                    builtin::spec_cast_integer::<$lt, $rt>(self)
+                    verus_builtin::spec_cast_integer::<$lt, $rt>(self)
                 }
             }
         }

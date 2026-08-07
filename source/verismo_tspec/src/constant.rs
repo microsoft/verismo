@@ -17,7 +17,7 @@ macro_rules! def_const_macro {
 macro_rules! macro_const_int {
     ($($(#[$attr:meta])* $vis:vis const $name:ident : $type:ty = $value:expr ;)+) => {
         $(
-            builtin_macros::verus!{
+            verus_builtin_macros::verus!{
             #[allow(unused_attributes)]
             $( #[$attr] )* $vis const $name : $type = $value;
             }
@@ -25,7 +25,7 @@ macro_rules! macro_const_int {
             $( #[$attr] )*
             macro_rules! $name {
                 () => {
-                    builtin::spec_cast_integer::<_, int>($value)
+                    verus_builtin::spec_cast_integer::<_, int>($value)
                 }
             }
         )+

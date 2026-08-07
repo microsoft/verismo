@@ -120,7 +120,7 @@ pub fn verismo_default_expand(input: proc_macro::TokenStream) -> proc_macro::Tok
             #[verifier(external_body)]
             fn default() -> (ret: Self)
             ensures
-                builtin::equal(ret, Self::spec_default()),
+                verus_builtin::equal(ret, Self::spec_default()),
                 ret.wf(),
             { #newstruct }
         }

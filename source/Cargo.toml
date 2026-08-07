@@ -13,18 +13,15 @@ members = [
 bitflags = "2.13"
 paste = "1.0"
 
-# Verus crates from crates.io.
-# `builtin` and `builtin_macros` are kept as the local crate names (via the
-# `package = ...` rename) so we don't have to touch the `use builtin::*;` /
-# `use builtin_macros::*;` statements scattered through the codebase.
-builtin = { package = "verus_builtin", version = "=0.0.0-2026-08-02-0125", default-features = false }
-builtin_macros = { package = "verus_builtin_macros", version = "=0.0.0-2026-08-02-0125", features = ["vpanic"], default-features = false }
+# Verus crates from crates.io, referred to by their published names.
+verus_builtin = { version = "=0.0.0-2026-08-02-0125", default-features = false }
+verus_builtin_macros = { version = "=0.0.0-2026-08-02-0125", features = ["vpanic"], default-features = false }
 verus_state_machines_macros = { version = "=0.0.0-2026-08-02-0125", default-features = false }
 vstd = { version = "=0.0.0-2026-08-02-0125", features = ["alloc", "allow_panic"], default-features = false }
 
 
 # `verus_syn` is used only by the project's own proc-macro crates
-# (`verismo_macro` and `verismo_verus`).
+# (`verismo_macro` and `verismo_sec_macro`).
 verus_syn = { version = "=0.0.0-2026-08-02-0125", features = ["full", "visit-mut", "extra-traits"] }
 
 # the profile used for `cargo build`

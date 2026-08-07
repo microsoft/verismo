@@ -5,7 +5,7 @@
 //! transformations that are specific to Verismo (secure integer types, secure
 //! operators, the project's specification traits, the project's derives and the
 //! synthesized constantness contracts), print the result as still-Verus syntax
-//! and hand it to the upstream `builtin_macros::verus!` macro, which performs
+//! and hand it to the upstream `verus_builtin_macros::verus!` macro, which performs
 //! all the standard Verus lowering.
 
 use proc_macro2::{Span, TokenStream};
@@ -338,7 +338,7 @@ impl Visitor {
             }
         }
 
-        posts.push(Expr::Verbatim(quote! {builtin::imply(#constant_pre, #constant_post)}));
+        posts.push(Expr::Verbatim(quote! {verus_builtin::imply(#constant_pre, #constant_post)}));
 
         if !pres.is_empty() {
             match &mut sig.spec.requires {
@@ -513,7 +513,7 @@ impl VisitMut for Visitor {
                                 // Defer the integer type to inference, or make it
                                 // a secure constant in executable code.
                                 *expr = if !use_sec_type {
-                                    quote_verbatim!(span, attrs => ::builtin::spec_literal_integer(#n))
+                                    quote_verbatim!(span, attrs => ::verus_builtin::spec_literal_integer(#n))
                                 } else {
                                     let lit =
                                         Expr::Lit(ExprLit { lit: Lit::Int(lit), attrs: vec![] });
@@ -522,7 +522,7 @@ impl VisitMut for Visitor {
                             }
                             InsideArith::Widen if n.starts_with('-') => {
                                 *expr = if !use_sec_type {
-                                    quote_verbatim! {span, attrs => (::builtin::spec_literal_int(#n)) }
+                                    quote_verbatim! {span, attrs => (::verus_builtin::spec_literal_int(#n)) }
                                 } else {
                                     let lit =
                                         Expr::Lit(ExprLit { lit: Lit::Int(lit), attrs: vec![] });
@@ -531,7 +531,7 @@ impl VisitMut for Visitor {
                             }
                             InsideArith::Widen => {
                                 *expr = if !use_sec_type {
-                                    quote_verbatim! {span, attrs => (::builtin::spec_literal_nat(#n)) }
+                                    quote_verbatim! {span, attrs => (::verus_builtin::spec_literal_nat(#n)) }
                                 } else {
                                     let lit =
                                         Expr::Lit(ExprLit { lit: Lit::Int(lit), attrs: vec![] });
@@ -551,12 +551,12 @@ impl VisitMut for Visitor {
                         }
                     } else if lit.suffix() == "int" {
                         *expr = if use_spec_traits {
-                            quote_verbatim! {span, attrs => (::builtin::spec_literal_int(#n)) }
+                            quote_verbatim! {span, attrs => (::verus_builtin::spec_literal_int(#n)) }
                         } else {
                             panic!("No int in exe")
                         };
                     } else if lit.suffix() == "nat" {
-                        *expr = quote_verbatim! {span, attrs => (::builtin::spec_literal_nat(#n))};
+                        *expr = quote_verbatim! {span, attrs => (::verus_builtin::spec_literal_nat(#n))};
                     } else if lit.suffix().ends_with("_s") {
                         let tmp = Expr::Lit(ExprLit {
                             lit: Lit::Int(LitInt::new(
@@ -740,7 +740,7 @@ impl VisitMut for Visitor {
                             }
                         }
                         BinOp::Add(..) | BinOp::Sub(..) | BinOp::Mul(..) => {
-                            *expr = quote_verbatim!(span, attrs => compile_error!("Inside bit-vector assertion, use `add` `sub` `mul` for fixed-bit operators, instead of `+` `-` `*`. (see the functions builtin::add(left, right), builtin::sub(left, right), and builtin::mul(left, right))"));
+                            *expr = quote_verbatim!(span, attrs => compile_error!("Inside bit-vector assertion, use `add` `sub` `mul` for fixed-bit operators, instead of `+` `-` `*`. (see the functions verus_builtin::add(left, right), verus_builtin::sub(left, right), and verus_builtin::mul(left, right))"));
                         }
                         BinOp::Div(..) => {
                             if use_spec_traits {
@@ -1052,7 +1052,7 @@ pub(crate) fn rewrite_items(
     let stream = proc_macro::TokenStream::from(verus_syn::rejoin_tokens(stream.into()));
     let items: Items = parse_macro_input!(stream as Items);
     let new_stream = transform_parsed_items(items.items, contract);
-    proc_macro::TokenStream::from(quote! { ::builtin_macros::verus! { #new_stream } })
+    proc_macro::TokenStream::from(quote! { ::verus_builtin_macros::verus! { #new_stream } })
 }
 
 #[cfg(test)]
@@ -1094,7 +1094,7 @@ mod tests {
     }
 
     const IMPLICATION: &str =
-        "builtin::imply(true&&((a)).is_constant()&&((b)).is_constant(),true&&((ret)).is_constant())";
+        "verus_builtin::imply(true&&((a)).is_constant()&&((b)).is_constant(),true&&((ret)).is_constant())";
 
     #[test]
     fn contract_none_synthesizes_no_constantness() {

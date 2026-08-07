@@ -793,8 +793,8 @@ impl BuddyAllocator {
                             },
                     );
                     assert forall|j1: (nat, nat), j2: (nat, nat)|
-                        !builtin::spec_eq(j1, j2) && key_map.dom().contains(j1)
-                            && key_map.dom().contains(j2) implies !builtin::spec_eq(
+                        !verus_builtin::spec_eq(j1, j2) && key_map.dom().contains(j1)
+                            && key_map.dom().contains(j2) implies !verus_builtin::spec_eq(
                         #[trigger] key_map.index(j1),
                         #[trigger] key_map.index(j2),
                     ) by {

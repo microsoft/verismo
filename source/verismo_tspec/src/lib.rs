@@ -41,10 +41,9 @@ mod stream;
 mod vec_spec;
 mod wellformed;
 
-//use builtin::*;
+//use verus_builtin::*;
 pub use alloc::string::String;
 
-pub use builtin_macros::*;
 pub use cast::*;
 pub use default::*;
 pub use fmap::FMap;
@@ -61,7 +60,8 @@ pub use size_s::*;
 pub use stream::basic::*;
 pub use stream::{Byte, ByteStream, Stream, *};
 pub use verismo_macro::*;
-pub use verismo_verus::*;
+pub use verismo_sec_macro::*;
+pub use verus_builtin_macros::*;
 pub use vstd::pervasive::{affirm, arbitrary, proof_from_false, spec_affirm, unreached};
 pub use vstd::prelude::*;
 pub use vstd::slice::SliceAdditionalSpecFns;

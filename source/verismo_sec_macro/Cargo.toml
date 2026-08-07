@@ -1,5 +1,5 @@
 [package]
-name = "verismo_verus"
+name = "verismo_sec_macro"
 version = "0.1.0"
 edition = "2021"
 
