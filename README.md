@@ -62,6 +62,31 @@ tools/install_verus
 ```
 Pass `--verus-dir PATH` (optionally with `--verus-rev REV`) to build Verus from a source checkout instead, or `--force` to reinstall when the expected version is already present. Run `tools/install_verus --help` for full usage.
 
+### Updating Verus
+
+`tools/bump_verus.sh` updates the pinned Verus version. It moves the five
+crates.io pins in `source/Cargo.toml` and `VERUS_VERSION`,
+`DEFAULT_VERUS_REV`, and `VERUS_RUST_VERSION` in `tools/install_verus`
+together, choosing the newest version published both as all five crates on
+crates.io and as a non-rolling Verus release.
+
+```bash
+./tools/bump_verus.sh --check          # report the target, change nothing
+./tools/bump_verus.sh                  # bump to the newest version
+./tools/bump_verus.sh --to 2026-07-27  # bump to a specific release date
+```
+
+Exit code `3` means Verus is already at the target version and nothing changed.
+
+The `.github/workflows/verus-bump.md` agentic workflow runs this monthly. When
+an update is available, it installs the new toolchain, runs verification, and
+lets an AI agent attempt proof-preserving repairs if verification breaks. Any
+pull request it opens is a draft; review it carefully, especially any proof
+changes. If there is no new version, it stops before invoking the agent.
+GitHub Actions executes the generated `.github/workflows/verus-bump.lock.yml`,
+not the markdown, so after editing the `.md` regenerate it with
+`gh aw compile verus-bump`.
+
 ## 2. Install build tools 🧰
 Then, build verus-rustc (replacing rustc) and igvm tools and dependencies.
 ```
