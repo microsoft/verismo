@@ -71,6 +71,8 @@ pub proof fn proof_align_down(val: nat, align: nat) -> (ret: (u64, u64, u64))
         requires
             bits < 64,
     ;
+    // Required to rewrite `val - val % align` as `val / align * align`.
+    proof_div_mod_rel(val as int, align as int);
     (mask, bits, ret as u64)
 }
 
