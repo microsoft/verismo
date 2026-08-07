@@ -2,6 +2,27 @@
 
 This repo includes the code for VeriSMo project.
 
+## Reference
+
+For more background, see [*VeriSMo: A Verified Security Module for Confidential VMs*](https://www.usenix.org/system/files/osdi24-zhou.pdf), OSDI 2024.
+
+To cite this paper, use the following BibTeX entry:
+
+```bibtex
+@inproceedings{zhou2024verismo,
+author = {Ziqiao Zhou and Anjali and Weiteng Chen and Sishuai Gong and Chris Hawblitzel and Weidong Cui},
+title = {{VeriSMo}: A Verified Security Module for Confidential {VMs}},
+booktitle = {18th USENIX Symposium on Operating Systems Design and Implementation (OSDI 24)},
+year = {2024},
+isbn = {978-1-939133-40-3},
+address = {Santa Clara, CA},
+pages = {599--614},
+url = {https://www.usenix.org/conference/osdi24/presentation/zhou},
+publisher = {USENIX Association},
+month = jul
+}
+```
+
 # 📰 News
 
 * **mid-2026 — Copilot-assisted refresh**: verismo now builds and verifies against the latest Verus toolchain.
