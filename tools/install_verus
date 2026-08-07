@@ -13,9 +13,9 @@ set -euo pipefail
 trap 'echo "Error at line $LINENO: $BASH_COMMAND" >&2' ERR
 
 # Verus release version and commit hash
-VERUS_VERSION=0.2026.07.27.31579f0
+VERUS_VERSION=0.2026.08.02.b677dd5
 VERUS_RELEASE_TAG=release/$VERUS_VERSION
-DEFAULT_VERUS_REV=31579f0b8542a8a9ae4ae5604c16107ccde23ef2
+DEFAULT_VERUS_REV=b677dd5a766f25f56e9aa1e32621aa4e53304b47
 VERUS_RUST_VERSION=1.97.1
 
 # Verusfmt version
