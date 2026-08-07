@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn_verus::{parse_macro_input, Data, DeriveInput, ExprLit, Lit};
+use verus_syn::{parse_macro_input, Data, DeriveInput, ExprLit, Lit};
 
 pub fn verismo_enum_int_expand(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -19,7 +19,7 @@ pub fn verismo_enum_int_expand(input: TokenStream) -> TokenStream {
                     Some(discriminant) => {
                         let expr = &discriminant.1;
                         let default_lit =
-                            if let syn_verus::Expr::Lit(ExprLit { lit: Lit::Int(l), attrs: _ }) =
+                            if let verus_syn::Expr::Lit(ExprLit { lit: Lit::Int(l), attrs: _ }) =
                                 expr
                             {
                                 l

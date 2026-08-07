@@ -1,5 +1,5 @@
 use quote::quote;
-use syn_verus::{parse_macro_input, Data, DeriveInput, Lit, LitInt};
+use verus_syn::{parse_macro_input, Data, DeriveInput, Lit, LitInt};
 
 pub fn verismo_clone_expand(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     //let strinput = input.to_string();

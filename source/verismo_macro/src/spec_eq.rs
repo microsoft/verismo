@@ -1,5 +1,5 @@
 use quote::quote;
-use syn_verus::{parse_macro_input, Data, DeriveInput, Ident};
+use verus_syn::{parse_macro_input, Data, DeriveInput, Ident};
 
 use crate::def::{
     add_bound_to_generic_with_self, field_name_ty, gen_field_calls, generic_mod,

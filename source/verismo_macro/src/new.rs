@@ -1,5 +1,5 @@
 use quote::quote;
-use syn_verus::{Data, DeriveInput};
+use verus_syn::{Data, DeriveInput};
 
 use crate::def::{field_name_ty, get_field};
 

@@ -1,16 +1,17 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn_verus::spanned::Spanned;
-use syn_verus::{parse_macro_input, AttributeArgs, Ident, Lit, NestedMeta};
+use verus_syn::punctuated::Punctuated;
+use verus_syn::spanned::Spanned;
+use verus_syn::{parse_macro_input, Ident, Lit, Meta, Token};
 
 use crate::def::field_name_ty;
 
 pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(item as syn_verus::Item);
+    let input = parse_macro_input!(item as verus_syn::Item);
     let mut fields_stream = quote! {};
-    let args = parse_macro_input!(attr as AttributeArgs);
+    let args = parse_macro_input!(attr with Punctuated::<Meta, Token![,]>::parse_terminated);
     let s = match &input {
-        syn_verus::Item::Struct(s) => s,
+        verus_syn::Item::Struct(s) => s,
         _ => todo!(),
     };
     if args.len() < 2 {
@@ -18,8 +19,6 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
     let bitstruct = &args[0];
     let valuetype = &args[1];
-    //println!("{} : {}\n", quote! {#bitstruct}, quote! {#valuetype});
-    //let bitstruct = Ident::new(&attr.to_string(), s.span());
     let specname = &s.ident;
     let mut specfields = quote! {arbitrary::<#specname>()};
     let mut emptyspec = quote! {arbitrary::<#specname>()};
@@ -36,25 +35,20 @@ pub fn parse_bit_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         let mut bit_start: u64 = 0;
         let mut bit_last: u64 = 0;
         for attr in &field.attrs {
-            let name = attr.path.get_ident();
+            let name = attr.path().get_ident();
             if name.unwrap().to_string() == "vbits" {
-                //bit_start = attr.path.segments[1];
-                //bit_last = attr.path.segments[2];
-                if let Result::Ok(meta) = attr.parse_meta() {
-                    match meta {
-                        syn_verus::Meta::Path(_) => todo!(),
-                        syn_verus::Meta::List(metalist) => {
-                            if let NestedMeta::Lit(Lit::Int(litint)) = &metalist.nested[0] {
-                                bit_start = litint.base10_parse::<u64>().unwrap();
-                                bit_last = bit_start;
-                            }
-                            if metalist.nested.len() >= 2 {
-                                if let NestedMeta::Lit(Lit::Int(litint)) = &metalist.nested[1] {
-                                    bit_last = litint.base10_parse::<u64>().unwrap();
-                                }
-                            }
+                if let Meta::List(metalist) = &attr.meta {
+                    let nested = metalist
+                        .parse_args_with(Punctuated::<Lit, Token![,]>::parse_terminated)
+                        .expect("failed to parse #[vbits(..)] arguments");
+                    if let Some(Lit::Int(litint)) = nested.first() {
+                        bit_start = litint.base10_parse::<u64>().unwrap();
+                        bit_last = bit_start;
+                    }
+                    if nested.len() >= 2 {
+                        if let Lit::Int(litint) = &nested[1] {
+                            bit_last = litint.base10_parse::<u64>().unwrap();
                         }
-                        syn_verus::Meta::NameValue(_) => todo!(),
                     }
                 }
             }

@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn_verus::{parse_macro_input, Data, DeriveInput, Expr, Fields, Ident, Type};
+use verus_syn::{parse_macro_input, Data, DeriveInput, Expr, Fields, Ident, Type};
 
 struct ParsedArgs {
     global_ident: Ident,
@@ -8,16 +8,14 @@ struct ParsedArgs {
     invfn: Expr,
 }
 
-impl syn_verus::parse::Parse for ParsedArgs {
-    fn parse(input: syn_verus::parse::ParseStream) -> syn_verus::Result<Self> {
-        let content;
-        syn_verus::parenthesized!(content in input);
-        let global_ident = content.parse::<Ident>()?;
-        content.parse::<syn_verus::Token![,]>()?;
-        let type_ident = content.parse::<Type>()?;
-        content.parse::<syn_verus::Token![,]>()?;
-        let initfn_tokens: proc_macro2::TokenStream = content.parse()?;
-        let invfn = syn_verus::parse2(initfn_tokens)?;
+impl verus_syn::parse::Parse for ParsedArgs {
+    fn parse(input: verus_syn::parse::ParseStream) -> verus_syn::Result<Self> {
+        let global_ident = input.parse::<Ident>()?;
+        input.parse::<verus_syn::Token![,]>()?;
+        let type_ident = input.parse::<Type>()?;
+        input.parse::<verus_syn::Token![,]>()?;
+        let initfn_tokens: proc_macro2::TokenStream = input.parse()?;
+        let invfn = verus_syn::parse2(initfn_tokens)?;
         Ok(ParsedArgs { global_ident, type_ident, invfn })
     }
 }
@@ -37,11 +35,14 @@ pub fn gen_shared_globals(input: TokenStream) -> TokenStream {
                 let tname_attr = variant
                     .attrs
                     .iter()
-                    .find(|attr| attr.path.is_ident("tname"))
+                    .find(|attr| attr.path().is_ident("tname"))
                     .expect("Expected #[tname(..)] attribute");
-                let args: proc_macro2::TokenStream = tname_attr.tokens.clone().into();
+                let args: proc_macro2::TokenStream = match &tname_attr.meta {
+                    verus_syn::Meta::List(list) => list.tokens.clone(),
+                    _ => panic!("Expected #[tname(..)] attribute"),
+                };
                 let parsed_args: ParsedArgs =
-                    syn_verus::parse2(args).expect("Failed to parse tname arguments");
+                    verus_syn::parse2(args).expect("Failed to parse tname arguments");
                 let global_ident = &parsed_args.global_ident;
                 let type_ident = &parsed_args.type_ident;
                 let invfn = &parsed_args.invfn;

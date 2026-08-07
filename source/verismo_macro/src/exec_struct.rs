@@ -1,7 +1,7 @@
 use proc_macro;
 use quote::quote;
 use quote::spanned::Spanned;
-use syn_verus::{parse_macro_input, Data, DeriveInput};
+use verus_syn::{parse_macro_input, Data, DeriveInput};
 
 fn add_empty_trait(input: &DeriveInput, trt: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
     // Used in the quasi-quotation below as `#name`.

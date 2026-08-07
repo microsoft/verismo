@@ -1,7 +1,7 @@
 use proc_macro::TokenStream;
 use proc_macro2::Span;
 use quote::quote;
-use syn_verus::{parse_macro_input, Data, DeriveInput, Type, Visibility};
+use verus_syn::{parse_macro_input, Data, DeriveInput, Type, Visibility};
 
 use crate::def::{field_name_ty, get_field};
 
