@@ -11,7 +11,7 @@ vstd = { workspace = true, features = ["alloc", "allow_panic"], default-features
 
 # Local macros & helpers
 verismo_macro = { path = "../verismo_macro" }
-verismo_verus = { path = "../verismo_verus" }
+verismo_sec_macro = { path = "../verismo_sec_macro" }
 vops = { path = "../vops" }
 paste = "1.0"
 seq-macro = "0.3"

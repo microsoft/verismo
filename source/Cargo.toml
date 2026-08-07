@@ -21,7 +21,7 @@ vstd = { version = "=0.0.0-2026-08-02-0125", features = ["alloc", "allow_panic"]
 
 
 # `verus_syn` is used only by the project's own proc-macro crates
-# (`verismo_macro` and `verismo_verus`).
+# (`verismo_macro` and `verismo_sec_macro`).
 verus_syn = { version = "=0.0.0-2026-08-02-0125", features = ["full", "visit-mut", "extra-traits"] }
 
 # the profile used for `cargo build`
