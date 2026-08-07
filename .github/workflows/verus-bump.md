@@ -101,9 +101,9 @@ explain what you did.
 ## How to repair a broken proof
 
 A Verus upgrade may break the existing proofs due to different reasons, for example:
-1. flaky proofs: the statement is still true but the proof misses some facts (e.g., lemmas or triggers) explicitly;
+1. need extra proof for z3 solver: the statement is still true but the proof misses some facts (e.g., asserts, lemmas or triggers) explicitly;
 2. vstd API changes.
-3. wrong proofs: very low likely.
+3. wrong spec: very low likely.
 
 Prioritize to fix proofs by considering case 1 and 2. Only try case 3 to fix
 proof by modifying the spec statement if you can figure out a counterexample.
