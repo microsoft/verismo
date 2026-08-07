@@ -51,6 +51,99 @@ write_file() {
     rm -f "$tmp"
 }
 
+require_commands() {
+    local cmd
+    for cmd in "$@"; do
+        command -v "$cmd" > /dev/null 2>&1 || die "required command not found: $cmd"
+    done
+}
+
+# Non-yanked 0.0.0-dated versions of one crate, e.g. 0.0.0-2026-08-02-0125.
+crates_io_versions() {
+    local crate=$1
+    curl -sS --fail \
+        -H 'User-Agent: verismo-verus-bump (https://github.com/microsoft/verismo)' \
+        "https://crates.io/api/v1/crates/$crate/versions" \
+        | jq -r '.versions[] | select(.yanked | not) | .num | select(startswith("0.0.0-2"))' \
+        | sort -u
+}
+
+# Versions published for every crate in VERUS_CRATES, newest first.
+common_crates_io_versions() {
+    local acc="" crate versions
+    for crate in "${VERUS_CRATES[@]}"; do
+        versions=$(crates_io_versions "$crate")
+        [ -n "$versions" ] || die "no dated versions found on crates.io for $crate"
+        if [ -z "$acc" ]; then
+            acc=$versions
+        else
+            acc=$(comm -12 <(printf '%s\n' "$acc") <(printf '%s\n' "$versions"))
+        fi
+    done
+    printf '%s\n' "$acc" | sort -r
+}
+
+# Non-rolling Verus release versions, e.g. 0.2026.08.02.b677dd5.
+verus_release_versions() {
+    gh api "repos/$VERUS_REPO/releases" --paginate \
+        -q '.[] | select(.prerelease | not) | .tag_name' \
+        | sed -n 's|^release/||p' \
+        | grep -v '/'
+}
+
+# 0.0.0-2026-08-02-0125 -> 2026-08-02
+crates_version_date() {
+    printf '%s\n' "${1#0.0.0-}" | cut -d- -f1-3
+}
+
+# 0.2026.08.02.b677dd5 -> 2026-08-02
+release_version_date() {
+    printf '%s\n' "$1" | cut -d. -f2-4 | tr '.' '-'
+}
+
+# Print "DATE CRATES_VERSION VERUS_VERSION" for the newest date published both
+# as all five crates and as a non-rolling release. With an argument, use that
+# date instead of the newest.
+discover_target() {
+    local wanted_date=${1:-}
+    local releases crates_version release_version date
+
+    releases=$(verus_release_versions)
+    [ -n "$releases" ] || die "no Verus releases found"
+
+    while read -r crates_version; do
+        [ -n "$crates_version" ] || continue
+        date=$(crates_version_date "$crates_version")
+        if [ -n "$wanted_date" ] && [ "$date" != "$wanted_date" ]; then
+            continue
+        fi
+        while read -r release_version; do
+            [ -n "$release_version" ] || continue
+            if [ "$(release_version_date "$release_version")" = "$date" ]; then
+                printf '%s %s %s\n' "$date" "$crates_version" "$release_version"
+                return 0
+            fi
+        done <<< "$releases"
+    done <<< "$(common_crates_io_versions)"
+
+    if [ -n "$wanted_date" ]; then
+        die "no Verus release and crates.io publish found for date $wanted_date"
+    fi
+    die "no date is published both on crates.io and as a Verus release"
+}
+
+# Full 40-character commit SHA for a release's short SHA.
+resolve_verus_rev() {
+    gh api "repos/$VERUS_REPO/commits/$1" -q '.sha'
+}
+
+# The Rust toolchain that revision of Verus requires.
+resolve_rust_version() {
+    gh api "repos/$VERUS_REPO/contents/rust-toolchain.toml?ref=$1" \
+        -H 'Accept: application/vnd.github.raw' \
+        | sed -n 's/^channel *= *"\(.*\)"/\1/p'
+}
+
 # apply_versions ROOT CRATES_VERSION VERUS_VERSION VERUS_REV RUST_VERSION
 #
 # Rewrites the five crates.io pins in source/Cargo.toml and the three pinned
