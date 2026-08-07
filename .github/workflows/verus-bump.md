@@ -152,7 +152,8 @@ The body must contain:
 - any notable upstream change that explains breakage — check the Verus commit
   log between the two revisions for toolchain or Z3 upgrades, which you can
   read with
-  `gh api repos/verus-lang/verus/compare/<old-rev>...<new-rev> --jq '.commits[].commit.message'`;
+  `curl -sS https://api.github.com/repos/verus-lang/verus/compare/<old-rev>...<new-rev>`
+  (or the GitHub tools available to you);
 - for each proof you repaired: which proof, why it broke, and what you added;
 - a clearly marked **"Still failing"** section listing anything unresolved,
   with the error output. Omit this section only if verification is clean.
