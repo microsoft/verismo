@@ -100,23 +100,13 @@ explain what you did.
 
 ## How to repair a broken proof
 
-A Verus upgrade can change the bundled Z3 or the encoding, so a proof that
-relied on the solver inferring something may stop verifying even though the
-statement is still true. The fix is to state the missing fact explicitly.
+A Verus upgrade may break the existing proofs due to different reasons, for example:
+1. flaky proofs: the statement is still true but the proof misses some facts (e.g., lemmas or triggers) explicitly;
+2. vstd API changes.
+3. wrong proofs: very low likely.
 
-For example, the 2026-08-02 bump upgraded Z3 from 4.12.5 to 4.16.0 and
-`proof_align_down` stopped verifying, because it had relied on the solver
-deriving `val - val % align == val / align * align` unaided. The repair was a
-single line naming the existing lemma:
-
-```rust
-// Required to rewrite `val - val % align` as `val / align * align`.
-proof_div_mod_rel(val as int, align as int);
-```
-
-Prefer that shape of fix: call an existing lemma, add an `assert ... by (...)`,
-or supply an explicit witness. Look in `source/verismo_tspec/src/math/` for
-lemmas that already state the fact you need.
+Prioritize to fix proofs by considering case 1 and 2. Only try case 3 to fix
+proof by modifying the spec statement if you can figure out a counterexample.
 
 ## Rules you must not break
 
@@ -135,6 +125,14 @@ You must **never**:
 
 Only add proof steps that help the solver establish the **existing**
 specification.
+
+The one exception is case 3 above. You may change a specification **only** if
+you can state a concrete counterexample showing the existing specification is
+actually wrong. If you do, you must give that counterexample in the pull
+request under a heading **"Specification changed"**, along with the old and new
+statements. A specification change without a counterexample is never
+acceptable — if you merely suspect a specification is wrong, leave the proof
+failing and say so instead.
 
 If you cannot repair a failure within these rules, **leave it failing** and
 document it in the pull request. That is a good outcome.
@@ -155,6 +153,8 @@ The body must contain:
   `curl -sS https://api.github.com/repos/verus-lang/verus/compare/<old-rev>...<new-rev>`
   (or the GitHub tools available to you);
 - for each proof you repaired: which proof, why it broke, and what you added;
+- a **"Specification changed"** section if you changed any specification, with
+  the counterexample that justified it;
 - a clearly marked **"Still failing"** section listing anything unresolved,
   with the error output. Omit this section only if verification is clean.
 
