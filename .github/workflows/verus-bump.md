@@ -2,6 +2,9 @@
 description: Monthly bump of the pinned Verus version, repairing any proof breakage it causes.
 
 "on":
+  push:
+    branches:
+      - verus-monthly-bump
   schedule:
     - cron: "0 6 1 * *"
   workflow_dispatch:

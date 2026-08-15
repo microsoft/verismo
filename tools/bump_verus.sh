@@ -5,28 +5,26 @@
 #
 # Bump the pinned Verus version.
 #
-# Verus is pinned in two places that must move together: the five crates.io
-# pins in source/Cargo.toml, and VERUS_VERSION / DEFAULT_VERUS_REV /
-# VERUS_RUST_VERSION in tools/install_verus. This script finds the newest
-# version published both as all five crates on crates.io and as a non-rolling
-# Verus release, then rewrites both locations.
+# Verus is pinned in two places: the five crates.io pins in source/Cargo.toml,
+# and VERUS_VERSION / DEFAULT_VERUS_REV / VERUS_RUST_VERSION in
+# tools/install_verus. This script selects the newest eligible publication for
+# each crate independently and the newest stable, non-rolling Verus release.
 #
 # Usage:
-#   ./bump_verus.sh                  Bump to the newest common version.
-#   ./bump_verus.sh --check          Report the target; change nothing.
-#   ./bump_verus.sh --to 2026-07-27  Bump to a specific release date.
+#   ./bump_verus.sh                  Bump to the newest versions.
+#   ./bump_verus.sh --check          Report the targets; change nothing.
+#   ./bump_verus.sh --to 2026-07-27  Select versions no later than this date.
 #
 # Exit codes:
 #   0  Files were updated (or, with --check, an update is available).
-#   3  Already at the newest common version; nothing changed.
+#   3  Already at the selected versions; nothing changed.
 #   1  Error.
 
 set -euo pipefail
 
 VERUS_REPO=verus-lang/verus
 
-# All five must publish a version before that date is a valid target; some
-# dates are published for vstd but not for verus_builtin or verus_syn.
+# Each crate selects its newest eligible dated publication independently.
 VERUS_CRATES=(
     vstd
     verus_builtin
@@ -65,22 +63,7 @@ crates_io_versions() {
         -H 'User-Agent: verismo-verus-bump (https://github.com/microsoft/verismo)' \
         "https://crates.io/api/v1/crates/$crate/versions" \
         | jq -r '.versions[] | select(.yanked | not) | .num | select(startswith("0.0.0-2"))' \
-        | sort -u
-}
-
-# Versions published for every crate in VERUS_CRATES, newest first.
-common_crates_io_versions() {
-    local acc="" crate versions
-    for crate in "${VERUS_CRATES[@]}"; do
-        versions=$(crates_io_versions "$crate")
-        [ -n "$versions" ] || die "no dated versions found on crates.io for $crate"
-        if [ -z "$acc" ]; then
-            acc=$versions
-        else
-            acc=$(comm -12 <(printf '%s\n' "$acc") <(printf '%s\n' "$versions"))
-        fi
-    done
-    printf '%s\n' "$acc" | sort -r
+        | sort -ru
 }
 
 # Non-rolling Verus release versions, e.g. 0.2026.08.02.b677dd5.
@@ -88,7 +71,7 @@ verus_release_versions() {
     gh api "repos/$VERUS_REPO/releases" --paginate \
         -q '.[] | select(.prerelease | not) | .tag_name' \
         | sed -n 's|^release/||p' \
-        | grep -v '/'
+        | { grep -v '/' || [ $? -eq 1 ]; }
 }
 
 # 0.0.0-2026-08-02-0125 -> 2026-08-02
@@ -101,35 +84,72 @@ release_version_date() {
     printf '%s\n' "$1" | cut -d. -f2-4 | tr '.' '-'
 }
 
-# Print "DATE CRATES_VERSION VERUS_VERSION" for the newest date published both
-# as all five crates and as a non-rolling release. With an argument, use that
-# date instead of the newest.
-discover_target() {
-    local wanted_date=${1:-}
-    local releases crates_version release_version date
+# Return success when DATE is no later than CUTOFF. An empty cutoff accepts all
+# dates.
+date_is_at_or_before() {
+    local date=$1 cutoff=${2:-}
+    [ -z "$cutoff" ] || [ "$date" = "$cutoff" ] || [[ "$date" < "$cutoff" ]]
+}
 
-    releases=$(verus_release_versions)
-    [ -n "$releases" ] || die "no Verus releases found"
+# Newest non-yanked dated publication for one crate, optionally at or before
+# an inclusive cutoff.
+latest_crate_version() {
+    local crate=$1 cutoff=${2:-}
+    local version date versions
 
-    while read -r crates_version; do
-        [ -n "$crates_version" ] || continue
-        date=$(crates_version_date "$crates_version")
-        if [ -n "$wanted_date" ] && [ "$date" != "$wanted_date" ]; then
-            continue
+    versions=$(crates_io_versions "$crate" | sort -ru)
+    [ -n "$versions" ] || die "no non-yanked dated version found for $crate"
+
+    while read -r version; do
+        [ -n "$version" ] || continue
+        date=$(crates_version_date "$version")
+        if date_is_at_or_before "$date" "$cutoff"; then
+            printf '%s\n' "$version"
+            return 0
         fi
-        while read -r release_version; do
-            [ -n "$release_version" ] || continue
-            if [ "$(release_version_date "$release_version")" = "$date" ]; then
-                printf '%s %s %s\n' "$date" "$crates_version" "$release_version"
-                return 0
-            fi
-        done <<< "$releases"
-    done <<< "$(common_crates_io_versions)"
+    done <<< "$versions"
 
-    if [ -n "$wanted_date" ]; then
-        die "no Verus release and crates.io publish found for date $wanted_date"
+    if [ -n "$cutoff" ]; then
+        die "no non-yanked $crate version found on or before $cutoff"
     fi
-    die "no date is published both on crates.io and as a Verus release"
+    die "no non-yanked dated version found for $crate"
+}
+
+# Newest stable, non-rolling Verus release, optionally at or before an
+# inclusive cutoff.
+latest_verus_release() {
+    local cutoff=${1:-}
+    local version date versions
+
+    versions=$(verus_release_versions | sort -ru)
+    [ -n "$versions" ] || die "no stable Verus releases found"
+
+    while read -r version; do
+        [ -n "$version" ] || continue
+        date=$(release_version_date "$version")
+        if date_is_at_or_before "$date" "$cutoff"; then
+            printf '%s\n' "$version"
+            return 0
+        fi
+    done <<< "$versions"
+
+    if [ -n "$cutoff" ]; then
+        die "no stable Verus release found at or before $cutoff"
+    fi
+    die "no stable Verus releases found"
+}
+
+# Print independently selected name=version targets in stable order.
+discover_targets() {
+    local cutoff=${1:-}
+    local crate version
+
+    for crate in "${VERUS_CRATES[@]}"; do
+        version=$(latest_crate_version "$crate" "$cutoff")
+        printf '%s=%s\n' "$crate" "$version"
+    done
+    version=$(latest_verus_release "$cutoff")
+    printf 'VERUS_VERSION=%s\n' "$version"
 }
 
 # Full 40-character commit SHA for a release's short SHA.
@@ -144,45 +164,99 @@ resolve_rust_version() {
         | sed -n 's/^channel *= *"\(.*\)"/\1/p'
 }
 
-# apply_versions ROOT CRATES_VERSION VERUS_VERSION VERUS_REV RUST_VERSION
+# apply_versions ROOT VERUS_VERSION VERUS_REV RUST_VERSION CRATE=VERSION...
 #
 # Rewrites the five crates.io pins in source/Cargo.toml and the three pinned
 # variables in tools/install_verus. Asserts afterwards that every expected
 # substitution landed, so a changed file format fails loudly instead of
 # silently producing a half-updated tree.
 apply_versions() {
-    local root=$1 crates_version=$2 verus_version=$3 verus_rev=$4 rust_version=$5
+    local root=$1 verus_version=$2 verus_rev=$3 rust_version=$4
     local cargo="$root/source/Cargo.toml"
     local install="$root/tools/install_verus"
-    local tmp
+    local assignment crate version count tmp next_tmp install_tmp actual n
+    local known variable expected
+
+    shift 4
+    [ "$#" -eq "${#VERUS_CRATES[@]}" ] \
+        || die "expected ${#VERUS_CRATES[@]} crate assignments, got $#"
+
+    for assignment in "$@"; do
+        case "$assignment" in
+            *=*) ;;
+            *) die "invalid crate assignment: $assignment (expected CRATE=VERSION)" ;;
+        esac
+        crate=${assignment%%=*}
+        version=${assignment#*=}
+        known=0
+        for expected in "${VERUS_CRATES[@]}"; do
+            [ "$crate" = "$expected" ] && known=1
+        done
+        [ "$known" -eq 1 ] || die "unknown crate assignment: $crate"
+        case "$version" in
+            0.0.0-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-[0-9][0-9][0-9][0-9]) ;;
+            *) die "invalid version for $crate: $version (expected 0.0.0-YYYY-MM-DD-NNNN)" ;;
+        esac
+    done
 
     [ -f "$cargo" ] || die "not found: $cargo"
     [ -f "$install" ] || die "not found: $install"
 
-    tmp=$(mktemp)
-    sed -E "s/(version = \")=0\.0\.0-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}(\")/\1=${crates_version}\2/" \
-        "$cargo" > "$tmp"
-    write_file "$cargo" "$tmp"
+    for crate in "${VERUS_CRATES[@]}"; do
+        count=0
+        for assignment in "$@"; do
+            [ "${assignment%%=*}" = "$crate" ] && count=$((count + 1))
+        done
+        [ "$count" -eq 1 ] \
+            || die "expected exactly one $crate assignment, got $count"
+    done
 
     tmp=$(mktemp)
+    cat "$cargo" > "$tmp"
+    for assignment in "$@"; do
+        crate=${assignment%%=*}
+        version=${assignment#*=}
+        next_tmp=$(mktemp)
+        sed -E \
+            "s|^(${crate}[[:space:]]*=[[:space:]]*\\{[[:space:]]*version[[:space:]]*=[[:space:]]*\")=0\\.0\\.0-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}(\")|\\1=${version}\\2|" \
+            "$tmp" > "$next_tmp"
+        rm -f "$tmp"
+        tmp=$next_tmp
+    done
+
+    install_tmp=$(mktemp)
     sed -E \
         -e "s|^VERUS_VERSION=.*|VERUS_VERSION=${verus_version}|" \
         -e "s|^DEFAULT_VERUS_REV=.*|DEFAULT_VERUS_REV=${verus_rev}|" \
         -e "s|^VERUS_RUST_VERSION=.*|VERUS_RUST_VERSION=${rust_version}|" \
-        "$install" > "$tmp"
-    write_file "$install" "$tmp"
+        "$install" > "$install_tmp"
 
-    local n
-    n=$(grep -c "\"=${crates_version}\"" "$cargo" || true)
-    [ "$n" -eq "${#VERUS_CRATES[@]}" ] \
-        || die "expected ${#VERUS_CRATES[@]} pins in $cargo, updated $n"
+    for assignment in "$@"; do
+        crate=${assignment%%=*}
+        version=${assignment#*=}
+        n=$(grep -Ec "^${crate}[[:space:]]*=" "$tmp" || true)
+        [ "$n" -eq 1 ] \
+            || die "expected exactly one $crate pin in $cargo, found $n"
+        actual=$(sed -nE \
+            "s|^${crate}[[:space:]]*=[[:space:]]*\\{[[:space:]]*version[[:space:]]*=[[:space:]]*\"=([^\"]+)\".*|\\1|p" \
+            "$tmp")
+        [ "$actual" = "$version" ] \
+            || die "failed to update $crate in $cargo"
+    done
 
-    grep -q "^VERUS_VERSION=${verus_version}$" "$install" \
-        || die "failed to update VERUS_VERSION in $install"
-    grep -q "^DEFAULT_VERUS_REV=${verus_rev}$" "$install" \
-        || die "failed to update DEFAULT_VERUS_REV in $install"
-    grep -q "^VERUS_RUST_VERSION=${rust_version}$" "$install" \
-        || die "failed to update VERUS_RUST_VERSION in $install"
+    for variable in VERUS_VERSION DEFAULT_VERUS_REV VERUS_RUST_VERSION; do
+        case "$variable" in
+            VERUS_VERSION) expected=$verus_version ;;
+            DEFAULT_VERUS_REV) expected=$verus_rev ;;
+            VERUS_RUST_VERSION) expected=$rust_version ;;
+        esac
+        n=$(grep -Fxc "${variable}=${expected}" "$install_tmp" || true)
+        [ "$n" -eq 1 ] \
+            || die "expected exactly one $variable assignment in $install, found $n"
+    done
+
+    write_file "$cargo" "$tmp"
+    write_file "$install" "$install_tmp"
 }
 
 usage() {
@@ -192,8 +266,8 @@ Usage: $0 [OPTIONS]
 Bump the pinned Verus version in source/Cargo.toml and tools/install_verus.
 
 Options:
-  --check           Report the target version without changing any files.
-  --to YYYY-MM-DD   Bump to a specific release date instead of the newest.
+  --check           Report the target versions without changing any files.
+  --to YYYY-MM-DD   Select the newest versions on or before YYYY-MM-DD.
   -h, --help        Show this help text.
 
 Exit codes:
@@ -203,9 +277,40 @@ Exit codes:
 EOF
 }
 
-current_crates_version() {
-    sed -nE 's/^vstd = \{ version = "=(0\.0\.0-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4})".*/\1/p' \
+current_crate_version() {
+    local crate=$1
+    sed -nE \
+        "s|^${crate}[[:space:]]*=[[:space:]]*\\{[[:space:]]*version[[:space:]]*=[[:space:]]*\"=(0\\.0\\.0-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4})\".*|\\1|p" \
         "$REPO_ROOT/source/Cargo.toml"
+}
+
+current_verus_version() {
+    sed -nE 's/^VERUS_VERSION=(.*)$/\1/p' "$REPO_ROOT/tools/install_verus"
+}
+
+targets_are_current() {
+    local verus_version=$1 assignment crate target current
+    local all_current=0
+    shift
+
+    [ "$#" -eq "${#VERUS_CRATES[@]}" ] \
+        || die "expected ${#VERUS_CRATES[@]} crate assignments, got $#"
+
+    for assignment in "$@"; do
+        crate=${assignment%%=*}
+        target=${assignment#*=}
+        current=$(current_crate_version "$crate")
+        [ -n "$current" ] \
+            || die "could not read the current $crate pin from $REPO_ROOT/source/Cargo.toml"
+        [ "$current" = "$target" ] || all_current=1
+    done
+
+    current=$(current_verus_version)
+    [ -n "$current" ] \
+        || die "could not read the current Verus release from $REPO_ROOT/tools/install_verus"
+    [ "$current" = "$verus_version" ] || all_current=1
+
+    return "$all_current"
 }
 
 main() {
@@ -225,21 +330,66 @@ main() {
         shift
     done
 
-    require_commands curl jq gh sed grep comm
+    if [ -n "$wanted_date" ]; then
+        case "$wanted_date" in
+            [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
+            *) die "--to requires a date in YYYY-MM-DD form" ;;
+        esac
+    fi
 
-    local target date crates_version verus_version
-    target=$(discover_target "$wanted_date")
-    read -r date crates_version verus_version <<< "$target"
+    require_commands curl jq gh sed grep
 
-    local current
-    current=$(current_crates_version)
-    [ -n "$current" ] || die "could not read the current pin from $REPO_ROOT/source/Cargo.toml"
+    local targets line expected crate version verus_version=""
+    local index=0 current all_current=false
+    local crate_assignments=()
+    targets=$(discover_targets "$wanted_date")
 
-    echo "current: $current"
-    echo "target:  $crates_version ($verus_version, released $date)"
+    while IFS= read -r line; do
+        if [ "$index" -lt "${#VERUS_CRATES[@]}" ]; then
+            expected=${VERUS_CRATES[$index]}
+            case "$line" in
+                "$expected="*)
+                    version=${line#*=}
+                    [ -n "$version" ] || die "empty target version for $expected"
+                    crate_assignments[${#crate_assignments[@]}]=$line
+                    ;;
+                *) die "expected target $expected at line $((index + 1)), got: $line" ;;
+            esac
+        elif [ "$index" -eq "${#VERUS_CRATES[@]}" ]; then
+            case "$line" in
+                VERUS_VERSION=*)
+                    verus_version=${line#*=}
+                    [ -n "$verus_version" ] || die "empty Verus release target"
+                    ;;
+                *) die "expected Verus release target at line $((index + 1)), got: $line" ;;
+            esac
+        else
+            die "discover_targets returned more than six targets"
+        fi
+        index=$((index + 1))
+    done <<< "$targets"
 
-    if [ "$current" = "$crates_version" ]; then
-        echo "Already at the target version; nothing to do."
+    [ "${#crate_assignments[@]}" -eq "${#VERUS_CRATES[@]}" ] \
+        || die "expected ${#VERUS_CRATES[@]} crate targets, got ${#crate_assignments[@]}"
+    [ "$index" -eq $((${#VERUS_CRATES[@]} + 1)) ] \
+        || die "expected six targets, got $index"
+    [ -n "$verus_version" ] || die "empty Verus release target"
+
+    if targets_are_current "$verus_version" "${crate_assignments[@]}"; then
+        all_current=true
+    fi
+
+    for line in "${crate_assignments[@]}"; do
+        crate=${line%%=*}
+        version=${line#*=}
+        current=$(current_crate_version "$crate")
+        echo "$crate: $current -> $version"
+    done
+    current=$(current_verus_version)
+    echo "Verus release: $current -> $verus_version"
+
+    if $all_current; then
+        echo "Already at all selected target versions; nothing to do."
         exit 3
     fi
 
@@ -255,7 +405,8 @@ main() {
     rust_version=$(resolve_rust_version "$verus_rev")
     [ -n "$rust_version" ] || die "could not read the Rust channel for $verus_rev"
 
-    apply_versions "$REPO_ROOT" "$crates_version" "$verus_version" "$verus_rev" "$rust_version"
+    apply_versions "$REPO_ROOT" "$verus_version" "$verus_rev" "$rust_version" \
+        "${crate_assignments[@]}"
 
     echo "Updated to $verus_version (rev $verus_rev, Rust $rust_version)."
     exit 0
