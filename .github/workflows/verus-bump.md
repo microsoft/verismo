@@ -51,6 +51,7 @@ steps:
     id: bump
     env:
       GH_TOKEN: ${{ github.token }}
+      GH_AW_SAFE_OUTPUTS: ${{ steps.set-runtime-paths.outputs.GH_AW_SAFE_OUTPUTS }}
       TARGET_DATE: ${{ inputs.target_date }}
     run: |
       set -uo pipefail
@@ -66,6 +67,7 @@ steps:
           ;;
         3)
           echo "updated=false" >> "$GITHUB_OUTPUT"
+          mkdir -p "$(dirname "$GH_AW_SAFE_OUTPUTS")"
           echo '{"type":"noop","message":"Verus is already at the newest version published on both crates.io and as a release."}' >> "$GH_AW_SAFE_OUTPUTS"
           ;;
         *)

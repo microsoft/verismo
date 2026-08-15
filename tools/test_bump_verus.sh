@@ -47,6 +47,26 @@ test_library_mode_defines_functions() {
 
 test_library_mode_defines_functions
 
+test_workflow_provides_safe_outputs_to_bump_step() {
+    local workflow="$SCRIPT_DIR/../.github/workflows/verus-bump.md"
+    local bump_step
+    bump_step=$(sed -n '/- name: Apply the version bump/,/- name: Install the new Verus toolchain/p' "$workflow")
+
+    if grep -q 'GH_AW_SAFE_OUTPUTS:' <<< "$bump_step"; then
+        pass "workflow provides GH_AW_SAFE_OUTPUTS to bump step"
+    else
+        fail "workflow does not provide GH_AW_SAFE_OUTPUTS to bump step"
+    fi
+
+    if grep -q 'mkdir -p.*GH_AW_SAFE_OUTPUTS' <<< "$bump_step"; then
+        pass "workflow creates the safe outputs directory"
+    else
+        fail "workflow does not create the safe outputs directory"
+    fi
+}
+
+test_workflow_provides_safe_outputs_to_bump_step
+
 
 # Build a throwaway repo containing just the two files bump_verus.sh edits.
 make_fixture_repo() {
