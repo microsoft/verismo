@@ -42,7 +42,7 @@ EOF
 
 cleanup() {
     local tmpdir
-    for tmpdir in "${TMPDIRS[@]}"; do
+    for tmpdir in "${TMPDIRS[@]-}"; do
         rm -rf "$tmpdir"
     done
 }
@@ -145,7 +145,7 @@ verify_verus_assets() {
         [ -x "$VERUS_INSTALL_DIR/$asset" ] || die "installed asset is missing or not executable: $VERUS_INSTALL_DIR/$asset"
     done
     if [ "$VERUS_REV" = "$DEFAULT_VERUS_REV" ]; then
-        "$VERUS_INSTALL_DIR/verus" --version | grep -q "$VERUS_VERSION" \
+        "$VERUS_INSTALL_DIR/verus" --version | grep "$VERUS_VERSION" > /dev/null \
             || die "installed verus does not report expected version $VERUS_VERSION"
     fi
 }
