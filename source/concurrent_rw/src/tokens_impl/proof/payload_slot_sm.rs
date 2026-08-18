@@ -170,7 +170,7 @@ tokenized_state_machine!(
 
 verus! {
 
-/// Custody of a slot: it holds the payload, and the right to change what is in it.
+/// Owner of a slot: it holds the payload, and the right to change what is in it.
 ///
 /// Held by whoever may change the slot's contents -- in the reader/writer model, the state living
 /// inside the atomic invariant.
@@ -215,8 +215,7 @@ impl<P> SlotOwner<P> {
         (owner, handle)
     }
 
-    /// A throwaway owner of a brand-new empty slot. Used only as a placeholder when swapping a
-    /// real owner out from behind a `&mut`.
+    /// A dummy owner of a brand-new empty slot. Used only as a placeholder.
     pub proof fn dummy() -> (tracked out: SlotOwner<P>) {
         SlotOwner::new().0
     }

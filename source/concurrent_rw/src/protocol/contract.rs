@@ -6,7 +6,7 @@
 //!
 //! # The trade
 //!
-//! A `PointsTo` is already a concurrency model -- shared xor mutable. [`RWContract::build_rw`]
+//! A `PointsTo` is already a concurrency model -- shared xor mutable. `RWContract::build_rw`
 //! consumes it and hands back two tokens that may be used at the same time. There is no cell
 //! type here; these tokens are what replaces the `PointsTo`. Exactly one of each exists per
 //! pointer -- the "multiple readers" is that a read needs only `&RWShared`, so the one token can
@@ -38,7 +38,7 @@
 //!
 //! Exclusion is not the only way to make interference harmless: it prevents interference, where
 //! an ordering makes it survivable. Every store must land in `RWModel::reachable` of the pair it
-//! replaces ([`WritePerm::write_value_requires`]), so a reader that has fallen behind holds a value
+//! replaces (`WritePerm::write_value_requires`), so a reader that has fallen behind holds a value
 //! that is imprecise but never wrong. That is the trade -- overlap, bought with reads that return
 //! a reachable value rather than *the* stored one. The obligation is therefore all on the write:
 //! a read requires nothing but the right pointer, and [`RWContract::write`] is where the
@@ -51,7 +51,7 @@
 //! | 1 | **Reads move forward.** Once you have observed a value and the payload beside it, every later read returns a pair `reachable` from that one. | [`RWContract::read`] |
 //! | 2 | **With the writer in hand, reads are exact again.** Nobody else can be storing, so you read *the* stored value. | [`RWContract::read_exact`] |
 //! | 3a | **A published payload is available.** If the value you read says it published, you get a ticket. | [`RWWithPublishPayloadContract::read_published`] |
-//! | 3b | **A published payload is one payload.** Two tickets at one slot and version name the *same* payload. Without this, publishing would be empty. | [`RWWithPublishPayloadContract::payloads_agree`] |
+//! | 3b | **A published payload is one payload.** Two tickets at one slot and version name the *same* payload. Without this, publishing would be empty. | `RWWithPublishPayloadContract::payloads_agree` |
 //!
 //! Property 1's relation is on *pairs*, because a claim about a value alone would say nothing
 //! about the payload beside it: a writer may swap the payload for any other well formed one.
@@ -83,7 +83,7 @@
 //! Publishing does not freeze the payload's contents, only which payload the value is bound to.
 //! It is one-way while the `RWShared` stays whole: `PayloadHolder::reclaim` must consume the
 //! reader's `SlotHandle`, and nothing in [`crate::tokens_impl`] surrenders that handle yet. What
-//! holds unconditionally is [`PublishPayload::payload_stays_published`]: no value reachable by
+//! holds unconditionally is `PublishPayload::payload_stays_published`: no value reachable by
 //! *reading* ever un-publishes, so a concurrent write cannot undercut a ticket you hold.
 use crate::tokens_impl::payload_slot::PayloadTicket;
 use crate::tokens_impl::{Observed, PublishPayload, RWModel, RWShared, WritePerm};
@@ -288,7 +288,7 @@ pub trait RWWithPublishPayloadContract: RWContract + PublishPayload {
     ///
     /// This thread: PROPERTY 3a -- if the value read has published, a ticket always comes back,
     /// good at this reader's slot and version.
-    /// Other threads: each gets its own ticket this way; [`Self::payloads_agree`] is what makes
+    /// Other threads: each gets its own ticket this way; `Self::payloads_agree` is what makes
     /// them all name one payload.
     ///
     /// The `Option` is not redundant: even a publishing model has values that have not published

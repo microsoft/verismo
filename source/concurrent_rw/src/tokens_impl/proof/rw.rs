@@ -1,6 +1,6 @@
 //! **The tokens themselves.** What a `RWShared`, `WritePerm`, `Observed` and `PayloadTicket` are,
 //! and the ghost operations over them. Entirely ghost: the operations that touch the pointer
-//! live in [`rw_exec`], a child module so that it can reach the private items here.
+//! live in `rw_exec`, a child module so that it can reach the private items here.
 //!
 //! [`super`] carries the reading -- how the pieces fit together and why each one is shaped the
 //! way it is.

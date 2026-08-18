@@ -1,11 +1,11 @@
 //! Multiple-reader single-writer tokens over a shared atomic value -- second implementation.
 //!
 //! A value of an atomic type, behind a raw pointer, is split into a
-//! [`WritePerm`](tokens_impl::WritePerm) (exclusive, and required in order to store) and a
-//! [`RWShared`](tokens_impl::RWShared), which a read needs only by `&`, so it can be shared.
-//! A read returns the value together with an [`Observed`](tokens_impl::Observed) token proving
+//! [`WritePerm`] (exclusive, and required in order to store) and a
+//! [`RWShared`], which a read needs only by `&`, so it can be shared.
+//! A read returns the value together with an [`Observed`] token proving
 //! *this* reader saw *that* value *with that payload beside it*, and the client's
-//! [`RWModel`](tokens_impl::RWModel) impl says which pairs a reader may observe next. A tracked
+//! [`RWModel`] impl says which pairs a reader may observe next. A tracked
 //! payload lives in a versioned slot that readers borrow for as long as their `Observed` token
 //! stays current.
 //!

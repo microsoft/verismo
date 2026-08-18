@@ -1,40 +1,16 @@
 //! **What a reader remembers:** a growing set of values, and duplicable evidence of membership.
 //!
-//! Built on a tokenized state machine. Its counterpart, [`super::obs_history`], gets the same
-//! API from a hand-written resource algebra.
-//!
-//! Neither can use a ready-made set resource from vstd: they all reject recursive types, and the
-//! set here holds snapshots, which are recursive -- a snapshot names a payload, payloads hold
-//! readers, readers hold snapshots again.
+//! Built on a tokenized state machine.
 //!
 //! ```text
 //!         ObsHistory<A>              Observed<A>
-//!         exclusive custody          duplicable
+//!         exclusive                  duplicable
 //!         of what has been seen      "A was seen"
 //!
 //!    observe(v) : requires seen(v)          -> evidence of it
 //!    insert(v)  : adds v to the set         -> evidence of it
 //!    is_seen()  : evidence + history        ==> the set contains it
 //! ```
-//!
-//! ## Why there is no relation in here
-//!
-//! An earlier version tracked a `current` value and guaranteed that everything observed reaches
-//! it, along a preorder supplied as a trait bound. That cannot work: the element type is a
-//! snapshot, so the bound would land on `RWShared`, and a payload holds readers -- the trait
-//! implementations chase each other in a circle.
-//!
-//! So this keeps only what needs a resource: monotonicity of the set. The reachability guarantee
-//! lives in `RWState::inv`, as "everything in the set reaches the pair stored now", where the
-//! model's traits are in scope and transitivity can be applied. Nothing is lost -- a set that
-//! only grows is what makes such an invariant worth stating.
-//!
-//! ## Why membership is persistent, not fractional
-//!
-//! Having seen something is a fact about the past, so there is nothing to police: no exclusivity
-//! to protect, no reason to count copies. That makes it `persistent_set`, and it is what keeps
-//! this usable at all for a type with no finite enumeration -- the fractional scheme it replaced
-//! had to pre-allocate one whole-fraction token per possible value.
 use verus_state_machines_macros::*;
 use vstd::prelude::*;
 

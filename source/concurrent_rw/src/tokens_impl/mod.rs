@@ -2,12 +2,12 @@
 //! [`crate::protocol::contract`].
 //!
 //! The contract says what a `RWShared`, `WritePerm`, `Observed` and `PayloadTicket` are *for*. This
-//! module says what they *are*. Nothing here needs to be believed: [`contract_proof`]
+//! module says what they *are*. Nothing here needs to be believed: `contract_proof`
 //! checks it against the contract, and a client that reads only `protocol` misses nothing.
 //!
 //! Everything rests on one idea. Each token is a *fractional share* of a ghost resource, and what
 //! you may do depends on how much you hold. Entirely ghost; the operations that touch the pointer
-//! live in [`rw_proof::rw_exec`].
+//! live in `rw_proof::rw_exec`.
 //!
 //! ```text
 //!     PointsTo<AtomicType>        exclusive: no read may run during a write

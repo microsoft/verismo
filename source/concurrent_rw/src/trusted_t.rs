@@ -1,6 +1,6 @@
 //! The numbering of instance ids that this crate takes on faith.
 //!
-//! [`loc_to_int`] is assumed for a different reason -- not because it is unprovable, but because
+//! `loc_to_int` is assumed for a different reason -- not because it is unprovable, but because
 //! the definition that would prove it is out of reach until Verus issue #2735 lands.
 //!
 //! There used to be a third atomic-side assumption, `frac_bounded2`, needed to show a reader

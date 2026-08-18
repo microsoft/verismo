@@ -1,7 +1,7 @@
 //! **What a client must supply.** The traits a model implements, with no bodies.
 //!
 //! Four declarations, and nothing else: what the shared word looks like as a plain integer
-//! ([`HasAtomicType`]), what tracked data rides alongside it ([`WithPayload`]), which values a
+//! ([`IsValidAtomicType`]), what tracked data rides alongside it ([`WithPayload`]), which values a
 //! reader may legally see next ([`RWModel`]), and -- only if the model publishes --
 //! [`PublishPayload`]. Together they are the whole of a client's obligation.
 //!
@@ -20,22 +20,10 @@ use vstd::std_specs::convert::{FromSpec, FromSpecImpl, IntoSpec};
 
 verus! {
 
-/// A value and its payload, as seen at one moment. Build with [`Snapshot::new`].
-///
-/// What a reader observes, and what [`RWModel::reachable`] relates. It has to be the pair: a
-/// claim about the value alone would say nothing about the payload beside it, since a writer may
-/// swap the payload for any other well-formed one.
-///
-/// The relation must hold for the payload that was *actually* there. Quantifying instead over
-/// every payload well formed for the old value would demand that the new payload relate to all of
-/// them at once, which no write could satisfy.
+/// A value and its payload, as seen at one moment. Build with `Snapshot::new`.
 #[verifier::accept_recursive_types(T)]
 #[verifier::accept_recursive_types(P)]
 pub tracked struct Snapshot<T, P> {
-    /// `Option` only to give the type a base case. A snapshot sits inside `RWShared`, so it is
-    /// recursive -- a payload holds readers, and a reader's state holds a set of snapshots -- and
-    /// Verus wants one way to build one that does not recurse. `new` is the only constructor
-    /// anyone uses, and `value` and `payload` are meaningless without it.
     pub ghost pair: Option<(T, P)>,
 }
 
@@ -66,15 +54,6 @@ pub trait IsValidAtomicType: Sized {
 pub trait RWModel: WithPayload + IsValidAtomicType + Sized {
     /// **The one relation a client supplies:** a preorder on pairs, saying where a value and its
     /// payload may go together, and so what an observer may later see.
-    ///
-    /// On pairs rather than on values because a claim about the value alone says nothing about
-    /// the payload beside it -- a writer may swap the payload for any other well-formed one, so a
-    /// reader holding only a value learns nothing that outlives the block it read in. A model
-    /// with nothing to say about payloads simply ignores the second component.
-    ///
-    /// This would read more naturally as `Snapshot<Self, Self::Payload>: Reachable`, but Rust
-    /// does not elaborate a trait's `where` clauses to its users, so every generic function over
-    /// an `RWModel` would have to repeat the bound. Same relation, stated where it costs nothing.
     spec fn reachable(
         pair: Snapshot<Self, Self::Payload>,
         other: Snapshot<Self, Self::Payload>,
@@ -127,14 +106,14 @@ pub trait RWModel: WithPayload + IsValidAtomicType + Sized {
 /// invariant block it came from.
 ///
 /// `RWModel` on its own already supports payloads, but only inside `open_atomic_invariant!` --
-/// see [`RWState::borrow_payload`]. That is enough to read a payload and copy plain data out
+/// see `RWState::borrow_payload`. That is enough to read a payload and copy plain data out
 /// of it, and a model that never needs more should stop there: it then never names
-/// [`PayloadTicket`] at all, and its reads return just a value and an `Observed`.
+/// [`crate::PayloadTicket`] at all, and its reads return just a value and an `Observed`.
 ///
 /// Implementing this trait additionally enables the published route: `read_published` and
 /// `write_with_published_payload` on
 /// [`RWWithPublishPayloadContract`](crate::protocol::contract::RWWithPublishPayloadContract),
-/// plus [`RWShared::borrow_published_payload`].
+/// plus `RWShared::borrow_published_payload`.
 ///
 /// A model that opts in must also override `RWModel::has_published_payload`, which defaults to
 /// `false`. That spec function stays in `RWModel` because the reader's invariant ties it to
@@ -156,13 +135,7 @@ pub trait RWModel: WithPayload + IsValidAtomicType + Sized {
 /// ```
 pub trait PublishPayload: RWModel {
     // Publishing is one-way along read-reachability: a value that has published can only be
-    // followed, by reading, by values that have also published. This is what stops a concurrent
-    // write from undercutting a ticket a reader already holds.
-    //
-    // The whole obligation, and the only one this trait adds. It once also demanded that
-    // reachable values agree on which payloads are well formed, which was never used: the library
-    // re-derives `value.wf_payload(payload)` from the invariant on every read, so no client ever
-    // needed to transport it across a write.
+    // followed, by reading, by values that have also published.
     proof fn payload_stays_published(
         pair: Snapshot<Self, Self::Payload>,
         next: Snapshot<Self, Self::Payload>,
