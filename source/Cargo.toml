@@ -9,7 +9,6 @@ members = [
     "bitflags_verus/tests",
     "concurrent_rw",
     "concurrent_rw/tests",
-    "paging",
     "machine_model",
 ]
 
