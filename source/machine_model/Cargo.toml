@@ -1,0 +1,18 @@
+[package]
+name = "machine_model"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+vstd = { workspace = true, default-features = false, features = ["alloc"] }
+
+[features]
+verification-test = []
+reject-send = []
+reject-sync = []
+
+[package.metadata.verus]
+verify = true
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(verus)'] }
