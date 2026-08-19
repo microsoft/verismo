@@ -1,6 +1,6 @@
 use super::name::*;
 use super::points_to::*;
-use super::r#trait::*;
+use super::reg_trait::*;
 use super::value::*;
 use core::arch::asm;
 use vstd::prelude::*;
