@@ -37,9 +37,18 @@ verus! {
     pub const CR3_PCD: u64 = 0x10;
     /// Modeled physical-address width, in bits.
     pub const PHYS_ADDR_WIDTH: u64 = 52;
+    /// Width of the in-page byte offset, in bits (4KB pages).
+    pub const PAGE_OFFSET_WIDTH: u64 = 12;
+    /// Modeled physical *page number* width, in bits: the physical address width
+    /// minus the page offset bits. Physical page numbers are bounded by
+    /// `1 << PHYS_PAGE_NUMBER_WIDTH`.
+    pub const PHYS_PAGE_NUMBER_WIDTH: u64 = (PHYS_ADDR_WIDTH - PAGE_OFFSET_WIDTH) as u64;
     /// CR3 bit 63: the `MOV to CR3` "no-flush" control. This is write-only: it is
     /// consumed by the write operation itself and never persists as architectural
-    /// state, so it must always read back as clear.
+    /// state, so it must always read back as clear. This is documented explicitly
+    /// even though it is also excluded by the high-bit reserved mask in
+    /// `cr3_paging_precondition`, since the write-only semantics (rather than mere
+    /// reservedness) is the reason it must be clear.
     pub const CR3_NOFLUSH: u64 = 0x8000_0000_0000_0000;
 
     // ---------------------------------------------------------------------------
@@ -98,13 +107,22 @@ verus! {
 
     impl PageMapping {
         /// A single mapping is well-formed with respect to the current EFER value:
-        /// the physical page number fits the modeled physical address width (with a
-        /// 12-bit page offset, i.e. `< 1 << 40` for a 52-bit physical address space),
-        /// the protection key is a valid 4-bit index, and non-executable mappings are
-        /// only meaningful when `EFER.NXE` is set (otherwise the NX bit is reserved
-        /// and every mapping is architecturally executable).
+        /// the physical page number fits the modeled physical page-number width
+        /// (`PHYS_PAGE_NUMBER_WIDTH`, derived from the 52-bit physical address width
+        /// minus the 12-bit page offset, i.e. `< 1 << 40`), the protection key is a
+        /// valid 4-bit index, and non-executable mappings are only meaningful when
+        /// `EFER.NXE` is set (otherwise the NX bit is reserved and every mapping is
+        /// architecturally executable).
+        ///
+        /// `protection_key` is modeled unconditionally, independent of `CR4.PKE`:
+        /// when PKE is clear, hardware ignores the protection key entirely (any
+        /// stored value is simply inert), so this predicate does not need `cr4` and
+        /// does not require `protection_key == 0` in that mode. `CR4.PKE` (along
+        /// with `SMEP`, `SMAP`, and `RFLAGS.AC`) is retained in the register state
+        /// for a later access-check relation (deciding whether a given access is
+        /// permitted), not for static mapping validity as checked here.
         pub open spec fn inv(self, efer: u64) -> bool {
-            &&& self.physical_page < (1u64 << 40)
+            &&& self.physical_page < (1u64 << PHYS_PAGE_NUMBER_WIDTH)
             &&& self.protection_key < 16
             &&& (self.executable || (efer & EFER_NXE) != 0)
         }
