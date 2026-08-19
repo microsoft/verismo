@@ -26,6 +26,7 @@ verus! {
         Cr3(u64),
         Cr4(u64),
         XCr0(u64),
+        Pkru(u64),
         IdtrBaseLimit(DescriptorTableValue),
         GdtrBaseLimit(DescriptorTableValue),
         MSR { register: u32, value: u64 },
@@ -52,6 +53,7 @@ verus! {
                 RegisterValue::Cr3(_) => RegName::Cr3,
                 RegisterValue::Cr4(_) => RegName::Cr4,
                 RegisterValue::XCr0(_) => RegName::XCr0,
+                RegisterValue::Pkru(_) => RegName::Pkru,
                 RegisterValue::IdtrBaseLimit(_) => RegName::IdtrBaseLimit,
                 RegisterValue::GdtrBaseLimit(_) => RegName::GdtrBaseLimit,
                 RegisterValue::MSR { register, value: _ } => RegName::MSR(register),
@@ -89,6 +91,7 @@ verus! {
             assert(RegisterValue::Cr3(0).register_id() == RegName::Cr3);
             assert(RegisterValue::Cr4(0).register_id() == RegName::Cr4);
             assert(RegisterValue::XCr0(0).register_id() == RegName::XCr0);
+            assert(RegisterValue::Pkru(0).register_id() == RegName::Pkru);
             assert(RegisterValue::IdtrBaseLimit(DescriptorTableValue { limit: 0, base: 0 }).register_id()
                 == RegName::IdtrBaseLimit);
             assert(RegisterValue::GdtrBaseLimit(DescriptorTableValue { limit: 0, base: 0 }).register_id()
@@ -116,6 +119,9 @@ verus! {
 
             assert(RegisterValue::Cs(0).matches(RegName::Cs));
             assert(!RegisterValue::Cs(0).matches(RegName::Ds));
+
+            assert(RegisterValue::Pkru(0).matches(RegName::Pkru));
+            assert(!RegisterValue::Pkru(0).matches(RegName::XCr0));
 
             assert(RegisterValue::GdtrBaseLimit(DescriptorTableValue { limit: 0, base: 0 })
                 .matches(RegName::GdtrBaseLimit));

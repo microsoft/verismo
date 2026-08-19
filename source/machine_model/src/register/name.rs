@@ -25,6 +25,7 @@ verus! {
         Cr3,
         Cr4,
         XCr0,
+        Pkru,
         IdtrBaseLimit,
         GdtrBaseLimit,
         MSR(u32),
@@ -60,6 +61,7 @@ verus! {
             assert(RegName::Cr3.kind() == RegisterKind::U64);
             assert(RegName::Cr4.kind() == RegisterKind::U64);
             assert(RegName::XCr0.kind() == RegisterKind::U64);
+            assert(RegName::Pkru.kind() == RegisterKind::U64);
             assert(RegName::IdtrBaseLimit.kind() == RegisterKind::DescriptorTable);
             assert(RegName::GdtrBaseLimit.kind() == RegisterKind::DescriptorTable);
             assert(RegName::MSR(0).kind() == RegisterKind::U64);
