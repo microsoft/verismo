@@ -71,7 +71,7 @@ mod verification_test {
         assert(RegName::GdtrBaseLimit.kind() == RegisterKind::DescriptorTable);
         assert(RegName::MSR(0).kind() == RegisterKind::U64);
     }
+
 }
-}
-} // verus!
+
 } // verus!

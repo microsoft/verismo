@@ -1,10 +1,12 @@
 pub mod name;
 mod points_to;
 mod reg_trait;
+mod spec;
 mod value;
 mod x86_64_t;
 pub use name::*;
 pub use points_to::*;
 pub use reg_trait::*;
+pub use spec::*;
 pub use value::*;
 pub use x86_64_t::*;

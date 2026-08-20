@@ -3,12 +3,7 @@ use vstd::prelude::*;
 verus! {
 
 use super::name::*;
-
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
-pub ghost struct DescriptorTableValue {
-    pub limit: u16,
-    pub base: u64,
-}
+use super::spec::DescriptorTableValue;
 
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub ghost enum RegisterValue {
