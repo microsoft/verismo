@@ -20,63 +20,44 @@ pub trait RegSpec: Sized {
 
 // Fixed (statically-known) register markers. Each is a zero-sized type, so
 // there is exactly one instance and `same_reg` is trivially always true.
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub struct Rflags;
 
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub struct Rax;
 
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub struct Rsp;
 
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub struct Cs;
 
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub struct Ds;
 
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub struct Ss;
 
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub struct Es;
 
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub struct Gs;
 
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub struct Cpl;
 
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub struct Cr0;
 
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub struct Cr1;
 
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub struct Cr2;
 
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub struct Cr3;
 
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub struct Cr4;
 
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub struct Xcr0;
 
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub struct Pkru;
 
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub struct IdtrBaseLimit;
 
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub struct GdtrBaseLimit;
 
 /// A model-specific register, identified at runtime by its register
 /// number.
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub struct Msr {
     pub register: u32,
 }
