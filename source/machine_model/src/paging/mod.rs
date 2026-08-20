@@ -87,15 +87,6 @@ pub const EFER_LMA: u64 = 0x400;
 pub const EFER_NXE: u64 = 0x800;
 
 // ---------------------------------------------------------------------------
-// RFLAGS
-// ---------------------------------------------------------------------------
-/// RFLAGS bit 1: architecturally fixed to 1 (reserved).
-pub const RFLAGS_FIXED1: u64 = 0x2;
-
-/// RFLAGS.AC (Alignment Check), bit 18.
-pub const RFLAGS_AC: u64 = 0x4_0000;
-
-// ---------------------------------------------------------------------------
 // Ghost page mappings
 // ---------------------------------------------------------------------------
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
@@ -122,7 +113,7 @@ impl PageMapping {
     /// when PKE is clear, hardware ignores the protection key entirely (any
     /// stored value is simply inert), so this predicate does not need `cr4` and
     /// does not require `protection_key == 0` in that mode. `CR4.PKE` (along
-    /// with `SMEP`, `SMAP`, and `RFLAGS.AC`) is retained in the register state
+    /// with `SMEP`, `SMAP`, and the RFLAGS control state's `AC` flag) is retained in the register state
     /// for a later access-check relation (deciding whether a given access is
     /// permitted), not for static mapping validity as checked here.
     pub open spec fn inv(self, efer: u64) -> bool {
@@ -164,11 +155,6 @@ pub open spec fn cr4_paging_precondition(cr0: u64, cr4: u64, efer: u64) -> bool 
 pub open spec fn efer_paging_precondition(efer: u64) -> bool {
     &&& (efer & EFER_LME) != 0
     &&& (efer & EFER_LMA) != 0
-}
-
-/// RFLAGS must have the architecturally fixed bit 1 set; AC is optional.
-pub open spec fn rflags_precondition(rflags: u64) -> bool {
-    (rflags & RFLAGS_FIXED1) != 0
 }
 
 /// CPL must be a valid privilege level (0..=3).
@@ -214,7 +200,6 @@ impl PageTableGlobalState {
             registers.msrs[MSR_EFER].value(),
         )
         &&& efer_paging_precondition(registers.msrs[MSR_EFER].value())
-        &&& rflags_precondition(registers.rflags.value())
         &&& cpl_precondition(registers.cpl.value())
         &&& forall|va: u64|
             #![trigger self.mappings.dom().contains(va)]

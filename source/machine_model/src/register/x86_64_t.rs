@@ -8,7 +8,7 @@ macro_rules! control_reg_impl {
     ($ty:ident, $read_asm:literal, $write_asm:literal) => {
         verus! {
 
-        impl ExecutableReg for $ty {
+        impl ReadableReg for $ty {
             #[inline(always)]
             #[verifier(external_body)]
             fn read(&self, Tracked(token): Tracked<&RegisterPointsTo<Self>>) -> (result: u64) {
@@ -17,12 +17,14 @@ macro_rules! control_reg_impl {
                     asm!(
                         $read_asm,
                         out(reg) output,
-                        options(nomem, nostack, preserves_flags),
+                        options(nomem, nostack),
                     );
                 }
                 output
             }
+        }
 
+        impl WritableReg for $ty {
             #[inline(always)]
             #[verifier(external_body)]
             fn write(&self, value: u64, Tracked(token): Tracked<&mut RegisterPointsTo<Self>>) {
@@ -31,7 +33,7 @@ macro_rules! control_reg_impl {
                     asm!(
                         $write_asm,
                         in(reg) input,
-                        options(nostack, preserves_flags),
+                        options(nostack),
                     );
                 }
             }
@@ -47,32 +49,71 @@ control_reg_impl!(Cr4, "mov {}, cr4", "mov cr4, {}");
 
 verus! {
 
-impl ExecutableReg for Rflags {
+impl ReadableReg for RflagsControl {
+    /// Read the persistent control/system flags out of RFLAGS.
+    ///
+    /// `pushfq`/`pop` only reads the flags, so `preserves_flags` is accurate here.
+    /// Being `external_body`, the (trusted) postcondition binds the decoded value to
+    /// the token's ghost value.
     #[inline(always)]
     #[verifier(external_body)]
-    fn read(&self, Tracked(token): Tracked<&RegisterPointsTo<Self>>) -> (result: u64) {
-        let output: u64;
+    fn read(&self, Tracked(token): Tracked<&RegisterPointsTo<Self>>) -> (result:
+        RflagsControlValue) {
+        let raw: u64;
         unsafe {
             asm!(
                 "pushfq",
                 "pop {}",
-                out(reg) output,
+                out(reg) raw,
                 options(preserves_flags),
             );
         }
-        output
+        RflagsControlValue {
+            trap: (raw & RFLAGS_TF) != 0,
+            interrupt_enable: (raw & RFLAGS_IF) != 0,
+            direction: (raw & RFLAGS_DF) != 0,
+            io_privilege_level: ((raw & RFLAGS_IOPL) >> RFLAGS_IOPL_SHIFT) as u8,
+            nested_task: (raw & RFLAGS_NT) != 0,
+            resume: (raw & RFLAGS_RF) != 0,
+            virtual_8086: (raw & RFLAGS_VM) != 0,
+            alignment_check: (raw & RFLAGS_AC) != 0,
+            virtual_interrupt: (raw & RFLAGS_VIF) != 0,
+            virtual_interrupt_pending: (raw & RFLAGS_VIP) != 0,
+            id: (raw & RFLAGS_ID) != 0,
+        }
     }
+}
 
+impl RflagsControl {
+    /// `STAC`: set RFLAGS.AC, allowing supervisor accesses to user pages under SMAP.
+    ///
+    /// `STAC` only modifies AC, and Rust's `preserves_flags` covers just the
+    /// status flags (CF, PF, AF, ZF, SF, OF) plus DF, none of which `STAC` touches,
+    /// so the option is sound here.
     #[inline(always)]
     #[verifier(external_body)]
-    fn write(&self, value: u64, Tracked(token): Tracked<&mut RegisterPointsTo<Self>>) {
-        let input: u64 = value;
+    pub fn stac(&self, Tracked(token): Tracked<&mut RegisterPointsTo<RflagsControl>>)
+        ensures
+            final(token).reg() == old(token).reg(),
+            final(token).value() == old(token).value().with_alignment_check(true),
+    {
         unsafe {
-            asm!(
-                "push {}",
-                "popfq",
-                in(reg) input,
-            );
+            asm!("stac", options(nomem, nostack, preserves_flags));
+        }
+    }
+
+    /// `CLAC`: clear RFLAGS.AC, restoring SMAP enforcement.
+    ///
+    /// See `stac` for why `preserves_flags` is sound.
+    #[inline(always)]
+    #[verifier(external_body)]
+    pub fn clac(&self, Tracked(token): Tracked<&mut RegisterPointsTo<RflagsControl>>)
+        ensures
+            final(token).reg() == old(token).reg(),
+            final(token).value() == old(token).value().with_alignment_check(false),
+    {
+        unsafe {
+            asm!("clac", options(nomem, nostack, preserves_flags));
         }
     }
 }
