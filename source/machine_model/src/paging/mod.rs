@@ -1,6 +1,10 @@
 use vstd::prelude::*;
 
 use crate::register::*;
+// Re-exported so paging users keep seeing `CR4_SMAP`, which is defined in the
+// register module (register operations need it, and depending on paging there
+// would be cyclic).
+pub use crate::register::CR4_SMAP;
 
 verus! {
 
@@ -64,9 +68,6 @@ pub const CR4_PCIDE: u64 = 0x2_0000;
 
 /// CR4.SMEP (Supervisor Mode Execution Prevention), bit 20.
 pub const CR4_SMEP: u64 = 0x10_0000;
-
-/// CR4.SMAP (Supervisor Mode Access Prevention), bit 21.
-pub const CR4_SMAP: u64 = 0x20_0000;
 
 /// CR4.PKE (Protection Key Enable), bit 22.
 pub const CR4_PKE: u64 = 0x40_0000;
@@ -176,11 +177,24 @@ pub open spec fn low_bits_mask_u64(n: nat) -> u64 {
 /// `RegisterState`; this structure only carries the ghost mapping of virtual
 /// page numbers to page mappings implied by the current page tables, and
 /// relates it to a borrowed `RegisterState` through `inv`.
+///
+/// The `mappings` field is private and there is no public constructor, so this
+/// view cannot be forged outside this module: instances can only come from the
+/// (future) trusted initialization and verified page-table operations that
+/// establish and maintain the private view.
 pub ghost struct PageTableGlobalState {
-    pub mappings: PageMappings,
+    mappings: PageMappings,
 }
 
 impl PageTableGlobalState {
+    /// The ghost mapping from virtual page numbers to page mappings.
+    ///
+    /// Opaque (`closed`): callers may mention it in specifications, but its body
+    /// is only known inside this module, which keeps the field unforgeable.
+    pub closed spec fn mappings(&self) -> PageMappings {
+        self.mappings
+    }
+
     /// The global invariant, relative to the register state: the register state
     /// is itself well-formed and owns the EFER MSR token, the register values
     /// satisfy all x86-64 paging architectural preconditions, and every ghost
@@ -202,8 +216,8 @@ impl PageTableGlobalState {
         &&& efer_paging_precondition(registers.msrs[MSR_EFER].value())
         &&& cpl_precondition(registers.cpl.value())
         &&& forall|va: u64|
-            #![trigger self.mappings.dom().contains(va)]
-            self.mappings.dom().contains(va) ==> self.mappings[va].inv(
+            #![trigger self.mappings().dom().contains(va)]
+            self.mappings().dom().contains(va) ==> self.mappings()[va].inv(
                 registers.msrs[MSR_EFER].value(),
             )
     }

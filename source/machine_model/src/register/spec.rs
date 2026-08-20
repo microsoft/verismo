@@ -30,12 +30,6 @@ pub const RFLAGS_IOPL_SHIFT: u64 = 12;
 /// RFLAGS.NT (Nested Task), bit 14.
 pub const RFLAGS_NT: u64 = 0x4000;
 
-/// RFLAGS.RF (Resume Flag), bit 16.
-pub const RFLAGS_RF: u64 = 0x1_0000;
-
-/// RFLAGS.VM (Virtual-8086 Mode), bit 17.
-pub const RFLAGS_VM: u64 = 0x2_0000;
-
 /// RFLAGS.AC (Alignment Check / Access Control), bit 18.
 pub const RFLAGS_AC: u64 = 0x4_0000;
 
@@ -48,11 +42,25 @@ pub const RFLAGS_VIP: u64 = 0x10_0000;
 /// RFLAGS.ID (CPUID-supported Identification), bit 21.
 pub const RFLAGS_ID: u64 = 0x20_0000;
 
+// ---------------------------------------------------------------------------
+// CR4 control bits needed by register operations
+// ---------------------------------------------------------------------------
+/// CR4.SMAP (Supervisor Mode Access Prevention), bit 21.
+///
+/// Defined here (rather than in the paging module) so that register operations
+/// with SMAP-related preconditions can refer to it without a module cycle; the
+/// paging module re-exports it.
+pub const CR4_SMAP: u64 = 0x20_0000;
+
 /// The persistent control/system portion of RFLAGS.
 ///
 /// The arithmetic/status flags (CF, PF, AF, ZF, SF, OF) are deliberately *not*
 /// modeled: they are clobbered by ordinary instructions, so they carry no stable
 /// architectural state worth owning as a register token.
+///
+/// `RF` (Resume Flag) and `VM` (Virtual-8086 Mode) are also *not* modeled: `PUSHFQ`
+/// clears both bits in the image it pushes, so this reader cannot observe their
+/// architectural values at all.
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub struct RflagsControlValue {
     pub trap: bool,
@@ -60,8 +68,6 @@ pub struct RflagsControlValue {
     pub direction: bool,
     pub io_privilege_level: u8,
     pub nested_task: bool,
-    pub resume: bool,
-    pub virtual_8086: bool,
     pub alignment_check: bool,
     pub virtual_interrupt: bool,
     pub virtual_interrupt_pending: bool,
@@ -80,6 +86,20 @@ impl RflagsControlValue {
 /// value type carried by the register.
 pub trait RegSpec: Sized {
     type Value;
+}
+
+/// Marker for registers whose identity is *statically* determined by the marker
+/// type alone, i.e. every value of the marker type denotes the same architectural
+/// register.
+///
+/// This is deliberately not implemented for `Msr`, whose identity depends on the
+/// runtime `register` number: a `&RegisterPointsTo<Msr>` says nothing about *which*
+/// MSR is owned, so a generic read/write keyed only on the marker type would let a
+/// caller read or write an arbitrary MSR with a token for a different one. Dynamic
+/// MSR access therefore needs a separate future API whose contracts match the
+/// requested register number against `token.reg().register` explicitly.
+pub trait FixedRegSpec: RegSpec {
+
 }
 
 // Fixed (statically-known) register markers. Each is a zero-sized type, so
@@ -130,72 +150,144 @@ impl RegSpec for RflagsControl {
     type Value = RflagsControlValue;
 }
 
+impl FixedRegSpec for RflagsControl {
+
+}
+
 impl RegSpec for Rax {
     type Value = u64;
+}
+
+impl FixedRegSpec for Rax {
+
 }
 
 impl RegSpec for Rsp {
     type Value = u64;
 }
 
+impl FixedRegSpec for Rsp {
+
+}
+
 impl RegSpec for Cs {
     type Value = u16;
+}
+
+impl FixedRegSpec for Cs {
+
 }
 
 impl RegSpec for Ds {
     type Value = u16;
 }
 
+impl FixedRegSpec for Ds {
+
+}
+
 impl RegSpec for Ss {
     type Value = u16;
+}
+
+impl FixedRegSpec for Ss {
+
 }
 
 impl RegSpec for Es {
     type Value = u16;
 }
 
+impl FixedRegSpec for Es {
+
+}
+
 impl RegSpec for Gs {
     type Value = u16;
+}
+
+impl FixedRegSpec for Gs {
+
 }
 
 impl RegSpec for Cpl {
     type Value = u64;
 }
 
+impl FixedRegSpec for Cpl {
+
+}
+
 impl RegSpec for Cr0 {
     type Value = u64;
+}
+
+impl FixedRegSpec for Cr0 {
+
 }
 
 impl RegSpec for Cr1 {
     type Value = u64;
 }
 
+impl FixedRegSpec for Cr1 {
+
+}
+
 impl RegSpec for Cr2 {
     type Value = u64;
+}
+
+impl FixedRegSpec for Cr2 {
+
 }
 
 impl RegSpec for Cr3 {
     type Value = u64;
 }
 
+impl FixedRegSpec for Cr3 {
+
+}
+
 impl RegSpec for Cr4 {
     type Value = u64;
+}
+
+impl FixedRegSpec for Cr4 {
+
 }
 
 impl RegSpec for Xcr0 {
     type Value = u64;
 }
 
+impl FixedRegSpec for Xcr0 {
+
+}
+
 impl RegSpec for Pkru {
     type Value = u32;
+}
+
+impl FixedRegSpec for Pkru {
+
 }
 
 impl RegSpec for IdtrBaseLimit {
     type Value = DescriptorTableValue;
 }
 
+impl FixedRegSpec for IdtrBaseLimit {
+
+}
+
 impl RegSpec for GdtrBaseLimit {
     type Value = DescriptorTableValue;
+}
+
+impl FixedRegSpec for GdtrBaseLimit {
+
 }
 
 impl RegSpec for Msr {

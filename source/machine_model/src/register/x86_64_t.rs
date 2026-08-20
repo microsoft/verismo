@@ -24,6 +24,11 @@ macro_rules! control_reg_impl {
             }
         }
 
+        /// Note: writing a control register can invalidate
+        /// `PageTableGlobalState::inv` (which constrains CR0/CR3/CR4 and the ghost
+        /// mappings). The invariant is relative to the register state, so callers
+        /// holding such a state must re-establish it after any control-register
+        /// write before relying on it again.
         impl WritableReg for $ty {
             #[inline(always)]
             #[verifier(external_body)]
@@ -74,8 +79,6 @@ impl ReadableReg for RflagsControl {
             direction: (raw & RFLAGS_DF) != 0,
             io_privilege_level: ((raw & RFLAGS_IOPL) >> RFLAGS_IOPL_SHIFT) as u8,
             nested_task: (raw & RFLAGS_NT) != 0,
-            resume: (raw & RFLAGS_RF) != 0,
-            virtual_8086: (raw & RFLAGS_VM) != 0,
             alignment_check: (raw & RFLAGS_AC) != 0,
             virtual_interrupt: (raw & RFLAGS_VIF) != 0,
             virtual_interrupt_pending: (raw & RFLAGS_VIP) != 0,
@@ -90,9 +93,21 @@ impl RflagsControl {
     /// `STAC` only modifies AC, and Rust's `preserves_flags` covers just the
     /// status flags (CF, PF, AF, ZF, SF, OF) plus DF, none of which `STAC` touches,
     /// so the option is sound here.
+    ///
+    /// `STAC` faults with #UD unless `CR4.SMAP` is set and the current privilege
+    /// level is 0, so shared tokens for `Cr4` and `Cpl` are taken as evidence of
+    /// both conditions.
     #[inline(always)]
     #[verifier(external_body)]
-    pub fn stac(&self, Tracked(token): Tracked<&mut RegisterPointsTo<RflagsControl>>)
+    pub fn stac(
+        &self,
+        Tracked(cr4): Tracked<&RegisterPointsTo<Cr4>>,
+        Tracked(cpl): Tracked<&RegisterPointsTo<Cpl>>,
+        Tracked(token): Tracked<&mut RegisterPointsTo<RflagsControl>>,
+    )
+        requires
+            (cr4.value() & CR4_SMAP) != 0,
+            cpl.value() == 0,
         ensures
             final(token).reg() == old(token).reg(),
             final(token).value() == old(token).value().with_alignment_check(true),
@@ -104,10 +119,19 @@ impl RflagsControl {
 
     /// `CLAC`: clear RFLAGS.AC, restoring SMAP enforcement.
     ///
-    /// See `stac` for why `preserves_flags` is sound.
+    /// See `stac` for why `preserves_flags` is sound and why the `Cr4`/`Cpl` tokens
+    /// are required: `CLAC` has the same #UD conditions.
     #[inline(always)]
     #[verifier(external_body)]
-    pub fn clac(&self, Tracked(token): Tracked<&mut RegisterPointsTo<RflagsControl>>)
+    pub fn clac(
+        &self,
+        Tracked(cr4): Tracked<&RegisterPointsTo<Cr4>>,
+        Tracked(cpl): Tracked<&RegisterPointsTo<Cpl>>,
+        Tracked(token): Tracked<&mut RegisterPointsTo<RflagsControl>>,
+    )
+        requires
+            (cr4.value() & CR4_SMAP) != 0,
+            cpl.value() == 0,
         ensures
             final(token).reg() == old(token).reg(),
             final(token).value() == old(token).value().with_alignment_check(false),
