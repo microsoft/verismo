@@ -1,31 +1,26 @@
 use vstd::prelude::*;
 
 verus! {
-    use super::name::*;
-    use super::points_to::*;
-    use super::value::*;
 
-    /// Generic execution contract for a single machine register.
-    pub trait AnyRegTrait<T> {
-        /// The register this implementor reads/writes.
-        spec fn reg_id(&self) -> RegName;
+use super::points_to::*;
+use super::spec::*;
 
-        /// The `RegisterValue` corresponding to `value` for this register.
-        spec fn reg_value(&self, value: T) -> RegisterValue;
+/// Execution contract for a single, statically-identified machine register.
+///
+/// The marker type is the register identity, so no dynamic identity precondition
+/// is needed: a `RegisterPointsTo<Self>` can only own this register.
+pub trait ExecutableReg: RegSpec {
+    /// Read the current value of this register from its token.
+    fn read(&self, Tracked(token): Tracked<&RegisterPointsTo<Self>>) -> (result: Self::Value)
+        ensures
+            token.value() == result,
+    ;
 
-        /// Every value produced by `reg_value` is structurally tagged with `reg_id`.
-        proof fn reg_value_id(&self, value: T)
-            ensures self.reg_value(value).register_id() == self.reg_id();
-
-        /// Read the current value of this register from its token.
-        fn read(&self, Tracked(token): Tracked<&RegisterPointsTo>) -> (result: T)
-            requires token.register_id() == self.reg_id(),
-            ensures token.value() == self.reg_value(result);
-
-        /// Write a new value to this register's token.
-        fn write(&self, value: T, Tracked(token): Tracked<&mut RegisterPointsTo>)
-            requires old(token).register_id() == self.reg_id(),
-            ensures final(token).value() == self.reg_value(value),
-                    final(token).register_id() == old(token).register_id();
-    }
+    /// Write a new value to this register's token.
+    fn write(&self, value: Self::Value, Tracked(token): Tracked<&mut RegisterPointsTo<Self>>)
+        ensures
+            final(token).value() == value,
+    ;
 }
+
+} // verus!

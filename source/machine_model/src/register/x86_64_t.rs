@@ -1,32 +1,17 @@
-use super::name::*;
 use super::points_to::*;
 use super::reg_trait::*;
-use super::value::*;
+use super::spec::*;
 use core::arch::asm;
 use vstd::prelude::*;
 
 macro_rules! control_reg_impl {
-    ($ty:ident, $reg_name:ident, $variant:ident, $read_asm:literal, $write_asm:literal) => {
+    ($ty:ident, $read_asm:literal, $write_asm:literal) => {
         verus! {
 
-        #[derive(Copy, Clone, Debug)]
-        pub struct $ty;
-
-        impl AnyRegTrait<u64> for $ty {
-            open spec fn reg_id(&self) -> RegName {
-                RegName::$reg_name
-            }
-
-            open spec fn reg_value(&self, value: u64) -> RegisterValue {
-                RegisterValue::$variant(value)
-            }
-
-            proof fn reg_value_id(&self, value: u64) {
-            }
-
+        impl ExecutableReg for $ty {
             #[inline(always)]
             #[verifier(external_body)]
-            fn read(&self, Tracked(token): Tracked<&RegisterPointsTo>) -> (result: u64) {
+            fn read(&self, Tracked(token): Tracked<&RegisterPointsTo<Self>>) -> (result: u64) {
                 let output: u64;
                 unsafe {
                     asm!(
@@ -40,7 +25,7 @@ macro_rules! control_reg_impl {
 
             #[inline(always)]
             #[verifier(external_body)]
-            fn write(&self, value: u64, Tracked(token): Tracked<&mut RegisterPointsTo>) {
+            fn write(&self, value: u64, Tracked(token): Tracked<&mut RegisterPointsTo<Self>>) {
                 let input: u64 = value;
                 unsafe {
                     asm!(
@@ -56,30 +41,16 @@ macro_rules! control_reg_impl {
     };
 }
 
-control_reg_impl!(CR0, Cr0, Cr0, "mov {}, cr0", "mov cr0, {}");
-control_reg_impl!(CR3, Cr3, Cr3, "mov {}, cr3", "mov cr3, {}");
-control_reg_impl!(CR4, Cr4, Cr4, "mov {}, cr4", "mov cr4, {}");
+control_reg_impl!(Cr0, "mov {}, cr0", "mov cr0, {}");
+control_reg_impl!(Cr3, "mov {}, cr3", "mov cr3, {}");
+control_reg_impl!(Cr4, "mov {}, cr4", "mov cr4, {}");
 
 verus! {
 
-#[derive(Copy, Clone, Debug)]
-pub struct RFLAGS;
-
-impl AnyRegTrait<u64> for RFLAGS {
-    open spec fn reg_id(&self) -> RegName {
-        RegName::Rflags
-    }
-
-    open spec fn reg_value(&self, value: u64) -> RegisterValue {
-        RegisterValue::Rflags(value)
-    }
-
-    proof fn reg_value_id(&self, value: u64) {
-    }
-
+impl ExecutableReg for Rflags {
     #[inline(always)]
     #[verifier(external_body)]
-    fn read(&self, Tracked(token): Tracked<&RegisterPointsTo>) -> (result: u64) {
+    fn read(&self, Tracked(token): Tracked<&RegisterPointsTo<Self>>) -> (result: u64) {
         let output: u64;
         unsafe {
             asm!(
@@ -94,7 +65,7 @@ impl AnyRegTrait<u64> for RFLAGS {
 
     #[inline(always)]
     #[verifier(external_body)]
-    fn write(&self, value: u64, Tracked(token): Tracked<&mut RegisterPointsTo>) {
+    fn write(&self, value: u64, Tracked(token): Tracked<&mut RegisterPointsTo<Self>>) {
         let input: u64 = value;
         unsafe {
             asm!(

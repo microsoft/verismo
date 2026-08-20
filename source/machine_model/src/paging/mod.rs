@@ -184,11 +184,6 @@ pub open spec fn cpl_precondition(cpl: u64) -> bool {
     cpl <= 3
 }
 
-/// PKRU is a 32-bit register; the upper 32 bits must be zero.
-pub open spec fn pkru_precondition(pkru: u64) -> bool {
-    (pkru & !(low_bits_mask_u64(32))) == 0
-}
-
 /// `u64`-typed variant of `vstd::bits::low_bits_mask`, usable directly as a bit
 /// mask in the spec expressions above.
 pub open spec fn low_bits_mask_u64(n: nat) -> u64 {
@@ -196,156 +191,40 @@ pub open spec fn low_bits_mask_u64(n: nat) -> u64 {
 }
 
 // ---------------------------------------------------------------------------
-// Checked value extractors
-// ---------------------------------------------------------------------------
-/// Extract the CR0 value from a `RegisterValue`, or `None` if it isn't a CR0 value.
-pub open spec fn extract_cr0(value: RegisterValue) -> Option<u64> {
-    match value {
-        RegisterValue::Cr0(v) => Some(v),
-        _ => None,
-    }
-}
-
-/// Extract the CR2 value from a `RegisterValue`, or `None` if it isn't a CR2 value.
-pub open spec fn extract_cr2(value: RegisterValue) -> Option<u64> {
-    match value {
-        RegisterValue::Cr2(v) => Some(v),
-        _ => None,
-    }
-}
-
-/// Extract the CR3 value from a `RegisterValue`, or `None` if it isn't a CR3 value.
-pub open spec fn extract_cr3(value: RegisterValue) -> Option<u64> {
-    match value {
-        RegisterValue::Cr3(v) => Some(v),
-        _ => None,
-    }
-}
-
-/// Extract the CR4 value from a `RegisterValue`, or `None` if it isn't a CR4 value.
-pub open spec fn extract_cr4(value: RegisterValue) -> Option<u64> {
-    match value {
-        RegisterValue::Cr4(v) => Some(v),
-        _ => None,
-    }
-}
-
-/// Extract the EFER value from a `RegisterValue`, or `None` if it isn't the EFER
-/// MSR (register number `MSR_EFER`).
-pub open spec fn extract_efer(value: RegisterValue) -> Option<u64> {
-    match value {
-        RegisterValue::MSR { register, value } if register == MSR_EFER => Some(value),
-        _ => None,
-    }
-}
-
-/// Extract the RFLAGS value from a `RegisterValue`, or `None` if it isn't an
-/// RFLAGS value.
-pub open spec fn extract_rflags(value: RegisterValue) -> Option<u64> {
-    match value {
-        RegisterValue::Rflags(v) => Some(v),
-        _ => None,
-    }
-}
-
-/// Extract the CPL value from a `RegisterValue`, or `None` if it isn't a CPL
-/// value.
-pub open spec fn extract_cpl(value: RegisterValue) -> Option<u64> {
-    match value {
-        RegisterValue::Cpl(v) => Some(v),
-        _ => None,
-    }
-}
-
-/// Extract the PKRU value from a `RegisterValue`, or `None` if it isn't a PKRU
-/// value.
-pub open spec fn extract_pkru(value: RegisterValue) -> Option<u64> {
-    match value {
-        RegisterValue::Pkru(v) => Some(v),
-        _ => None,
-    }
-}
-
-// ---------------------------------------------------------------------------
 // PageTableGlobalState
 // ---------------------------------------------------------------------------
-/// The aggregated global paging state: tracked ownership tokens for every
-/// register that participates in the x86-64 paging architecture, plus the
-/// ghost mapping of virtual page numbers to page mappings implied by the
-/// current page tables.
-pub tracked struct PageTableGlobalState {
-    pub tracked cr0: RegisterPointsTo,
-    pub tracked cr2: RegisterPointsTo,
-    pub tracked cr3: RegisterPointsTo,
-    pub tracked cr4: RegisterPointsTo,
-    pub tracked efer: RegisterPointsTo,
-    pub tracked rflags: RegisterPointsTo,
-    pub tracked cpl: RegisterPointsTo,
-    pub tracked pkru: RegisterPointsTo,
-    pub ghost mappings: PageMappings,
+/// The aggregated global paging state: a ghost view of the paging-relevant
+/// architectural state. The register tokens themselves are owned by
+/// `RegisterState`; this structure only carries the ghost mapping of virtual
+/// page numbers to page mappings implied by the current page tables, and
+/// relates it to a borrowed `RegisterState` through `inv`.
+pub ghost struct PageTableGlobalState {
+    pub mappings: PageMappings,
 }
 
 impl PageTableGlobalState {
-    pub closed spec fn cr0_value(&self) -> Option<u64> {
-        extract_cr0(self.cr0.value())
-    }
-
-    pub closed spec fn cr2_value(&self) -> Option<u64> {
-        extract_cr2(self.cr2.value())
-    }
-
-    pub closed spec fn cr3_value(&self) -> Option<u64> {
-        extract_cr3(self.cr3.value())
-    }
-
-    pub closed spec fn cr4_value(&self) -> Option<u64> {
-        extract_cr4(self.cr4.value())
-    }
-
-    pub closed spec fn efer_value(&self) -> Option<u64> {
-        extract_efer(self.efer.value())
-    }
-
-    pub closed spec fn rflags_value(&self) -> Option<u64> {
-        extract_rflags(self.rflags.value())
-    }
-
-    pub closed spec fn cpl_value(&self) -> Option<u64> {
-        extract_cpl(self.cpl.value())
-    }
-
-    pub closed spec fn pkru_value(&self) -> Option<u64> {
-        extract_pkru(self.pkru.value())
-    }
-
-    /// The global invariant: every register token holds a value of the exact
-    /// expected register identity (with EFER additionally pinned to the exact
-    /// MSR number), the decoded values satisfy all x86-64 paging architectural
-    /// preconditions, and every ghost page mapping is well-formed with respect
-    /// to the current EFER value.
-    pub open spec fn inv(&self) -> bool {
-        &&& self.cr0_value().is_some()
-        &&& self.cr2_value().is_some()
-        &&& self.cr3_value().is_some()
-        &&& self.cr4_value().is_some()
-        &&& self.efer_value().is_some()
-        &&& self.rflags_value().is_some()
-        &&& self.cpl_value().is_some()
-        &&& self.pkru_value().is_some()
-        &&& cr0_paging_precondition(self.cr0_value().unwrap())
-        &&& cr3_paging_precondition(self.cr3_value().unwrap(), self.cr4_value().unwrap())
+    /// The global invariant, relative to the register state: the register state
+    /// is itself well-formed and owns the EFER MSR token, the register values
+    /// satisfy all x86-64 paging architectural preconditions, and every ghost
+    /// page mapping is well-formed with respect to the current EFER value.
+    pub open spec fn inv(&self, registers: &RegisterState) -> bool {
+        &&& registers.inv()
+        &&& registers.msrs.dom().contains(MSR_EFER)
+        &&& cr0_paging_precondition(registers.cr0.value())
+        &&& cr3_paging_precondition(registers.cr3.value(), registers.cr4.value())
         &&& cr4_paging_precondition(
-            self.cr0_value().unwrap(),
-            self.cr4_value().unwrap(),
-            self.efer_value().unwrap(),
+            registers.cr0.value(),
+            registers.cr4.value(),
+            registers.msrs[MSR_EFER].value(),
         )
-        &&& efer_paging_precondition(self.efer_value().unwrap())
-        &&& rflags_precondition(self.rflags_value().unwrap())
-        &&& cpl_precondition(self.cpl_value().unwrap())
-        &&& pkru_precondition(self.pkru_value().unwrap())
+        &&& efer_paging_precondition(registers.msrs[MSR_EFER].value())
+        &&& rflags_precondition(registers.rflags.value())
+        &&& cpl_precondition(registers.cpl.value())
         &&& forall|va: u64|
             #![trigger self.mappings.dom().contains(va)]
-            self.mappings.dom().contains(va) ==> self.mappings[va].inv(self.efer_value().unwrap())
+            self.mappings.dom().contains(va) ==> self.mappings[va].inv(
+                registers.msrs[MSR_EFER].value(),
+            )
     }
 }
 
