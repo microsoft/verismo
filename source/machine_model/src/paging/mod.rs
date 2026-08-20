@@ -4,14 +4,6 @@ use crate::register::*;
 
 verus! {
 
-/// Spec-only helper computing the value of a single bit. Used instead of raw shift
-/// expressions so bit positions are self-documenting; `n` is always a small
-/// compile-time constant in this module, so this never approaches the `u64` shift
-/// width limit.
-pub open spec fn bit(n: u64) -> u64 {
-    1u64 << n
-}
-
 // ---------------------------------------------------------------------------
 // CR0
 // ---------------------------------------------------------------------------
@@ -207,6 +199,10 @@ impl PageTableGlobalState {
     /// is itself well-formed and owns the EFER MSR token, the register values
     /// satisfy all x86-64 paging architectural preconditions, and every ghost
     /// page mapping is well-formed with respect to the current EFER value.
+    ///
+    /// This invariant is relative to the borrowed `registers`: callers must thread
+    /// the same borrowed `RegisterState` through all operations and contracts that
+    /// mention this invariant, since nothing here ties it to a particular state.
     pub open spec fn inv(&self, registers: &RegisterState) -> bool {
         &&& registers.inv()
         &&& registers.msrs.dom().contains(MSR_EFER)

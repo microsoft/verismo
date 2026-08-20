@@ -20,6 +20,7 @@ pub trait ExecutableReg: RegSpec {
     fn write(&self, value: Self::Value, Tracked(token): Tracked<&mut RegisterPointsTo<Self>>)
         ensures
             final(token).value() == value,
+            final(token).reg() == old(token).reg(),
     ;
 }
 

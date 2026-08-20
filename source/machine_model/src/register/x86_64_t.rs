@@ -31,7 +31,7 @@ macro_rules! control_reg_impl {
                     asm!(
                         $write_asm,
                         in(reg) input,
-                        options(nomem, nostack, preserves_flags),
+                        options(nostack, preserves_flags),
                     );
                 }
             }
