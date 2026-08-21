@@ -4,7 +4,9 @@ use crate::register::*;
 // Re-exported so paging users keep seeing `CR4_SMAP`, which is defined in the
 // register module (register operations need it, and depending on paging there
 // would be cyclic).
-pub use crate::register::CR4_SMAP;
+// `CR3_NOFLUSH` likewise lives in the register module so the control-register
+// write contract can normalize it away without depending on paging.
+pub use crate::register::{CR3_NOFLUSH, CR4_SMAP};
 
 verus! {
 
@@ -45,14 +47,6 @@ pub const PAGE_OFFSET_WIDTH: u64 = 12;
 /// minus the page offset bits. Physical page numbers are bounded by
 /// `1 << PHYS_PAGE_NUMBER_WIDTH`.
 pub const PHYS_PAGE_NUMBER_WIDTH: u64 = (PHYS_ADDR_WIDTH - PAGE_OFFSET_WIDTH) as u64;
-
-/// CR3 bit 63: the `MOV to CR3` "no-flush" control. This is write-only: it is
-/// consumed by the write operation itself and never persists as architectural
-/// state, so it must always read back as clear. This is documented explicitly
-/// even though it is also excluded by the high-bit reserved mask in
-/// `cr3_paging_precondition`, since the write-only semantics (rather than mere
-/// reservedness) is the reason it must be clear.
-pub const CR3_NOFLUSH: u64 = 0x8000_0000_0000_0000;
 
 // ---------------------------------------------------------------------------
 // CR4

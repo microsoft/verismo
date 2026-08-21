@@ -52,6 +52,30 @@ pub const RFLAGS_ID: u64 = 0x20_0000;
 /// paging module re-exports it.
 pub const CR4_SMAP: u64 = 0x20_0000;
 
+// ---------------------------------------------------------------------------
+// CR0 bits needed by register operations
+// ---------------------------------------------------------------------------
+/// CR0.ET (Extension Type), bit 4.
+///
+/// On all CPUs modeled here this bit is fixed to 1: it reads back as set no
+/// matter what value a `MOV to CR0` writes.
+pub const CR0_ET: u64 = 0x10;
+
+// ---------------------------------------------------------------------------
+// CR3 bits needed by register operations
+// ---------------------------------------------------------------------------
+/// CR3 bit 63: the `MOV to CR3` "no-flush" control. This is write-only: it is
+/// consumed by the write operation itself and never persists as architectural
+/// state, so it must always read back as clear. This is documented explicitly
+/// even though it is also excluded by the high-bit reserved mask in
+/// `cr3_paging_precondition`, since the write-only semantics (rather than mere
+/// reservedness) is the reason it must be clear.
+///
+/// Defined here (rather than in the paging module) so that the control-register
+/// write contract can normalize it away without depending on paging; the paging
+/// module re-exports it.
+pub const CR3_NOFLUSH: u64 = 0x8000_0000_0000_0000;
+
 /// The persistent control/system portion of RFLAGS.
 ///
 /// The arithmetic/status flags (CF, PF, AF, ZF, SF, OF) are deliberately *not*

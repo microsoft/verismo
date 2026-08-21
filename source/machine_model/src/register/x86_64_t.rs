@@ -4,14 +4,36 @@ use super::spec::*;
 use core::arch::asm;
 use vstd::prelude::*;
 
+/// Implements `ControlReg` for a control-register marker.
+///
+/// `$stored` is the closed-form normalization applied to a written value: the
+/// value that is architecturally retained (and thus read back) after a successful
+/// `MOV to CRn`.
+///
+/// Reads are `nomem, nostack`; writes are `nostack` only, since a `MOV to CRn` can
+/// change how memory is translated/cached. Neither is `preserves_flags`: `MOV
+/// to/from CRn` leaves the status flags architecturally undefined.
+///
+/// Writing an invalid/reserved/unsupported value faults (`#GP`); the contract below
+/// models only the value retained after a successful write, and full CPU
+/// capability/fixed-bit preconditions remain future work. Such a write can also
+/// invalidate `PageTableGlobalState::inv`, which callers must re-establish.
 macro_rules! control_reg_impl {
-    ($ty:ident, $read_asm:literal, $write_asm:literal) => {
+    ($ty:ident, $read_asm:literal, $write_asm:literal, |$v:ident| $stored:expr) => {
         verus! {
 
-        impl ReadableReg for $ty {
+        impl ControlReg for $ty {
+            open spec fn stored_value(&self, $v: u64) -> u64 {
+                $stored
+            }
+
             #[inline(always)]
             #[verifier(external_body)]
-            fn read(&self, Tracked(token): Tracked<&RegisterPointsTo<Self>>) -> (result: u64) {
+            fn read(
+                &self,
+                Tracked(_cpl): Tracked<&RegisterPointsTo<Cpl>>,
+                Tracked(token): Tracked<&RegisterPointsTo<Self>>,
+            ) -> (result: u64) {
                 let output: u64;
                 unsafe {
                     asm!(
@@ -22,17 +44,15 @@ macro_rules! control_reg_impl {
                 }
                 output
             }
-        }
 
-        /// Note: writing a control register can invalidate
-        /// `PageTableGlobalState::inv` (which constrains CR0/CR3/CR4 and the ghost
-        /// mappings). The invariant is relative to the register state, so callers
-        /// holding such a state must re-establish it after any control-register
-        /// write before relying on it again.
-        impl WritableReg for $ty {
             #[inline(always)]
             #[verifier(external_body)]
-            fn write(&self, value: u64, Tracked(token): Tracked<&mut RegisterPointsTo<Self>>) {
+            fn write(
+                &self,
+                value: u64,
+                Tracked(_cpl): Tracked<&RegisterPointsTo<Cpl>>,
+                Tracked(token): Tracked<&mut RegisterPointsTo<Self>>,
+            ) {
                 let input: u64 = value;
                 unsafe {
                     asm!(
@@ -48,9 +68,12 @@ macro_rules! control_reg_impl {
     };
 }
 
-control_reg_impl!(Cr0, "mov {}, cr0", "mov cr0, {}");
-control_reg_impl!(Cr3, "mov {}, cr3", "mov cr3, {}");
-control_reg_impl!(Cr4, "mov {}, cr4", "mov cr4, {}");
+// CR0.ET is fixed to 1, so it reads back set regardless of the written value.
+control_reg_impl!(Cr0, "mov {}, cr0", "mov cr0, {}", |value| value | CR0_ET);
+// CR3 bit 63 is the write-only "no-flush" control and never persists.
+control_reg_impl!(Cr3, "mov {}, cr3", "mov cr3, {}", |value| value & !CR3_NOFLUSH);
+// Every CR4 bit modeled here is retained as written.
+control_reg_impl!(Cr4, "mov {}, cr4", "mov cr4, {}", |value| value);
 
 verus! {
 
