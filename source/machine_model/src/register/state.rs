@@ -9,7 +9,7 @@ use super::spec::*;
 /// modeled register, plus a map of tokens for the model-specific registers,
 /// keyed by MSR number.
 pub tracked struct RegisterState {
-    pub tracked rflags_control: RegisterPointsTo<RflagsControl>,
+    pub tracked rflags: RegisterPointsTo<Rflags>,
     pub tracked rax: RegisterPointsTo<Rax>,
     pub tracked rsp: RegisterPointsTo<Rsp>,
     pub tracked cs: RegisterPointsTo<Cs>,

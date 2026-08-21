@@ -10,6 +10,27 @@ pub struct DescriptorTableValue {
 }
 
 // ---------------------------------------------------------------------------
+// RFLAGS status (arithmetic) bits
+// ---------------------------------------------------------------------------
+/// RFLAGS.CF (Carry Flag), bit 0.
+pub const RFLAGS_CF: u64 = 0x1;
+
+/// RFLAGS.PF (Parity Flag), bit 2.
+pub const RFLAGS_PF: u64 = 0x4;
+
+/// RFLAGS.AF (Auxiliary Carry Flag), bit 4.
+pub const RFLAGS_AF: u64 = 0x10;
+
+/// RFLAGS.ZF (Zero Flag), bit 6.
+pub const RFLAGS_ZF: u64 = 0x40;
+
+/// RFLAGS.SF (Sign Flag), bit 7.
+pub const RFLAGS_SF: u64 = 0x80;
+
+/// RFLAGS.OF (Overflow Flag), bit 11.
+pub const RFLAGS_OF: u64 = 0x800;
+
+// ---------------------------------------------------------------------------
 // RFLAGS control/system bits
 // ---------------------------------------------------------------------------
 /// RFLAGS.TF (Trap Flag), bit 8.
@@ -29,6 +50,17 @@ pub const RFLAGS_IOPL_SHIFT: u64 = 12;
 
 /// RFLAGS.NT (Nested Task), bit 14.
 pub const RFLAGS_NT: u64 = 0x4000;
+
+/// RFLAGS.RF (Resume Flag), bit 16.
+///
+/// `PUSHFQ` always stores this bit as 0, so it reads as clear in the pushed
+/// image regardless of the hidden architectural value.
+pub const RFLAGS_RF: u64 = 0x1_0000;
+
+/// RFLAGS.VM (Virtual-8086 Mode), bit 17.
+///
+/// `PUSHFQ` always stores this bit as 0 as well.
+pub const RFLAGS_VM: u64 = 0x2_0000;
 
 /// RFLAGS.AC (Alignment Check / Access Control), bit 18.
 pub const RFLAGS_AC: u64 = 0x4_0000;
@@ -76,33 +108,126 @@ pub const CR0_ET: u64 = 0x10;
 /// module re-exports it.
 pub const CR3_NOFLUSH: u64 = 0x8000_0000_0000_0000;
 
-/// The persistent control/system portion of RFLAGS.
+/// The raw RFLAGS image of the current CPU.
 ///
-/// The arithmetic/status flags (CF, PF, AF, ZF, SF, OF) are deliberately *not*
-/// modeled: they are clobbered by ordinary instructions, so they carry no stable
-/// architectural state worth owning as a register token.
-///
-/// `RF` (Resume Flag) and `VM` (Virtual-8086 Mode) are also *not* modeled: `PUSHFQ`
-/// clears both bits in the image it pushes, so this reader cannot observe their
-/// architectural values at all.
+/// `bits` is exactly the 64-bit architectural image that `PUSHFQ` stores: no
+/// decoding, masking, or per-field projection is applied. In particular, `PUSHFQ`
+/// stores `RF` and `VM` as 0 no matter what the hidden architectural values are,
+/// so `bits` is the *observable* RFLAGS image, and the `resume()`/`virtual_8086()`
+/// queries below report that image rather than a claim about hidden hardware state.
+/// The status flags are included even though ordinary instructions clobber them:
+/// this value is a plain (untracked) exec value describing the image, not an
+/// ownership token, so knowledge of it is refreshed by whatever operation last
+/// constrained it.
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
-pub struct RflagsControlValue {
-    pub trap: bool,
-    pub interrupt_enable: bool,
-    pub direction: bool,
-    pub io_privilege_level: u8,
-    pub nested_task: bool,
-    pub alignment_check: bool,
-    pub virtual_interrupt: bool,
-    pub virtual_interrupt_pending: bool,
-    pub id: bool,
+pub struct RflagsValue {
+    pub bits: u64,
 }
 
-impl RflagsControlValue {
-    /// The same control state with `AC` set to `value` and every other field
-    /// preserved.
-    pub open spec fn with_alignment_check(self, value: bool) -> RflagsControlValue {
-        RflagsControlValue { alignment_check: value, ..self }
+impl RflagsValue {
+    // -----------------------------------------------------------------------
+    // Status (arithmetic) flags: written by ordinary ALU instructions.
+    // -----------------------------------------------------------------------
+    /// RFLAGS.CF.
+    pub open spec fn carry(self) -> bool {
+        (self.bits & RFLAGS_CF) != 0
+    }
+
+    /// RFLAGS.PF.
+    pub open spec fn parity(self) -> bool {
+        (self.bits & RFLAGS_PF) != 0
+    }
+
+    /// RFLAGS.AF.
+    pub open spec fn auxiliary_carry(self) -> bool {
+        (self.bits & RFLAGS_AF) != 0
+    }
+
+    /// RFLAGS.ZF.
+    pub open spec fn zero(self) -> bool {
+        (self.bits & RFLAGS_ZF) != 0
+    }
+
+    /// RFLAGS.SF.
+    pub open spec fn sign(self) -> bool {
+        (self.bits & RFLAGS_SF) != 0
+    }
+
+    /// RFLAGS.OF.
+    pub open spec fn overflow(self) -> bool {
+        (self.bits & RFLAGS_OF) != 0
+    }
+
+    // -----------------------------------------------------------------------
+    // Control/system flags: persistent mode and control state.
+    // -----------------------------------------------------------------------
+    /// RFLAGS.TF.
+    pub open spec fn trap(self) -> bool {
+        (self.bits & RFLAGS_TF) != 0
+    }
+
+    /// RFLAGS.IF.
+    pub open spec fn interrupt_enable(self) -> bool {
+        (self.bits & RFLAGS_IF) != 0
+    }
+
+    /// RFLAGS.DF.
+    pub open spec fn direction(self) -> bool {
+        (self.bits & RFLAGS_DF) != 0
+    }
+
+    /// RFLAGS.IOPL, as the 2-bit privilege level it encodes.
+    pub open spec fn io_privilege_level(self) -> u8 {
+        ((self.bits & RFLAGS_IOPL) >> RFLAGS_IOPL_SHIFT) as u8
+    }
+
+    /// RFLAGS.NT.
+    pub open spec fn nested_task(self) -> bool {
+        (self.bits & RFLAGS_NT) != 0
+    }
+
+    /// RFLAGS.RF *as it appears in the image*. `PUSHFQ` clears this bit when it
+    /// stores the image, so a value obtained from a `PUSHFQ`-based read reports
+    /// `false` here even if the hidden architectural RF is set.
+    pub open spec fn resume(self) -> bool {
+        (self.bits & RFLAGS_RF) != 0
+    }
+
+    /// RFLAGS.VM *as it appears in the image*; see `resume` for the same caveat.
+    pub open spec fn virtual_8086(self) -> bool {
+        (self.bits & RFLAGS_VM) != 0
+    }
+
+    /// RFLAGS.AC.
+    pub open spec fn alignment_check(self) -> bool {
+        (self.bits & RFLAGS_AC) != 0
+    }
+
+    /// RFLAGS.VIF.
+    pub open spec fn virtual_interrupt(self) -> bool {
+        (self.bits & RFLAGS_VIF) != 0
+    }
+
+    /// RFLAGS.VIP.
+    pub open spec fn virtual_interrupt_pending(self) -> bool {
+        (self.bits & RFLAGS_VIP) != 0
+    }
+
+    /// RFLAGS.ID.
+    pub open spec fn id(self) -> bool {
+        (self.bits & RFLAGS_ID) != 0
+    }
+
+    /// The same image with `AC` set to `value` and every other bit, status flags
+    /// included, preserved exactly.
+    pub open spec fn with_alignment_check(self, value: bool) -> RflagsValue {
+        RflagsValue {
+            bits: if value {
+                self.bits | RFLAGS_AC
+            } else {
+                self.bits & !RFLAGS_AC
+            },
+        }
     }
 }
 
@@ -128,7 +253,7 @@ pub trait FixedRegSpec: RegSpec {
 
 // Fixed (statically-known) register markers. Each is a zero-sized type, so
 // there is exactly one instance.
-pub struct RflagsControl;
+pub struct Rflags;
 
 pub struct Rax;
 
@@ -170,11 +295,11 @@ pub struct Msr {
     pub register: u32,
 }
 
-impl RegSpec for RflagsControl {
-    type Value = RflagsControlValue;
+impl RegSpec for Rflags {
+    type Value = RflagsValue;
 }
 
-impl FixedRegSpec for RflagsControl {
+impl FixedRegSpec for Rflags {
 
 }
 

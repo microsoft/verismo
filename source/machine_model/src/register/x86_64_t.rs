@@ -12,7 +12,9 @@ use vstd::prelude::*;
 ///
 /// Reads are `nomem, nostack`; writes are `nostack` only, since a `MOV to CRn` can
 /// change how memory is translated/cached. Neither is `preserves_flags`: `MOV
-/// to/from CRn` leaves the status flags architecturally undefined.
+/// to/from CRn` leaves the status flags architecturally undefined, which is why both
+/// operations take the `Rflags` token mutably and the body need not compute any
+/// flag value.
 ///
 /// Writing an invalid/reserved/unsupported value faults (`#GP`); the contract below
 /// models only the value retained after a successful write, and full CPU
@@ -32,6 +34,7 @@ macro_rules! control_reg_impl {
             fn read(
                 &self,
                 Tracked(_cpl): Tracked<&RegisterPointsTo<Cpl>>,
+                Tracked(_rflags): Tracked<&mut RegisterPointsTo<Rflags>>,
                 Tracked(token): Tracked<&RegisterPointsTo<Self>>,
             ) -> (result: u64) {
                 let output: u64;
@@ -51,6 +54,7 @@ macro_rules! control_reg_impl {
                 &self,
                 value: u64,
                 Tracked(_cpl): Tracked<&RegisterPointsTo<Cpl>>,
+                Tracked(_rflags): Tracked<&mut RegisterPointsTo<Rflags>>,
                 Tracked(token): Tracked<&mut RegisterPointsTo<Self>>,
             ) {
                 let input: u64 = value;
@@ -77,45 +81,40 @@ control_reg_impl!(Cr4, "mov {}, cr4", "mov cr4, {}", |value| value);
 
 verus! {
 
-impl ReadableReg for RflagsControl {
-    /// Read the persistent control/system flags out of RFLAGS.
+impl ReadableReg for Rflags {
+    /// Read the raw RFLAGS image with `PUSHFQ`/`POP`.
     ///
-    /// `pushfq`/`pop` only reads the flags, so `preserves_flags` is accurate here.
-    /// Being `external_body`, the (trusted) postcondition binds the decoded value to
-    /// the token's ghost value.
+    /// The popped 64-bit word is stored verbatim: no bit is decoded, masked, or
+    /// otherwise interpreted here, so the value is exactly the architectural image
+    /// `PUSHFQ` produced (with `RF` and `VM` stored as 0 by that instruction).
+    ///
+    /// `PUSHFQ`/`POP` only reads the flags, so `preserves_flags` is accurate; the
+    /// sequence pushes and pops the stack and so is neither `nomem` nor `nostack`.
+    /// Being `external_body`, the (trusted) postcondition binds the value to the
+    /// token's ghost value.
     #[inline(always)]
     #[verifier(external_body)]
-    fn read(&self, Tracked(token): Tracked<&RegisterPointsTo<Self>>) -> (result:
-        RflagsControlValue) {
-        let raw: u64;
+    fn read(&self, Tracked(token): Tracked<&RegisterPointsTo<Self>>) -> (result: RflagsValue) {
+        let output: u64;
         unsafe {
             asm!(
                 "pushfq",
                 "pop {}",
-                out(reg) raw,
+                out(reg) output,
                 options(preserves_flags),
             );
         }
-        RflagsControlValue {
-            trap: (raw & RFLAGS_TF) != 0,
-            interrupt_enable: (raw & RFLAGS_IF) != 0,
-            direction: (raw & RFLAGS_DF) != 0,
-            io_privilege_level: ((raw & RFLAGS_IOPL) >> RFLAGS_IOPL_SHIFT) as u8,
-            nested_task: (raw & RFLAGS_NT) != 0,
-            alignment_check: (raw & RFLAGS_AC) != 0,
-            virtual_interrupt: (raw & RFLAGS_VIF) != 0,
-            virtual_interrupt_pending: (raw & RFLAGS_VIP) != 0,
-            id: (raw & RFLAGS_ID) != 0,
-        }
+        RflagsValue { bits: output }
     }
 }
 
-impl RflagsControl {
+impl Rflags {
     /// `STAC`: set RFLAGS.AC, allowing supervisor accesses to user pages under SMAP.
     ///
     /// `STAC` only modifies AC, and Rust's `preserves_flags` covers just the
     /// status flags (CF, PF, AF, ZF, SF, OF) plus DF, none of which `STAC` touches,
-    /// so the option is sound here.
+    /// so the option is sound here; correspondingly the resulting raw image differs
+    /// from the previous one only in the `AC` bit.
     ///
     /// `STAC` faults with #UD unless `CR4.SMAP` is set and the current privilege
     /// level is 0, so shared tokens for `Cr4` and `Cpl` are taken as evidence of
@@ -126,7 +125,7 @@ impl RflagsControl {
         &self,
         Tracked(cr4): Tracked<&RegisterPointsTo<Cr4>>,
         Tracked(cpl): Tracked<&RegisterPointsTo<Cpl>>,
-        Tracked(token): Tracked<&mut RegisterPointsTo<RflagsControl>>,
+        Tracked(token): Tracked<&mut RegisterPointsTo<Rflags>>,
     )
         requires
             (cr4.value() & CR4_SMAP) != 0,
@@ -150,7 +149,7 @@ impl RflagsControl {
         &self,
         Tracked(cr4): Tracked<&RegisterPointsTo<Cr4>>,
         Tracked(cpl): Tracked<&RegisterPointsTo<Cpl>>,
-        Tracked(token): Tracked<&mut RegisterPointsTo<RflagsControl>>,
+        Tracked(token): Tracked<&mut RegisterPointsTo<Rflags>>,
     )
         requires
             (cr4.value() & CR4_SMAP) != 0,

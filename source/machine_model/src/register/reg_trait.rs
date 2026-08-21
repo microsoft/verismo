@@ -24,6 +24,13 @@ pub trait ReadableReg: FixedRegSpec {
 /// Control registers are read and written with `MOV to/from CRn`, which fault with
 /// `#GP` outside CPL 0, so both operations take a shared `Cpl` token as typed
 /// evidence that the current privilege level is 0.
+///
+/// `MOV to/from CRn` also leaves the status flags architecturally undefined, so both
+/// operations additionally take the `Rflags` token *mutably*. They preserve the
+/// register identity but deliberately state no constraint on the resulting raw
+/// RFLAGS image: any previously known exact value is invalidated, and the caller's
+/// knowledge of RFLAGS is refreshed nondeterministically by the trusted operation
+/// (re-read it with `Rflags::read` if a concrete image is needed again).
 pub trait ControlReg: FixedRegSpec<Value = u64> {
     /// The value that is architecturally retained after successfully writing
     /// `value` to this register, i.e. the value a subsequent read observes.
@@ -36,12 +43,14 @@ pub trait ControlReg: FixedRegSpec<Value = u64> {
     fn read(
         &self,
         Tracked(cpl): Tracked<&RegisterPointsTo<Cpl>>,
+        Tracked(rflags): Tracked<&mut RegisterPointsTo<Rflags>>,
         Tracked(token): Tracked<&RegisterPointsTo<Self>>,
     ) -> (result: u64)
         requires
             cpl.value() == 0,
         ensures
             token.value() == result,
+            final(rflags).reg() == old(rflags).reg(),
     ;
 
     /// Write `value` to this control register.
@@ -60,6 +69,7 @@ pub trait ControlReg: FixedRegSpec<Value = u64> {
         &self,
         value: u64,
         Tracked(cpl): Tracked<&RegisterPointsTo<Cpl>>,
+        Tracked(rflags): Tracked<&mut RegisterPointsTo<Rflags>>,
         Tracked(token): Tracked<&mut RegisterPointsTo<Self>>,
     )
         requires
@@ -67,6 +77,7 @@ pub trait ControlReg: FixedRegSpec<Value = u64> {
         ensures
             final(token).value() == self.stored_value(value),
             final(token).reg() == old(token).reg(),
+            final(rflags).reg() == old(rflags).reg(),
     ;
 }
 

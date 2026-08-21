@@ -108,7 +108,7 @@ impl PageMapping {
     /// when PKE is clear, hardware ignores the protection key entirely (any
     /// stored value is simply inert), so this predicate does not need `cr4` and
     /// does not require `protection_key == 0` in that mode. `CR4.PKE` (along
-    /// with `SMEP`, `SMAP`, and the RFLAGS control state's `AC` flag) is retained in the register state
+    /// with `SMEP`, `SMAP`, and the `AC` bit of the raw RFLAGS image) is retained in the register state
     /// for a later access-check relation (deciding whether a given access is
     /// permitted), not for static mapping validity as checked here.
     pub open spec fn inv(self, efer: u64) -> bool {
