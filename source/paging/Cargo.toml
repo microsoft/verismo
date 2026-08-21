@@ -12,6 +12,7 @@ bitflags = { workspace = true }
 zerocopy = { workspace = true }
 builtin_macros = { workspace = true }
 common_proofs = { path = "../common_proofs" }
+concurrent_rw = { path = "../concurrent_rw" }
 
 [features]
 verification-test = []
