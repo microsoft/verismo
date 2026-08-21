@@ -8,7 +8,6 @@
 //! that marker is being defined elsewhere and will be plugged in later.
 use core::marker::PhantomData;
 
-use bitflags::Flags;
 use vstd::prelude::*;
 
 use crate::structs::address::{Address, PhysAddr};
@@ -42,6 +41,36 @@ impl<A: ArchPagingMeta> PageTableEntry<A> {
             self.view(),
     {
         self.val
+    }
+
+    /// The entry a raw word denotes. The protocol layer reads and writes slots
+    /// as plain words, so it needs both directions of this correspondence.
+    pub closed spec fn spec_from_bits(val: usize) -> Self {
+        Self { val, dummy: PhantomData }
+    }
+
+    #[verifier::when_used_as_spec(spec_from_bits)]
+    pub fn from_bits(val: usize) -> (ret: Self)
+        ensures
+            ret == Self::spec_from_bits(val),
+            ret.view() == val,
+    {
+        Self { val, dummy: PhantomData }
+    }
+
+    /// Encoding and decoding are inverses. Both directions are `closed`, so a
+    /// layer that stores entries as plain words needs this stated.
+    pub proof fn lemma_bits_roundtrip(entry: Self)
+        ensures
+            Self::spec_from_bits(entry.view()) == entry,
+    {
+    }
+
+    /// Decoding a word and reading it back gives the word.
+    pub proof fn lemma_view_of_bits(val: usize)
+        ensures
+            Self::spec_from_bits(val).view() == val,
+    {
     }
 
     /// The address-field bits, *including* any confidentiality/shared tag
@@ -109,17 +138,13 @@ impl<A: ArchPagingMeta> PageTableEntry<A> {
     }
 
     /// Decodes the flags word into the architecture's flags type.
-    ///
-    /// Trusted: `bitflags::Flags` has no Verus specification generic over an
-    /// arbitrary implementer (only concrete `bitflags_verus!`-generated
-    /// types get one), so decoding is assumed to agree with
-    /// `GenericPageTableFlags::spec_bits`, the same trust boundary
-    /// `ArchPagingMeta`'s mask accessors already carry.
-    #[verifier::external_body]
     pub fn flags(&self) -> (ret: A::PTFlags)
         ensures
-            ret.spec_bits() == self.flags_bits_spec(),
+            ret@ == self.flags_bits_spec(),
     {
+        proof {
+            A::lemma_pte_masks_wf();
+        }
         A::PTFlags::from_bits_truncate(self.val)
     }
 
@@ -190,42 +215,78 @@ impl<A: ArchPagingMeta> PageTableEntry<A> {
     /// A table entry pointing at `child_frame`, a page holding the next
     /// level down.
     ///
-    /// Trusted for the same reason as `flags`: assembling the raw word from
-    /// `flags`'s bits crosses the same unspecified `bitflags::Flags`
-    /// boundary. `flags` must already carry `PRESENT` and clear `HUGE` --
-    /// typically `A::PTFlags::parent_flags()` plus any per-mapping bits.
-    #[verifier::external_body]
+    /// `flags` must already carry `PRESENT` and clear `HUGE` -- typically
+    /// `A::PTFlags::parent_flags()` plus any per-mapping bits.
     pub fn new_table(child_frame: PhysAddr, flags: A::PTFlags) -> (ret: Self)
         requires
             child_frame@ & !A::spec_address_mask() == 0,
-            flags.spec_bits() & A::PTFlags::spec_present_bit() != 0,
-            flags.spec_bits() & A::PTFlags::spec_huge_bit() == 0,
+            flags@ & A::PTFlags::spec_present_bit() != 0,
+            flags@ & A::PTFlags::spec_huge_bit() == 0,
         ensures
             ret.paddr_field_spec() == child_frame@,
             forall|depth: nat| depth > 0 ==> ret.is_table_spec(depth),
     {
+        proof {
+            A::lemma_pte_masks_wf();
+        }
         let addr = child_frame.bits() & A::address_mask();
-        Self { val: addr | flags.bits(), dummy: PhantomData }
+        // Flag bits are masked out of the address field before assembly, so
+        // the postconditions below hold regardless of what `flags` happens
+        // to carry outside its architecture-defined bits.
+        let flag_bits = flags.bits() & !A::address_mask();
+        let ret = Self { val: addr | flag_bits, dummy: PhantomData };
+        proof {
+            let am = A::spec_address_mask();
+            let pb = A::PTFlags::spec_present_bit();
+            let hb = A::PTFlags::spec_huge_bit();
+            let cf = child_frame@;
+            let fb = flags@;
+            assert(am & pb == 0 && am & hb == 0);
+            assert(cf & !am == 0);
+            assert(fb & pb != 0 && fb & hb == 0);
+            assert(addr == cf & am);
+            assert(flag_bits == fb & !am);
+            assert((am & pb == 0 && am & hb == 0 && cf & !am == 0 && fb & pb != 0 && fb & hb == 0
+                && addr == cf & am && flag_bits == fb & !am) ==> ((addr | flag_bits) & am == cf && (
+            addr | flag_bits) & pb != 0 && (addr | flag_bits) & hb == 0)) by (bit_vector);
+        }
+        ret
     }
 
     /// A leaf entry mapping `frame` with `flags`.
-    ///
-    /// Trusted for the same reason as `new_table`.
-    #[verifier::external_body]
     pub fn new_leaf(frame: PhysAddr, flags: A::PTFlags) -> (ret: Self)
         requires
             frame@ & !A::spec_address_mask() == 0,
-            flags.spec_bits() & A::PTFlags::spec_present_bit() != 0,
+            flags@ & A::PTFlags::spec_present_bit() != 0,
         ensures
             ret.paddr_field_spec() == frame@,
             ret.present_spec(),
             forall|depth: nat|
-                depth > 0 ==> ret.huge_spec(depth) == (flags.spec_bits()
-                    & A::PTFlags::spec_huge_bit() != 0),
+                depth > 0 ==> ret.huge_spec(depth) == (flags@ & A::PTFlags::spec_huge_bit() != 0),
             ret.is_leaf_spec(0),
     {
+        proof {
+            A::lemma_pte_masks_wf();
+        }
         let addr = frame.bits() & A::address_mask();
-        Self { val: addr | flags.bits(), dummy: PhantomData }
+        let flag_bits = flags.bits() & !A::address_mask();
+        let ret = Self { val: addr | flag_bits, dummy: PhantomData };
+        proof {
+            let am = A::spec_address_mask();
+            let pb = A::PTFlags::spec_present_bit();
+            let hb = A::PTFlags::spec_huge_bit();
+            let fr = frame@;
+            let fb = flags@;
+            assert(am & pb == 0 && am & hb == 0);
+            assert(fr & !am == 0);
+            assert(fb & pb != 0);
+            assert(addr == fr & am);
+            assert(flag_bits == fb & !am);
+            assert((am & pb == 0 && am & hb == 0 && fr & !am == 0 && fb & pb != 0 && addr == fr & am
+                && flag_bits == fb & !am) ==> ((addr | flag_bits) & am == fr && (addr | flag_bits)
+                & pb != 0 && (addr | flag_bits) & hb == fb & hb)) by (bit_vector);
+        }
+        ret
     }
 }
 

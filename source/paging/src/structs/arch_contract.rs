@@ -45,7 +45,12 @@ pub open spec fn level_shift<A: ArchPagingGeometry>(depth: nat) -> nat {
     (page_offset_width::<A>() + depth * A::level_index_width()) as nat
 }
 
-pub trait GenericPageTableFlags: bitflags::Flags<Bits = usize> + core::ops::BitAnd<
+/// A host's page-table flags type.
+///
+/// An implementer's raw bits are exposed through the standard Verus `View`
+/// (`self@`), not a bespoke accessor -- any `bitflags_verus!`-generated type
+/// already carries a `view` spec, so it satisfies this for free.
+pub trait GenericPageTableFlags: View<V = usize> + core::ops::BitAnd<
     Output = Self,
 > + core::ops::BitOr<Output = Self> + Copy + Clone {
     const PRESENT: Self;
@@ -61,13 +66,7 @@ pub trait GenericPageTableFlags: bitflags::Flags<Bits = usize> + core::ops::BitA
     /// rights are constrained by both parent and leaf entries.
     fn parent_flags() -> Self;
 
-    /// The raw bits `present()`/`huge()` are read from. `bitflags::Flags` has
-    /// no Verus-visible spec for a generic implementer, so an architecture
-    /// states its own bit pattern here rather than through `.bits()`.
-    spec fn spec_bits(&self) -> usize;
-
-    /// Spec-level mask tested by `present()`. Paired with `spec_bits` so
-    /// entry-level specs can state presence without decoding `Self`.
+    /// Spec-level mask tested by `present()`.
     spec fn spec_present_bit() -> usize;
 
     /// Spec-level mask tested by `huge()`.
@@ -75,12 +74,12 @@ pub trait GenericPageTableFlags: bitflags::Flags<Bits = usize> + core::ops::BitA
 
     fn huge(&self) -> (ret: bool)
         ensures
-            ret == (self.spec_bits() & Self::spec_huge_bit() != 0),
+            ret == (self@ & Self::spec_huge_bit() != 0),
     ;
 
     fn present(&self) -> (ret: bool)
         ensures
-            ret == (self.spec_bits() & Self::spec_present_bit() != 0),
+            ret == (self@ & Self::spec_present_bit() != 0),
     ;
 
     /// Raw value of the `PRESENT` bit, so a caller assembling a fresh raw
@@ -101,7 +100,27 @@ pub trait GenericPageTableFlags: bitflags::Flags<Bits = usize> + core::ops::BitA
 
     fn user(&self) -> (ret: bool)
         ensures
-            ret == (self.spec_bits() & Self::spec_user_bit() != 0),
+            ret == (self@ & Self::spec_user_bit() != 0),
+    ;
+
+    /// Every bit any named flag can occupy. Together with
+    /// `ArchPagingMeta::lemma_pte_masks_wf`'s claim that this is exactly the
+    /// complement of the address field, this is what lets `entry.rs` decode
+    /// a raw word's flags without dropping bits it should have kept.
+    spec fn spec_all_bits() -> usize;
+
+    /// Raw word, so `entry.rs` can assemble/decode a `PageTableEntry` without
+    /// crossing into `bitflags::Flags`, which has no Verus spec generic over
+    /// an arbitrary implementer.
+    fn bits(&self) -> (ret: usize)
+        ensures
+            ret == self@,
+    ;
+
+    /// Decodes `bits`, dropping anything outside `Self::spec_all_bits()`.
+    fn from_bits_truncate(bits: usize) -> (ret: Self)
+        ensures
+            ret@ == (bits & Self::spec_all_bits()),
     ;
 }
 
@@ -127,6 +146,10 @@ pub trait ArchPagingMeta: 'static + Copy + ArchPagingGeometry {
             Self::spec_address_mask() & Self::PTFlags::spec_present_bit() == 0,
             Self::spec_address_mask() & Self::PTFlags::spec_huge_bit() == 0,
             Self::spec_private_mask() & Self::spec_shared_mask() == 0,
+            // Every bit outside the address field is some named flag, so
+            // decoding a raw word's flags (`PageTableEntry::flags`) never
+            // drops bits it should have kept.
+            Self::PTFlags::spec_all_bits() == !Self::spec_address_mask(),
     ;
 
     /// Returns the bitmask ORed into physical addresses for private
