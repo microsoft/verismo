@@ -90,8 +90,9 @@ catches it when a caller threads the wrong one.
 Writes to `CR0`, `CR3`, `CR4` or `MSR_EFER` can invalidate this invariant, so
 those operations do not preserve it; callers re-establish it.
 
-The address widths are supplied by the host through `ArchPagingGeometry`
-(`phys_addr_width`, `page_offset_width`), a supertrait of `ArchPagingMeta`, so
+The address geometry is supplied by the host through `ArchPagingGeometry`, a
+supertrait of `ArchPagingMeta`: `phys_addr_width` plus a `MinPageSize` marker
+whose shift is the in-page offset width (`page_offset_width`). So
 `cr3_paging_precondition` is stated against the embedder's geometry rather than
 against fixed constants. `geometry_wf` states the sanity condition on those
 widths in the crate, so a host cannot weaken it.

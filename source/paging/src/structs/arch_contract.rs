@@ -1,22 +1,31 @@
 use vstd::prelude::*;
 
 use crate::address::{Address, PhysAddr};
+use crate::sizes::{PageOffset, PageSize};
 
 verus! {
 
 /// The address geometry a host supplies. Split out of `ArchPagingMeta` so that
 /// specifications can be stated against it without depending on the executable
 /// entry-manipulation half of that trait.
-pub trait ArchPagingGeometry {
+pub trait ArchPagingGeometry: Sized {
+    /// Smallest page this architecture can map. Its shift is the width of the
+    /// in-page byte offset.
+    type MinPageSize: PageSize;
+
     spec fn phys_addr_width() -> nat;
 
-    spec fn page_offset_width() -> nat;
+    /// Sanity condition on the geometry, discharged by the host so that callers
+    /// need not carry it as a precondition.
+    proof fn lemma_geometry_wf()
+        ensures
+            <Self::MinPageSize as PageOffset>::SHIFT < Self::phys_addr_width() <= 64,
+    ;
 }
 
-/// Sanity condition on a host's geometry. Stated here rather than left to the
-/// host, so that a host cannot weaken it.
-pub open spec fn geometry_wf<A: ArchPagingGeometry>() -> bool {
-    0 < A::page_offset_width() < A::phys_addr_width() <= 64
+/// Width of the in-page byte offset, in bits.
+pub open spec fn page_offset_width<A: ArchPagingGeometry>() -> nat {
+    <A::MinPageSize as PageOffset>::SHIFT as nat
 }
 
 } // verus!
@@ -53,7 +62,6 @@ pub trait GenericPageTableFlags:
 }
 
 pub trait ArchPagingMeta: 'static + Copy + ArchPagingGeometry {
-    const PAGE_SIZE: usize;
     type PTFlags: GenericPageTableFlags;
 
     /// Returns the bitmask ORed into physical addresses for private
