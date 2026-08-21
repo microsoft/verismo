@@ -278,19 +278,22 @@ macro_rules! bitflags_verus {
         $(#[$outer:meta])*
         $vis:vis struct $name:ident : $bits:ty {
             $(
-                $(#[$cmeta:meta])*
+                // Matched the same way `bitflags!` matches per-flag attributes
+                // (`ident` + token stream, not `meta`), so that attributes such as
+                // doc comments can be forwarded to it unchanged.
+                $(#[$cmeta:ident $($cargs:tt)*])*
                 const $cname:ident = $cvalue:expr;
             )*
         }
     ) => {
-        paste! {
+        $crate::paste! {
         mod [<spec_ $name _internal>] {
             use super::*;
             ::bitflags::bitflags! {
                     $(#[$outer])*
                     $vis struct $name : $bits {
                         $(
-                            $(#[$cmeta])*
+                            $(#[$cmeta $($cargs)*])*
                             const $cname = $cvalue;
                         )*
                     }
@@ -300,6 +303,12 @@ macro_rules! bitflags_verus {
                 $name, $bits, [ $( $cname = ($cvalue) ),* ]
             }
             }
+            // Re-export the struct itself with the requested visibility so it can
+            // be named (and further re-exported) from outside the module in which
+            // the macro was invoked. The glob brings in the spec mirrors, which
+            // stay private to that module.
+            $vis use [<spec_ $name _internal>]::$name;
+            #[allow(unused_imports)]
             use [<spec_ $name _internal>]::*;
         }
     };
@@ -317,6 +326,13 @@ macro_rules! __bitflags_verus_one {
         #[cfg(verus_only)]
         $crate::paste! {$crate::verus! {
             use super::*;
+            // Imported here rather than expected from the call site, so the
+            // macro also works under `use bitflags_verus::bitflags_verus as
+            // bitflags;` without a glob import of this crate.
+            #[allow(unused_imports)]
+            use $crate::traits::FlagsSpec;
+            #[allow(unused_imports)]
+            use ::vstd::prelude::*;
             impl $name {
                 #[verifier::inline]
                 pub open spec fn view(self) -> $bits {

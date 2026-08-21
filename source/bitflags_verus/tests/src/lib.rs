@@ -8,6 +8,7 @@
 
 pub mod test_i32;
 pub mod test_isize;
+pub mod test_module_reexport;
 pub mod test_u32;
 pub mod test_usize;
 pub mod test_verus_spec;
