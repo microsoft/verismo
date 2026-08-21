@@ -3,7 +3,7 @@
 // Copyright (c) Microsoft Corporation
 //
 // Author: Ziqiao Zhou <ziqiaozhou@microsoft.com>
-use super::PAGE_SIZE;
+use super::{PageSize, Size4KiB};
 use builtin_macros::*;
 use vstd::prelude::*;
 
@@ -17,9 +17,10 @@ broadcast use group_types_proof;
 
 pub broadcast proof fn lemma_page_size()
     ensures
-        #[trigger] PAGE_SIZE == 0x1000,
+        #[trigger] <Size4KiB as PageSize>::SIZE == 0x1000,
 {
-    assert(1usize << 12 == 0x1000);
+    Size4KiB::lemma_size_wf();
+    assert(1usize << 12usize == 0x1000usize) by (compute);
 }
 
 } // verus!

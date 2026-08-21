@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //
 // Copyright (c) 2022-2023 SUSE LLC
-//
-// Author: Carlos López <carlos.lopez@suse.com>
 
-use crate::sizes::{PAGE_SHIFT, PAGE_SIZE};
+use crate::sizes::{lemma_size_4k, PageOffset, PageSize, Size4KiB};
 use crate::util::{align_down, align_up, is_aligned};
 
 use core::fmt;
@@ -89,26 +87,26 @@ pub trait Address: Copy + From<InnerAddr> + Into<InnerAddr> + Ord {
     #[inline]
     #[verus_spec(ret =>
         requires
-            addr_align_up_requires(*self, PAGE_SIZE),
+            addr_align_up_requires(*self, S::SIZE),
         ensures
-            addr_align_up_ens(*self, PAGE_SIZE, ret),
+            addr_align_up_ens(*self, S::SIZE, ret),
     )]
-    fn page_align_up(&self) -> Self {
-        self.align_up(PAGE_SIZE)
+    fn page_align_up<S: PageSize>(&self) -> Self {
+        self.align_up(S::SIZE)
     }
 
     #[inline]
     #[verus_spec(ret =>
-        requires
-            align_requires(PAGE_SIZE),
         ensures
-            addr_align_down_ens(*self, PAGE_SIZE, ret),
+            addr_align_down_ens(*self, S::SIZE, ret),
     )]
-    fn page_align(&self) -> Self {
-        self.align_down(PAGE_SIZE)
+    fn page_align<S: PageSize>(&self) -> Self {
+        proof! { S::lemma_size_wf(); }
+        self.align_down(S::SIZE)
     }
 
     #[inline]
+    #[verus_verify(spinoff_prover, rlimit(4))]
     #[verus_spec(ret =>
         requires
             align_requires(align),
@@ -135,10 +133,11 @@ pub trait Address: Copy + From<InnerAddr> + Into<InnerAddr> + Ord {
     #[inline]
     #[verus_spec(ret =>
         ensures
-            addr_is_aligned_ens(*self, PAGE_SIZE, ret),
+            addr_is_aligned_ens(*self, S::SIZE, ret),
     )]
-    fn is_page_aligned(&self) -> bool {
-        self.is_aligned(PAGE_SIZE)
+    fn is_page_aligned<S: PageSize>(&self) -> bool {
+        proof! { S::lemma_size_wf(); }
+        self.is_aligned(S::SIZE)
     }
 
     #[inline]
@@ -161,8 +160,9 @@ pub trait Address: Copy + From<InnerAddr> + Into<InnerAddr> + Ord {
 
     #[inline]
     #[verus_verify]
-    fn page_offset(&self) -> usize {
-        self.bits() & (PAGE_SIZE - 1)
+    fn page_offset<S: PageSize>(&self) -> usize {
+        proof! { S::lemma_size_wf(); }
+        self.bits() & (S::SIZE - 1)
     }
 
     #[inline]
@@ -174,9 +174,10 @@ pub trait Address: Copy + From<InnerAddr> + Into<InnerAddr> + Ord {
             crosses_page_ens(*self, size, ret),
     )]
     fn crosses_page(&self, size: usize) -> bool {
+        proof! { lemma_size_4k(); }
         let start = self.bits();
-        let x1 = start / PAGE_SIZE;
-        let x2 = (start + (size - 1)) / PAGE_SIZE;
+        let x1 = start / <Size4KiB as PageSize>::SIZE;
+        let x2 = (start + (size - 1)) / <Size4KiB as PageSize>::SIZE;
         x1 != x2
     }
 
@@ -186,7 +187,8 @@ pub trait Address: Copy + From<InnerAddr> + Into<InnerAddr> + Ord {
             exists_into(*self, |i: InnerAddr| ret == pfn_spec(i))
     )]
     fn pfn(&self) -> InnerAddr {
-        self.bits() >> PAGE_SHIFT
+        proof! { lemma_size_4k(); }
+        self.bits() >> <Size4KiB as PageOffset>::SHIFT
     }
 }
 

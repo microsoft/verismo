@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //
 // Copyright (c) 2022-2023 SUSE LLC
-//
-// Author: Joerg Roedel <jroedel@suse.de>
 
-use crate::sizes::PAGE_SIZE;
+use crate::sizes::{PageSize, Size4KiB};
 use core::ops::{Add, BitAnd, Not, Sub};
 
 use builtin_macros::*;
@@ -61,15 +59,15 @@ where
 }
 
 pub fn page_align_up(x: usize) -> usize {
-    align_up(x, PAGE_SIZE)
+    align_up(x, <Size4KiB as PageSize>::SIZE)
 }
 
 pub fn round_to_pages(x: usize) -> usize {
-    page_align_up(x) / PAGE_SIZE
+    page_align_up(x) / <Size4KiB as PageSize>::SIZE
 }
 
 pub fn page_offset(x: usize) -> usize {
-    x & (PAGE_SIZE - 1)
+    x & (<Size4KiB as PageSize>::SIZE - 1)
 }
 
 pub fn overlap<T>(x1: T, x2: T, y1: T, y2: T) -> bool

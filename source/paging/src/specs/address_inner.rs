@@ -108,17 +108,17 @@ pub broadcast proof fn lemma_inner_addr_as_vaddr(bits: InnerAddr)
 }
 
 pub closed spec fn pfn_spec(addr: usize) -> usize {
-    addr / PAGE_SIZE
+    addr / 0x1000usize
 }
 
 pub broadcast proof fn reveal_pfn(addr: usize)
     ensures
-        #[trigger] pfn_spec(addr) == addr / PAGE_SIZE,
-        pfn_spec(addr) == addr >> PAGE_SHIFT,
+        #[trigger] pfn_spec(addr) == addr / 0x1000usize,
+        pfn_spec(addr) == addr >> 12usize,
 {
     broadcast use common_proofs::bits::lemma_bit_usize_shl_values;
 
-    common_proofs::bits::lemma_bit_usize_shr_is_div(addr, PAGE_SHIFT);
+    common_proofs::bits::lemma_bit_usize_shr_is_div(addr, 12usize);
 }
 
 #[verifier(inline)]

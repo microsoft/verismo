@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//
-// Copyright (c) 2022-2023 SUSE LLC
-//
-// Author: Joerg Roedel <jroedel@suse.de>
 
 use builtin_macros::*;
 use vstd::prelude::*;
@@ -19,26 +15,95 @@ verus! {
 
 verus! {
 
-pub const PAGE_SHIFT: usize = 12;
-pub const PAGE_SHIFT_2M: usize = 21;
-pub const PAGE_SHIFT_1G: usize = 30;
-pub const PAGE_SIZE: usize = 1 << PAGE_SHIFT;
-pub const PAGE_SIZE_2M: usize = 1 << PAGE_SHIFT_2M;
-pub const PAGE_SIZE_1G: usize = 1 << PAGE_SHIFT_1G;
+/// Marker type describing the width of the in-page byte offset, i.e. the page
+/// shift.
+pub trait PageOffset {
+    const SHIFT: usize;
+
+    proof fn lemma_shift_wf()
+        ensures
+            0 < Self::SHIFT < usize::BITS,
+            common_proofs::bits::is_pow_of_2((1usize << Self::SHIFT) as u64),
+    ;
+}
+
+/// Marker type describing the size of a page, following the `x86_64` crate's
+/// `PageSize` trait.
+pub trait PageSize: PageOffset {
+    const SIZE: usize;
+
+    proof fn lemma_size_wf()
+        ensures
+            Self::SIZE == 1usize << Self::SHIFT,
+            0 < Self::SHIFT < usize::BITS,
+            0 < Self::SIZE,
+            common_proofs::bits::is_pow_of_2(Self::SIZE as u64),
+    ;
+}
 
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PageSize {
-    Regular,
-    Huge,
-}
+verus! {
 
-impl From<PageSize> for usize {
-    fn from(psize: PageSize) -> Self {
-        match psize {
-            PageSize::Regular => PAGE_SIZE,
-            PageSize::Huge => PAGE_SIZE_2M,
-        }
+pub struct Size4KiB;
+
+pub struct Size2MiB;
+
+pub struct Size1GiB;
+
+impl PageOffset for Size4KiB {
+    const SHIFT: usize = 12;
+
+    proof fn lemma_shift_wf() {
+        assert(Self::SHIFT == 12);
+        assert(1usize << 12usize == 0x1000usize) by (compute);
+        assert(common_proofs::bits::is_pow_of_2(0x1000u64)) by (compute);
     }
 }
+
+impl PageOffset for Size2MiB {
+    const SHIFT: usize = 21;
+
+    proof fn lemma_shift_wf() {
+        assert(Self::SHIFT == 21);
+        assert(1usize << 21usize == 0x20_0000usize) by (compute);
+        assert(common_proofs::bits::is_pow_of_2(0x20_0000u64)) by (compute);
+    }
+}
+
+impl PageOffset for Size1GiB {
+    const SHIFT: usize = 30;
+
+    proof fn lemma_shift_wf() {
+        assert(Self::SHIFT == 30);
+        assert(1usize << 30usize == 0x4000_0000usize) by (compute);
+        assert(common_proofs::bits::is_pow_of_2(0x4000_0000u64)) by (compute);
+    }
+}
+
+impl<T: PageOffset> PageSize for T {
+    const SIZE: usize = 1usize << T::SHIFT;
+
+    proof fn lemma_size_wf() {
+        T::lemma_shift_wf();
+        let shift = T::SHIFT;
+        assert(Self::SIZE == 1usize << shift);
+        assert(1usize << shift > 0) by (bit_vector)
+            requires
+                shift < 64,
+        ;
+    }
+}
+
+/// Bridges the 4KB marker to the literal page geometry used by the `pfn`
+/// specifications.
+pub proof fn lemma_size_4k()
+    ensures
+        <Size4KiB as PageSize>::SIZE == 0x1000usize,
+        <Size4KiB as PageOffset>::SHIFT == 12usize,
+{
+    Size4KiB::lemma_size_wf();
+    assert(1usize << 12usize == 0x1000usize) by (compute);
+}
+
+} // verus!
