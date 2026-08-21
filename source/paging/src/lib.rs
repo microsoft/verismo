@@ -15,6 +15,8 @@ pub mod util;
 
 pub use proofs::address_space::UniqueAddress;
 pub use structs::address;
+pub use structs::entry;
+pub use structs::level;
 pub use structs::sizes;
 pub use structs::arch_contract::{
     page_offset_width, ArchPagingGeometry, ArchPagingMeta, GenericPageTableFlags,
