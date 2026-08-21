@@ -1,10 +1,5 @@
-mod points_to;
-mod reg_trait;
-mod spec;
-mod state;
-mod x86_64_t;
-pub use points_to::*;
-pub use reg_trait::*;
-pub use spec::*;
-pub use state::*;
-pub use x86_64_t::*;
+pub(crate) mod points_to;
+pub(crate) mod reg_trait;
+pub use points_to::{AsmRegisterPointsTo, RustRegisterPointsTo};
+pub use reg_trait::ReadableReg;
+pub use reg_trait::RegSpec;

@@ -1,84 +1,54 @@
+// `RegSpec` is sealed by a crate-private supertrait; see its docs.
+#![allow(private_bounds, private_interfaces)]
+
 use vstd::prelude::*;
 
 verus! {
 
-use super::points_to::*;
-use super::spec::*;
+/// Crate-private supertrait that seals `RegSpec`: downstream crates cannot name
+/// it, so they cannot add a register marker.
+pub(crate) mod sealed {
+    pub trait Sealed {
 
-/// Read access to a single, statically-identified machine register.
-///
-/// Restricted to `FixedRegSpec`: the marker type *is* the register identity, so no
-/// dynamic identity precondition is needed. Dynamically identified registers such
-/// as `Msr` cannot implement this trait; they require a separate future API that
-/// matches the requested register number against `token.reg().register`.
-pub trait ReadableReg: FixedRegSpec {
-    /// Read the current value of this register from its token.
-    fn read(&self, Tracked(token): Tracked<&RegisterPointsTo<Self>>) -> (result: Self::Value)
-        ensures
-            token.value() == result,
-    ;
+    }
+
 }
 
-/// Access to a single control register (`CR0`/`CR3`/`CR4`).
-///
-/// Control registers are read and written with `MOV to/from CRn`, which fault with
-/// `#GP` outside CPL 0, so both operations take a shared `Cpl` token as typed
-/// evidence that the current privilege level is 0.
-///
-/// `MOV to/from CRn` also leaves the status flags architecturally undefined, so both
-/// operations additionally take the `Rflags` token *mutably*. They preserve the
-/// register identity but deliberately state no constraint on the resulting raw
-/// RFLAGS image: any previously known exact value is invalidated, and the caller's
-/// knowledge of RFLAGS is refreshed nondeterministically by the trusted operation
-/// (re-read it with `Rflags::read` if a concrete image is needed again).
-pub trait ControlReg: FixedRegSpec<Value = u64> {
-    /// The value that is architecturally retained after successfully writing
-    /// `value` to this register, i.e. the value a subsequent read observes.
-    ///
-    /// This normalizes bits that do not persist as written: fixed-to-one bits and
-    /// write-only control bits.
-    spec fn stored_value(&self, value: u64) -> u64;
+use super::points_to::{AsmRegisterPointsTo, RustRegisterPointsTo};
 
-    /// Read the current value of this control register from its token.
-    fn read(
-        &self,
-        Tracked(cpl): Tracked<&RegisterPointsTo<Cpl>>,
-        Tracked(rflags): Tracked<&mut RegisterPointsTo<Rflags>>,
-        Tracked(token): Tracked<&RegisterPointsTo<Self>>,
-    ) -> (result: u64)
-        requires
-            cpl.value() == 0,
+/// Metadata-only contract for a typed register marker: identifies the value type
+/// carried by the register.
+///
+/// Sealed so that the register model stays inside this crate's trusted base: no
+/// downstream crate can add a marker, which in turn seals every trait bounded by
+/// it (`ReadableReg`, `ControlReg`).
+pub trait RegSpec: sealed::Sealed + Sized {
+    type Value;
+
+    /// The part of this register's value that compiled Rust code is entitled to
+    /// assume, and that every operation must therefore preserve. Defined per
+    /// target in `crate::arch`.
+    spec fn rust_abi_wf(value: Self::Value) -> bool;
+}
+
+/// Read access to a single machine register whose identity is the marker type
+/// itself, so no dynamic identity precondition is needed.
+///
+/// Not implementable for `Msr`, whose identity depends on the runtime `register`
+/// number; see `Msr::read`.
+pub trait ReadableReg: RegSpec {
+    /// Trusted: implemented by a single `asm!` block.
+    fn asm_read(&self, Tracked(token): Tracked<&AsmRegisterPointsTo<Self>>) -> (result: Self::Value)
         ensures
             token.value() == result,
-            final(rflags).reg() == old(rflags).reg(),
     ;
 
-    /// Write `value` to this control register.
-    ///
-    /// This models only the value retained after a *successful* write: writing a
-    /// reserved, unsupported, or otherwise invalid value (e.g. one that violates a
-    /// CPU capability requirement or a fixed-bit constraint) faults with `#GP`.
-    /// Complete capability/fixed-bit preconditions are deferred; only the stored-value
-    /// normalization is modeled here.
-    ///
-    /// Note: writing a control register can invalidate `PageTableGlobalState::inv`
-    /// (which constrains CR0/CR3/CR4 and the ghost mappings). The invariant is
-    /// relative to the register state, so callers holding such a state must
-    /// re-establish it after any control-register write before relying on it again.
-    fn write(
-        &self,
-        value: u64,
-        Tracked(cpl): Tracked<&RegisterPointsTo<Cpl>>,
-        Tracked(rflags): Tracked<&mut RegisterPointsTo<Rflags>>,
-        Tracked(token): Tracked<&mut RegisterPointsTo<Self>>,
-    )
-        requires
-            cpl.value() == 0,
+    fn read(&self, Tracked(token): Tracked<&RustRegisterPointsTo<Self>>) -> (result: Self::Value)
         ensures
-            final(token).value() == self.stored_value(value),
-            final(token).reg() == old(token).reg(),
-            final(rflags).reg() == old(rflags).reg(),
-    ;
+            token.value() == result,
+    {
+        self.asm_read(Tracked(&token.asm))
+    }
 }
 
 } // verus!

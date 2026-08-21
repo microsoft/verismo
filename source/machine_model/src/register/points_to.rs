@@ -1,42 +1,64 @@
+// The public items below mention crate-private `RegSpec` on purpose; see its
+// docs in `reg_trait.rs`.
+#![allow(private_bounds, private_interfaces)]
+
 use vstd::prelude::*;
 
 verus! {
 
-use super::spec::*;
+use super::reg_trait::RegSpec;
 
-/// A tracked, thread-affine permission/token representing knowledge of the current
-/// value of a single machine register.
+/// A tracked, thread-affine token owning the current value of one machine
+/// register, as seen from *inside* an `asm!` block, where the Rust ABI
+/// invariants on register values need not hold.
 ///
-/// The register is identified statically by the marker type `R`, and the value type
-/// is fixed by `R::Value`, so identity/value mismatches are unrepresentable.
+/// Verus cannot verify assembly bodies, so this token is conceptual: it appears
+/// only at the trusted `external_body` boundary, where an `asm_*` operation
+/// consumes it. Exec code holds `RustRegisterPointsTo` instead.
 ///
-/// The fields are private to this module and there is no public constructor, so a
-/// token cannot be forged anywhere else, not even elsewhere in this crate: instances
-/// can only be obtained from whatever trusted external-body operation is responsible
-/// for producing them (e.g. modeling the initial machine state), and can only be
-/// consumed/updated through external-body exec operations taking
-/// `Tracked<&mut RegisterPointsTo<R>>`.
-pub tracked struct RegisterPointsTo<R: RegSpec> {
-    ghost reg: R,
-    ghost value: R::Value,
+/// The struct is opaque: `reg` and `value` are uninterpreted, so a token has no
+/// representation and cannot be constructed anywhere, not even inside this
+/// crate.
+#[verifier::external_body]
+#[verifier::reject_recursive_types(R)]
+pub tracked struct AsmRegisterPointsTo<R: RegSpec> {
+    reg: core::marker::PhantomData<R>,
     // `*mut ()` is neither `Send` nor `Sync`, so this field pins the token to the
     // thread that created it and prevents it from being shared or moved across
     // threads.
     not_send_sync: core::marker::PhantomData<*mut ()>,
 }
 
-impl<R: RegSpec> RegisterPointsTo<R> {
+impl<R: RegSpec> AsmRegisterPointsTo<R> {
     /// The register marker identifying which register this token owns.
-    ///
-    /// Opaque (`closed`): callers may mention it in invariants, but its body is only
-    /// known inside this module, which keeps the fields unforgeable.
-    pub closed spec fn reg(&self) -> R {
-        self.reg
+    pub uninterp spec fn reg(&self) -> R;
+
+    pub uninterp spec fn value(&self) -> R::Value;
+}
+
+/// The register token exec code holds: an `AsmRegisterPointsTo` that also
+/// satisfies `R::rust_abi_wf`, the part of the register's value compiled Rust is
+/// entitled to assume at every `asm!` boundary.
+#[verifier::reject_recursive_types(R)]
+pub tracked struct RustRegisterPointsTo<R: RegSpec> {
+    pub(crate) tracked asm: AsmRegisterPointsTo<R>,
+}
+
+impl<R: RegSpec> RustRegisterPointsTo<R> {
+    /// The register marker identifying which register this token owns.
+    pub open(crate) spec fn reg(&self) -> R {
+        self.asm.reg()
     }
 
-    /// The current value of the register.
-    pub closed spec fn value(&self) -> R::Value {
-        self.value
+    pub open(crate) spec fn value(&self) -> R::Value {
+        self.asm.value()
+    }
+
+    /// Abstract outside the crate, since `rust_abi_wf` is part of the trusted
+    /// register model.
+    #[verifier::type_invariant]
+    pub open(crate) spec fn rust_abi_wf(&self) -> bool {
+        R::rust_abi_wf(self.asm.value())
     }
 }
 

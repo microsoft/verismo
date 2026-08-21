@@ -5,6 +5,9 @@ edition = "2021"
 
 [dependencies]
 vstd = { workspace = true, default-features = false, features = ["alloc"] }
+bitflags = { workspace = true }
+bitflags_verus = { path = "../bitflags_verus" }
+paste = { workspace = true }
 
 [features]
 verification-test = []
