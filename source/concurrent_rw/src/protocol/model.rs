@@ -15,8 +15,6 @@
 //! publishing its payload, one not -- and stands as evidence that the obligations are
 //! dischargeable at all.
 use vstd::prelude::*;
-#[cfg(verus_only)]
-use vstd::std_specs::convert::{FromSpec, FromSpecImpl, IntoSpec};
 
 verus! {
 
@@ -48,7 +46,30 @@ pub trait WithPayload {
 }
 
 pub trait IsValidAtomicType: Sized {
-    type AtomicType: From<Self> + Into<Self> + Copy + PartialEq;
+    type AtomicType: Copy + PartialEq;
+
+    /// The word this value is stored as.
+    spec fn spec_to_atomic(self) -> Self::AtomicType;
+
+    /// The value a stored word decodes to.
+    spec fn spec_from_atomic(atomic: Self::AtomicType) -> Self;
+
+    /// Decoding a value's own word gives the value back -- the one fact that makes
+    /// `spec_to_atomic`/`spec_from_atomic` a real encoding rather than two unrelated functions.
+    proof fn lemma_atomic_roundtrip(self)
+        ensures
+            Self::spec_from_atomic(self.spec_to_atomic()) == self,
+    ;
+
+    fn to_atomic(self) -> (ret: Self::AtomicType)
+        returns
+            self.spec_to_atomic(),
+    ;
+
+    fn from_atomic(atomic: Self::AtomicType) -> (ret: Self)
+        returns
+            Self::spec_from_atomic(atomic),
+    ;
 }
 
 pub trait RWModel: WithPayload + IsValidAtomicType + Sized {
@@ -85,21 +106,6 @@ pub trait RWModel: WithPayload + IsValidAtomicType + Sized {
     open spec fn has_published_payload(self) -> bool {
         false
     }
-
-    proof fn into_from_obeys() where Self: From<Self::AtomicType> + Into<Self::AtomicType>
-        ensures
-            Self::obeys_from_spec(),
-            Self::obeys_into_spec(),
-    ;
-
-    proof fn into_from_atomic_agree(self) where
-        Self: From<Self::AtomicType> + Into<Self::AtomicType>,
-
-        ensures
-            Self::obeys_from_spec(),
-            Self::obeys_into_spec(),
-            self === Self::AtomicType::from_spec(self).into_spec(),
-    ;
 }
 
 /// Opt-in: this model publishes payloads, so a reader may carry a payload reference *out* of the

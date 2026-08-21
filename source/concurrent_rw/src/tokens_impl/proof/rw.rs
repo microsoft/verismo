@@ -38,8 +38,6 @@ use vstd::resource::frac::FractionRA;
 #[cfg(any(not(feature = "state_machine"), not(verus_only)))]
 use vstd::resource::Loc;
 #[cfg(verus_only)]
-use vstd::std_specs::convert::{FromSpec, FromSpecImpl, IntoSpec};
-#[cfg(verus_only)]
 use vstd::{open_atomic_invariant, open_atomic_invariant_in_proof};
 
 verus! {
@@ -294,7 +292,7 @@ impl<T: RWModel> RWState<T, T::Payload> {
         ensures
             self.perm.is_init(),
             self.perm.ptr() == r.ptr(),
-            self.perm.value().into_spec() == self.value(),
+            T::spec_from_atomic(self.perm.value()) == self.value(),
     {
     }
 
@@ -349,7 +347,7 @@ impl<T: RWModel> RWState<T, T::Payload> {
 
     spec fn inv_perm(&self, value: T) -> bool {
         &&& self.perm.is_init()
-        &&& self.perm.value().into_spec() === value
+        &&& T::spec_from_atomic(self.perm.value()) === value
     }
 
     /// The pair in the slot right now, which is what both the writer's fraction and the
@@ -389,7 +387,7 @@ impl<T: RWModel> RWState<T, T::Payload> {
         tracked writer: &mut WritePerm<T>,
         value: T,
         tracked payload: T::Payload,
-    ) -> (tracked observed: Observed<T>) where T: From<T::AtomicType> + Into<T::AtomicType>
+    ) -> (tracked observed: Observed<T>)
         requires
             old(writer).write_value_payload_requires(value, payload),
             // Replacing the payload is only possible while it is still private -- so neither the
@@ -427,9 +425,7 @@ impl<T: RWModel> RWState<T, T::Payload> {
         value: T,
         publish: bool,
         tracked payload: Option<T::Payload>,
-    ) -> (tracked out: (Observed<T>, Option<PayloadTicket<T::Payload>>)) where
-        T: From<T::AtomicType> + Into<T::AtomicType>,
-
+    ) -> (tracked out: (Observed<T>, Option<PayloadTicket<T::Payload>>))
         requires
             match payload {
                 Some(p) => {
@@ -498,7 +494,7 @@ impl<T: RWModel> RWState<T, T::Payload> {
         tracked &mut self,
         tracked writer: &mut WritePerm<T>,
         value: T,
-    ) -> (tracked observed: Observed<T>) where T: From<T::AtomicType> + Into<T::AtomicType>
+    ) -> (tracked observed: Observed<T>)
         requires
             old(writer).write_value_requires(value),
             old(self).inv_frac(),
@@ -522,9 +518,7 @@ impl<T: RWModel> RWState<T, T::Payload> {
     /// this is one of the two ghost steps a read is made of. It sits at the same layer as
     /// [`Self::read_with_observed`]: both need `&mut RWState`, which is only reachable by
     /// opening the shared location's invariant.
-    pub proof fn observe(tracked &mut self) -> (tracked observed: Observed<T>) where
-        T: From<T::AtomicType> + Into<T::AtomicType>,
-
+    pub proof fn observe(tracked &mut self) -> (tracked observed: Observed<T>)
         requires
             old(self).inv(),
         ensures
@@ -578,9 +572,7 @@ impl<T: PublishPayload> RWState<T, T::Payload> {
         tracked writer: &mut WritePerm<T>,
         value: T,
         tracked payload: T::Payload,
-    ) -> (tracked out: (Observed<T>, PayloadTicket<T::Payload>)) where
-        T: From<T::AtomicType> + Into<T::AtomicType>,
-
+    ) -> (tracked out: (Observed<T>, PayloadTicket<T::Payload>))
         requires
             old(writer).write_value_payload_requires(value, payload),
             value.has_published_payload(),
@@ -788,10 +780,7 @@ impl<T: PublishPayload> RWShared<T, T::Payload> {
     }
 }
 
-impl<T: RWModel> RWShared<T, T::Payload> where
-    T: From<T::AtomicType> + Into<T::AtomicType>,
-    T::AtomicType: From<T>,
- {
+impl<T: RWModel> RWShared<T, T::Payload> {
     pub proof fn new(
         value: T,
         tracked points_to: PointsTo<T::AtomicType>,
@@ -799,7 +788,7 @@ impl<T: RWModel> RWShared<T, T::Payload> where
     ) -> (tracked ret: (RWShared<T, T::Payload>, WritePerm<T>, Observed<T>))
         requires
             points_to.is_init(),
-            points_to.value().into_spec() === value,
+            T::spec_from_atomic(points_to.value()) === value,
             value.wf_payload(payload),
             !value.has_published_payload(),
         ensures
@@ -816,7 +805,6 @@ impl<T: RWModel> RWShared<T, T::Payload> where
         let tracked (obs, first) = obs_history::ObsHistory::new(snapshot);
         let tracked (payload, handle) = PayloadHolder::new(payload);
         let tracked mut reader_state = RWState { perm: points_to, payload, value_frac, obs };
-        T::into_from_obeys();
         assert(value == reader_state.value());
         let constant = reader_state.constant();
         T::reachable_self(snapshot);
@@ -846,7 +834,7 @@ impl<T: RWModel> RWShared<T, T::Payload> where
         ensures
             out.0.is_init(),
             out.0.ptr() == self.ptr(),
-            out.0.value().into_spec() == writer@,
+            T::spec_from_atomic(out.0.value()) == writer@,
             writer@.wf_payload(out.1),
         opens_invariants [self.namespace()]
     {
