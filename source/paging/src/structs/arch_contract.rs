@@ -15,17 +15,34 @@ pub trait ArchPagingGeometry: Sized {
 
     spec fn phys_addr_width() -> nat;
 
+    /// Number of virtual-address bits one paging level consumes, so a table page
+    /// holds `1 << level_index_width()` entries.
+    spec fn level_index_width() -> nat;
+
+    /// Number of paging levels, counting the leaf level that maps `MinPageSize`.
+    spec fn level_count() -> nat;
+
     /// Sanity condition on the geometry, discharged by the host so that callers
     /// need not carry it as a precondition.
     proof fn lemma_geometry_wf()
         ensures
             <Self::MinPageSize as PageOffset>::SHIFT < Self::phys_addr_width() <= 64,
+            0 < Self::level_index_width() < 64,
+            0 < Self::level_count(),
+            <Self::MinPageSize as PageOffset>::SHIFT + Self::level_count()
+                * Self::level_index_width() <= 64,
     ;
 }
 
 /// Width of the in-page byte offset, in bits.
 pub open spec fn page_offset_width<A: ArchPagingGeometry>() -> nat {
     <A::MinPageSize as PageOffset>::SHIFT as nat
+}
+
+/// Shift of the page a level maps: `depth` levels above the leaf, each level
+/// covering `level_index_width` more address bits.
+pub open spec fn level_shift<A: ArchPagingGeometry>(depth: nat) -> nat {
+    (page_offset_width::<A>() + depth * A::level_index_width()) as nat
 }
 
 } // verus!
