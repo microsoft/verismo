@@ -7,17 +7,20 @@
 
 use builtin_macros::*;
 
+mod arch;
+mod proofs;
 pub mod specs;
 mod structs;
 pub mod util;
 
-pub use structs::addr_proof::UniqueAddress;
+pub use proofs::address_space::UniqueAddress;
 pub use structs::address;
 pub use structs::sizes;
 pub use structs::arch_contract::{
-    geometry_wf, ArchPagingGeometry, ArchPagingMeta, GenericPageTableFlags,
+    page_offset_width, ArchPagingGeometry, ArchPagingMeta, GenericPageTableFlags,
 };
-pub use structs::reg_contract::{
+#[cfg(target_arch = "x86_64")]
+pub use arch::x86_64::reg_contract::{
     cpl_precondition, cr0_paging_precondition, cr3_paging_precondition, cr4_paging_precondition,
     efer_paging_precondition, efer_value, low_bits_mask_u64, paging_inv, paging_view, PagingView,
     MSR_EFER,
