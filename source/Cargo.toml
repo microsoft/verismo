@@ -9,7 +9,9 @@ members = [
     "bitflags_verus/tests",
     "concurrent_rw",
     "concurrent_rw/tests",
+    "common_proofs",
     "machine_model",
+    "paging",
 ]
 
 [workspace.dependencies]
@@ -24,6 +26,8 @@ builtin = { package = "verus_builtin", version = "=0.0.0-2026-08-02-0125", defau
 builtin_macros = { package = "verus_builtin_macros", version = "=0.0.0-2026-08-02-0125", features = ["vpanic"], default-features = false }
 verus_state_machines_macros = { version = "=0.0.0-2026-08-02-0125", default-features = false }
 vstd = { version = "=0.0.0-2026-08-02-0125", features = ["alloc", "allow_panic"], default-features = false }
+
+zerocopy = { version = "0.8.2", features = ["derive"] }
 
 
 # `syn_verus` and `prettyplease_verus` are used only by the project's own

@@ -1,0 +1,163 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+//
+// Copyright (c) Microsoft Corporation
+//
+// Author: Ziqiao Zhou <ziqiaozhou@microsoft.com>
+//
+// Specifications related to alignment helpers that are used in proof_align_down and proof_align_up.
+use core::ops::{Add, BitAnd, Not, Sub};
+use builtin_macros::*;
+use vstd::prelude::*;
+use vstd::std_specs::ops::{AddSpec, BitAndSpec, NotSpec, SubSpec};
+
+#[verus_verify]
+pub trait AlignUpSpec:
+    Add<Output = Self>
+    + Sub<Output = Self>
+    + BitAnd<Output = Self>
+    + Not<Output = Self>
+    + From<u8>
+    + Copy
+    + Sized
+{
+}
+
+#[verus_verify]
+impl<T> AlignUpSpec for T where
+    T: Add<Output = Self>
+        + Sub<Output = Self>
+        + BitAnd<Output = Self>
+        + Not<Output = Self>
+        + From<u8>
+        + Copy
+        + Sized
+{
+}
+
+#[verus_verify]
+pub trait AlignDownSpec:
+    Sub<Output = Self> + Not<Output = Self> + BitAnd<Output = Self> + From<u8> + Copy + Sized
+{
+}
+
+#[verus_verify]
+impl<T> AlignDownSpec for T where
+    T: Sub<Output = Self> + Not<Output = Self> + BitAnd<Output = Self> + From<u8> + Copy + Sized
+{
+}
+
+#[verus_verify]
+pub trait IsAlignedSpec:
+    Sub<Output = Self> + BitAnd<Output = Self> + PartialEq + From<u8> + Sized
+{
+}
+
+#[verus_verify]
+impl<T> IsAlignedSpec for T where
+    T: Sub<Output = Self> + BitAnd<Output = Self> + PartialEq + From<u8> + Sized
+{
+}
+
+verus! {
+
+use common_proofs::bits::is_pow_of_2;
+
+#[verifier(inline)]
+pub open spec fn align_requires(align: u64) -> bool {
+    is_pow_of_2(align)
+}
+
+pub open spec fn spec_align_up(val: int, align: int) -> int {
+    let r = val % align;
+    &&& if r == 0 {
+        val
+    } else {
+        (val - r + align)
+    }
+}
+
+pub open spec fn align_up_integer_ens<T>(val: T, align: T, ret: T) -> bool where
+    T: AlignUpSpec + Integer,
+ {
+    spec_align_up(val as int, align as int) == ret as int
+}
+
+pub open spec fn spec_align_down(val: int, align: int) -> int {
+    val - val % align
+}
+
+pub open spec fn align_down_integer_ens<T>(val: T, align: T, ret: T) -> bool where
+    T: AlignDownSpec + Integer,
+ {
+    spec_align_down(val as int, align as int) == ret as int
+}
+
+pub open spec fn align_down_requires<T>(args: (T, T)) -> bool where T: AlignDownSpec {
+    let (val, align) = args;
+    &&& forall|x: T| x.not_req()
+    &&& forall|x: T, y: T| x.bitand_req(y)
+    &&& forall|one| #[trigger] call_ensures(T::from, (1u8,), one) ==> align.sub_req(one)
+}
+
+pub open spec fn align_down_ens<T>(args: (T, T), ret: T) -> bool where T: AlignDownSpec {
+    let (val, align) = args;
+    exists|one: T, mask: T, unmask: T|
+        {
+            &&& #[trigger] call_ensures(T::from, (1u8,), one)
+            &&& call_ensures(T::sub, (align, one), mask)
+            &&& #[trigger] call_ensures(T::not, (mask,), unmask)
+            &&& call_ensures(T::bitand, (val, unmask), ret)
+        }
+}
+
+pub open spec fn align_up_requires<T>(args: (T, T)) -> bool where T: AlignUpSpec {
+    let (val, align) = args;
+    &&& align_down_requires(args)
+    &&& forall|x: T| x.not_req()
+    &&& forall|x: T, y: T| x.bitand_req(y)
+    &&& forall|one: T, mask: T|
+        (call_ensures(T::from, (1u8,), one) && #[trigger] call_ensures(T::sub, (align, one), mask))
+            ==> val.add_req(mask)
+}
+
+pub open spec fn align_up_ens<T>(args: (T, T), ret: T) -> bool where T: AlignUpSpec {
+    let (val, align) = args;
+    exists|one: T, mask: T, unmask: T, tmpval: T|
+        {
+            &&& #[trigger] call_ensures(T::from, (1u8,), one)
+            &&& call_ensures(T::sub, (align, one), mask)
+            &&& #[trigger] call_ensures(T::not, (mask,), unmask)
+            &&& call_ensures(T::add, (val, mask), tmpval)
+            &&& #[trigger] call_ensures(T::bitand, (tmpval, unmask), ret)
+        }
+}
+
+pub open spec fn is_aligned_requires<T>(args: (T, T)) -> bool where T: IsAlignedSpec {
+    let (val, align) = args;
+    &&& forall|one| #[trigger] call_ensures(T::from, (1u8,), one) ==> align.sub_req(one)
+    &&& forall|one: T, mask: T| #[trigger]
+        call_ensures(T::from, (1u8,), one) && #[trigger] call_ensures(T::sub, (align, one), mask)
+            ==> call_requires(T::bitand, (val, mask))
+}
+
+pub open spec fn is_aligned_ens<T>(args: (T, T), ret: bool) -> bool where T: IsAlignedSpec {
+    let (val, align) = args;
+    exists|zero: T, one: T, mask: T, b: T|
+        {
+            &&& #[trigger] call_ensures(T::from, (1u8,), one)
+            &&& #[trigger] call_ensures(T::from, (0u8,), zero)
+            &&& call_ensures(T::sub, (align, one), mask)
+            &&& #[trigger] call_ensures(T::bitand, (val, mask), b)
+            &&& #[trigger] call_ensures(T::eq, (&b, &zero), ret)
+        }
+}
+
+pub open spec fn spec_is_aligned<T>(val: T, align: T) -> bool where T: IsAlignedSpec + Integer {
+    (val as int) % (align as int) == 0
+}
+
+} // verus!
+#[path = "../proofs/align.rs"]
+mod align_proofs;
+
+pub use align_proofs::*;

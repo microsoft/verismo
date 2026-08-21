@@ -1,20 +1,12 @@
 [package]
-name = "paging"
+name = "common_proofs"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-# Verus deps
 vstd = { workspace = true, features = ["alloc"], default-features = false }
-verus_state_machines_macros = { workspace = true }
-machine_model = { path = "../machine_model" }
-bitflags = { workspace = true }
-zerocopy = { workspace = true }
 builtin_macros = { workspace = true }
-common_proofs = { path = "../common_proofs" }
-
-[features]
-verification-test = []
+seq-macro = "0.3"
 
 [package.metadata.verus]
 verify = true
