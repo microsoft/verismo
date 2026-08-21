@@ -1,0 +1,21 @@
+[package]
+name = "paging"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Verus deps
+vstd = { workspace = true, features = ["alloc"], default-features = false }
+verus_state_machines_macros = { workspace = true }
+
+[features]
+verification-test = []
+
+[package.metadata.verus]
+verify = true
+
+[lints.rust]
+# Verus turns on `--cfg verus_only` during verification and sets
+# `verus_keep_ghost` itself; declaring both keeps a plain `cargo build`
+# warning-free.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(verus_only)', 'cfg(verus_keep_ghost)', 'cfg(verus_keep_ghost_body)'] }
