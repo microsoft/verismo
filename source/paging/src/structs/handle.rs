@@ -28,7 +28,7 @@ use crate::structs::geometry::shift_at;
 use crate::structs::level::PageLevel;
 use crate::structs::map::map_at;
 use crate::structs::os_contract::{PTPageInit, PageLock, PagingError, PagingHandler};
-use crate::structs::range::{leaf_entry, range_at, RangeOp};
+use crate::structs::range::{leaf_entry, level_flags, range_at, RangeOp};
 use crate::structs::region::map_region;
 use crate::structs::state::PTInstallState;
 use crate::structs::tlb::MayNeedFlush;
@@ -215,11 +215,7 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
             self.inv(),
             paddr@ & !A::spec_address_mask() == 0,
     {
-        let leaf_flags = if target.is_leaf() {
-            flags
-        } else {
-            flags.with(A::PTFlags::HUGE)
-        };
+        let leaf_flags = level_flags::<A>(flags, target);
         let entry = PTEntry::<A>::new_leaf(paddr, leaf_flags);
         map_at::<A, H>(self.root, self.level, self.borrow_page(), vaddr, target, entry)
     }
@@ -363,11 +359,7 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
             vstart <= vend,
             paddr + (vend - vstart) <= usize::MAX,
     {
-        let leaf_flags = if target.is_leaf() {
-            flags
-        } else {
-            flags.with(A::PTFlags::HUGE)
-        };
+        let leaf_flags = level_flags::<A>(flags, target);
         range_at::<A, H>(
             self.root,
             self.level,
@@ -454,11 +446,7 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
             self.inv(),
             vstart <= vend,
     {
-        let leaf_flags = if target.is_leaf() {
-            flags
-        } else {
-            flags.with(A::PTFlags::HUGE)
-        };
+        let leaf_flags = level_flags::<A>(flags, target);
         match range_at::<A, H>(
             self.root,
             self.level,

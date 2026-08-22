@@ -20,7 +20,7 @@ use vstd::prelude::*;
 
 use crate::structs::address::lemma_phys_addr_from_bits;
 use crate::structs::address::{Address, PhysAddr, VirtAddr};
-use crate::structs::arch_contract::{level_geometry_wf, ArchPagingMeta};
+use crate::structs::arch_contract::{level_geometry_wf, ArchPagingMeta, GenericPageTableFlags};
 use crate::structs::concurrent_pt::{PTPageSharedPerm, PTPageWritePerm};
 use crate::structs::entry::PTEntry;
 use crate::structs::geometry::{entry_index_bits, shift_at};
@@ -382,6 +382,19 @@ pub fn leaf_entry<A: ArchPagingMeta>(paddr: usize, flags: A::PTFlags) -> (ret: P
         assert((paddr & am) & !am == 0) by (bit_vector);
     }
     PTEntry::<A>::new_leaf(PhysAddr::from(masked), flags)
+}
+
+/// `flags` as an entry at `target` must carry them.
+///
+/// The size bit says "this entry maps a page" at every level but the leaf,
+/// where the hardware reads it as PAT instead; so it is set or cleared here
+/// rather than left to the caller, who would have to know that.
+pub fn level_flags<A: ArchPagingMeta>(flags: A::PTFlags, target: PageLevel) -> (ret: A::PTFlags) {
+    if target.is_leaf() {
+        flags.without(A::PTFlags::HUGE)
+    } else {
+        flags.with(A::PTFlags::HUGE)
+    }
 }
 
 /// Where the entry containing `cur` stops: the next boundary of a block of

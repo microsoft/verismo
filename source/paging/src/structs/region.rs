@@ -17,7 +17,7 @@ use crate::structs::concurrent_pt::PTPageSharedPerm;
 use crate::structs::geometry::shift_at;
 use crate::structs::level::PageLevel;
 use crate::structs::os_contract::{PagingError, PagingHandler};
-use crate::structs::range::{range_at, RangeOp};
+use crate::structs::range::{level_flags, range_at, RangeOp};
 
 verus! {
 
@@ -53,16 +53,8 @@ pub fn map_region<A: ArchPagingMeta, H: PagingHandler>(
     ;
     let size = 1usize << shift;
     let mask = sub(size, 1);
-    let small_flags = if small.is_leaf() {
-        flags.without(A::PTFlags::HUGE)
-    } else {
-        flags.with(A::PTFlags::HUGE)
-    };
-    let big_flags = if big.is_leaf() {
-        flags.without(A::PTFlags::HUGE)
-    } else {
-        flags.with(A::PTFlags::HUGE)
-    };
+    let small_flags = level_flags::<A>(flags, small);
+    let big_flags = level_flags::<A>(flags, big);
     let small_op = RangeOp::Map { paddr, flags: small_flags };
     if (vstart ^ paddr) & mask != 0 {
         // The two addresses do not agree on where a big block begins, so no
