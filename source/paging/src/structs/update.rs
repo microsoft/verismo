@@ -39,6 +39,7 @@ pub fn set_leaf_slot<A: ArchPagingMeta>(
         !entry.is_table_spec(),
     ensures
         final(writers).ids() =~= page.ids(),
+        ret is Ok ==> final(writers).slots[index as int]@ == entry,
 {
     let ghost i = index as int;
     proof {
@@ -135,6 +136,8 @@ pub fn replace_leaf_slot<A: ArchPagingMeta>(
     ensures
         final(writers).ids() =~= page.ids(),
         ret matches Ok(old) ==> !old.is_table_spec(),
+        ret matches Ok(prev) ==> prev == old(writers).slots[index as int]@,
+        ret is Ok ==> final(writers).slots[index as int]@ == entry,
 {
     let ghost i = index as int;
     proof {

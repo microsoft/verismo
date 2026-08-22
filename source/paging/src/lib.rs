@@ -39,6 +39,28 @@
 //! "present and not huge" means a 4 KiB mapping -- so an ignored software bit
 //! marks them; see `structs::arch_contract::GenericPageTableFlagsSpec`.
 //!
+//! # What is proved, and what is not
+//!
+//! Proved: every access to a table page goes through a token that says the
+//! page is there and that the accessor is allowed to touch it; a slot is
+//! written only under that page's lock; a table pointer, once stored, keeps
+//! pointing at the same page at the same level, which is what makes descending
+//! on a stale read sound; a page's frames are never handed back while anything
+//! can still reach them; and a caller cannot forget a TLB invalidation, because
+//! the operations that need one return a value that must be used.
+//!
+//! Not proved: that a mapping installed by `map` is the one `translate` finds
+//! afterwards. Nothing here says so, and under this locking discipline nothing
+//! could without a tree-wide invariant: the moment an operation drops a page's
+//! lock, another thread may change what it just wrote. The specifications
+//! therefore describe what an operation does to the slot *while it holds the
+//! writer*, and stop there.
+//!
+//! Also not proved: that a page's ghost level matches its depth in the tree.
+//! Recursion is bounded by the level it is passed instead. Stating it would
+//! need a slot to expose, in specification, the payload it escrows, which
+//! `concurrent_rw` deliberately keeps inside its invariant.
+//!
 //! # What an embedder owes
 //!
 //! Everything OS-specific is in [`os_contract`]: allocation, the direct map,
