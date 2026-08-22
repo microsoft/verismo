@@ -47,7 +47,7 @@ pub fn slot_ptr<A: ArchPagingMeta>(
 {
     let ghost i = index as int;
     assert(page.slots[i].ptr()@.addr == slot_addr::<A>(page.base, i));
-    let addr = base.bits() + index * core::mem::size_of::<PTEntry<A>>();
+    let addr = base.bits() + index * core::mem::size_of::<usize>();
     with_exposed_provenance(addr, Tracked(page.provenance))
 }
 

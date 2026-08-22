@@ -38,8 +38,13 @@ pub struct PTEntry<A: ArchPagingMeta> {
 impl<A: ArchPagingMeta> PTEntry<A> {
     /// How many entries a table page holds: a table page is one page of the
     /// architecture's smallest size, filled with entries.
+    ///
+    /// Stated in terms of `usize` rather than `Self`, which it is
+    /// `repr(transparent)` over: a generic struct has no layout Verus can
+    /// evaluate, and the word size is the thing the architecture actually
+    /// fixes.
     pub open spec fn count_per_page() -> nat {
-        (<A::MinPageSize as PageSize>::SIZE as nat) / vstd::layout::size_of::<Self>()
+        (<A::MinPageSize as PageSize>::SIZE as nat) / vstd::layout::size_of::<usize>()
     }
 
     /// Raw word.

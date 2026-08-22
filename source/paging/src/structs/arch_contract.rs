@@ -149,7 +149,7 @@ pub open spec fn spec_entry_index<A: ArchPagingMeta>(vaddr: usize, level: PageLe
 /// Address of a table page's entry `index`. Stated once here so that no
 /// specification has to spell out the entry stride.
 pub open spec fn slot_addr<A: ArchPagingMeta>(base: usize, index: int) -> int {
-    base as int + index * vstd::layout::size_of::<PTEntry<A>>()
+    base as int + index * vstd::layout::size_of::<usize>()
 }
 
 /// Whether the level geometry fits the entry width: a table page's entries are

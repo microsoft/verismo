@@ -124,7 +124,7 @@ fn free_slots<A: ArchPagingMeta, H: PagingHandler>(
         Tracked(writers),
     );
     let ptr = with_exposed_provenance(
-        base.bits() + index * core::mem::size_of::<PTEntry<A>>(),
+        base.bits() + index * core::mem::size_of::<usize>(),
         Tracked(*provenance),
     );
     let (entry, Tracked(_observed)) = PTEntry::<A>::read_exact(
