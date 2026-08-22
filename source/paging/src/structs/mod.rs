@@ -1,5 +1,6 @@
 pub mod address;
 pub mod arch_contract;
+pub mod build;
 pub mod concurrent_pt;
 pub mod entry;
 pub mod geometry;

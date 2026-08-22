@@ -27,6 +27,7 @@ bitflags! {
         const DIRTY         = 0x40;
         const HUGE          = 0x80;
         const GLOBAL        = 0x100;
+        const ESCROW        = 0x200;
         const NX            = 0x8000_0000_0000_0000;
     }
 }
@@ -36,7 +37,7 @@ verus! {
 impl GenericPageTableFlagsSpec for PTEntryFlags {
     /// The union of the named flags declared above.
     open spec fn spec_all_bits() -> usize {
-        0x8000_0000_0000_01ff
+        0x8000_0000_0000_03ff
     }
 
     open spec fn spec_present_bit() -> usize {
@@ -51,6 +52,12 @@ impl GenericPageTableFlagsSpec for PTEntryFlags {
         0x4
     }
 
+    /// Bit 9, the first of the three the architecture leaves to software in
+    /// every entry format.
+    open spec fn spec_escrow_bit() -> usize {
+        0x200
+    }
+
     fn present_bit() -> (ret: usize) {
         0x1
     }
@@ -63,13 +70,20 @@ impl GenericPageTableFlagsSpec for PTEntryFlags {
         0x4
     }
 
+    fn escrow_bit() -> (ret: usize) {
+        0x200
+    }
+
     proof fn lemma_flag_bits_wf() {
         broadcast use bitflags_verus::bigflags_axioms;
 
         assert(1usize & 0x80usize == 0usize) by (bit_vector);
-        assert(1usize & 0x8000_0000_0000_01ffusize == 1usize) by (bit_vector);
-        assert(0x80usize & 0x8000_0000_0000_01ffusize == 0x80usize) by (bit_vector);
-        assert(4usize & 0x8000_0000_0000_01ffusize == 4usize) by (bit_vector);
+        assert(1usize & 0x8000_0000_0000_03ffusize == 1usize) by (bit_vector);
+        assert(0x80usize & 0x8000_0000_0000_03ffusize == 0x80usize) by (bit_vector);
+        assert(4usize & 0x8000_0000_0000_03ffusize == 4usize) by (bit_vector);
+        assert(0x200usize & 0x1usize == 0usize) by (bit_vector);
+        assert(0x200usize & 0x80usize == 0usize) by (bit_vector);
+        assert(0x200usize & 0x8000_0000_0000_03ffusize == 0x200usize) by (bit_vector);
     }
 }
 

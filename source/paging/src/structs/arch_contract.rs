@@ -175,6 +175,17 @@ pub trait GenericPageTableFlagsSpec: GenericPageTableFlags {
 
     spec fn spec_user_bit() -> usize;
 
+    /// A bit the hardware ignores in every kind of entry, which this crate uses
+    /// to mark an entry that points at a table page *this crate built*.
+    ///
+    /// The hardware bits cannot say that on their own: at the leaf level a
+    /// present entry with the large-page bit clear maps a 4K page, and at every
+    /// other level the same two bits mean "points at a table". The tokens of a
+    /// child page are escrowed in the entry that points at it, so which entries
+    /// carry them has to be readable from the entry alone, at any level. Marking
+    /// them explicitly is what makes that possible.
+    spec fn spec_escrow_bit() -> usize;
+
     /// Executable mirrors of the bit positions above. The associated consts of
     /// [`GenericPageTableFlags`] cannot serve here: Verus gives an associated
     /// const no ghost value unless its initializer is a bare name, which a
@@ -194,6 +205,11 @@ pub trait GenericPageTableFlagsSpec: GenericPageTableFlags {
             ret == Self::spec_user_bit(),
     ;
 
+    fn escrow_bit() -> (ret: usize)
+        ensures
+            ret == Self::spec_escrow_bit(),
+    ;
+
     proof fn lemma_flag_bits_wf()
         ensures
             Self::obeys_bitflags_spec(),
@@ -203,6 +219,10 @@ pub trait GenericPageTableFlagsSpec: GenericPageTableFlags {
             Self::spec_present_bit() & Self::spec_all_bits() == Self::spec_present_bit(),
             Self::spec_huge_bit() & Self::spec_all_bits() == Self::spec_huge_bit(),
             Self::spec_user_bit() & Self::spec_all_bits() == Self::spec_user_bit(),
+            Self::spec_escrow_bit() != 0,
+            Self::spec_escrow_bit() & Self::spec_present_bit() == 0,
+            Self::spec_escrow_bit() & Self::spec_huge_bit() == 0,
+            Self::spec_escrow_bit() & Self::spec_all_bits() == Self::spec_escrow_bit(),
     ;
 }
 
@@ -237,6 +257,7 @@ pub trait ArchPagingMeta: 'static + Copy + ArchPagingGeometry {
             Self::PTFlags::spec_present_bit() & Self::PTFlags::spec_huge_bit() == 0,
             Self::spec_address_mask() & Self::PTFlags::spec_present_bit() == 0,
             Self::spec_address_mask() & Self::PTFlags::spec_huge_bit() == 0,
+            Self::spec_address_mask() & Self::PTFlags::spec_escrow_bit() == 0,
             Self::spec_private_mask() & Self::spec_shared_mask() == 0,
             // No named flag overlaps the address field, so assembling an
             // entry from an address and flags loses neither.

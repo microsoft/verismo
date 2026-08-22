@@ -28,12 +28,12 @@ verus! {
 /// tokens of a page at level `l` are escrowed in the entry of the level `l + 1`
 /// page that points at it. The level is ghost state rather than a type
 /// parameter, so one walk serves every level.
-pub struct PTPageSharedPerm<A: ArchPagingMeta> {
-    pub slots: Seq<SlotShared<A>>,
-    pub provenance: IsExposed,
-    pub base: usize,
-    pub frame: usize,
-    pub level: PageLevel,
+pub tracked struct PTPageSharedPerm<A: ArchPagingMeta> {
+    pub tracked slots: Seq<SlotShared<A>>,
+    pub tracked provenance: IsExposed,
+    pub ghost base: usize,
+    pub ghost frame: usize,
+    pub ghost level: PageLevel,
 }
 
 impl<A: ArchPagingMeta> PTPageSharedPerm<A> {
@@ -61,8 +61,8 @@ impl<A: ArchPagingMeta> PTPageSharedPerm<A> {
 ///
 /// A host lock hands this out; holding it is what makes an update the only
 /// writer of those slots.
-pub struct PTPageWritePerm<A: ArchPagingMeta> {
-    pub slots: Seq<WritePerm<PTEntry<A>>>,
+pub tracked struct PTPageWritePerm<A: ArchPagingMeta> {
+    pub tracked slots: Seq<WritePerm<PTEntry<A>>>,
 }
 
 impl<A: ArchPagingMeta> PTPageWritePerm<A> {

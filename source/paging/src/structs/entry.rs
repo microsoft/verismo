@@ -225,30 +225,54 @@ impl<A: ArchPagingMeta> PTEntry<A> {
         self.raw() & A::PTFlags::user_bit() != 0
     }
 
-    /// A present, non-huge entry: the shape a walker may follow down to a
-    /// child table, once it has established that it is above the leaf level.
+    /// Whether this crate marked the entry as pointing at a table page it
+    /// built, and so as escrowing that page's tokens.
+    pub open spec fn escrows_spec(&self) -> bool {
+        self.view() & A::PTFlags::spec_escrow_bit() != 0
+    }
+
+    #[verifier::when_used_as_spec(escrows_spec)]
+    pub fn escrows(&self) -> (ret: bool)
+        returns
+            self.escrows_spec(),
+    {
+        proof {
+            A::PTFlags::lemma_flag_bits_wf();
+        }
+        self.raw() & A::PTFlags::escrow_bit() != 0
+    }
+
+    /// An entry a walker may follow down to a child table.
+    ///
+    /// The hardware bits alone cannot say this. At the leaf level a present
+    /// entry with the large-page bit clear maps a 4K page, and the hardware
+    /// reads that bit as PAT there; above the leaf the same two bits mean
+    /// "points at a table". The escrow bit is what distinguishes them at every
+    /// level, and it is set only by the code in this crate that links a page it
+    /// has just built.
     pub open spec fn is_table_spec(&self) -> bool {
-        self.present_spec() && !self.huge_spec()
+        &&& self.present_spec()
+        &&& !self.huge_spec()
+        &&& self.escrows_spec()
     }
 
     pub fn is_table(&self) -> (ret: bool)
         returns
             self.is_table_spec(),
     {
-        self.present() && !self.huge()
+        self.present() && !self.huge() && self.escrows()
     }
 
-    /// A present entry mapping a large page, which a walk above the leaf level
-    /// stops at. At the leaf level every present entry stops the walk.
+    /// A present entry that maps a page rather than pointing at a table.
     pub open spec fn is_leaf_spec(&self) -> bool {
-        self.present_spec() && self.huge_spec()
+        self.present_spec() && !self.is_table_spec()
     }
 
     pub fn is_leaf(&self) -> (ret: bool)
         returns
             self.is_leaf_spec(),
     {
-        self.present() && self.huge()
+        self.present() && !self.is_table()
     }
 
     /// The all-zero entry: not present, and so neither a table nor a leaf.
@@ -273,6 +297,7 @@ impl<A: ArchPagingMeta> PTEntry<A> {
             ret.view() & !A::spec_address_mask() == flags.bits_spec() & !A::spec_address_mask(),
             ret.present_spec() == (flags.bits_spec() & A::PTFlags::spec_present_bit() != 0),
             ret.huge_spec() == (flags.bits_spec() & A::PTFlags::spec_huge_bit() != 0),
+            ret.escrows_spec() == (flags.bits_spec() & A::PTFlags::spec_escrow_bit() != 0),
     {
         proof {
             A::lemma_pte_masks_wf();
@@ -287,10 +312,12 @@ impl<A: ArchPagingMeta> PTEntry<A> {
             let hb = A::PTFlags::spec_huge_bit();
             let a = addr@;
             let fb = flags.bits_spec();
-            assert((am & pb == 0 && am & hb == 0 && a & !am == 0 && masked_addr == a & am
-                && flag_bits == fb & !am) ==> ((masked_addr | flag_bits) & am == a && (masked_addr
-                | flag_bits) & !am == fb & !am && ((masked_addr | flag_bits) & pb != 0) == (fb & pb
-                != 0) && ((masked_addr | flag_bits) & hb != 0) == (fb & hb != 0))) by (bit_vector);
+            let eb = A::PTFlags::spec_escrow_bit();
+            assert((am & pb == 0 && am & hb == 0 && am & eb == 0 && a & !am == 0 && masked_addr == a
+                & am && flag_bits == fb & !am) ==> ((masked_addr | flag_bits) & am == a && (
+            masked_addr | flag_bits) & !am == fb & !am && ((masked_addr | flag_bits) & pb != 0) == (
+            fb & pb != 0) && ((masked_addr | flag_bits) & hb != 0) == (fb & hb != 0) && ((
+            masked_addr | flag_bits) & eb != 0) == (fb & eb != 0))) by (bit_vector);
         }
         ret
     }
@@ -304,6 +331,7 @@ impl<A: ArchPagingMeta> PTEntry<A> {
                 & !A::spec_address_mask(),
             final(self).present_spec() == (flags.bits_spec() & A::PTFlags::spec_present_bit() != 0),
             final(self).huge_spec() == (flags.bits_spec() & A::PTFlags::spec_huge_bit() != 0),
+            final(self).escrows_spec() == (flags.bits_spec() & A::PTFlags::spec_escrow_bit() != 0),
     {
         *self = Self::new(addr, flags);
     }
