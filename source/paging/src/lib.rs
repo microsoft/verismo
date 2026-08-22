@@ -16,8 +16,9 @@ pub mod util;
 #[cfg(target_arch = "x86_64")]
 pub use arch::x86_64::reg_contract::{
     cpl_precondition, cr0_paging_precondition, cr3_paging_precondition, cr4_paging_precondition,
-    efer_paging_precondition, efer_value, geometry_paging_precondition, low_bits_mask_u64,
-    paging_inv, paging_view, PagingView, MSR_EFER,
+    efer_paging_precondition, efer_value, legacy_paging_precondition,
+    long_mode_paging_precondition, low_bits_mask_u64, pae_paging_precondition, paging_inv,
+    paging_view, PagingView, MSR_EFER,
 };
 pub use proofs::address_space::UniqueAddress;
 pub use structs::address;

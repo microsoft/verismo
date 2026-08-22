@@ -61,13 +61,13 @@ pub open spec fn cr3_paging_precondition<A: ArchPagingGeometry>(
         & !(Cr3Value::PWT@ | Cr3Value::PCD@))) == 0)
 }
 
-/// CR4 bits required for long-mode paging: `PAE` is mandatory, and both `PCIDE`
-/// and `LA57` are only architecturally settable once long mode is active.
+/// CR4 bits constrained in every paging mode: `PCIDE` and `LA57` are only
+/// architecturally settable once long mode is active. Which modes are allowed
+/// at all is [`PagingView::mode_precondition`]'s business.
 ///
 /// APM Vol. 2, "CR4 Register" and "Enabling Long Mode"; SDM Vol. 3A, "Control
 /// Registers" and "Initializing IA-32e Mode".
 pub open spec fn cr4_paging_precondition(cr0: Cr0Value, cr4: Cr4Value, efer: EferValue) -> bool {
-    &&& cr4.contains(Cr4Value::PAE)
     &&& (cr4.contains(Cr4Value::PCIDE) ==> cr0.contains(Cr0Value::PG) && efer.contains(
         EferValue::LMA,
     ))
@@ -83,20 +83,37 @@ pub open spec fn efer_paging_precondition(efer: EferValue) -> bool {
     &&& efer.contains(EferValue::LMA)
 }
 
-/// The geometry `A` describes has to be the one this processor walks: long mode
-/// maps 4 KiB pages at the leaf, and `CR4.LA57` is what chooses whether the walk
-/// starts four or five levels above it. `CR3` names the root of a tree of that
-/// depth, so a mismatch would let a table be read at the wrong level.
+/// 32-bit paging: two levels, reached with neither PAE nor long mode.
+///
+/// APM Vol. 2, "Legacy-Mode Page Translation"; SDM Vol. 3A, "32-Bit Paging".
+pub open spec fn legacy_paging_precondition(cr4: Cr4Value, efer: EferValue) -> bool {
+    &&& !cr4.contains(Cr4Value::PAE)
+    &&& !efer.contains(EferValue::LME)
+    &&& !efer.contains(EferValue::LMA)
+}
+
+/// PAE paging: three levels, PAE enabled but long mode not.
+///
+/// APM Vol. 2, "PAE Paging"; SDM Vol. 3A, "PAE Paging".
+pub open spec fn pae_paging_precondition(cr4: Cr4Value, efer: EferValue) -> bool {
+    &&& cr4.contains(Cr4Value::PAE)
+    &&& !efer.contains(EferValue::LME)
+    &&& !efer.contains(EferValue::LMA)
+}
+
+/// Long-mode paging: PAE is mandatory, and `CR4.LA57` is what chooses whether
+/// the walk starts four or five levels above the leaf.
 ///
 /// APM Vol. 2, "Long-Mode Page Translation" and "5-Level Address Translation";
 /// SDM Vol. 3A, "4-Level Paging and 5-Level Paging".
-pub open spec fn geometry_paging_precondition<A: ArchPagingGeometry>(cr4: Cr4Value) -> bool {
-    &&& page_offset_width::<A>() == 12
-    &&& level_count::<A>() == (if cr4.contains(Cr4Value::LA57) {
-        5nat
-    } else {
-        4nat
-    })
+pub open spec fn long_mode_paging_precondition(
+    cr4: Cr4Value,
+    efer: EferValue,
+    five_level: bool,
+) -> bool {
+    &&& cr4.contains(Cr4Value::PAE)
+    &&& efer_paging_precondition(efer)
+    &&& cr4.contains(Cr4Value::LA57) == five_level
 }
 
 /// The current privilege level is a two-bit field.
@@ -140,11 +157,38 @@ pub open spec fn paging_inv<A: ArchPagingGeometry>(registers: &RegisterState) ->
 }
 
 impl PagingView {
+    /// The registers have to select the very tree `A` describes: how deep the
+    /// hardware walks is a paging mode, and `CR3` names the root of a tree of
+    /// that depth, so a mismatch would let a table be read at the wrong level.
+    ///
+    /// A geometry with any other level count denotes no x86 paging mode. Every
+    /// mode maps 4 KiB pages at the leaf, which is also what makes `CR3`'s low
+    /// bits the ones `cr3_paging_precondition` reserves.
+    pub open spec fn mode_precondition<A: ArchPagingGeometry>(&self) -> bool {
+        &&& page_offset_width::<A>() == 12
+        &&& self.level_precondition::<A>()
+    }
+
+    pub open spec fn level_precondition<A: ArchPagingGeometry>(&self) -> bool {
+        let levels = level_count::<A>();
+        if levels == 2 {
+            legacy_paging_precondition(self.cr4, self.efer)
+        } else if levels == 3 {
+            pae_paging_precondition(self.cr4, self.efer)
+        } else if levels == 4 {
+            long_mode_paging_precondition(self.cr4, self.efer, false)
+        } else if levels == 5 {
+            long_mode_paging_precondition(self.cr4, self.efer, true)
+        } else {
+            false
+        }
+    }
+
     pub open spec fn inv<A: ArchPagingGeometry>(&self) -> bool {
         &&& cr0_paging_precondition(self.cr0)
         &&& cr3_paging_precondition::<A>(self.cr3, self.cr4)
         &&& cr4_paging_precondition(self.cr0, self.cr4, self.efer)
-        &&& geometry_paging_precondition::<A>(self.cr4)
+        &&& self.mode_precondition::<A>()
         &&& efer_paging_precondition(self.efer)
         &&& cpl_precondition(self.cpl)
     }
