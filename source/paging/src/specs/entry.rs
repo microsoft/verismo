@@ -36,7 +36,7 @@ impl<A: ArchPagingMeta> FromSpecImpl<PageTableEntry<A>> for usize {
     }
 }
 
-pub proof fn lemma_entry_from_word<A: ArchPagingMeta>(val: usize)
+pub proof fn lemma_entry_from_usize<A: ArchPagingMeta>(val: usize)
     ensures
         <PageTableEntry<A> as FromSpec<usize>>::obeys_from_spec(),
         <PageTableEntry<A> as FromSpec<usize>>::from_spec(val)
@@ -44,7 +44,7 @@ pub proof fn lemma_entry_from_word<A: ArchPagingMeta>(val: usize)
 {
 }
 
-pub proof fn lemma_word_from_entry<A: ArchPagingMeta>(entry: PageTableEntry<A>)
+pub proof fn lemma_usize_from_entry<A: ArchPagingMeta>(entry: PageTableEntry<A>)
     ensures
         <usize as FromSpec<PageTableEntry<A>>>::obeys_from_spec(),
         <usize as FromSpec<PageTableEntry<A>>>::from_spec(entry) == entry.view(),

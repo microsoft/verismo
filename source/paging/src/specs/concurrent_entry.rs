@@ -9,7 +9,7 @@
 use concurrent_rw::{IsValidAtomicType, PublishPayload, RWModel, Snapshot, WithPayload};
 use vstd::prelude::*;
 
-use crate::specs::entry::{lemma_entry_from_word, lemma_word_from_entry};
+use crate::specs::entry::{lemma_entry_from_usize, lemma_usize_from_entry};
 use crate::structs::arch_contract::ArchPagingMeta;
 use crate::structs::entry::{entry_step, PageTableEntry};
 use crate::structs::table::TablePage;
@@ -65,15 +65,15 @@ impl<A: ArchPagingMeta> RWModel for PageTableEntry<A> {
     }
 
     proof fn into_from_obeys() where Self: From<Self::AtomicType> + Into<Self::AtomicType> {
-        lemma_entry_from_word::<A>(0);
-        lemma_word_from_entry::<A>(PageTableEntry::spec_from_bits(0));
+        lemma_entry_from_usize::<A>(0);
+        lemma_usize_from_entry::<A>(PageTableEntry::spec_from_bits(0));
     }
 
     proof fn into_from_atomic_agree(self) where
         Self: From<Self::AtomicType> + Into<Self::AtomicType>,
     {
-        lemma_entry_from_word::<A>(self.view());
-        lemma_word_from_entry::<A>(self);
+        lemma_entry_from_usize::<A>(self.view());
+        lemma_usize_from_entry::<A>(self);
         PageTableEntry::<A>::lemma_bits_roundtrip(self);
     }
 }
