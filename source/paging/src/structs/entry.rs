@@ -11,7 +11,12 @@ use core::marker::PhantomData;
 use vstd::prelude::*;
 
 use crate::structs::address::{Address, PhysAddr};
-use crate::structs::arch_contract::{ArchPagingMeta, GenericPageTableFlags};
+use crate::structs::arch_contract::{
+    ArchPagingMeta, GenericPageTableFlags, GenericPageTableFlagsSpec,
+};
+use bitflags::Flags;
+use bitflags_verus::FlagsSpec;
+
 use crate::structs::sizes::PageSize;
 
 verus! {
@@ -158,19 +163,17 @@ impl<A: ArchPagingMeta> PTEntry<A> {
         self.paddr_field() & A::shared_pte_mask() == A::shared_pte_mask()
     }
 
-    /// The named flag bits the entry carries. Bits outside the address field
-    /// that no named flag covers are not included: the C-bit's position, for
-    /// one, is a machine property rather than an architectural constant.
-    pub open spec fn flags_bits_spec(&self) -> usize {
-        self.view() & A::PTFlags::spec_all_bits()
-    }
-
-    /// Decodes the flags word into the architecture's flags type.
+    /// Reads the whole word as flags. Every bit is kept, including any the
+    /// architecture has no name for: the C-bit's position, for one, is a
+    /// machine property rather than an architectural constant.
     pub fn flags(&self) -> (ret: A::PTFlags)
         ensures
-            ret@ == self.flags_bits_spec(),
+            ret.bits_spec() == self.view(),
     {
-        A::PTFlags::from_bits_truncate(self.val)
+        proof {
+            A::PTFlags::lemma_flag_bits_wf();
+        }
+        A::PTFlags::from_bits_retain(self.val)
     }
 
     /// Hardware present bit.
@@ -183,7 +186,10 @@ impl<A: ArchPagingMeta> PTEntry<A> {
         returns
             self.present_spec(),
     {
-        self.val & A::PTFlags::present_bit() != 0
+        proof {
+            A::PTFlags::lemma_flag_bits_wf();
+        }
+        self.raw() & A::PTFlags::present_bit() != 0
     }
 
     /// Hardware huge (large-page) bit. At the leaf level the hardware reads
@@ -197,12 +203,15 @@ impl<A: ArchPagingMeta> PTEntry<A> {
         returns
             self.huge_spec(),
     {
-        self.val & A::PTFlags::huge_bit() != 0
+        proof {
+            A::PTFlags::lemma_flag_bits_wf();
+        }
+        self.raw() & A::PTFlags::huge_bit() != 0
     }
 
     /// Hardware user-accessible bit.
     pub open spec fn user_spec(&self) -> bool {
-        self.flags_bits_spec() & A::PTFlags::spec_user_bit() != 0
+        self.view() & A::PTFlags::spec_user_bit() != 0
     }
 
     #[verifier::when_used_as_spec(user_spec)]
@@ -210,7 +219,10 @@ impl<A: ArchPagingMeta> PTEntry<A> {
         returns
             self.user_spec(),
     {
-        self.flags().user()
+        proof {
+            A::PTFlags::lemma_flag_bits_wf();
+        }
+        self.raw() & A::PTFlags::user_bit() != 0
     }
 
     /// A present, non-huge entry: the shape a walker may follow down to a
@@ -258,12 +270,13 @@ impl<A: ArchPagingMeta> PTEntry<A> {
             addr@ & !A::spec_address_mask() == 0,
         ensures
             ret.paddr_field_spec() == addr@,
-            ret.flags_bits_spec() == flags@ & A::PTFlags::spec_all_bits(),
-            ret.present_spec() == (flags@ & A::PTFlags::spec_present_bit() != 0),
-            ret.huge_spec() == (flags@ & A::PTFlags::spec_huge_bit() != 0),
+            ret.view() & !A::spec_address_mask() == flags.bits_spec() & !A::spec_address_mask(),
+            ret.present_spec() == (flags.bits_spec() & A::PTFlags::spec_present_bit() != 0),
+            ret.huge_spec() == (flags.bits_spec() & A::PTFlags::spec_huge_bit() != 0),
     {
         proof {
             A::lemma_pte_masks_wf();
+            A::PTFlags::lemma_flag_bits_wf();
         }
         let masked_addr = addr.bits() & A::address_mask();
         let flag_bits = flags.bits() & !A::address_mask();
@@ -272,14 +285,12 @@ impl<A: ArchPagingMeta> PTEntry<A> {
             let am = A::spec_address_mask();
             let pb = A::PTFlags::spec_present_bit();
             let hb = A::PTFlags::spec_huge_bit();
-            let ab = A::PTFlags::spec_all_bits();
             let a = addr@;
-            let fb = flags@;
-            assert((am & pb == 0 && am & hb == 0 && ab & !am == ab && a & !am == 0 && masked_addr
-                == a & am && flag_bits == fb & !am) ==> ((masked_addr | flag_bits) & am == a && (
-            masked_addr | flag_bits) & ab == fb & ab && ((masked_addr | flag_bits) & pb != 0) == (fb
-                & pb != 0) && ((masked_addr | flag_bits) & hb != 0) == (fb & hb != 0)))
-                by (bit_vector);
+            let fb = flags.bits_spec();
+            assert((am & pb == 0 && am & hb == 0 && a & !am == 0 && masked_addr == a & am
+                && flag_bits == fb & !am) ==> ((masked_addr | flag_bits) & am == a && (masked_addr
+                | flag_bits) & !am == fb & !am && ((masked_addr | flag_bits) & pb != 0) == (fb & pb
+                != 0) && ((masked_addr | flag_bits) & hb != 0) == (fb & hb != 0))) by (bit_vector);
         }
         ret
     }
@@ -289,9 +300,10 @@ impl<A: ArchPagingMeta> PTEntry<A> {
             addr@ & !A::spec_address_mask() == 0,
         ensures
             final(self).paddr_field_spec() == addr@,
-            final(self).flags_bits_spec() == flags@ & A::PTFlags::spec_all_bits(),
-            final(self).present_spec() == (flags@ & A::PTFlags::spec_present_bit() != 0),
-            final(self).huge_spec() == (flags@ & A::PTFlags::spec_huge_bit() != 0),
+            final(self).view() & !A::spec_address_mask() == flags.bits_spec()
+                & !A::spec_address_mask(),
+            final(self).present_spec() == (flags.bits_spec() & A::PTFlags::spec_present_bit() != 0),
+            final(self).huge_spec() == (flags.bits_spec() & A::PTFlags::spec_huge_bit() != 0),
     {
         *self = Self::new(addr, flags);
     }

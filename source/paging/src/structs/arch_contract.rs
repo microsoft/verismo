@@ -4,7 +4,56 @@ use vstd::prelude::*;
 
 use crate::address::{Address, PhysAddr};
 use crate::sizes::{PageOffset, PageSize};
+use bitflags::Flags;
+use bitflags_verus::FlagsSpec;
+use builtin_macros::verus_verify;
+
 use crate::structs::entry::PTEntry;
+
+/// Executable interface to a page table entry's flag word.
+///
+/// Kept in plain Rust, annotated rather than rewritten, so the flag types can
+/// be shared with unverified code. Its ghost half is
+/// [`GenericPageTableFlagsSpec`].
+#[verus_verify]
+pub trait GenericPageTableFlags:
+    bitflags::Flags<Bits = usize>
+    + core::ops::BitAnd<Output = Self>
+    + core::ops::BitOr<Output = Self>
+    + Copy
+    + Clone
+{
+    const PRESENT: Self;
+
+    const USER: Self;
+
+    const HUGE: Self;
+
+    /// Default flags for newly created parent page table entries.
+    ///
+    /// These flags must be permissive enough to form a superset of all
+    /// possible descendant leaf entry permissions, since effective access
+    /// rights are constrained by both parent and leaf entries.
+    fn parent_flags() -> Self;
+
+    /// Flags for the self-map entry itself. This may differ from `parent_flags`
+    fn self_map_table_flags() -> Self;
+
+    #[verus_verify(external_body)]
+    fn huge(&self) -> bool {
+        self.contains(Self::HUGE)
+    }
+
+    #[verus_verify(external_body)]
+    fn present(&self) -> bool {
+        self.contains(Self::PRESENT)
+    }
+
+    #[verus_verify(external_body)]
+    fn user(&self) -> bool {
+        self.contains(Self::USER)
+    }
+}
 
 verus! {
 
@@ -62,86 +111,57 @@ pub open spec fn level_geometry_wf<A: ArchPagingMeta>() -> bool {
     &&& 0 < level_index_width::<A>() < 64
 }
 
-/// A host's page-table flags type.
+/// The ghost half of [`GenericPageTableFlags`]: which bit each named flag
+/// occupies, and the well-formedness the entry encoding relies on.
 ///
-/// An implementer's raw bits are exposed through the standard Verus `View`
-/// (`self@`), not a bespoke accessor -- any `bitflags_verus!`-generated type
-/// already carries a `view` spec, so it satisfies this for free.
-pub trait GenericPageTableFlags: View<V = usize> + core::ops::BitAnd<
-    Output = Self,
-> + core::ops::BitOr<Output = Self> + Copy + Clone {
-    const PRESENT: Self;
-
-    const USER: Self;
-
-    const HUGE: Self;
-
-    /// Default flags for newly created parent page table entries.
-    ///
-    /// These flags must be permissive enough to form a superset of all
-    /// possible descendant leaf entry permissions, since effective access
-    /// rights are constrained by both parent and leaf entries.
-    fn parent_flags() -> Self;
-
-    /// Spec-level mask tested by `present()`.
-    spec fn spec_present_bit() -> usize;
-
-    /// Spec-level mask tested by `huge()`.
-    spec fn spec_huge_bit() -> usize;
-
-    fn huge(&self) -> (ret: bool)
-        ensures
-            ret == (self@ & Self::spec_huge_bit() != 0),
-    ;
-
-    fn present(&self) -> (ret: bool)
-        ensures
-            ret == (self@ & Self::spec_present_bit() != 0),
-    ;
-
-    /// Raw value of the `PRESENT` bit, so a caller assembling a fresh raw
-    /// word does not need a `Self` value just to read a constant.
-    fn present_bit() -> (ret: usize)
-        ensures
-            ret == Self::spec_present_bit(),
-    ;
-
-    /// Raw value of the `HUGE` bit.
-    fn huge_bit() -> (ret: usize)
-        ensures
-            ret == Self::spec_huge_bit(),
-    ;
-
-    /// Spec-level mask tested by `user()`.
-    spec fn spec_user_bit() -> usize;
-
-    fn user(&self) -> (ret: bool)
-        ensures
-            ret == (self@ & Self::spec_user_bit() != 0),
-    ;
-
+/// Separate from the exec trait so that a flag type can be defined -- and used
+/// by unverified code -- without carrying proofs, and so that the bit positions
+/// are named in one place that specifications can refer to.
+pub trait GenericPageTableFlagsSpec: GenericPageTableFlags {
     /// Every bit a named flag can occupy. Bits outside the address field may
     /// fall outside this too, since a flag whose position the machine reports
     /// at runtime -- the C-bit -- cannot be a constant of the architecture.
     spec fn spec_all_bits() -> usize;
 
-    /// Raw word, so `entry.rs` can assemble/decode a `PTEntry` without
-    /// crossing into `bitflags::Flags`, which has no Verus spec generic over
-    /// an arbitrary implementer.
-    fn bits(&self) -> (ret: usize)
+    spec fn spec_present_bit() -> usize;
+
+    spec fn spec_huge_bit() -> usize;
+
+    spec fn spec_user_bit() -> usize;
+
+    /// Executable mirrors of the bit positions above. The associated consts of
+    /// [`GenericPageTableFlags`] cannot serve here: Verus gives an associated
+    /// const no ghost value unless its initializer is a bare name, which a
+    /// `bitflags`-generated flag never is.
+    fn present_bit() -> (ret: usize)
         ensures
-            ret == self@,
+            ret == Self::spec_present_bit(),
     ;
 
-    /// Decodes `bits`, dropping anything outside `Self::spec_all_bits()`.
-    fn from_bits_truncate(bits: usize) -> (ret: Self)
+    fn huge_bit() -> (ret: usize)
         ensures
-            ret@ == (bits & Self::spec_all_bits()),
+            ret == Self::spec_huge_bit(),
+    ;
+
+    fn user_bit() -> (ret: usize)
+        ensures
+            ret == Self::spec_user_bit(),
+    ;
+
+    proof fn lemma_flag_bits_wf()
+        ensures
+            Self::obeys_bitflags_spec(),
+            Self::spec_present_bit() != 0,
+            Self::spec_huge_bit() != 0,
+            Self::spec_present_bit() & Self::spec_huge_bit() == 0,
+            Self::spec_present_bit() & Self::spec_all_bits() == Self::spec_present_bit(),
+            Self::spec_huge_bit() & Self::spec_all_bits() == Self::spec_huge_bit(),
+            Self::spec_user_bit() & Self::spec_all_bits() == Self::spec_user_bit(),
     ;
 }
 
 pub trait ArchPagingMeta: 'static + Copy + ArchPagingGeometry {
-    type PTFlags: GenericPageTableFlags;
+    type PTFlags: GenericPageTableFlagsSpec;
 
     /// Spec-level mirror of `private_pte_mask()`.
     spec fn spec_private_mask() -> usize;
