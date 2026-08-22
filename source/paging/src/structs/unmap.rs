@@ -30,6 +30,9 @@ pub enum LeafUpdate<A: ArchPagingMeta> {
     Clear,
     /// Keep the frame, replace the permissions.
     SetFlags(A::PTFlags),
+    /// Keep the frame and the permissions, and move the page between private
+    /// and shared memory by retagging its address.
+    SetSharing { shared: bool },
 }
 
 /// Applies `update` to the entry `vaddr` leads to, and returns the entry that
@@ -118,6 +121,26 @@ fn leaf_replacement<A: ArchPagingMeta>(current: PTEntry<A>, update: LeafUpdate<A
                 assert((v & am) & !am == 0) by (bit_vector);
             }
             PTEntry::<A>::new_leaf(PhysAddr::from(addr), flags)
+        },
+        LeafUpdate::SetSharing { shared } => {
+            let untagged = current.paddr_field() & !A::private_pte_mask() & !A::shared_pte_mask();
+            let tag = if shared {
+                A::shared_pte_mask()
+            } else {
+                A::private_pte_mask()
+            };
+            let flags = current.flags();
+            proof {
+                A::lemma_pte_masks_wf();
+                let am = A::spec_address_mask();
+                let pm = A::spec_private_mask();
+                let sm = A::spec_shared_mask();
+                let v = current.view();
+                lemma_phys_addr_from_bits((v & am) & !pm & !sm | tag);
+                assert((tag == pm || tag == sm) && pm & !am == 0 && sm & !am == 0 ==> ((v & am)
+                    & !pm & !sm | tag) & !am == 0) by (bit_vector);
+            }
+            PTEntry::<A>::new_leaf(PhysAddr::from(untagged | tag), flags)
         },
     }
 }

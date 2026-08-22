@@ -220,8 +220,49 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
         }
     }
 
-    /// Maps `[vstart, vend)` to the physical range starting at `paddr`.
+    /// Moves the page `vaddr` leads to between private and shared memory,
+    /// keeping its frame and its permissions, and returns the entry that was
+    /// there.
     ///
+    /// Nothing about the frame changes except the tag the hardware reads to
+    /// decide whether to decrypt it -- which is precisely why the old
+    /// translation must not survive anywhere: a frame reachable under two tags
+    /// at once is the same memory seen two ways, and only one of them is the
+    /// one the caller asked for.
+    pub fn set_sharing(&self, vaddr: VirtAddr, shared: bool) -> (ret: Result<
+        (PTEntry<A>, MayNeedFlush),
+        PagingError,
+    >)
+        requires
+            self.inv(),
+            vaddr@ < usize::MAX,
+        ensures
+            ret matches Ok((old, _)) ==> !old.is_table_spec(),
+    {
+        match update_leaf_at::<A, H>(
+            self.root,
+            self.level,
+            self.borrow_page(),
+            vaddr,
+            LeafUpdate::SetSharing { shared },
+        ) {
+            Err(e) => Err(e),
+            Ok(old) => Ok((old, MayNeedFlush::range(vaddr.bits(), vaddr.bits() + 1))),
+        }
+    }
+
+    /// The frame the hardware is told to start walking from: what goes in
+    /// `CR3`.
+    pub fn root_frame(&self) -> (ret: PhysAddr)
+        requires
+            self.inv(),
+        ensures
+            ret@ == self.install_spec().root_frame(),
+    {
+        H::vaddr_to_paddr(self.root)
+    }
+
+    /// Maps `[vstart, vend)` to the physical range starting at `paddr`.    ///
     /// One pass over the tree rather than one walk per page, and one
     /// acquisition of each leaf page's lock rather than one per entry -- see
     /// [`range_at`]. Fails, leaving what it has already written in place, on
