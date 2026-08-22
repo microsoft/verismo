@@ -120,10 +120,9 @@ pub trait GenericPageTableFlags: View<V = usize> + core::ops::BitAnd<
             ret == (self@ & Self::spec_user_bit() != 0),
     ;
 
-    /// Every bit any named flag can occupy. Together with
-    /// `ArchPagingMeta::lemma_pte_masks_wf`'s claim that this is exactly the
-    /// complement of the address field, this is what lets `entry.rs` decode
-    /// a raw word's flags without dropping bits it should have kept.
+    /// Every bit a named flag can occupy. Bits outside the address field may
+    /// fall outside this too, since a flag whose position the machine reports
+    /// at runtime -- the C-bit -- cannot be a constant of the architecture.
     spec fn spec_all_bits() -> usize;
 
     /// Raw word, so `entry.rs` can assemble/decode a `PTEntry` without
@@ -163,10 +162,10 @@ pub trait ArchPagingMeta: 'static + Copy + ArchPagingGeometry {
             Self::spec_address_mask() & Self::PTFlags::spec_present_bit() == 0,
             Self::spec_address_mask() & Self::PTFlags::spec_huge_bit() == 0,
             Self::spec_private_mask() & Self::spec_shared_mask() == 0,
-            // Every bit outside the address field is some named flag, so
-            // decoding a raw word's flags (`PTEntry::flags`) never
-            // drops bits it should have kept.
-            Self::PTFlags::spec_all_bits() == !Self::spec_address_mask(),
+            // No named flag overlaps the address field, so assembling an
+            // entry from an address and flags loses neither.
+            Self::PTFlags::spec_all_bits() & !Self::spec_address_mask()
+                == Self::PTFlags::spec_all_bits(),
     ;
 
     /// Returns the bitmask ORed into physical addresses for private
