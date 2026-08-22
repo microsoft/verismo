@@ -11,8 +11,8 @@ use vstd::prelude::*;
 
 use crate::specs::entry::{lemma_entry_from_usize, lemma_usize_from_entry};
 use crate::structs::arch_contract::ArchPagingMeta;
-use crate::structs::entry::{entry_step, PageTableEntry};
 use crate::structs::concurrent_pt::PTPageSharedPerm;
+use crate::structs::entry::{entry_step, PageTableEntry};
 
 verus! {
 
@@ -22,7 +22,7 @@ impl<A: ArchPagingMeta> WithPayload for PageTableEntry<A> {
     /// An entry that points at a table describes the page whose tokens it
     /// escrows: the same frame, one level down.
     open spec fn wf_payload(self, payload: Self::Payload) -> bool {
-        self.is_table_spec(payload.depth as nat + 1) ==> {
+        self.is_table_spec() ==> {
             &&& payload.wf()
             &&& payload.frame == self.page_frame_spec()
         }
@@ -37,21 +37,19 @@ impl<A: ArchPagingMeta> RWModel for PageTableEntry<A> {
     /// PIN, as the protocol states it: a reader that saw a table pointer may
     /// act on it later, because no writer may take it back.
     ///
-    /// The depth comes from the payload rather than from the value, because the
-    /// value is just a word: it is the page a slot belongs to that fixes which
-    /// level it is read at, and a slot never changes level.
+    /// A slot never changes which page it belongs to, so its depth is fixed.
     open spec fn reachable(
         pair: Snapshot<Self, Self::Payload>,
         other: Snapshot<Self, Self::Payload>,
     ) -> bool {
         &&& other.payload().depth == pair.payload().depth
-        &&& entry_step(pair.value(), other.value(), pair.payload().depth as nat + 1)
+        &&& entry_step(pair.value(), other.value())
     }
 
     /// A table entry has published its child: that is what lets a walk borrow
     /// the child's tokens outside the invariant block that produced them.
     open spec fn has_published_payload(self) -> bool {
-        exists|depth: nat| self.is_table_spec(depth)
+        self.is_table_spec()
     }
 
     proof fn reachable_self(pair: Snapshot<Self, Self::Payload>) {
@@ -71,7 +69,7 @@ impl<A: ArchPagingMeta> RWModel for PageTableEntry<A> {
 
     proof fn into_from_atomic_agree(self) where
         Self: From<Self::AtomicType> + Into<Self::AtomicType>,
-    {
+     {
         lemma_entry_from_usize::<A>(self.view());
         lemma_usize_from_entry::<A>(self);
         PageTableEntry::<A>::lemma_bits_roundtrip(self);

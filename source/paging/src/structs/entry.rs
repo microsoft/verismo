@@ -3,9 +3,9 @@
 //! has been observed to hold a table pointer.
 //!
 //! Type definitions and their specs only -- no walking, no mapping, no
-//! allocation. Levels are threaded as a plain `depth` counted up from the
-//! leaf (`0` is the smallest page) rather than a typed level marker, since
-//! that marker is being defined elsewhere and will be plugged in later.
+//! allocation. Nothing here knows which level an entry is read at: at the leaf
+//! level bit 7 is PAT rather than PS, so it is the walk layer, which knows the
+//! page's depth, that must refuse to descend below the leaf.
 use core::marker::PhantomData;
 
 use vstd::prelude::*;
@@ -168,47 +168,47 @@ impl<A: ArchPagingMeta> PageTableEntry<A> {
         self.val & A::PTFlags::present_bit() != 0
     }
 
-    /// Hardware huge (large-page) bit. A depth-0 entry maps the smallest
-    /// page and is never huge, regardless of the stored bit.
-    pub open spec fn huge_spec(&self, depth: nat) -> bool {
-        depth > 0 && self.view() & A::PTFlags::spec_huge_bit() != 0
+    /// Hardware huge (large-page) bit. At the leaf level the hardware reads
+    /// this bit as PAT instead, so only a caller that knows the level may read
+    /// it as "maps a large page".
+    pub open spec fn huge_spec(&self) -> bool {
+        self.view() & A::PTFlags::spec_huge_bit() != 0
     }
 
-    pub fn huge(&self, depth: usize) -> (ret: bool)
+    pub fn huge(&self) -> (ret: bool)
         returns
-            self.huge_spec(depth as nat),
+            self.huge_spec(),
     {
-        depth > 0 && self.val & A::PTFlags::huge_bit() != 0
+        self.val & A::PTFlags::huge_bit() != 0
     }
 
-    /// A present, non-huge entry above the leaf level: the only shape a
-    /// walker may follow down to a child table.
-    pub open spec fn is_table_spec(&self, depth: nat) -> bool {
-        self.present_spec() && !self.huge_spec(depth) && depth > 0
+    /// A present, non-huge entry: the shape a walker may follow down to a
+    /// child table, once it has established that it is above the leaf level.
+    pub open spec fn is_table_spec(&self) -> bool {
+        self.present_spec() && !self.huge_spec()
     }
 
-    pub fn is_table(&self, depth: usize) -> (ret: bool)
+    pub fn is_table(&self) -> (ret: bool)
         returns
-            self.is_table_spec(depth as nat),
+            self.is_table_spec(),
     {
-        self.present() && !self.huge(depth) && depth > 0
+        self.present() && !self.huge()
     }
 
-    /// A present entry a walk stops at: a depth-0 mapping, or a huge mapping
-    /// above it.
-    pub open spec fn is_leaf_spec(&self, depth: nat) -> bool {
-        self.present_spec() && (depth == 0 || self.huge_spec(depth))
+    /// A present entry mapping a large page, which a walk above the leaf level
+    /// stops at. At the leaf level every present entry stops the walk.
+    pub open spec fn is_leaf_spec(&self) -> bool {
+        self.present_spec() && self.huge_spec()
     }
 
-    pub fn is_leaf(&self, depth: usize) -> (ret: bool)
+    pub fn is_leaf(&self) -> (ret: bool)
         returns
-            self.is_leaf_spec(depth as nat),
+            self.is_leaf_spec(),
     {
-        self.present() && (depth == 0 || self.huge(depth))
+        self.present() && self.huge()
     }
 
-    /// The all-zero entry: not present, and so neither a table nor a leaf at
-    /// any depth.
+    /// The all-zero entry: not present, and so neither a table nor a leaf.
     pub fn empty() -> (ret: Self)
         ensures
             ret.view() == 0,
@@ -231,7 +231,7 @@ impl<A: ArchPagingMeta> PageTableEntry<A> {
             flags@ & A::PTFlags::spec_huge_bit() == 0,
         ensures
             ret.paddr_field_spec() == child_frame@,
-            forall|depth: nat| depth > 0 ==> ret.is_table_spec(depth),
+            ret.is_table_spec(),
     {
         proof {
             A::lemma_pte_masks_wf();
@@ -268,9 +268,7 @@ impl<A: ArchPagingMeta> PageTableEntry<A> {
         ensures
             ret.paddr_field_spec() == frame@,
             ret.present_spec(),
-            forall|depth: nat|
-                depth > 0 ==> ret.huge_spec(depth) == (flags@ & A::PTFlags::spec_huge_bit() != 0),
-            ret.is_leaf_spec(0),
+            ret.huge_spec() == (flags@ & A::PTFlags::spec_huge_bit() != 0),
     {
         proof {
             A::lemma_pte_masks_wf();
@@ -329,19 +327,13 @@ impl<A: ArchPagingMeta> From<PageTableEntry<A>> for usize {
     }
 }
 
-
-pub open spec fn entry_step<A: ArchPagingMeta>(
-    a: PageTableEntry<A>,
-    b: PageTableEntry<A>,
-    depth: nat,
-) -> bool {
-    a.is_table_spec(depth) ==> (b.is_table_spec(depth) && a.paddr_field_spec()
-        == b.paddr_field_spec())
+pub open spec fn entry_step<A: ArchPagingMeta>(a: PageTableEntry<A>, b: PageTableEntry<A>) -> bool {
+    a.is_table_spec() ==> (b.is_table_spec() && a.paddr_field_spec() == b.paddr_field_spec())
 }
 
-pub proof fn lemma_entry_step_reflexive<A: ArchPagingMeta>(a: PageTableEntry<A>, depth: nat)
+pub proof fn lemma_entry_step_reflexive<A: ArchPagingMeta>(a: PageTableEntry<A>)
     ensures
-        entry_step(a, a, depth),
+        entry_step(a, a),
 {
 }
 
@@ -349,13 +341,12 @@ pub proof fn lemma_entry_step_transitive<A: ArchPagingMeta>(
     a: PageTableEntry<A>,
     b: PageTableEntry<A>,
     c: PageTableEntry<A>,
-    depth: nat,
 )
     requires
-        entry_step(a, b, depth),
-        entry_step(b, c, depth),
+        entry_step(a, b),
+        entry_step(b, c),
     ensures
-        entry_step(a, c, depth),
+        entry_step(a, c),
 {
 }
 
