@@ -32,7 +32,7 @@ proof fn efer_paging_precondition_holds_for_concrete_value() {
 
 /// Example of exec code driving a control-register update while holding the
 /// tracked register state: setting `CR4.SMEP` leaves every paging control bit
-/// alone, so `PagingView::inv` is re-established after the write.
+/// alone, so `PagingRegisters::inv` is re-established after the write.
 fn enable_smep<A: ArchPagingGeometry>(Tracked(regs): Tracked<&mut RegisterState>)
     requires
         paging_inv::<A>(old(regs)),

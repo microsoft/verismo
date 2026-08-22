@@ -50,7 +50,7 @@ impl<A: ArchPagingMeta, H: PagingHost> PageTableHandle<A, H> {
 
     /// How deep the tree under this handle is: the root page's own depth, since
     /// nothing static fixes it. An operation that also holds the register state
-    /// checks this against `PagingView::level_count`.
+    /// checks this against `PagingRegisters::level_count`.
     pub open spec fn root_depth(&self) -> nat {
         self.page_spec().depth as nat
     }

@@ -66,7 +66,7 @@ pub open spec fn cr3_paging_precondition<A: ArchPagingGeometry>(
 
 /// CR4 bits constrained in every paging mode: `PCIDE` and `LA57` are only
 /// architecturally settable once long mode is active. Which mode is in effect
-/// is [`PagingView::level_count`]'s business.
+/// is [`PagingRegisters::level_count`]'s business.
 ///
 /// APM Vol. 2, "CR4 Register" and "Enabling Long Mode"; SDM Vol. 3A, "Control
 /// Registers" and "Initializing IA-32e Mode".
@@ -92,11 +92,11 @@ pub open spec fn low_bits_mask_u64(n: nat) -> u64 {
 }
 
 // ---------------------------------------------------------------------------
-// PagingView
+// PagingRegisters
 // ---------------------------------------------------------------------------
 /// The paging-relevant values held by the register state, gathered into one
 /// value so that paging contracts do not have to borrow `RegisterState`.
-pub ghost struct PagingView<A: ArchPagingGeometry> {
+pub ghost struct PagingRegisters<A: ArchPagingGeometry> {
     pub cr0: Cr0Value,
     pub cr3: Cr3Value,
     pub cr4: Cr4Value,
@@ -105,31 +105,22 @@ pub ghost struct PagingView<A: ArchPagingGeometry> {
     pub arch: PhantomData<A>,
 }
 
-pub open spec fn paging_view<A: ArchPagingGeometry>(registers: &RegisterState) -> PagingView<A> {
-    PagingView {
-        cr0: registers.cr0.value(),
-        cr3: registers.cr3.value(),
-        cr4: registers.cr4.value(),
-        efer: efer_value(registers),
-        cs: registers.cs.value(),
-        arch: PhantomData,
-    }
-}
-
 pub open spec fn paging_inv<A: ArchPagingGeometry>(registers: &RegisterState) -> bool {
     &&& registers.msrs.dom().contains(MSR_EFER)
-    &&& paging_view::<A>(registers).inv()
+    &&& PagingRegisters::<A>::of(registers).inv()
 }
 
-impl<A: ArchPagingGeometry> PagingView<A> {
-    /// The registers have to select the very tree `A` describes: how deep the
-    /// hardware walks is a paging mode, and `CR3` names the root of a tree of
-    /// that depth, so a mismatch would let a table be read at the wrong level.
-    ///
-    /// Every mode maps 4 KiB pages at the leaf, which is also what makes
-    /// `CR3`'s low bits the ones `cr3_paging_precondition` reserves.
-    pub open spec fn mode_precondition(&self) -> bool {
-        &&& A::MinPageSize::SHIFT == 12
+impl<A: ArchPagingGeometry> PagingRegisters<A> {
+    /// The paging-relevant values the tracked register tokens hold.
+    pub open spec fn of(registers: &RegisterState) -> PagingRegisters<A> {
+        PagingRegisters {
+            cr0: registers.cr0.value(),
+            cr3: registers.cr3.value(),
+            cr4: registers.cr4.value(),
+            efer: efer_value(registers),
+            cs: registers.cs.value(),
+            arch: PhantomData,
+        }
     }
 
     /// How deep the hardware walks, as the mode bits select it: `PAE` without
@@ -153,12 +144,20 @@ impl<A: ArchPagingGeometry> PagingView<A> {
         }
     }
 
+    pub open spec fn entry_size(&self) -> nat {
+        if self.cr4.contains(Cr4Value::PAE) || self.efer.contains(EferValue::LMA) {
+            8nat
+        } else {
+            4nat
+        }
+    }
+
     pub open spec fn inv(&self) -> bool {
         &&& cr0_paging_precondition(self.cr0)
         &&& cr3_paging_precondition::<A>(self.cr3, self.cr4)
         &&& cr4_paging_precondition(self.cr0, self.cr4, self.efer)
-        &&& self.mode_precondition()
         &&& efer_paging_precondition(self.efer)
+        &&& A::MinPageSize::SHIFT == 12
     }
 }
 
