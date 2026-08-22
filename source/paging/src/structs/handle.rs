@@ -15,11 +15,14 @@ use core::marker::PhantomData;
 use vstd::prelude::*;
 
 use crate::structs::address::{Address, PhysAddr, VirtAddr};
-use crate::structs::arch_contract::{level_geometry_wf, ArchPagingMeta};
+use crate::structs::arch_contract::{level_geometry_wf, ArchPagingMeta, GenericPageTableFlags};
 use crate::structs::concurrent_pt::PTPageSharedPerm;
+use crate::structs::entry::PTEntry;
 use crate::structs::level::PageLevel;
+use crate::structs::map::map_at;
 use crate::structs::os_contract::{PagingError, PagingHandler};
 use crate::structs::state::PTInstallState;
+use crate::structs::unmap::{update_leaf_at, LeafUpdate};
 use crate::structs::walk::{descend, WalkResult};
 
 verus! {
@@ -142,6 +145,71 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
         } else {
             Err(PagingError::NotMapped)
         }
+    }
+
+    /// Maps `vaddr` to `paddr` at `target`, building the tables in between.
+    ///
+    /// Takes `&self`: mapping only grows the tree, and a walker standing in a
+    /// page is unaffected by a page being linked below it. Fails if the address
+    /// already maps -- see [`map_at`].
+    ///
+    /// `paddr` carries whatever tag the caller wants the mapping to have; only
+    /// the bits outside the address field are dropped. Above the leaf level the
+    /// huge bit is set here, because at those levels it is what distinguishes a
+    /// mapping from a table pointer.
+    pub fn map(
+        &self,
+        vaddr: VirtAddr,
+        paddr: PhysAddr,
+        target: PageLevel,
+        flags: A::PTFlags,
+    ) -> (ret: Result<(), PagingError>)
+        requires
+            self.inv(),
+            paddr@ & !A::spec_address_mask() == 0,
+    {
+        let leaf_flags = if target.is_leaf() {
+            flags
+        } else {
+            flags.with(A::PTFlags::HUGE)
+        };
+        let entry = PTEntry::<A>::new_leaf(paddr, leaf_flags);
+        map_at::<A, H>(self.root, self.level, self.borrow_page(), vaddr, target, entry)
+    }
+
+    /// Removes the mapping `vaddr` leads to, returning the entry that was
+    /// there so the caller can reclaim the frame it named.
+    ///
+    /// The TLB still holds the old translation afterwards: nothing here
+    /// invalidates it, because which processors need telling is the OS's to
+    /// know.
+    pub fn unmap(&self, vaddr: VirtAddr) -> (ret: Result<PTEntry<A>, PagingError>)
+        requires
+            self.inv(),
+        ensures
+            ret matches Ok(old) ==> !old.is_table_spec(),
+    {
+        update_leaf_at::<A, H>(self.root, self.level, self.borrow_page(), vaddr, LeafUpdate::Clear)
+    }
+
+    /// Replaces the permissions of the mapping `vaddr` leads to, keeping the
+    /// frame, and returns the entry that was there.
+    pub fn protect(&self, vaddr: VirtAddr, flags: A::PTFlags) -> (ret: Result<
+        PTEntry<A>,
+        PagingError,
+    >)
+        requires
+            self.inv(),
+        ensures
+            ret matches Ok(old) ==> !old.is_table_spec(),
+    {
+        update_leaf_at::<A, H>(
+            self.root,
+            self.level,
+            self.borrow_page(),
+            vaddr,
+            LeafUpdate::SetFlags(flags),
+        )
     }
 
     /// The root tokens, as a walk needs them: shared, so several walks may hold

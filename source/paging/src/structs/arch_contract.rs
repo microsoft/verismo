@@ -40,6 +40,22 @@ pub trait GenericPageTableFlags:
     /// Flags for the self-map entry itself. This may differ from `parent_flags`
     fn self_map_table_flags() -> Self;
 
+    /// The union of two flag words.
+    ///
+    /// Written out rather than using `|` so that the trait need not name a
+    /// verification-only operator specification: `BitOr` on a generic type
+    /// carries a precondition that nothing here can discharge.
+    #[verus_spec(ret =>
+        ensures
+            Self::obeys_bitflags_spec() ==> ret.bits_spec() == self.bits_spec() | other.bits_spec(),
+    )]
+    fn with(self, other: Self) -> Self {
+        proof! {
+            broadcast use bitflags_verus::traits::axiom_from_bits_retain;
+        }
+        Self::from_bits_retain(self.bits() | other.bits())
+    }
+
     #[verus_spec(ret =>
         ensures
             Self::obeys_bitflags_spec() ==> ret == self.contains_spec(Self::HUGE),
@@ -259,6 +275,10 @@ pub trait ArchPagingMeta: 'static + Copy + ArchPagingGeometry {
             Self::spec_address_mask() & Self::PTFlags::spec_huge_bit() == 0,
             Self::spec_address_mask() & Self::PTFlags::spec_escrow_bit() == 0,
             Self::spec_private_mask() & Self::spec_shared_mask() == 0,
+            // Both tags live inside the address field, so tagging an address
+            // keeps it a legal entry payload.
+            Self::spec_private_mask() & !Self::spec_address_mask() == 0,
+            Self::spec_shared_mask() & !Self::spec_address_mask() == 0,
             // No named flag overlaps the address field, so assembling an
             // entry from an address and flags loses neither.
             Self::PTFlags::spec_all_bits() & !Self::spec_address_mask()

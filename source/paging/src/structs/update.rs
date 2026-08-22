@@ -114,6 +114,47 @@ pub fn link_table_slot<A: ArchPagingMeta>(
     Ok(Tracked(ticket))
 }
 
+/// Replaces a slot that does not point at a table, returning what it held.
+///
+/// This is the one update that overwrites: unmapping and reprotecting both
+/// need it. It refuses a table pointer, because dropping one would strand
+/// everything below it along with the tokens escrowed in the slot.
+pub fn replace_leaf_slot<A: ArchPagingMeta>(
+    base: VirtAddr,
+    index: usize,
+    Tracked(page): Tracked<&PTPageSharedPerm<A>>,
+    Tracked(writers): Tracked<&mut PTPageWritePerm<A>>,
+    entry: PTEntry<A>,
+) -> (ret: Result<PTEntry<A>, PagingError>)
+    requires
+        page.wf(),
+        page.base == base@,
+        old(writers).ids() =~= page.ids(),
+        index < PTEntry::<A>::count_per_page(),
+        !entry.is_table_spec(),
+    ensures
+        final(writers).ids() =~= page.ids(),
+        ret matches Ok(old) ==> !old.is_table_spec(),
+{
+    let ghost i = index as int;
+    proof {
+        lemma_ids_match::<A>(*writers, *page);
+    }
+    let ptr = slot_ptr::<A>(base, index, Tracked(page));
+    let tracked reader = page.slots.tracked_borrow(i);
+    let current = read_slot_exact::<A>(ptr, Tracked(reader), Tracked(writers), index);
+    if current.is_table() {
+        return Err(PagingError::NotLeafEntry);
+    }
+    let ghost before = *writers;
+    let tracked writer = writers.slots.tracked_borrow_mut(i);
+    let Tracked(_observed) = store_slot::<A>(ptr, entry, Tracked(reader), Tracked(writer));
+    proof {
+        lemma_ids_unchanged::<A>(before, *writers, i);
+    }
+    Ok(current)
+}
+
 /// The value really in the slot, which only the holder of the writer can know.
 ///
 /// A walk reads a *reachable* value; here the writers are in hand, so no store

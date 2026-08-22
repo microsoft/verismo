@@ -44,6 +44,9 @@ pub enum PagingError {
     EntryAlreadyPresent,
     /// The tree is not deep enough for the requested page size.
     InvalidLevel,
+    /// A table pointer sits where a mapping was expected. Overwriting one
+    /// would strand the subtree below it, so no operation on a leaf will.
+    NotLeafEntry,
 }
 
 /// A freshly allocated table page, before it becomes part of any tree.
@@ -170,7 +173,14 @@ pub trait PagingHandler: 'static + Sized {
         ensures
             ret matches Ok((paddr, page)) ==> {
                 &&& page@.wf()
-                &&& page@.base == A::spec_paddr_to_vaddr(paddr@)
+                &&& page@.base == A::spec_paddr_to_vaddr(
+                    paddr@,
+                )
+                // Clean: within the address field, and neither tag set, so the
+                // page table is free to tag it either way.
+                &&& paddr@ & !A::spec_address_mask() == 0
+                &&& paddr@ & A::spec_private_mask() == 0
+                &&& paddr@ & A::spec_shared_mask() == 0
             },
     ;
 
