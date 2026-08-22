@@ -10,6 +10,10 @@
 //! the reader half of a table page is shareable by `&`, so `&PageTableHandle`
 //! is exactly the capability a lock-free walk needs, and `&mut
 //! PageTableHandle` is exactly the exclusion `free` needs.
+use machine_model::arch::x86_64::Cr3;
+use machine_model::register::RustRegisterPointsTo;
+
+use crate::arch::x86_64::reg_contract::cr3_root_frame;
 use core::marker::PhantomData;
 
 use vstd::prelude::*;
@@ -260,6 +264,46 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
             ret@ == self.install_spec().root_frame(),
     {
         H::vaddr_to_paddr(self.root)
+    }
+
+    /// Records that the paging-root register now names this tree, so that the
+    /// operations which may not run under a walking processor start refusing.
+    ///
+    /// Loading the register is the caller's; this is the bookkeeping that goes
+    /// with it, and it is checked rather than believed -- the register token
+    /// has to say that the register really holds this tree's root.
+    pub fn install(&mut self, Tracked(cr3): Tracked<&RustRegisterPointsTo<Cr3>>)
+        requires
+            old(self).inv(),
+            cr3_root_frame::<A>(cr3.value()) == old(self).install_spec().root_frame(),
+        ensures
+            final(self).inv(),
+            final(self).installed(),
+            final(self).root_spec() == old(self).root_spec(),
+            final(self).root_level() == old(self).root_level(),
+            final(self).page_spec() == old(self).page_spec(),
+    {
+        let root = H::vaddr_to_paddr(self.root);
+        PTInstallState::<A>::mark_installed(Tracked(self.install.borrow_mut()), root, Tracked(cr3));
+    }
+
+    /// Records that no processor's paging-root register names this tree any
+    /// more, which is what lets it be taken apart.
+    ///
+    /// TRUSTED in the same way [`PTInstallState::mark_uninstalled`] is: one
+    /// register state cannot witness the absence of this root from every
+    /// processor, so the caller carries that argument.
+    pub proof fn uninstall(tracked &mut self)
+        requires
+            old(self).inv(),
+        ensures
+            final(self).inv(),
+            !final(self).installed(),
+            final(self).root_spec() == old(self).root_spec(),
+            final(self).root_level() == old(self).root_level(),
+            final(self).page_spec() == old(self).page_spec(),
+    {
+        PTInstallState::mark_uninstalled(self.install.borrow_mut());
     }
 
     /// Maps `[vstart, vend)` to the physical range starting at `paddr`.    ///
