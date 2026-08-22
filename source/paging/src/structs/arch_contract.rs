@@ -5,7 +5,6 @@ use vstd::prelude::*;
 use crate::address::{Address, PhysAddr};
 use crate::sizes::{PageOffset, PageSize};
 use crate::structs::entry::PageTableEntry;
-use crate::structs::level::PagingLevel;
 
 verus! {
 
@@ -17,9 +16,9 @@ pub trait ArchPagingGeometry: Sized {
     /// in-page byte offset.
     type MinPageSize: PageSize;
 
-    /// Top of the paging tree. Its depth is the number of levels below it, so
-    /// a table page at `RootLevel::DEPTH` is a root.
-    type RootLevel: PagingLevel;
+    /// Depth of the root table page, counting up from the leaf: a tree of
+    /// `root_depth() + 1` levels.
+    spec fn root_depth() -> nat;
 
     spec fn phys_addr_width() -> nat;
 
@@ -56,7 +55,7 @@ pub open spec fn slot_addr<A: ArchPagingMeta>(base: usize, index: int) -> int {
 
 /// Number of paging levels, counting the leaf level that maps `MinPageSize`.
 pub open spec fn level_count<A: ArchPagingGeometry>() -> nat {
-    (A::RootLevel::DEPTH + 1) as nat
+    A::root_depth() + 1
 }
 
 /// Whether the level geometry fits the entry width: a table page's entries are
@@ -64,9 +63,9 @@ pub open spec fn level_count<A: ArchPagingGeometry>() -> nat {
 /// than an address has.
 ///
 /// Stated as a predicate rather than a trait obligation because it is defined
-/// in terms of `PageTableEntry<A>`, which is itself indexed by `A`; each
-/// architecture instantiates and discharges it, as with
-/// `maps_page_shift_agrees_with_geometry`.
+/// in terms of `PageTableEntry<A>`, which is itself indexed by `A`: naming it
+/// inside `ArchPagingMeta` would be a cyclic definition. Each architecture
+/// instantiates and discharges it.
 pub open spec fn level_geometry_wf<A: ArchPagingMeta>() -> bool {
     &&& pow2(level_index_width::<A>()) == PageTableEntry::<A>::count_per_page()
     &&& 0 < level_index_width::<A>() < 64
