@@ -26,8 +26,10 @@ pub use structs::arch_contract::{
 pub use structs::concurrent_pt;
 pub use structs::entry;
 pub use structs::handle;
-pub use structs::host_contract;
+pub use structs::level;
+pub use structs::os_contract;
 pub use structs::sizes;
+pub use structs::state;
 
 verus! {
 

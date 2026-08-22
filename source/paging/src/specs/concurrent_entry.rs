@@ -37,12 +37,13 @@ impl<A: ArchPagingMeta> RWModel for PTEntry<A> {
     /// PIN, as the protocol states it: a reader that saw a table pointer may
     /// act on it later, because no writer may take it back.
     ///
-    /// A slot never changes which page it belongs to, so its depth is fixed.
+    /// A slot never changes which page it belongs to, so the level of the page
+    /// its payload describes is fixed.
     open spec fn reachable(
         pair: Snapshot<Self, Self::Payload>,
         other: Snapshot<Self, Self::Payload>,
     ) -> bool {
-        &&& other.payload().depth == pair.payload().depth
+        &&& other.payload().level == pair.payload().level
         &&& entry_step(pair.value(), other.value())
     }
 

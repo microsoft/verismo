@@ -1,24 +1,25 @@
 //! The handle a caller holds on a page table.
 //!
-//! Two levels of exclusion, following verios-pagetable: the operations that
-//! only walk or grow the tree take `&self` and may run concurrently, while
-//! reclaiming interior pages takes `&mut self`, because a walker must not be
-//! standing in a page that is being freed. Rust's borrow checker is what
-//! enforces the outer level, and the per-page host lock the inner one.
+//! Two levels of exclusion. The operations that only walk or grow the tree take
+//! `&self` and may run concurrently; reclaiming interior pages takes `&mut
+//! self`, because a walker must not be standing in a page that is being freed.
+//! Rust's borrow checker enforces the outer level and the OS's per-page lock
+//! the inner one -- see `os_contract`.
 //!
-//! Unlike verios-pagetable, whose handle holds no tokens and threads them
-//! through every call, the tokens live in the handle: the reader half of a
-//! table page is shareable by `&`, so `&PageTableHandle` is exactly the
-//! capability a lock-free walk needs, and `&mut PageTableHandle` is exactly the
-//! exclusion `free` needs.
+//! The tokens live in the handle rather than being threaded through every call:
+//! the reader half of a table page is shareable by `&`, so `&PageTableHandle`
+//! is exactly the capability a lock-free walk needs, and `&mut
+//! PageTableHandle` is exactly the exclusion `free` needs.
 use core::marker::PhantomData;
 
 use vstd::prelude::*;
 
 use crate::structs::address::{Address, VirtAddr};
 use crate::structs::arch_contract::ArchPagingMeta;
-use crate::structs::host_contract::PagingHost;
 use crate::structs::concurrent_pt::PTPageSharedPerm;
+use crate::structs::level::PageLevel;
+use crate::structs::os_contract::{page_lock_matches, PagingHandler};
+use crate::structs::state::PTInstallState;
 
 verus! {
 
@@ -28,14 +29,14 @@ verus! {
 /// The root page is adopted, never allocated here: whoever installs a table in
 /// hardware owns its lifetime, and this handle owns only the right to read and
 /// update its slots.
-pub struct PageTableHandle<A: ArchPagingMeta, H: PagingHost> {
+pub struct PageTableHandle<A: ArchPagingMeta, H: PagingHandler> {
     root: VirtAddr,
     page: Tracked<PTPageSharedPerm<A>>,
-    deposit: Tracked<H::Deposit>,
+    install: Tracked<PTInstallState<A>>,
     dummy: PhantomData<(A, H)>,
 }
 
-impl<A: ArchPagingMeta, H: PagingHost> PageTableHandle<A, H> {
+impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
     pub closed spec fn root_spec(&self) -> VirtAddr {
         self.root
     }
@@ -44,24 +45,29 @@ impl<A: ArchPagingMeta, H: PagingHost> PageTableHandle<A, H> {
         self.page@
     }
 
-    pub closed spec fn deposit_spec(&self) -> H::Deposit {
-        self.deposit@
+    pub closed spec fn install_spec(&self) -> PTInstallState<A> {
+        self.install@
     }
 
-    /// How deep the tree under this handle is: the root page's own depth, since
-    /// nothing static fixes it. An operation that also holds the register state
-    /// checks this against `PagingRegisters::level_count`.
-    pub open spec fn root_depth(&self) -> nat {
-        self.page_spec().depth as nat
+    /// The level of the root page, and so how deep the tree is. Nothing static
+    /// fixes it: an operation that also holds the register state checks it
+    /// against `PagingRegisters::level_count`.
+    pub open spec fn root_level(&self) -> PageLevel {
+        self.page_spec().level
     }
 
-    /// The tokens describe the root page, and the host receipt names the lock
-    /// that guards it.
+    /// Whether the hardware may be walking this tree.
+    pub open spec fn installed(&self) -> bool {
+        self.install_spec().installed()
+    }
+
+    /// The tokens describe the root page, and the OS's lock for that address
+    /// guards its writers.
     pub open spec fn inv(&self) -> bool {
         &&& self.page_spec().wf()
         &&& self.page_spec().base == self.root_spec()@
-        &&& H::deposit_page(self.deposit_spec()) == self.root_spec()@
-        &&& H::deposit_slot_ids(self.deposit_spec()) =~= self.page_spec().ids()
+        &&& self.install_spec().root_frame() == H::spec_vaddr_to_paddr(self.root_spec()@)
+        &&& page_lock_matches::<A, H>(self.page_spec())
     }
 
     #[verifier::when_used_as_spec(root_spec)]
@@ -76,20 +82,20 @@ impl<A: ArchPagingMeta, H: PagingHost> PageTableHandle<A, H> {
     pub fn new(
         root: VirtAddr,
         Tracked(page): Tracked<PTPageSharedPerm<A>>,
-        Tracked(deposit): Tracked<H::Deposit>,
+        Tracked(install): Tracked<PTInstallState<A>>,
     ) -> (ret: Self)
         requires
             page.wf(),
             page.base == root@,
-            H::deposit_page(deposit) == root@,
-            H::deposit_slot_ids(deposit) =~= page.ids(),
+            install.root_frame() == H::spec_vaddr_to_paddr(root@),
+            page_lock_matches::<A, H>(page),
         ensures
             ret.inv(),
             ret.root_spec() == root,
             ret.page_spec() == page,
-            ret.deposit_spec() == deposit,
+            ret.install_spec() == install,
     {
-        PageTableHandle { root, page: Tracked(page), deposit: Tracked(deposit), dummy: PhantomData }
+        PageTableHandle { root, page: Tracked(page), install: Tracked(install), dummy: PhantomData }
     }
 
     /// The root tokens, as a walk needs them: shared, so several walks may hold
@@ -101,21 +107,18 @@ impl<A: ArchPagingMeta, H: PagingHost> PageTableHandle<A, H> {
         Tracked(self.page.borrow())
     }
 
-    pub fn borrow_deposit(&self) -> (ret: Tracked<&H::Deposit>)
-        ensures
-            *ret@ == self.deposit_spec(),
-    {
-        Tracked(self.deposit.borrow())
-    }
-
     /// Gives the root tokens back, dissolving the handle.
-    pub fn into_parts(self) -> (ret: (VirtAddr, Tracked<PTPageSharedPerm<A>>, Tracked<H::Deposit>))
+    pub fn into_parts(self) -> (ret: (
+        VirtAddr,
+        Tracked<PTPageSharedPerm<A>>,
+        Tracked<PTInstallState<A>>,
+    ))
         ensures
             ret.0 == self.root_spec(),
             ret.1@ == self.page_spec(),
-            ret.2@ == self.deposit_spec(),
+            ret.2@ == self.install_spec(),
     {
-        (self.root, self.page, self.deposit)
+        (self.root, self.page, self.install)
     }
 }
 

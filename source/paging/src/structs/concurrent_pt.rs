@@ -16,6 +16,7 @@ use vstd::resource::Loc;
 
 use crate::structs::arch_contract::{slot_addr, ArchPagingMeta};
 use crate::structs::entry::PTEntry;
+use crate::structs::level::PageLevel;
 
 verus! {
 
@@ -23,14 +24,15 @@ verus! {
 /// walk needs to turn an entry's frame back into a pointer.
 ///
 /// This is also a slot's payload, which is what makes it self-referential: the
-/// tokens of a page at depth `d` are escrowed in the entry at depth `d + 1`
-/// that points at it.
+/// tokens of a page at level `l` are escrowed in the entry of the level `l + 1`
+/// page that points at it. The level is ghost state rather than a type
+/// parameter, so one walk serves every level.
 pub struct PTPageSharedPerm<A: ArchPagingMeta> {
     pub slots: Seq<RWShared<PTEntry<A>, PTPageSharedPerm<A>>>,
     pub provenance: IsExposed,
     pub base: usize,
     pub frame: usize,
-    pub depth: usize,
+    pub level: PageLevel,
 }
 
 impl<A: ArchPagingMeta> PTPageSharedPerm<A> {

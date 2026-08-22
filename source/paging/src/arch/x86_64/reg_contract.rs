@@ -14,7 +14,7 @@ use vstd::prelude::*;
 use machine_model::arch::x86_64::state::RegisterState;
 use machine_model::arch::x86_64::{Cr0Value, Cr3Value, Cr4Value, EferValue};
 
-use crate::structs::arch_contract::{page_offset_width, ArchPagingGeometry};
+use crate::structs::arch_contract::{page_offset_width, ArchPagingGeometry, ArchPagingMeta};
 use crate::structs::sizes::PageOffset;
 
 verus! {
@@ -84,6 +84,12 @@ pub open spec fn cr4_paging_precondition(cr0: Cr0Value, cr4: Cr4Value, efer: Efe
 pub open spec fn efer_paging_precondition(efer: EferValue) -> bool {
     &&& efer.contains(EferValue::LME)
     &&& efer.contains(EferValue::LMA)
+}
+
+/// The frame the paging-root register names, with the flag and PCID bits the
+/// architecture keeps in the low word stripped off.
+pub open spec fn cr3_root_frame<A: ArchPagingMeta>(cr3: Cr3Value) -> usize {
+    (cr3@ as usize) & A::spec_address_mask()
 }
 
 /// `u64`-typed variant of `vstd::bits::low_bits_mask`.

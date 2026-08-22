@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //
 // Copyright (c) 2022-2023 SUSE LLC
-
 use crate::sizes::{lemma_size_4k, PageOffset, PageSize, Size4KiB};
 use crate::util::{align_down, align_up, is_aligned};
 
@@ -588,16 +587,12 @@ impl Address for VirtAddr {
     #[inline]
     #[verus_verify]
     fn checked_add(&self, off: InnerAddr) -> Option<Self> {
-        self.bits()
-            .checked_add(off)
-            .map(|addr| sign_extend(addr).into())
+        self.bits().checked_add(off).map(|addr| sign_extend(addr).into())
     }
 
     #[inline]
     #[verus_verify]
     fn checked_sub(&self, off: InnerAddr) -> Option<Self> {
-        self.bits()
-            .checked_sub(off)
-            .map(|addr| sign_extend(addr).into())
+        self.bits().checked_sub(off).map(|addr| sign_extend(addr).into())
     }
 }

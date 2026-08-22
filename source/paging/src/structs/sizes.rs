@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-
 use builtin_macros::*;
 use vstd::prelude::*;
 
@@ -10,9 +9,10 @@ mod sizes_spec_defs;
 pub use sizes_spec_defs::*;
 #[cfg(verus_only)]
 verus! {
-    broadcast use sizes_spec_defs::group_types_proof;
-}
 
+broadcast use sizes_spec_defs::group_types_proof;
+
+} // verus!
 verus! {
 
 /// Marker type describing the width of the in-page byte offset, i.e. the page
@@ -41,8 +41,7 @@ pub trait PageSize: PageOffset {
     ;
 }
 
-}
-
+} // verus!
 verus! {
 
 pub struct Size4KiB;
