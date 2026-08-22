@@ -12,11 +12,11 @@ use vstd::prelude::*;
 use crate::specs::entry::{lemma_entry_from_usize, lemma_usize_from_entry};
 use crate::structs::arch_contract::ArchPagingMeta;
 use crate::structs::concurrent_pt::PTPageSharedPerm;
-use crate::structs::entry::{entry_step, PageTableEntry};
+use crate::structs::entry::{entry_step, PTEntry};
 
 verus! {
 
-impl<A: ArchPagingMeta> WithPayload for PageTableEntry<A> {
+impl<A: ArchPagingMeta> WithPayload for PTEntry<A> {
     type Payload = PTPageSharedPerm<A>;
 
     /// An entry that points at a table describes the page whose tokens it
@@ -29,11 +29,11 @@ impl<A: ArchPagingMeta> WithPayload for PageTableEntry<A> {
     }
 }
 
-impl<A: ArchPagingMeta> IsValidAtomicType for PageTableEntry<A> {
+impl<A: ArchPagingMeta> IsValidAtomicType for PTEntry<A> {
     type AtomicType = usize;
 }
 
-impl<A: ArchPagingMeta> RWModel for PageTableEntry<A> {
+impl<A: ArchPagingMeta> RWModel for PTEntry<A> {
     /// PIN, as the protocol states it: a reader that saw a table pointer may
     /// act on it later, because no writer may take it back.
     ///
@@ -64,7 +64,7 @@ impl<A: ArchPagingMeta> RWModel for PageTableEntry<A> {
 
     proof fn into_from_obeys() where Self: From<Self::AtomicType> + Into<Self::AtomicType> {
         lemma_entry_from_usize::<A>(0);
-        lemma_usize_from_entry::<A>(PageTableEntry::spec_from_bits(0));
+        lemma_usize_from_entry::<A>(PTEntry::spec_from_bits(0));
     }
 
     proof fn into_from_atomic_agree(self) where
@@ -72,11 +72,11 @@ impl<A: ArchPagingMeta> RWModel for PageTableEntry<A> {
      {
         lemma_entry_from_usize::<A>(self.view());
         lemma_usize_from_entry::<A>(self);
-        PageTableEntry::<A>::lemma_bits_roundtrip(self);
+        PTEntry::<A>::lemma_bits_roundtrip(self);
     }
 }
 
-impl<A: ArchPagingMeta> PublishPayload for PageTableEntry<A> {
+impl<A: ArchPagingMeta> PublishPayload for PTEntry<A> {
     proof fn payload_stays_published(
         pair: Snapshot<Self, Self::Payload>,
         next: Snapshot<Self, Self::Payload>,

@@ -4,7 +4,7 @@ use vstd::prelude::*;
 
 use crate::address::{Address, PhysAddr};
 use crate::sizes::{PageOffset, PageSize};
-use crate::structs::entry::PageTableEntry;
+use crate::structs::entry::PTEntry;
 
 verus! {
 
@@ -34,7 +34,7 @@ pub open spec fn page_offset_width<A: ArchPagingGeometry>() -> nat {
 /// Number of virtual-address bits one paging level consumes: enough to index
 /// every entry of a table page.
 pub open spec fn level_index_width<A: ArchPagingMeta>() -> nat {
-    log(2, PageTableEntry::<A>::count_per_page() as int) as nat
+    log(2, PTEntry::<A>::count_per_page() as int) as nat
 }
 
 /// Shift of the page a level maps: `depth` levels above the leaf, each level
@@ -46,7 +46,7 @@ pub open spec fn level_shift<A: ArchPagingMeta>(depth: nat) -> nat {
 /// Address of a table page's entry `index`. Stated once here so that no
 /// specification has to spell out the entry stride.
 pub open spec fn slot_addr<A: ArchPagingMeta>(base: usize, index: int) -> int {
-    base as int + index * vstd::layout::size_of::<PageTableEntry<A>>()
+    base as int + index * vstd::layout::size_of::<PTEntry<A>>()
 }
 
 /// Whether the level geometry fits the entry width: a table page's entries are
@@ -54,11 +54,11 @@ pub open spec fn slot_addr<A: ArchPagingMeta>(base: usize, index: int) -> int {
 /// than an address has.
 ///
 /// Stated as a predicate rather than a trait obligation because it is defined
-/// in terms of `PageTableEntry<A>`, which is itself indexed by `A`: naming it
+/// in terms of `PTEntry<A>`, which is itself indexed by `A`: naming it
 /// inside `ArchPagingMeta` would be a cyclic definition. Each architecture
 /// instantiates and discharges it.
 pub open spec fn level_geometry_wf<A: ArchPagingMeta>() -> bool {
-    &&& pow2(level_index_width::<A>()) == PageTableEntry::<A>::count_per_page()
+    &&& pow2(level_index_width::<A>()) == PTEntry::<A>::count_per_page()
     &&& 0 < level_index_width::<A>() < 64
 }
 
@@ -126,7 +126,7 @@ pub trait GenericPageTableFlags: View<V = usize> + core::ops::BitAnd<
     /// a raw word's flags without dropping bits it should have kept.
     spec fn spec_all_bits() -> usize;
 
-    /// Raw word, so `entry.rs` can assemble/decode a `PageTableEntry` without
+    /// Raw word, so `entry.rs` can assemble/decode a `PTEntry` without
     /// crossing into `bitflags::Flags`, which has no Verus spec generic over
     /// an arbitrary implementer.
     fn bits(&self) -> (ret: usize)
@@ -164,7 +164,7 @@ pub trait ArchPagingMeta: 'static + Copy + ArchPagingGeometry {
             Self::spec_address_mask() & Self::PTFlags::spec_huge_bit() == 0,
             Self::spec_private_mask() & Self::spec_shared_mask() == 0,
             // Every bit outside the address field is some named flag, so
-            // decoding a raw word's flags (`PageTableEntry::flags`) never
+            // decoding a raw word's flags (`PTEntry::flags`) never
             // drops bits it should have kept.
             Self::PTFlags::spec_all_bits() == !Self::spec_address_mask(),
     ;

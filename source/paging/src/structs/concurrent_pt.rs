@@ -15,7 +15,7 @@ use vstd::raw_ptr::IsExposed;
 use vstd::resource::Loc;
 
 use crate::structs::arch_contract::{slot_addr, ArchPagingMeta};
-use crate::structs::entry::PageTableEntry;
+use crate::structs::entry::PTEntry;
 
 verus! {
 
@@ -26,7 +26,7 @@ verus! {
 /// tokens of a page at depth `d` are escrowed in the entry at depth `d + 1`
 /// that points at it.
 pub struct PTPageSharedPerm<A: ArchPagingMeta> {
-    pub slots: Seq<RWShared<PageTableEntry<A>, PTPageSharedPerm<A>>>,
+    pub slots: Seq<RWShared<PTEntry<A>, PTPageSharedPerm<A>>>,
     pub provenance: IsExposed,
     pub base: usize,
     pub frame: usize,
@@ -35,13 +35,13 @@ pub struct PTPageSharedPerm<A: ArchPagingMeta> {
 
 impl<A: ArchPagingMeta> PTPageSharedPerm<A> {
     pub open spec fn ids(self) -> Seq<Loc> {
-        self.slots.map_values(|slot: RWShared<PageTableEntry<A>, PTPageSharedPerm<A>>| slot.id())
+        self.slots.map_values(|slot: RWShared<PTEntry<A>, PTPageSharedPerm<A>>| slot.id())
     }
 
     /// Every entry of the page is owned, and entry `index` is the token for the
     /// word the architecture puts at that index.
     pub open spec fn wf(self) -> bool {
-        &&& self.slots.len() == PageTableEntry::<A>::count_per_page()
+        &&& self.slots.len() == PTEntry::<A>::count_per_page()
         &&& forall|index: int|
             0 <= index < self.slots.len() ==> {
                 &&& (#[trigger] self.slots[index]).ptr()@.addr == slot_addr::<A>(self.base, index)
@@ -55,12 +55,12 @@ impl<A: ArchPagingMeta> PTPageSharedPerm<A> {
 /// A host lock hands this out; holding it is what makes an update the only
 /// writer of those slots.
 pub struct PTPageWritePerm<A: ArchPagingMeta> {
-    pub slots: Seq<WritePerm<PageTableEntry<A>>>,
+    pub slots: Seq<WritePerm<PTEntry<A>>>,
 }
 
 impl<A: ArchPagingMeta> PTPageWritePerm<A> {
     pub open spec fn ids(self) -> Seq<Loc> {
-        self.slots.map_values(|slot: WritePerm<PageTableEntry<A>>| slot.id())
+        self.slots.map_values(|slot: WritePerm<PTEntry<A>>| slot.id())
     }
 }
 

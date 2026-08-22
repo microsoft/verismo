@@ -25,12 +25,12 @@ verus! {
 /// *means* is stated by the spec functions below, in terms of the masks
 /// `ArchPagingMeta` supplies.
 #[repr(transparent)]
-pub struct PageTableEntry<A: ArchPagingMeta> {
+pub struct PTEntry<A: ArchPagingMeta> {
     val: usize,
     dummy: PhantomData<A>,
 }
 
-impl<A: ArchPagingMeta> PageTableEntry<A> {
+impl<A: ArchPagingMeta> PTEntry<A> {
     /// How many entries a table page holds: a table page is one page of the
     /// architecture's smallest size, filled with entries.
     pub open spec fn count_per_page() -> nat {
@@ -43,11 +43,31 @@ impl<A: ArchPagingMeta> PageTableEntry<A> {
     }
 
     #[verifier::when_used_as_spec(view)]
-    pub fn bits(&self) -> (ret: usize)
+    pub fn raw(&self) -> (ret: usize)
         returns
             self.view(),
     {
         self.val
+    }
+
+    /// Whether the entry is the null word, which is what an unused slot holds.
+    pub open spec fn is_clear_spec(&self) -> bool {
+        self.view() == 0
+    }
+
+    #[verifier::when_used_as_spec(is_clear_spec)]
+    pub fn is_clear(&self) -> (ret: bool)
+        returns
+            self.is_clear_spec(),
+    {
+        self.val == 0
+    }
+
+    pub fn clear(&mut self)
+        ensures
+            final(self).is_clear_spec(),
+    {
+        self.val = 0;
     }
 
     /// The entry a raw word denotes. The protocol layer reads and writes slots
@@ -182,6 +202,19 @@ impl<A: ArchPagingMeta> PageTableEntry<A> {
         self.val & A::PTFlags::huge_bit() != 0
     }
 
+    /// Hardware user-accessible bit.
+    pub open spec fn user_spec(&self) -> bool {
+        self.flags_bits_spec() & A::PTFlags::spec_user_bit() != 0
+    }
+
+    #[verifier::when_used_as_spec(user_spec)]
+    pub fn user(&self) -> (ret: bool)
+        returns
+            self.user_spec(),
+    {
+        self.flags().user()
+    }
+
     /// A present, non-huge entry: the shape a walker may follow down to a
     /// child table, once it has established that it is above the leaf level.
     pub open spec fn is_table_spec(&self) -> bool {
@@ -211,7 +244,7 @@ impl<A: ArchPagingMeta> PageTableEntry<A> {
     /// The all-zero entry: not present, and so neither a table nor a leaf.
     pub fn empty() -> (ret: Self)
         ensures
-            ret.view() == 0,
+            ret.is_clear_spec(),
             !ret.present_spec(),
     {
         let ret = Self { val: 0, dummy: PhantomData };
@@ -219,83 +252,52 @@ impl<A: ArchPagingMeta> PageTableEntry<A> {
         ret
     }
 
-    /// A table entry pointing at `child_frame`, a page holding the next
-    /// level down.
-    ///
-    /// `flags` must already carry `PRESENT` and clear `HUGE` -- typically
-    /// `A::PTFlags::parent_flags()` plus any per-mapping bits.
-    pub fn new_table(child_frame: PhysAddr, flags: A::PTFlags) -> (ret: Self)
+    /// An entry holding `addr` with `flags`. Bits of `flags` that fall inside
+    /// the address field are dropped, so the address survives whatever the
+    /// caller passes.
+    pub fn new(addr: PhysAddr, flags: A::PTFlags) -> (ret: Self)
         requires
-            child_frame@ & !A::spec_address_mask() == 0,
-            flags@ & A::PTFlags::spec_present_bit() != 0,
-            flags@ & A::PTFlags::spec_huge_bit() == 0,
+            addr@ & !A::spec_address_mask() == 0,
         ensures
-            ret.paddr_field_spec() == child_frame@,
-            ret.is_table_spec(),
-    {
-        proof {
-            A::lemma_pte_masks_wf();
-        }
-        let addr = child_frame.bits() & A::address_mask();
-        // Flag bits are masked out of the address field before assembly, so
-        // the postconditions below hold regardless of what `flags` happens
-        // to carry outside its architecture-defined bits.
-        let flag_bits = flags.bits() & !A::address_mask();
-        let ret = Self { val: addr | flag_bits, dummy: PhantomData };
-        proof {
-            let am = A::spec_address_mask();
-            let pb = A::PTFlags::spec_present_bit();
-            let hb = A::PTFlags::spec_huge_bit();
-            let cf = child_frame@;
-            let fb = flags@;
-            assert(am & pb == 0 && am & hb == 0);
-            assert(cf & !am == 0);
-            assert(fb & pb != 0 && fb & hb == 0);
-            assert(addr == cf & am);
-            assert(flag_bits == fb & !am);
-            assert((am & pb == 0 && am & hb == 0 && cf & !am == 0 && fb & pb != 0 && fb & hb == 0
-                && addr == cf & am && flag_bits == fb & !am) ==> ((addr | flag_bits) & am == cf && (
-            addr | flag_bits) & pb != 0 && (addr | flag_bits) & hb == 0)) by (bit_vector);
-        }
-        ret
-    }
-
-    /// A leaf entry mapping `frame` with `flags`.
-    pub fn new_leaf(frame: PhysAddr, flags: A::PTFlags) -> (ret: Self)
-        requires
-            frame@ & !A::spec_address_mask() == 0,
-            flags@ & A::PTFlags::spec_present_bit() != 0,
-        ensures
-            ret.paddr_field_spec() == frame@,
-            ret.present_spec(),
+            ret.paddr_field_spec() == addr@,
+            ret.flags_bits_spec() == flags@ & !A::spec_address_mask(),
+            ret.present_spec() == (flags@ & A::PTFlags::spec_present_bit() != 0),
             ret.huge_spec() == (flags@ & A::PTFlags::spec_huge_bit() != 0),
     {
         proof {
             A::lemma_pte_masks_wf();
         }
-        let addr = frame.bits() & A::address_mask();
+        let masked_addr = addr.bits() & A::address_mask();
         let flag_bits = flags.bits() & !A::address_mask();
-        let ret = Self { val: addr | flag_bits, dummy: PhantomData };
+        let ret = Self { val: masked_addr | flag_bits, dummy: PhantomData };
         proof {
             let am = A::spec_address_mask();
             let pb = A::PTFlags::spec_present_bit();
             let hb = A::PTFlags::spec_huge_bit();
-            let fr = frame@;
+            let a = addr@;
             let fb = flags@;
-            assert(am & pb == 0 && am & hb == 0);
-            assert(fr & !am == 0);
-            assert(fb & pb != 0);
-            assert(addr == fr & am);
-            assert(flag_bits == fb & !am);
-            assert((am & pb == 0 && am & hb == 0 && fr & !am == 0 && fb & pb != 0 && addr == fr & am
-                && flag_bits == fb & !am) ==> ((addr | flag_bits) & am == fr && (addr | flag_bits)
-                & pb != 0 && (addr | flag_bits) & hb == fb & hb)) by (bit_vector);
+            assert((am & pb == 0 && am & hb == 0 && a & !am == 0 && masked_addr == a & am
+                && flag_bits == fb & !am) ==> ((masked_addr | flag_bits) & am == a && (masked_addr
+                | flag_bits) & !am == fb & !am && ((masked_addr | flag_bits) & pb != 0) == (fb & pb
+                != 0) && ((masked_addr | flag_bits) & hb != 0) == (fb & hb != 0))) by (bit_vector);
         }
         ret
     }
+
+    pub fn set(&mut self, addr: PhysAddr, flags: A::PTFlags)
+        requires
+            addr@ & !A::spec_address_mask() == 0,
+        ensures
+            final(self).paddr_field_spec() == addr@,
+            final(self).flags_bits_spec() == flags@ & !A::spec_address_mask(),
+            final(self).present_spec() == (flags@ & A::PTFlags::spec_present_bit() != 0),
+            final(self).huge_spec() == (flags@ & A::PTFlags::spec_huge_bit() != 0),
+    {
+        *self = Self::new(addr, flags);
+    }
 }
 
-impl<A: ArchPagingMeta> Clone for PageTableEntry<A> {
+impl<A: ArchPagingMeta> Clone for PTEntry<A> {
     fn clone(&self) -> (ret: Self)
         returns
             *self,
@@ -304,43 +306,43 @@ impl<A: ArchPagingMeta> Clone for PageTableEntry<A> {
     }
 }
 
-impl<A: ArchPagingMeta> Copy for PageTableEntry<A> {
+impl<A: ArchPagingMeta> Copy for PTEntry<A> {
 
+}
+
+/// A slot is read and written as a plain word; these are the two directions of
+/// that, and the protocol layer keys its value type on them. The ghost side of
+/// the correspondence lives in `specs::entry`.
+impl<A: ArchPagingMeta> From<usize> for PTEntry<A> {
+    fn from(val: usize) -> Self {
+        PTEntry::from_bits(val)
+    }
+}
+
+impl<A: ArchPagingMeta> From<PTEntry<A>> for usize {
+    fn from(entry: PTEntry<A>) -> usize {
+        entry.raw()
+    }
 }
 
 /// The PIN invariant a lock-free reader depends on: once a slot is observed
 /// holding a table entry, every later value of that slot is still a table
 /// entry with the *same* child frame. A leaf or empty observation carries no
 /// such promise -- it may already be stale by the time the reader acts on it.
-/// A slot is read and written as a plain word; these are the two directions of
-/// that, and the protocol layer keys its value type on them. The ghost side of
-/// the correspondence lives in `specs::entry`.
-impl<A: ArchPagingMeta> From<usize> for PageTableEntry<A> {
-    fn from(val: usize) -> Self {
-        PageTableEntry::from_bits(val)
-    }
-}
-
-impl<A: ArchPagingMeta> From<PageTableEntry<A>> for usize {
-    fn from(entry: PageTableEntry<A>) -> usize {
-        entry.bits()
-    }
-}
-
-pub open spec fn entry_step<A: ArchPagingMeta>(a: PageTableEntry<A>, b: PageTableEntry<A>) -> bool {
+pub open spec fn entry_step<A: ArchPagingMeta>(a: PTEntry<A>, b: PTEntry<A>) -> bool {
     a.is_table_spec() ==> (b.is_table_spec() && a.paddr_field_spec() == b.paddr_field_spec())
 }
 
-pub proof fn lemma_entry_step_reflexive<A: ArchPagingMeta>(a: PageTableEntry<A>)
+pub proof fn lemma_entry_step_reflexive<A: ArchPagingMeta>(a: PTEntry<A>)
     ensures
         entry_step(a, a),
 {
 }
 
 pub proof fn lemma_entry_step_transitive<A: ArchPagingMeta>(
-    a: PageTableEntry<A>,
-    b: PageTableEntry<A>,
-    c: PageTableEntry<A>,
+    a: PTEntry<A>,
+    b: PTEntry<A>,
+    c: PTEntry<A>,
 )
     requires
         entry_step(a, b),
