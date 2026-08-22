@@ -25,7 +25,6 @@
 use concurrent_rw::RWShared;
 use vstd::prelude::*;
 use vstd::raw_ptr::{IsExposed, PointsTo};
-use vstd::resource::Loc;
 
 use crate::structs::address::{Address, PhysAddr, VirtAddr};
 use crate::structs::arch_contract::{slot_addr, ArchPagingMeta};
@@ -82,27 +81,37 @@ impl<A: ArchPagingMeta> PTPageInit<A> {
 /// writer of those slots, and this trait is the promise that the OS gives them
 /// to one thread at a time.
 ///
-/// `page` and `slot_ids` are what address the lock. A caller cannot ask for the
-/// writers of a page whose lock it did not look up, and cannot present the
-/// writers of one page to the lock of another.
+/// A lock is addressed by the page it guards, and every method names the page's
+/// reader tokens as well. That pairing is the whole obligation: the OS promises
+/// that the writers it hands out for the page mapped at `page()` are the writer
+/// halves of *those* readers, so a thread that walked to a page and then locked
+/// it may write the slots it walked through. The page table cannot establish
+/// that itself -- it is the OS that allocated the frame, split its ownership,
+/// and kept the writers.
 pub trait PageLock: Sized + 'static {
     /// The page this lock guards, as a virtual address.
     spec fn page(&self) -> usize;
 
-    /// The slots whose writer halves this lock holds while it is free.
-    spec fn slot_ids(&self) -> Seq<Loc>;
-
     /// Takes the lock and hands back the writer half of the page's slots.
-    fn lock<A: ArchPagingMeta>(&self) -> (ret: Tracked<PTPageWritePerm<A>>)
+    fn lock<A: ArchPagingMeta>(&self, Tracked(page): Tracked<&PTPageSharedPerm<A>>) -> (ret:
+        Tracked<PTPageWritePerm<A>>)
+        requires
+            page.wf(),
+            page.base == self.page(),
         ensures
-            ret@.ids() =~= self.slot_ids(),
+            ret@.ids() =~= page.ids(),
         opens_invariants none
     ;
 
     /// Returns the writer half and releases the lock.
-    fn unlock<A: ArchPagingMeta>(&self, Tracked(writers): Tracked<PTPageWritePerm<A>>)
+    fn unlock<A: ArchPagingMeta>(
+        &self,
+        Tracked(page): Tracked<&PTPageSharedPerm<A>>,
+        Tracked(writers): Tracked<PTPageWritePerm<A>>,
+    )
         requires
-            writers.ids() =~= self.slot_ids(),
+            page.base == self.page(),
+            writers.ids() =~= page.ids(),
         opens_invariants none
     ;
 
@@ -111,9 +120,14 @@ pub trait PageLock: Sized + 'static {
     /// This is the last step of publishing a page: after it, the page is
     /// reachable by other walkers, and its writers are reachable only through
     /// this lock.
-    fn deposit<A: ArchPagingMeta>(&self, Tracked(writers): Tracked<PTPageWritePerm<A>>)
+    fn deposit<A: ArchPagingMeta>(
+        &self,
+        Tracked(page): Tracked<&PTPageSharedPerm<A>>,
+        Tracked(writers): Tracked<PTPageWritePerm<A>>,
+    )
         requires
-            writers.ids() =~= self.slot_ids(),
+            page.base == self.page(),
+            writers.ids() =~= page.ids(),
         opens_invariants none
     ;
 }
@@ -175,14 +189,13 @@ pub trait PagingHandler: 'static + Sized {
     /// Returning a `&'static` is what makes the inner level of locking
     /// reachable from anywhere in a walk: a thread that has descended to a page
     /// can lock it having been handed nothing but the page's address.
-    fn page_lock<A: ArchPagingMeta>(vaddr: VirtAddr) -> (ret: &'static Self::PageLock)
+    fn page_lock(vaddr: VirtAddr) -> (ret: &'static Self::PageLock)
         ensures
             ret.page() == vaddr@,
-            ret.slot_ids() =~= A::spec_lock_slot_ids(vaddr@),
     ;
 }
 
 /// The reader token of one slot, as the walk layer names it.
-pub type SlotShared<A> = RWShared<PTEntry<A>, PTPageSharedPerm<A>>;
+pub type SlotShared<A> = RWShared<PTEntry<A>, Option<PTPageSharedPerm<A>>>;
 
 } // verus!

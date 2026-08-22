@@ -77,20 +77,16 @@ pub trait ArchPagingGeometry: Sized {
 
     spec fn phys_addr_width() -> nat;
 
-    /// Where the platform maps a physical frame, and which slots the lock for
-    /// a mapped page guards.
+    /// Where the platform maps a physical frame.
     ///
-    /// Both are the OS's business, and the executable side of both is the OS's
-    /// (`PagingHandler`). They are *specified* here because a page's tracked
-    /// tokens have to state them -- a walker that has just computed a child
-    /// page's address must know that the tokens it borrowed describe that page,
-    /// and that the lock it can look up for that address guards their writers.
-    /// Those tokens are indexed by the platform, not by the embedder, and
-    /// making the embedder reachable from this trait instead is a cycle Verus
-    /// rejects.
+    /// The executable translation is the OS's (`PagingHandler::paddr_to_vaddr`),
+    /// and this is what ties the two together. It is specified here because a
+    /// page's tracked tokens have to state it -- a walker that has just
+    /// computed a child page's address must know that the tokens it borrowed
+    /// describe that page -- and those tokens are indexed by the platform, not
+    /// by the embedder. Making the embedder reachable from this trait instead
+    /// is a cycle Verus rejects.
     spec fn spec_paddr_to_vaddr(paddr: usize) -> usize;
-
-    spec fn spec_lock_slot_ids(vaddr: usize) -> Seq<vstd::resource::Loc>;
 
     /// How many entries a table page holds, and how many address bits one
     /// level indexes.

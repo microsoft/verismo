@@ -9,7 +9,7 @@
 //!
 //! How an entry behaves under that protocol -- what its payload is and where a
 //! slot's value may go -- is in `specs::concurrent_entry`.
-use concurrent_rw::{RWShared, WritePerm};
+use concurrent_rw::WritePerm;
 use vstd::prelude::*;
 use vstd::raw_ptr::IsExposed;
 use vstd::resource::Loc;
@@ -17,6 +17,7 @@ use vstd::resource::Loc;
 use crate::structs::arch_contract::{slot_addr, ArchPagingMeta};
 use crate::structs::entry::PTEntry;
 use crate::structs::level::PageLevel;
+use crate::structs::os_contract::SlotShared;
 
 verus! {
 
@@ -28,7 +29,7 @@ verus! {
 /// page that points at it. The level is ghost state rather than a type
 /// parameter, so one walk serves every level.
 pub struct PTPageSharedPerm<A: ArchPagingMeta> {
-    pub slots: Seq<RWShared<PTEntry<A>, PTPageSharedPerm<A>>>,
+    pub slots: Seq<SlotShared<A>>,
     pub provenance: IsExposed,
     pub base: usize,
     pub frame: usize,
@@ -37,21 +38,16 @@ pub struct PTPageSharedPerm<A: ArchPagingMeta> {
 
 impl<A: ArchPagingMeta> PTPageSharedPerm<A> {
     pub open spec fn ids(self) -> Seq<Loc> {
-        self.slots.map_values(|slot: RWShared<PTEntry<A>, PTPageSharedPerm<A>>| slot.id())
+        self.slots.map_values(|slot: SlotShared<A>| slot.id())
     }
 
     /// Every entry of the page is owned, entry `index` is the token for the
     /// word the architecture puts at that index, and the page is where the
-    /// platform maps its frame, guarded by the lock the platform keeps for that
-    /// address.
-    ///
-    /// The last two are what let a walker act on a page it has only just
-    /// reached: it knows the tokens it borrowed describe the page whose address
-    /// it computed, and that locking that address yields the writers of these
-    /// very slots.
+    /// platform maps its frame -- which is what lets a walker that has computed
+    /// a child's address know it has the right page's tokens, and what lets it
+    /// name the page to the OS when it wants that page's lock.
     pub open spec fn wf(self) -> bool {
         &&& self.base == A::spec_paddr_to_vaddr(self.frame)
-        &&& A::spec_lock_slot_ids(self.base) =~= self.ids()
         &&& self.slots.len() == PTEntry::<A>::count_per_page()
         &&& forall|index: int|
             0 <= index < self.slots.len() ==> {

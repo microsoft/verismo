@@ -92,7 +92,7 @@ pub fn descend<A: ArchPagingMeta, H: PagingHandler>(
                 // ticket outlives this frame, which is what lets the child's
                 // readers be borrowed outside any invariant block.
                 slot_ticket = ticket.tracked_unwrap();
-                child_page = slot.borrow_published_payload(&slot_ticket);
+                child_page = slot.borrow_published_payload(&slot_ticket).tracked_borrow();
             }
             proof {
                 lemma_phys_addr_from_bits(entry.page_frame_spec());
