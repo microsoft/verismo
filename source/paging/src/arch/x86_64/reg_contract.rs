@@ -130,7 +130,6 @@ impl<A: ArchPagingGeometry> PagingView<A> {
     /// `CR3`'s low bits the ones `cr3_paging_precondition` reserves.
     pub open spec fn mode_precondition(&self) -> bool {
         &&& A::MinPageSize::SHIFT == 12
-        &&& self.level_precondition()
     }
 
     /// How deep the hardware walks, as the mode bits select it: `PAE` without
@@ -152,10 +151,6 @@ impl<A: ArchPagingGeometry> PagingView<A> {
         } else {
             4nat
         }
-    }
-
-    pub open spec fn level_precondition(&self) -> bool {
-        self.level_count() == A::root_depth() + 1
     }
 
     pub open spec fn inv(&self) -> bool {

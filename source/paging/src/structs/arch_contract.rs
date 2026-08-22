@@ -16,10 +16,6 @@ pub trait ArchPagingGeometry: Sized {
     /// in-page byte offset.
     type MinPageSize: PageSize;
 
-    /// Depth of the root table page, counting up from the leaf: a tree of
-    /// `root_depth() + 1` levels.
-    spec fn root_depth() -> nat;
-
     spec fn phys_addr_width() -> nat;
 
     /// Sanity condition on the geometry, discharged by the host so that callers
@@ -64,7 +60,6 @@ pub open spec fn slot_addr<A: ArchPagingMeta>(base: usize, index: int) -> int {
 pub open spec fn level_geometry_wf<A: ArchPagingMeta>() -> bool {
     &&& pow2(level_index_width::<A>()) == PageTableEntry::<A>::count_per_page()
     &&& 0 < level_index_width::<A>() < 64
-    &&& page_offset_width::<A>() + (A::root_depth() + 1) * level_index_width::<A>() <= 64
 }
 
 /// A host's page-table flags type.

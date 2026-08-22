@@ -48,12 +48,18 @@ impl<A: ArchPagingMeta, H: PagingHost> PageTableHandle<A, H> {
         self.deposit@
     }
 
+    /// How deep the tree under this handle is: the root page's own depth, since
+    /// nothing static fixes it. An operation that also holds the register state
+    /// checks this against `PagingView::level_count`.
+    pub open spec fn root_depth(&self) -> nat {
+        self.page_spec().depth as nat
+    }
+
     /// The tokens describe the root page, and the host receipt names the lock
     /// that guards it.
     pub open spec fn inv(&self) -> bool {
         &&& self.page_spec().wf()
         &&& self.page_spec().base == self.root_spec()@
-        &&& self.page_spec().depth == A::root_depth()
         &&& H::deposit_page(self.deposit_spec()) == self.root_spec()@
         &&& H::deposit_slot_ids(self.deposit_spec()) =~= self.page_spec().ids()
     }
@@ -75,7 +81,6 @@ impl<A: ArchPagingMeta, H: PagingHost> PageTableHandle<A, H> {
         requires
             page.wf(),
             page.base == root@,
-            page.depth == A::root_depth(),
             H::deposit_page(deposit) == root@,
             H::deposit_slot_ids(deposit) =~= page.ids(),
         ensures
