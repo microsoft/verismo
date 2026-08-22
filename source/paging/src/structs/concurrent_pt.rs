@@ -40,9 +40,18 @@ impl<A: ArchPagingMeta> PTPageSharedPerm<A> {
         self.slots.map_values(|slot: RWShared<PTEntry<A>, PTPageSharedPerm<A>>| slot.id())
     }
 
-    /// Every entry of the page is owned, and entry `index` is the token for the
-    /// word the architecture puts at that index.
+    /// Every entry of the page is owned, entry `index` is the token for the
+    /// word the architecture puts at that index, and the page is where the
+    /// platform maps its frame, guarded by the lock the platform keeps for that
+    /// address.
+    ///
+    /// The last two are what let a walker act on a page it has only just
+    /// reached: it knows the tokens it borrowed describe the page whose address
+    /// it computed, and that locking that address yields the writers of these
+    /// very slots.
     pub open spec fn wf(self) -> bool {
+        &&& self.base == A::spec_paddr_to_vaddr(self.frame)
+        &&& A::spec_lock_slot_ids(self.base) =~= self.ids()
         &&& self.slots.len() == PTEntry::<A>::count_per_page()
         &&& forall|index: int|
             0 <= index < self.slots.len() ==> {

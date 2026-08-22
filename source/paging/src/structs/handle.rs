@@ -18,7 +18,7 @@ use crate::structs::address::{Address, VirtAddr};
 use crate::structs::arch_contract::ArchPagingMeta;
 use crate::structs::concurrent_pt::PTPageSharedPerm;
 use crate::structs::level::PageLevel;
-use crate::structs::os_contract::{page_lock_matches, PagingHandler};
+use crate::structs::os_contract::PagingHandler;
 use crate::structs::state::PTInstallState;
 
 verus! {
@@ -67,7 +67,6 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
         &&& self.page_spec().wf()
         &&& self.page_spec().base == self.root_spec()@
         &&& self.install_spec().root_frame() == H::spec_vaddr_to_paddr(self.root_spec()@)
-        &&& page_lock_matches::<A, H>(self.page_spec())
     }
 
     #[verifier::when_used_as_spec(root_spec)]
@@ -88,7 +87,6 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
             page.wf(),
             page.base == root@,
             install.root_frame() == H::spec_vaddr_to_paddr(root@),
-            page_lock_matches::<A, H>(page),
         ensures
             ret.inv(),
             ret.root_spec() == root,

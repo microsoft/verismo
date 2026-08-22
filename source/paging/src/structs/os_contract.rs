@@ -128,21 +128,14 @@ pub trait PagingHandler: 'static + Sized {
     /// [`Self::page_lock`] says which lock belongs to which page.
     type PageLock: PageLock;
 
-    /// The slots the lock for the page at `vaddr` guards. Naming them in spec
-    /// mode is what lets an invariant say that a page's writers are behind the
-    /// lock the OS would hand out for that page's address, without calling the
-    /// exec lookup.
-    spec fn spec_lock_slot_ids(vaddr: usize) -> Seq<Loc>;
-
-    spec fn spec_paddr_to_vaddr(paddr: usize) -> usize;
-
     spec fn spec_vaddr_to_paddr(vaddr: usize) -> usize;
 
     /// Where the OS has mapped a page-table frame. `paddr` is always clean --
     /// callers strip the architecture's confidentiality tags first.
-    fn paddr_to_vaddr(paddr: PhysAddr) -> (ret: VirtAddr)
+    ///
+    fn paddr_to_vaddr<A: ArchPagingMeta>(paddr: PhysAddr) -> (ret: VirtAddr)
         ensures
-            ret@ == Self::spec_paddr_to_vaddr(paddr@),
+            ret@ == A::spec_paddr_to_vaddr(paddr@),
     ;
 
     fn vaddr_to_paddr(vaddr: VirtAddr) -> (ret: PhysAddr)
@@ -163,7 +156,7 @@ pub trait PagingHandler: 'static + Sized {
         ensures
             ret matches Ok((paddr, page)) ==> {
                 &&& page@.wf()
-                &&& page@.base == Self::spec_paddr_to_vaddr(paddr@)
+                &&& page@.base == A::spec_paddr_to_vaddr(paddr@)
             },
     ;
 
@@ -174,7 +167,7 @@ pub trait PagingHandler: 'static + Sized {
         Tracked(page): Tracked<PTPageInit<A>>,
     )
         requires
-            page.base == Self::spec_paddr_to_vaddr(paddr@),
+            page.base == A::spec_paddr_to_vaddr(paddr@),
     ;
 
     /// The lock guarding the table page mapped at `vaddr`.
@@ -182,23 +175,11 @@ pub trait PagingHandler: 'static + Sized {
     /// Returning a `&'static` is what makes the inner level of locking
     /// reachable from anywhere in a walk: a thread that has descended to a page
     /// can lock it having been handed nothing but the page's address.
-    fn page_lock(vaddr: VirtAddr) -> (ret: &'static Self::PageLock)
+    fn page_lock<A: ArchPagingMeta>(vaddr: VirtAddr) -> (ret: &'static Self::PageLock)
         ensures
             ret.page() == vaddr@,
-            ret.slot_ids() =~= Self::spec_lock_slot_ids(vaddr@),
+            ret.slot_ids() =~= A::spec_lock_slot_ids(vaddr@),
     ;
-}
-
-/// A page's reader tokens together with the lock that guards its writers.
-///
-/// Every page a walk reaches satisfies this: the payload escrowed in the entry
-/// that points at the page describes the same page the OS's lock for that
-/// address guards. Without it a walker could reach a page whose writers are
-/// guarded by some other page's lock.
-pub open spec fn page_lock_matches<A: ArchPagingMeta, H: PagingHandler>(
-    page: PTPageSharedPerm<A>,
-) -> bool {
-    H::spec_lock_slot_ids(page.base) =~= page.ids()
 }
 
 /// The reader token of one slot, as the walk layer names it.

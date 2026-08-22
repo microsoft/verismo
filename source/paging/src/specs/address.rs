@@ -4,12 +4,10 @@
 //
 // Author: Ziqiao Zhou <ziqiaozhou@microsoft.com>
 //
-use crate::util::{
-    align_down_integer_ens, align_up_integer_ens, proof_align_down, proof_align_up,
-};
-use crate::specs::external::{exists_into, forall_into};
 use crate::specs::external::SpecVAddrImpl;
-use vstd::raw_ptr::{PtrData, ptr_from_data, ptr_mut_from_data};
+use crate::specs::external::{exists_into, forall_into};
+use crate::util::{align_down_integer_ens, align_up_integer_ens, proof_align_down, proof_align_up};
+use vstd::raw_ptr::{ptr_from_data, ptr_mut_from_data, PtrData};
 use vstd::set_lib::set_int_range;
 use vstd::std_specs::cmp::PartialOrdSpec;
 use vstd::std_specs::convert::{FromSpec, IntoSpec};
@@ -375,6 +373,14 @@ impl vstd::std_specs::convert::FromSpecImpl<InnerAddr> for PhysAddr {
     closed spec fn from_spec(v: InnerAddr) -> Self {
         PhysAddr(v)
     }
+}
+
+/// A physical address is its inner word. Both directions of that are `closed`,
+/// so a caller outside this module needs it stated.
+pub proof fn lemma_phys_addr_from_bits(v: InnerAddr)
+    ensures
+        <PhysAddr as vstd::std_specs::convert::FromSpec<InnerAddr>>::from_spec(v)@ == v,
+{
 }
 
 impl vstd::std_specs::convert::FromSpecImpl<PhysAddr> for InnerAddr {

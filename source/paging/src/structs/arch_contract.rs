@@ -9,6 +9,7 @@ use bitflags_verus::FlagsSpec;
 use builtin_macros::verus_verify;
 
 use crate::structs::entry::PTEntry;
+use crate::structs::level::PageLevel;
 
 /// Executable interface to a page table entry's flag word.
 ///
@@ -76,6 +77,32 @@ pub trait ArchPagingGeometry: Sized {
 
     spec fn phys_addr_width() -> nat;
 
+    /// Where the platform maps a physical frame, and which slots the lock for
+    /// a mapped page guards.
+    ///
+    /// Both are the OS's business, and the executable side of both is the OS's
+    /// (`PagingHandler`). They are *specified* here because a page's tracked
+    /// tokens have to state them -- a walker that has just computed a child
+    /// page's address must know that the tokens it borrowed describe that page,
+    /// and that the lock it can look up for that address guards their writers.
+    /// Those tokens are indexed by the platform, not by the embedder, and
+    /// making the embedder reachable from this trait instead is a cycle Verus
+    /// rejects.
+    spec fn spec_paddr_to_vaddr(paddr: usize) -> usize;
+
+    spec fn spec_lock_slot_ids(vaddr: usize) -> Seq<vstd::resource::Loc>;
+
+    /// How many entries a table page holds, and how many address bits one
+    /// level indexes.
+    ///
+    /// Both are derivable -- from the page size and the entry width, and as the
+    /// base-2 logarithm of the first -- but neither derivation can be evaluated
+    /// at run time, and naming `PTEntry<Self>` here would make this trait
+    /// depend on itself. `level_geometry_wf` ties these to the derived forms.
+    spec fn spec_entries_per_page() -> nat;
+
+    spec fn spec_index_width() -> nat;
+
     /// Sanity condition on the geometry, discharged by the host so that callers
     /// need not carry it as a precondition.
     proof fn lemma_geometry_wf()
@@ -101,6 +128,12 @@ pub open spec fn level_shift<A: ArchPagingMeta>(depth: nat) -> nat {
     (page_offset_width::<A>() + depth * level_index_width::<A>()) as nat
 }
 
+/// Which entry of a level's table page an address selects: the address bits
+/// just above the region that level maps.
+pub open spec fn spec_entry_index<A: ArchPagingMeta>(vaddr: usize, level: PageLevel) -> nat {
+    ((vaddr >> level_shift::<A>(level.spec_depth())) as nat) % PTEntry::<A>::count_per_page()
+}
+
 /// Address of a table page's entry `index`. Stated once here so that no
 /// specification has to spell out the entry stride.
 pub open spec fn slot_addr<A: ArchPagingMeta>(base: usize, index: int) -> int {
@@ -117,7 +150,15 @@ pub open spec fn slot_addr<A: ArchPagingMeta>(base: usize, index: int) -> int {
 /// instantiates and discharges it.
 pub open spec fn level_geometry_wf<A: ArchPagingMeta>() -> bool {
     &&& pow2(level_index_width::<A>()) == PTEntry::<A>::count_per_page()
-    &&& 0 < level_index_width::<A>() < 64
+    &&& 0 < level_index_width::<A>()
+        < 64
+    // The deepest tree the level type can describe still shifts by less than a
+    // word, so every index a walk computes is a legal shift.
+    &&& level_shift::<A>(PageLevel::Level4.spec_depth())
+        < usize::BITS
+    // The values exec code can read agree with the derived ones.
+    &&& A::spec_entries_per_page() == PTEntry::<A>::count_per_page()
+    &&& A::spec_index_width() == level_index_width::<A>()
 }
 
 /// The ghost half of [`GenericPageTableFlags`]: which bit each named flag
@@ -171,6 +212,16 @@ pub trait GenericPageTableFlagsSpec: GenericPageTableFlags {
 
 pub trait ArchPagingMeta: 'static + Copy + ArchPagingGeometry {
     type PTFlags: GenericPageTableFlagsSpec;
+
+    fn entries_per_page() -> (ret: usize)
+        ensures
+            ret == Self::spec_entries_per_page(),
+    ;
+
+    fn index_width() -> (ret: usize)
+        ensures
+            ret == Self::spec_index_width(),
+    ;
 
     /// Spec-level mirror of `private_pte_mask()`.
     spec fn spec_private_mask() -> usize;
