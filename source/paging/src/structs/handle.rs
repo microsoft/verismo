@@ -18,11 +18,13 @@ use core::marker::PhantomData;
 
 use vstd::prelude::*;
 
+use crate::structs::address::lemma_phys_addr_from_bits;
 use crate::structs::address::{Address, PhysAddr, VirtAddr};
 use crate::structs::arch_contract::{level_geometry_wf, ArchPagingMeta, GenericPageTableFlags};
 use crate::structs::concurrent_pt::PTPageSharedPerm;
 use crate::structs::entry::PTEntry;
 use crate::structs::free::free_page_tree;
+use crate::structs::geometry::shift_at;
 use crate::structs::level::PageLevel;
 use crate::structs::map::map_at;
 use crate::structs::os_contract::{PTPageInit, PageLock, PagingError, PagingHandler};
@@ -138,7 +140,12 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
         descend::<A, H>(self.root, self.level, self.borrow_page(), vaddr)
     }
 
-    /// The frame `vaddr` maps to, or why it does not map.
+    /// The physical address `vaddr` maps to, or why it does not map.
+    ///
+    /// The byte, not the frame: the offset within the page is carried over,
+    /// and how wide that offset is depends on the size of the page the walk
+    /// stopped at, which is why the level has to be known before the offset
+    /// can be taken.
     ///
     /// A present entry above the leaf level maps a large page; at the leaf
     /// every present entry maps one. An entry that still points at a table at
@@ -148,9 +155,40 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
         requires
             self.inv(),
     {
+        match self.translate_page(vaddr) {
+            Err(e) => Err(e),
+            Ok((frame, level)) => {
+                let shift = shift_at::<A>(level);
+                assert((1usize << shift) != 0) by (bit_vector)
+                    requires
+                        shift < 64,
+                ;
+                let offset = vaddr.bits() & sub(1usize << shift, 1);
+                let frame_bits = frame.bits();
+                proof {
+                    lemma_phys_addr_from_bits(frame_bits | offset);
+                }
+                Ok(PhysAddr::from(frame_bits | offset))
+            },
+        }
+    }
+
+    /// The frame `vaddr` is mapped to and the size of the page mapping it,
+    /// named by the level the mapping was installed at.
+    ///
+    /// A caller that wants the frame rather than the byte -- to reference-count
+    /// it, or to hand it back to an allocator -- wants this one, and needs the
+    /// level to know how much memory it is talking about.
+    pub fn translate_page(&self, vaddr: VirtAddr) -> (ret: Result<
+        (PhysAddr, PageLevel),
+        PagingError,
+    >)
+        requires
+            self.inv(),
+    {
         let stop = self.query(vaddr);
         if stop.entry.present() && !stop.entry.is_table() {
-            Ok(PhysAddr::from(stop.entry.address()))
+            Ok((PhysAddr::from(stop.entry.address()), stop.level))
         } else {
             Err(PagingError::NotMapped)
         }
