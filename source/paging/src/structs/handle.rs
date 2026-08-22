@@ -22,10 +22,11 @@ use crate::structs::free::free_page_tree;
 use crate::structs::level::PageLevel;
 use crate::structs::map::map_at;
 use crate::structs::os_contract::{PTPageInit, PageLock, PagingError, PagingHandler};
-use crate::structs::range::{range_at, RangeOp};
+use crate::structs::range::{leaf_entry, range_at, RangeOp};
 use crate::structs::state::PTInstallState;
 use crate::structs::tlb::MayNeedFlush;
 use crate::structs::unmap::{update_leaf_at, LeafUpdate};
+use crate::structs::update::set_leaf_slot;
 use crate::structs::walk::{descend, WalkResult};
 
 verus! {
@@ -337,6 +338,38 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
         let writers = lock.lock::<A>(Tracked(page.borrow()));
         let init = free_page_tree::<A, H>(root, level, page, writers);
         (init, install)
+    }
+
+    /// Installs the self-map: a root entry pointing at the root page itself,
+    /// so the tree's own pages are readable at a fixed virtual address.
+    ///
+    /// The entry is deliberately *not* a table pointer as this crate defines
+    /// one. A table entry escrows the tokens of the page it points at, and the
+    /// root's tokens are held by this handle -- an entry escrowing them would
+    /// have to contain itself. What the self-map gives is access to the tables
+    /// as data, which is exactly a leaf mapping of the root frame, and a walk
+    /// stops at it rather than descending.
+    pub fn install_self_map(&self, index: usize, flags: A::PTFlags) -> (ret: Result<
+        (),
+        PagingError,
+    >)
+        requires
+            self.inv(),
+            index < PTEntry::<A>::count_per_page(),
+    {
+        let frame = H::vaddr_to_paddr(self.root);
+        let entry = leaf_entry::<A>(frame.bits() | A::private_pte_mask(), flags);
+        let lock = H::page_lock(self.root);
+        let Tracked(mut writers) = lock.lock::<A>(self.borrow_page());
+        let ret = set_leaf_slot::<A>(
+            self.root,
+            index,
+            self.borrow_page(),
+            Tracked(&mut writers),
+            entry,
+        );
+        lock.unlock::<A>(self.borrow_page(), Tracked(writers));
+        ret
     }
 
     /// The root tokens, as a walk needs them: shared, so several walks may hold

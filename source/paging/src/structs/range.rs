@@ -322,7 +322,7 @@ fn leaf_step<A: ArchPagingMeta>(
 /// Masking rather than requiring an aligned address: the bits dropped are the
 /// ones the hardware would not read anyway, and both tags live inside the
 /// address field, so a tagged address survives.
-fn leaf_entry<A: ArchPagingMeta>(paddr: usize, flags: A::PTFlags) -> (ret: PTEntry<A>)
+pub fn leaf_entry<A: ArchPagingMeta>(paddr: usize, flags: A::PTFlags) -> (ret: PTEntry<A>)
     ensures
         !ret.is_table_spec(),
 {
