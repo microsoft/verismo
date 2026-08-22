@@ -10,6 +10,7 @@ pub mod level;
 pub mod map;
 pub mod os_contract;
 pub mod range;
+pub mod region;
 pub mod sizes;
 pub mod slot;
 pub mod split;

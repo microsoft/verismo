@@ -27,6 +27,7 @@ use crate::structs::level::PageLevel;
 use crate::structs::map::map_at;
 use crate::structs::os_contract::{PTPageInit, PageLock, PagingError, PagingHandler};
 use crate::structs::range::{leaf_entry, range_at, RangeOp};
+use crate::structs::region::map_region;
 use crate::structs::state::PTInstallState;
 use crate::structs::tlb::MayNeedFlush;
 use crate::structs::unmap::{update_leaf_at, LeafUpdate};
@@ -337,6 +338,41 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
             vend,
             target,
             RangeOp::Map { paddr, flags: leaf_flags },
+        )
+    }
+
+    /// Maps `[vstart, vend)` to the physical range at `paddr`, choosing the
+    /// page size rather than being told it.
+    ///
+    /// `big` is the size to prefer and `small` the size to fall back to: the
+    /// middle of the region is mapped with the first wherever it can be, the
+    /// ends with the second. "Wherever it can be" is the condition
+    /// [`map_region`] states -- the virtual and physical addresses have to
+    /// agree on where a big block begins.
+    pub fn map_region(
+        &self,
+        vstart: usize,
+        vend: usize,
+        paddr: usize,
+        flags: A::PTFlags,
+        big: PageLevel,
+        small: PageLevel,
+    ) -> (ret: Result<(), PagingError>)
+        requires
+            self.inv(),
+            vstart <= vend,
+            paddr + (vend - vstart) <= usize::MAX,
+    {
+        map_region::<A, H>(
+            self.root,
+            self.level,
+            self.borrow_page(),
+            vstart,
+            vend,
+            paddr,
+            flags,
+            big,
+            small,
         )
     }
 

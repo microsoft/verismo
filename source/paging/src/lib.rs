@@ -78,6 +78,7 @@ pub use structs::os_contract;
 pub use structs::free;
 pub use structs::map;
 pub use structs::range;
+pub use structs::region;
 pub use structs::split;
 pub use structs::tlb;
 pub use structs::unmap;
