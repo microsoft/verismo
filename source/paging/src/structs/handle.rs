@@ -14,12 +14,13 @@ use core::marker::PhantomData;
 
 use vstd::prelude::*;
 
-use crate::structs::address::{Address, VirtAddr};
-use crate::structs::arch_contract::ArchPagingMeta;
+use crate::structs::address::{Address, PhysAddr, VirtAddr};
+use crate::structs::arch_contract::{level_geometry_wf, ArchPagingMeta};
 use crate::structs::concurrent_pt::PTPageSharedPerm;
 use crate::structs::level::PageLevel;
-use crate::structs::os_contract::PagingHandler;
+use crate::structs::os_contract::{PagingError, PagingHandler};
 use crate::structs::state::PTInstallState;
+use crate::structs::walk::{descend, WalkResult};
 
 verus! {
 
@@ -31,6 +32,7 @@ verus! {
 /// update its slots.
 pub struct PageTableHandle<A: ArchPagingMeta, H: PagingHandler> {
     root: VirtAddr,
+    level: PageLevel,
     page: Tracked<PTPageSharedPerm<A>>,
     install: Tracked<PTInstallState<A>>,
     dummy: PhantomData<(A, H)>,
@@ -52,8 +54,8 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
     /// The level of the root page, and so how deep the tree is. Nothing static
     /// fixes it: an operation that also holds the register state checks it
     /// against `PagingRegisters::level_count`.
-    pub open spec fn root_level(&self) -> PageLevel {
-        self.page_spec().level
+    pub closed spec fn root_level(&self) -> PageLevel {
+        self.level
     }
 
     /// Whether the hardware may be walking this tree.
@@ -64,7 +66,9 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
     /// The tokens describe the root page, and the OS's lock for that address
     /// guards its writers.
     pub open spec fn inv(&self) -> bool {
+        &&& level_geometry_wf::<A>()
         &&& self.page_spec().wf()
+        &&& self.page_spec().level == self.root_level()
         &&& self.page_spec().base == self.root_spec()@
         &&& self.install_spec().root_frame() == H::spec_vaddr_to_paddr(self.root_spec()@)
     }
@@ -80,20 +84,64 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
     /// Adopts a root page whose slots the caller already owns.
     pub fn new(
         root: VirtAddr,
+        level: PageLevel,
         Tracked(page): Tracked<PTPageSharedPerm<A>>,
         Tracked(install): Tracked<PTInstallState<A>>,
     ) -> (ret: Self)
         requires
+            level_geometry_wf::<A>(),
             page.wf(),
             page.base == root@,
+            page.level == level,
             install.root_frame() == H::spec_vaddr_to_paddr(root@),
         ensures
             ret.inv(),
             ret.root_spec() == root,
+            ret.root_level() == level,
             ret.page_spec() == page,
             ret.install_spec() == install,
     {
-        PageTableHandle { root, page: Tracked(page), install: Tracked(install), dummy: PhantomData }
+        PageTableHandle {
+            root,
+            level,
+            page: Tracked(page),
+            install: Tracked(install),
+            dummy: PhantomData,
+        }
+    }
+
+    /// Where `vaddr` currently leads: the entry the hardware walker would stop
+    /// at, and the page holding it.
+    ///
+    /// Takes `&self`, so any number of threads may query at once, and takes no
+    /// lock: what comes back is an observation of the tree, and only what
+    /// `entry_step` preserves stays true of it afterwards.
+    pub fn query(&self, vaddr: VirtAddr) -> (ret: WalkResult<A>)
+        requires
+            self.inv(),
+        ensures
+            ret.level.spec_depth() <= self.root_level().spec_depth(),
+            ret.entry.is_table_spec() ==> ret.level.spec_is_leaf(),
+    {
+        descend::<A, H>(self.root, self.level, self.borrow_page(), vaddr)
+    }
+
+    /// The frame `vaddr` maps to, or why it does not map.
+    ///
+    /// A present entry above the leaf level maps a large page; at the leaf
+    /// every present entry maps one. An entry that still points at a table at
+    /// the leaf level is not a mapping the walk may follow -- there the bit
+    /// that would say "table" is PAT.
+    pub fn translate(&self, vaddr: VirtAddr) -> (ret: Result<PhysAddr, PagingError>)
+        requires
+            self.inv(),
+    {
+        let stop = self.query(vaddr);
+        if stop.entry.present() && !stop.entry.is_table() {
+            Ok(PhysAddr::from(stop.entry.address()))
+        } else {
+            Err(PagingError::NotMapped)
+        }
     }
 
     /// The root tokens, as a walk needs them: shared, so several walks may hold
@@ -108,15 +156,17 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
     /// Gives the root tokens back, dissolving the handle.
     pub fn into_parts(self) -> (ret: (
         VirtAddr,
+        PageLevel,
         Tracked<PTPageSharedPerm<A>>,
         Tracked<PTInstallState<A>>,
     ))
         ensures
             ret.0 == self.root_spec(),
-            ret.1@ == self.page_spec(),
-            ret.2@ == self.install_spec(),
+            ret.1 == self.root_level(),
+            ret.2@ == self.page_spec(),
+            ret.3@ == self.install_spec(),
     {
-        (self.root, self.page, self.install)
+        (self.root, self.level, self.page, self.install)
     }
 }
 
