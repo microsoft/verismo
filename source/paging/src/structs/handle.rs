@@ -435,6 +435,41 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
         }
     }
 
+    /// Clears every mapping in `[vstart, vend)`, whatever page sizes it was
+    /// built out of.
+    ///
+    /// Written at the smallest page size, which is not the same as assuming
+    /// the region is mapped that way: a larger mapping the range covers whole
+    /// is cleared where it stands, and one the range ends inside is split
+    /// first, so only the addresses the caller named stop mapping.
+    pub fn unmap_region(&self, vstart: usize, vend: usize) -> (ret: Result<
+        MayNeedFlush,
+        PagingError,
+    >)
+        requires
+            self.inv(),
+            vstart <= vend,
+    {
+        self.unmap_range(vstart, vend, PageLevel::Level0)
+    }
+
+    /// Replaces the permissions of every mapping in `[vstart, vend)`, whatever
+    /// page sizes it was built out of.
+    ///
+    /// Splits where the range ends inside a larger mapping, for the reason
+    /// [`Self::unmap_region`] gives: the addresses outside the range must keep
+    /// the permissions they had.
+    pub fn protect_region(&self, vstart: usize, vend: usize, flags: A::PTFlags) -> (ret: Result<
+        MayNeedFlush,
+        PagingError,
+    >)
+        requires
+            self.inv(),
+            vstart <= vend,
+    {
+        self.protect_range(vstart, vend, PageLevel::Level0, flags)
+    }
+
     /// Frees every table page of the tree and gives the root's frame back as
     /// plain ownership.
     ///
