@@ -92,11 +92,13 @@ use vstd::invariant::OpenInvariantCredit;
 use vstd::prelude::*;
 #[cfg(verus_only)]
 use vstd::raw_ptr::PointsTo;
+#[cfg(verus_only)]
+use vstd::std_specs::convert::{FromSpec, FromSpecImpl, IntoSpec};
 
 verus! {
 
 /// The guarantees `mrsw_tokens_v2` offers a client that has implemented [`RWModel`].
-pub trait RWContract: RWModel {
+pub trait RWContract: RWModel + From<Self::AtomicType> + Into<Self::AtomicType> {
     /// Trades a `PointsTo` for an initialised location for MRSW access to it.
     ///
     /// Consumes the `PointsTo`, under which a read may never run during a write, and returns a
@@ -114,7 +116,7 @@ pub trait RWContract: RWModel {
     ) -> (tracked ret: (RWShared<Self, Self::Payload>, WritePerm<Self>, Observed<Self>))
         requires
             points_to.is_init(),
-            Self::spec_from_atomic(points_to.value()) === value,
+            points_to.value().into_spec() === value,
             value.wf_payload(payload),
             !value.has_published_payload(),
         ensures
@@ -139,7 +141,7 @@ pub trait RWContract: RWModel {
         ensures
             ret.0.is_init(),
             ret.0.ptr() == r.ptr(),
-            Self::spec_from_atomic(ret.0.value()) == w@,
+            ret.0.value().into_spec() == w@,
             w@.wf_payload(ret.1),
         opens_invariants
             [r.namespace()]

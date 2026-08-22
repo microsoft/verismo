@@ -18,11 +18,47 @@ use vstd::prelude::*;
 use vstd::raw_ptr::IsExposed;
 #[cfg(verus_only)]
 use vstd::raw_ptr::PointsTo;
+#[cfg(verus_only)]
+use vstd::std_specs::convert::{FromSpec, FromSpecImpl, IntoSpec};
 
 verus! {
 
 pub struct PTEntry {
     pub value: usize,
+}
+
+impl From<usize> for PTEntry {
+    fn from(value: usize) -> Self {
+        PTEntry { value }
+    }
+}
+
+impl From<PTEntry> for usize {
+    fn from(entry: PTEntry) -> Self {
+        entry.value
+    }
+}
+
+#[cfg(verus_only)]
+impl FromSpecImpl<usize> for PTEntry {
+    open spec fn obeys_from_spec() -> bool {
+        true
+    }
+
+    open spec fn from_spec(v: usize) -> PTEntry {
+        PTEntry { value: v }
+    }
+}
+
+#[cfg(verus_only)]
+impl FromSpecImpl<PTEntry> for usize {
+    open spec fn obeys_from_spec() -> bool {
+        true
+    }
+
+    open spec fn from_spec(v: PTEntry) -> usize {
+        v.value
+    }
 }
 
 impl PTEntry {
@@ -75,25 +111,6 @@ impl WithPayload for PTEntry {
 
 impl IsValidAtomicType for PTEntry {
     type AtomicType = usize;
-
-    open spec fn spec_to_atomic(self) -> usize {
-        self.value
-    }
-
-    open spec fn spec_from_atomic(atomic: usize) -> PTEntry {
-        PTEntry { value: atomic }
-    }
-
-    proof fn lemma_atomic_roundtrip(self) {
-    }
-
-    fn to_atomic(self) -> usize {
-        self.value
-    }
-
-    fn from_atomic(atomic: usize) -> PTEntry {
-        PTEntry { value: atomic }
-    }
 }
 
 impl RWModel for PTEntry {
@@ -101,6 +118,14 @@ impl RWModel for PTEntry {
     // to another present entry with the same child, so the payload stays valid.
     open spec fn has_published_payload(self) -> bool {
         self.present()
+    }
+
+    proof fn into_from_obeys() where Self: From<Self::AtomicType> + Into<Self::AtomicType> {
+    }
+
+    proof fn into_from_atomic_agree(self) where
+        Self: From<Self::AtomicType> + Into<Self::AtomicType>,
+     {
     }
 
     /// Where a present entry may go: it stays present and keeps pointing at the same child table.
@@ -345,7 +370,7 @@ proof fn example_teardown_with_stale_ticket(
     ensures
         out.0.is_init(),
         out.0.ptr() == r.ptr(),
-        w@ === PTEntry::spec_from_atomic(out.0.value()),
+        w@ === out.0.value().into_spec(),
         w@.wf_payload(out.1),
     opens_invariants [r.namespace()]
 {

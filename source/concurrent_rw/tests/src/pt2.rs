@@ -18,11 +18,47 @@ use vstd::prelude::*;
 use vstd::raw_ptr::IsExposed;
 #[cfg(verus_only)]
 use vstd::raw_ptr::PointsTo;
+#[cfg(verus_only)]
+use vstd::std_specs::convert::{FromSpec, FromSpecImpl, IntoSpec};
 
 verus! {
 
 pub struct PTEntry {
     pub value: usize,
+}
+
+impl From<usize> for PTEntry {
+    fn from(value: usize) -> Self {
+        PTEntry { value }
+    }
+}
+
+impl From<PTEntry> for usize {
+    fn from(entry: PTEntry) -> Self {
+        entry.value
+    }
+}
+
+#[cfg(verus_only)]
+impl FromSpecImpl<usize> for PTEntry {
+    open spec fn obeys_from_spec() -> bool {
+        true
+    }
+
+    open spec fn from_spec(v: usize) -> PTEntry {
+        PTEntry { value: v }
+    }
+}
+
+#[cfg(verus_only)]
+impl FromSpecImpl<PTEntry> for usize {
+    open spec fn obeys_from_spec() -> bool {
+        true
+    }
+
+    open spec fn from_spec(v: PTEntry) -> usize {
+        v.value
+    }
 }
 
 impl PTEntry {
@@ -75,28 +111,18 @@ impl WithPayload for PTEntry {
 
 impl IsValidAtomicType for PTEntry {
     type AtomicType = usize;
-
-    open spec fn spec_to_atomic(self) -> usize {
-        self.value
-    }
-
-    open spec fn spec_from_atomic(atomic: usize) -> PTEntry {
-        PTEntry { value: atomic }
-    }
-
-    proof fn lemma_atomic_roundtrip(self) {
-    }
-
-    fn to_atomic(self) -> usize {
-        self.value
-    }
-
-    fn from_atomic(atomic: usize) -> PTEntry {
-        PTEntry { value: atomic }
-    }
 }
 
 impl RWModel for PTEntry {
+    proof fn into_from_obeys() where Self: From<Self::AtomicType> + Into<Self::AtomicType>
+    {
+    }
+
+    proof fn into_from_atomic_agree(self) where
+        Self: From<Self::AtomicType> + Into<Self::AtomicType>,
+    {
+    }
+
     /// A present entry keeps pointing at the same child table, which pins two things about the
     /// payload that `wf_payload` cannot: the child page's provenance, and each child reader's
     /// `obs_id`, without which an `Observed` taken on a child would be useless in the next
@@ -148,7 +174,7 @@ fn read_entry(
         final(state).value() == old(state).value(),
         old(state).constant().has_observed(out.1@),
         out.1@.snapshot() == final(state).current_snapshot(),
-        final(state).value() === PTEntry::spec_from_atomic(out.0),
+        final(state).value() === out.0.into_spec(),
         out.2@@ == final(state).payload_value().provenance@,
     opens_invariants none
     no_unwind
@@ -463,7 +489,7 @@ fn read_level0(
         r.ptr() == ptr_lvl0,
     ensures
         r.has_observed(out.1@),
-        out.1@.value() === PTEntry::spec_from_atomic(out.0),
+        out.1@.value() === out.0.into_spec(),
         out.2@@ == out.1@.payload().provenance@,
     opens_invariants 
         [r.namespace()],
@@ -500,7 +526,7 @@ fn read_level1(
         ptr_lvl1@.provenance == o1.payload().provenance@,
     ensures
         out.1@.id() == o1.payload().reader[0].obs_id(),
-        out.1@.value() === PTEntry::spec_from_atomic(out.0),
+        out.1@.value() === out.0.into_spec(),
         out.2@@ == out.1@.payload().provenance@,
     opens_invariants 
         [r.namespace(), o1.payload().reader[0].namespace()],
@@ -539,7 +565,7 @@ fn read_level2(
         ptr_lvl2@.provenance == o2.payload().provenance@,
     ensures
         out.1@.id() == o2.payload().reader[0].obs_id(),
-        out.1@.value() === PTEntry::spec_from_atomic(out.0),
+        out.1@.value() === out.0.into_spec(),
         out.2@@ == out.1@.payload().provenance@,
     opens_invariants 
         [r.namespace(), o1.payload().reader[0].namespace(), o2.payload().reader[0].namespace()],
@@ -586,7 +612,7 @@ fn read_level3(
         ptr_lvl3@.provenance == o3.payload().provenance@,
     ensures
         out.1@.id() == o3.payload().reader[0].obs_id(),
-        out.1@.value() === PTEntry::spec_from_atomic(out.0),
+        out.1@.value() === out.0.into_spec(),
         out.2@@ == out.1@.payload().provenance@,
     opens_invariants
         [
@@ -733,7 +759,7 @@ fn read_level_3(
         ptr_lvl3@.provenance == o3.payload().provenance@,
     ensures
         out.1@.id() == o3.payload().reader[0].obs_id(),
-        out.1@.value() === PTEntry::spec_from_atomic(out.0),
+        out.1@.value() === out.0.into_spec(),
         out.2@@ == out.1@.payload().provenance@,
     opens_invariants
         ns,
@@ -749,7 +775,7 @@ fn walk_level2(ptr_lvl0: *mut usize, Tracked(r): Tracked<&RWShared<PTEntry, Extr
         r.ptr() == ptr_lvl0,
 {
     let (entry_lvl0, Tracked(o1), Tracked(prov_lvl0)) = read_level0(ptr_lvl0, Tracked(r));
-    let entry_lvl0: PTEntry = PTEntry::from_atomic(entry_lvl0);
+    let entry_lvl0: PTEntry = entry_lvl0.into();
     if !entry_lvl0.present() {
         return;
     }
@@ -757,7 +783,7 @@ fn walk_level2(ptr_lvl0: *mut usize, Tracked(r): Tracked<&RWShared<PTEntry, Extr
         vstd::raw_ptr::with_exposed_provenance(entry_lvl0.next(), Tracked(prov_lvl0));
     let (entry_lvl1, Tracked(o2), Tracked(prov_lvl1)) =
         read_level1(ptr_lvl1, Tracked(r), Tracked(&o1));
-    let entry_lvl1: PTEntry = PTEntry::from_atomic(entry_lvl1);
+    let entry_lvl1: PTEntry = entry_lvl1.into();
     if !entry_lvl1.present() {
         return;
     }
@@ -775,7 +801,7 @@ fn walk_level3(ptr_lvl0: *mut usize, Tracked(r): Tracked<&RWShared<PTEntry, Extr
         r.ptr() == ptr_lvl0,
 {
     let (entry_lvl0, Tracked(o1), Tracked(prov_lvl0)) = read_level0(ptr_lvl0, Tracked(r));
-    let entry_lvl0: PTEntry = PTEntry::from_atomic(entry_lvl0);
+    let entry_lvl0: PTEntry = entry_lvl0.into();
     if !entry_lvl0.present() {
         return;
     }
@@ -783,7 +809,7 @@ fn walk_level3(ptr_lvl0: *mut usize, Tracked(r): Tracked<&RWShared<PTEntry, Extr
         vstd::raw_ptr::with_exposed_provenance(entry_lvl0.next(), Tracked(prov_lvl0));
     let (entry_lvl1, Tracked(o2), Tracked(prov_lvl1)) =
         read_level1(ptr_lvl1, Tracked(r), Tracked(&o1));
-    let entry_lvl1: PTEntry = PTEntry::from_atomic(entry_lvl1);
+    let entry_lvl1: PTEntry = entry_lvl1.into();
     if !entry_lvl1.present() {
         return;
     }
@@ -791,7 +817,7 @@ fn walk_level3(ptr_lvl0: *mut usize, Tracked(r): Tracked<&RWShared<PTEntry, Extr
         vstd::raw_ptr::with_exposed_provenance(entry_lvl1.next(), Tracked(prov_lvl1));
     let (entry_lvl2, Tracked(o3), Tracked(prov_lvl2)) =
         read_level2(ptr_lvl2, Tracked(r), Tracked(&o1), Tracked(&o2));
-    let entry_lvl2: PTEntry = PTEntry::from_atomic(entry_lvl2);
+    let entry_lvl2: PTEntry = entry_lvl2.into();
     if !entry_lvl2.present() {
         return;
     }
@@ -853,7 +879,7 @@ proof fn example_teardown_unpublished(
     ensures
         out.0.is_init(),
         out.0.ptr() == r.ptr(),
-        w@ === PTEntry::spec_from_atomic(out.0.value()),
+        w@ === out.0.value().into_spec(),
         w@.wf_payload(out.1),
     opens_invariants [r.namespace()]
 {

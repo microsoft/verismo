@@ -18,30 +18,30 @@ use vstd::prelude::*;
 use crate::structs::address::{Address, VirtAddr};
 use crate::structs::arch_contract::ArchPagingMeta;
 use crate::structs::host_contract::PagingHost;
-use crate::structs::level::PagingLevel;
-use crate::structs::table::{ChildOf, TableReaders};
+use crate::structs::table::TablePage;
 
 verus! {
 
-/// A page table rooted at level `L`, owned by the holder of this handle.
+/// A page table rooted at the architecture's top level, owned by the holder of
+/// this handle.
 ///
 /// The root page is adopted, never allocated here: whoever installs a table in
 /// hardware owns its lifetime, and this handle owns only the right to read and
 /// update its slots.
-pub struct PageTableHandle<A: ArchPagingMeta, H: PagingHost, L: PagingLevel + ChildOf<A, H>> {
+pub struct PageTableHandle<A: ArchPagingMeta, H: PagingHost> {
     root: VirtAddr,
-    readers: Tracked<TableReaders<A, H, L>>,
+    page: Tracked<TablePage<A>>,
     deposit: Tracked<H::Deposit>,
-    dummy: PhantomData<(A, H, L)>,
+    dummy: PhantomData<(A, H)>,
 }
 
-impl<A: ArchPagingMeta, H: PagingHost, L: PagingLevel + ChildOf<A, H>> PageTableHandle<A, H, L> {
+impl<A: ArchPagingMeta, H: PagingHost> PageTableHandle<A, H> {
     pub closed spec fn root_spec(&self) -> VirtAddr {
         self.root
     }
 
-    pub closed spec fn readers_spec(&self) -> TableReaders<A, H, L> {
-        self.readers@
+    pub closed spec fn page_spec(&self) -> TablePage<A> {
+        self.page@
     }
 
     pub closed spec fn deposit_spec(&self) -> H::Deposit {
@@ -51,10 +51,11 @@ impl<A: ArchPagingMeta, H: PagingHost, L: PagingLevel + ChildOf<A, H>> PageTable
     /// The tokens describe the root page, and the host receipt names the lock
     /// that guards it.
     pub open spec fn inv(&self) -> bool {
-        &&& self.readers_spec().wf()
-        &&& self.readers_spec().base == self.root_spec()@
+        &&& self.page_spec().wf()
+        &&& self.page_spec().base == self.root_spec()@
+        &&& self.page_spec().depth == A::level_count() - 1
         &&& H::deposit_page(self.deposit_spec()) == self.root_spec()@
-        &&& H::deposit_slot_ids(self.deposit_spec()) == self.readers_spec().ids
+        &&& H::deposit_slot_ids(self.deposit_spec()) =~= self.page_spec().ids()
     }
 
     #[verifier::when_used_as_spec(root_spec)]
@@ -68,35 +69,31 @@ impl<A: ArchPagingMeta, H: PagingHost, L: PagingLevel + ChildOf<A, H>> PageTable
     /// Adopts a root page whose slots the caller already owns.
     pub fn new(
         root: VirtAddr,
-        Tracked(readers): Tracked<TableReaders<A, H, L>>,
+        Tracked(page): Tracked<TablePage<A>>,
         Tracked(deposit): Tracked<H::Deposit>,
     ) -> (ret: Self)
         requires
-            readers.wf(),
-            readers.base == root@,
+            page.wf(),
+            page.base == root@,
+            page.depth == A::level_count() - 1,
             H::deposit_page(deposit) == root@,
-            H::deposit_slot_ids(deposit) == readers.ids,
+            H::deposit_slot_ids(deposit) =~= page.ids(),
         ensures
             ret.inv(),
             ret.root_spec() == root,
-            ret.readers_spec() == readers,
+            ret.page_spec() == page,
             ret.deposit_spec() == deposit,
     {
-        PageTableHandle {
-            root,
-            readers: Tracked(readers),
-            deposit: Tracked(deposit),
-            dummy: PhantomData,
-        }
+        PageTableHandle { root, page: Tracked(page), deposit: Tracked(deposit), dummy: PhantomData }
     }
 
     /// The root tokens, as a walk needs them: shared, so several walks may hold
     /// them at once.
-    pub fn borrow_readers(&self) -> (ret: Tracked<&TableReaders<A, H, L>>)
+    pub fn borrow_page(&self) -> (ret: Tracked<&TablePage<A>>)
         ensures
-            *ret@ == self.readers_spec(),
+            *ret@ == self.page_spec(),
     {
-        Tracked(self.readers.borrow())
+        Tracked(self.page.borrow())
     }
 
     pub fn borrow_deposit(&self) -> (ret: Tracked<&H::Deposit>)
@@ -107,15 +104,13 @@ impl<A: ArchPagingMeta, H: PagingHost, L: PagingLevel + ChildOf<A, H>> PageTable
     }
 
     /// Gives the root tokens back, dissolving the handle.
-    pub fn into_parts(self) -> (ret: (VirtAddr, Tracked<TableReaders<A, H, L>>, Tracked<
-        H::Deposit,
-    >))
+    pub fn into_parts(self) -> (ret: (VirtAddr, Tracked<TablePage<A>>, Tracked<H::Deposit>))
         ensures
             ret.0 == self.root_spec(),
-            ret.1@ == self.readers_spec(),
+            ret.1@ == self.page_spec(),
             ret.2@ == self.deposit_spec(),
     {
-        (self.root, self.readers, self.deposit)
+        (self.root, self.page, self.deposit)
     }
 }
 

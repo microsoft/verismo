@@ -307,6 +307,22 @@ impl<A: ArchPagingMeta> Copy for PageTableEntry<A> {
 /// holding a table entry, every later value of that slot is still a table
 /// entry with the *same* child frame. A leaf or empty observation carries no
 /// such promise -- it may already be stale by the time the reader acts on it.
+/// A slot is read and written as a plain word; these are the two directions of
+/// that, and the protocol layer keys its value type on them. The ghost side of
+/// the correspondence lives in `specs::entry`.
+impl<A: ArchPagingMeta> From<usize> for PageTableEntry<A> {
+    fn from(val: usize) -> Self {
+        PageTableEntry::from_bits(val)
+    }
+}
+
+impl<A: ArchPagingMeta> From<PageTableEntry<A>> for usize {
+    fn from(entry: PageTableEntry<A>) -> usize {
+        entry.bits()
+    }
+}
+
+
 pub open spec fn entry_step<A: ArchPagingMeta>(
     a: PageTableEntry<A>,
     b: PageTableEntry<A>,

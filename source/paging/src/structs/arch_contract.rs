@@ -45,6 +45,20 @@ pub open spec fn level_shift<A: ArchPagingGeometry>(depth: nat) -> nat {
     (page_offset_width::<A>() + depth * A::level_index_width()) as nat
 }
 
+/// Number of entries in one table page.
+pub open spec fn entries_per_table<A: ArchPagingGeometry>() -> nat {
+    vstd::arithmetic::power2::pow2(A::level_index_width())
+}
+
+/// Address of a table page's entry `index`. Stated once here so that no
+/// specification has to spell out the entry stride.
+pub open spec fn slot_addr<A: ArchPagingGeometry>(base: usize, index: int) -> int {
+    base as int + index * ENTRY_BYTES
+}
+
+/// Width of one table entry, in bytes.
+pub spec const ENTRY_BYTES: int = 8;
+
 /// A host's page-table flags type.
 ///
 /// An implementer's raw bits are exposed through the standard Verus `View`

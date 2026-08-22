@@ -23,7 +23,9 @@ verus! {
 // The proofs behind `protocol::contract::RWWithPublishPayloadContract`, the published-payload half.
 // Bounded on `PublishPayload`, so a model that never publishes gets neither the obligations nor
 // the API.
-impl<T: PublishPayload<AtomicType = usize>> crate::protocol::contract::RWWithPublishPayloadContract for T {
+impl<
+    T: PublishPayload<AtomicType = usize> + From<usize> + Into<usize>,
+> crate::protocol::contract::RWWithPublishPayloadContract for T where usize: From<T> {
     fn read_published(
         ptr: *mut Self::AtomicType,
         Tracked(r): Tracked<&RWShared<Self, Self::Payload>>,
@@ -79,7 +81,9 @@ impl<T: PublishPayload<AtomicType = usize>> crate::protocol::contract::RWWithPub
 // The proofs behind `protocol::contract::RWContract`. Each body delegates to the operation that
 // already exists; the trait exists so a reader can find the guarantees in one place, and so that
 // a guarantee stated there but not proved here fails to compile.
-impl<T: RWModel<AtomicType = usize>> crate::protocol::contract::RWContract for T {
+impl<
+    T: RWModel<AtomicType = usize> + From<usize> + Into<usize>,
+> crate::protocol::contract::RWContract for T where usize: From<T> {
     proof fn build_rw(
         value: Self,
         tracked points_to: PointsTo<Self::AtomicType>,
