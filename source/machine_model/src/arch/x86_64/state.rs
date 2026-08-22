@@ -3,7 +3,6 @@ use vstd::prelude::*;
 verus! {
 
 use super::spec::{
-    Cpl,
     Cr0,
     Cr1,
     Cr2,
@@ -37,7 +36,6 @@ pub tracked struct RegisterState {
     pub tracked ss: RustRegisterPointsTo<Ss>,
     pub tracked es: RustRegisterPointsTo<Es>,
     pub tracked gs: RustRegisterPointsTo<Gs>,
-    pub tracked cpl: RustRegisterPointsTo<Cpl>,
     pub tracked cr0: RustRegisterPointsTo<Cr0>,
     pub tracked cr1: RustRegisterPointsTo<Cr1>,
     pub tracked cr2: RustRegisterPointsTo<Cr2>,

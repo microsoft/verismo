@@ -7,7 +7,7 @@ pub mod x86_64;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{
     lemma_same_control_flags_preserves_df, lemma_with_alignment_check_preserves_df, ControlReg,
-    Cpl, Cr0, Cr0Value, Cr1, Cr2, Cr3, Cr3Value, Cr4, Cr4Value, Cs, DescriptorTableValue, Ds,
+    cpl, Cr0, Cr0Value, Cr1, Cr2, Cr3, Cr3Value, Cr4, Cr4Value, Cs, DescriptorTableValue, Ds,
     EferValue, Es, GdtrBaseLimit, Gs, IdtrBaseLimit, Msr, Pkru, Rax, Rflags, RflagsValue, Rsp,
     Ss, Xcr0,
 };

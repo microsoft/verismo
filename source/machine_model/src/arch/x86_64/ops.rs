@@ -4,7 +4,7 @@ use super::flags::{
     Cr3Value, Cr4Value, RflagsValue,
 };
 
-use super::spec::{Cpl, Cr0, Cr3, Cr4, Msr, Rflags};
+use super::spec::{cpl, Cr0, Cr3, Cr4, Cs, Msr, Rflags};
 use crate::register::points_to::{AsmRegisterPointsTo, RustRegisterPointsTo};
 use crate::register::reg_trait::ReadableReg;
 use core::arch::asm;
@@ -31,7 +31,7 @@ macro_rules! control_reg_impl {
             #[verifier(external_body)]
             fn asm_read(
                 &self,
-                Tracked(_cpl): Tracked<&AsmRegisterPointsTo<Cpl>>,
+                Tracked(_cs): Tracked<&AsmRegisterPointsTo<Cs>>,
                 Tracked(_rflags): Tracked<&mut AsmRegisterPointsTo<Rflags>>,
                 Tracked(token): Tracked<&AsmRegisterPointsTo<Self>>,
             ) -> (result: $value) {
@@ -51,7 +51,7 @@ macro_rules! control_reg_impl {
             fn asm_write(
                 &self,
                 value: $value,
-                Tracked(_cpl): Tracked<&AsmRegisterPointsTo<Cpl>>,
+                Tracked(_cs): Tracked<&AsmRegisterPointsTo<Cs>>,
                 Tracked(_rflags): Tracked<&mut AsmRegisterPointsTo<Rflags>>,
                 Tracked(token): Tracked<&mut AsmRegisterPointsTo<Self>>,
             ) {
@@ -71,12 +71,12 @@ macro_rules! control_reg_impl {
             #[inline(always)]
             pub fn read(
                 &self,
-                Tracked(cpl): Tracked<&RustRegisterPointsTo<Cpl>>,
+                Tracked(cs): Tracked<&RustRegisterPointsTo<Cs>>,
                 Tracked(rflags): Tracked<&mut RustRegisterPointsTo<Rflags>>,
                 Tracked(token): Tracked<&RustRegisterPointsTo<$ty>>,
             ) -> (result: $value)
                 requires
-                    cpl.value() == 0,
+                    cpl(cs.value()) == 0,
                 ensures
                     token.value() == result,
                     final(rflags).value().same_control_flags(old(rflags).value()),
@@ -84,19 +84,19 @@ macro_rules! control_reg_impl {
                 proof {
                     use_type_invariant(&*rflags);
                 }
-                self.asm_read(Tracked(&cpl.asm), Tracked(&mut rflags.asm), Tracked(&token.asm))
+                self.asm_read(Tracked(&cs.asm), Tracked(&mut rflags.asm), Tracked(&token.asm))
             }
 
             #[inline(always)]
             pub fn write(
                 &self,
                 value: $value,
-                Tracked(cpl): Tracked<&RustRegisterPointsTo<Cpl>>,
+                Tracked(cs): Tracked<&RustRegisterPointsTo<Cs>>,
                 Tracked(rflags): Tracked<&mut RustRegisterPointsTo<Rflags>>,
                 Tracked(token): Tracked<&mut RustRegisterPointsTo<$ty>>,
             )
                 requires
-                    cpl.value() == 0,
+                    cpl(cs.value()) == 0,
                 ensures
                     final(token).value() == self.stored_value(value),
                     final(rflags).value().same_control_flags(old(rflags).value()),
@@ -106,7 +106,7 @@ macro_rules! control_reg_impl {
                 }
                 self.asm_write(
                     value,
-                    Tracked(&cpl.asm),
+                    Tracked(&cs.asm),
                     Tracked(&mut rflags.asm),
                     Tracked(&mut token.asm),
                 )
@@ -161,17 +161,17 @@ impl Msr {
     /// explicitly to stop a token for one MSR from authorizing access to another.
     ///
     /// Trusted: `RDMSR` returns the value in `edx:eax` and faults with `#GP`
-    /// outside CPL 0 or for an unimplemented register, hence the `Cpl` evidence.
+    /// outside CPL 0 or for an unimplemented register, hence the `Cs` evidence.
     /// It reads no memory and leaves the flags alone.
     #[inline(always)]
     #[verifier(external_body)]
     pub fn asm_read(
         &self,
-        Tracked(cpl): Tracked<&AsmRegisterPointsTo<Cpl>>,
+        Tracked(cs): Tracked<&AsmRegisterPointsTo<Cs>>,
         Tracked(token): Tracked<&AsmRegisterPointsTo<Msr>>,
     ) -> (result: u64)
         requires
-            cpl.value() == 0,
+            cpl(cs.value()) == 0,
             token.reg().register == self.register,
         ensures
             token.value() == result,
@@ -208,11 +208,11 @@ impl Msr {
     pub fn asm_write(
         &self,
         value: u64,
-        Tracked(cpl): Tracked<&AsmRegisterPointsTo<Cpl>>,
+        Tracked(cs): Tracked<&AsmRegisterPointsTo<Cs>>,
         Tracked(token): Tracked<&mut AsmRegisterPointsTo<Msr>>,
     )
         requires
-            cpl.value() == 0,
+            cpl(cs.value()) == 0,
             old(token).reg().register == self.register,
         ensures
             final(token).value() == value,
@@ -238,32 +238,32 @@ impl Msr {
 impl Msr {
     pub fn read(
         &self,
-        Tracked(cpl): Tracked<&RustRegisterPointsTo<Cpl>>,
+        Tracked(cs): Tracked<&RustRegisterPointsTo<Cs>>,
         Tracked(token): Tracked<&RustRegisterPointsTo<Msr>>,
     ) -> (result: u64)
         requires
-            cpl.value() == 0,
+            cpl(cs.value()) == 0,
             token.reg().register == self.register,
         ensures
             token.value() == result,
     {
-        self.asm_read(Tracked(&cpl.asm), Tracked(&token.asm))
+        self.asm_read(Tracked(&cs.asm), Tracked(&token.asm))
     }
 
     pub fn write(
         &self,
         value: u64,
-        Tracked(cpl): Tracked<&RustRegisterPointsTo<Cpl>>,
+        Tracked(cs): Tracked<&RustRegisterPointsTo<Cs>>,
         Tracked(token): Tracked<&mut RustRegisterPointsTo<Msr>>,
     )
         requires
-            cpl.value() == 0,
+            cpl(cs.value()) == 0,
             old(token).reg().register == self.register,
         ensures
             final(token).value() == value,
             final(token).reg() == old(token).reg(),
     {
-        self.asm_write(value, Tracked(&cpl.asm), Tracked(&mut token.asm))
+        self.asm_write(value, Tracked(&cs.asm), Tracked(&mut token.asm))
     }
 }
 
@@ -274,18 +274,18 @@ impl Rflags {
     /// Trusted: `STAC` modifies only AC, which is why `preserves_flags` (covering
     /// the status flags and DF) is sound and why the ensured image differs only in
     /// that bit. It faults with `#UD` unless `CR4.SMAP` is set at CPL 0, hence the
-    /// `Cr4`/`Cpl` evidence.
+    /// `Cr4`/`Cs` evidence.
     #[inline(always)]
     #[verifier(external_body)]
     pub fn asm_stac(
         &self,
         Tracked(cr4): Tracked<&AsmRegisterPointsTo<Cr4>>,
-        Tracked(cpl): Tracked<&AsmRegisterPointsTo<Cpl>>,
+        Tracked(cs): Tracked<&AsmRegisterPointsTo<Cs>>,
         Tracked(token): Tracked<&mut AsmRegisterPointsTo<Rflags>>,
     )
         requires
             cr4.value().contains(Cr4Value::SMAP),
-            cpl.value() == 0,
+            cpl(cs.value()) == 0,
         ensures
             final(token).value() == old(token).value().with_alignment_check(true),
         no_unwind
@@ -303,12 +303,12 @@ impl Rflags {
     pub fn asm_clac(
         &self,
         Tracked(cr4): Tracked<&AsmRegisterPointsTo<Cr4>>,
-        Tracked(cpl): Tracked<&AsmRegisterPointsTo<Cpl>>,
+        Tracked(cs): Tracked<&AsmRegisterPointsTo<Cs>>,
         Tracked(token): Tracked<&mut AsmRegisterPointsTo<Rflags>>,
     )
         requires
             cr4.value().contains(Cr4Value::SMAP),
-            cpl.value() == 0,
+            cpl(cs.value()) == 0,
         ensures
             final(token).value() == old(token).value().with_alignment_check(false),
         no_unwind
@@ -324,37 +324,37 @@ impl Rflags {
     pub fn stac(
         &self,
         Tracked(cr4): Tracked<&RustRegisterPointsTo<Cr4>>,
-        Tracked(cpl): Tracked<&RustRegisterPointsTo<Cpl>>,
+        Tracked(cs): Tracked<&RustRegisterPointsTo<Cs>>,
         Tracked(token): Tracked<&mut RustRegisterPointsTo<Rflags>>,
     )
         requires
             cr4.value().contains(Cr4Value::SMAP),
-            cpl.value() == 0,
+            cpl(cs.value()) == 0,
         ensures
             final(token).value() == old(token).value().with_alignment_check(true),
     {
         proof {
             use_type_invariant(&*token);
         }
-        self.asm_stac(Tracked(&cr4.asm), Tracked(&cpl.asm), Tracked(&mut token.asm));
+        self.asm_stac(Tracked(&cr4.asm), Tracked(&cs.asm), Tracked(&mut token.asm));
     }
 
     pub fn clac(
         &self,
         Tracked(cr4): Tracked<&RustRegisterPointsTo<Cr4>>,
-        Tracked(cpl): Tracked<&RustRegisterPointsTo<Cpl>>,
+        Tracked(cs): Tracked<&RustRegisterPointsTo<Cs>>,
         Tracked(token): Tracked<&mut RustRegisterPointsTo<Rflags>>,
     )
         requires
             cr4.value().contains(Cr4Value::SMAP),
-            cpl.value() == 0,
+            cpl(cs.value()) == 0,
         ensures
             final(token).value() == old(token).value().with_alignment_check(false),
     {
         proof {
             use_type_invariant(&*token);
         }
-        self.asm_clac(Tracked(&cr4.asm), Tracked(&cpl.asm), Tracked(&mut token.asm));
+        self.asm_clac(Tracked(&cr4.asm), Tracked(&cs.asm), Tracked(&mut token.asm));
     }
 }
 

@@ -30,8 +30,6 @@ pub struct Es;
 
 pub struct Gs;
 
-pub struct Cpl;
-
 pub struct Cr0;
 
 pub struct Cr1;
@@ -85,10 +83,6 @@ impl Sealed for Es {
 }
 
 impl Sealed for Gs {
-
-}
-
-impl Sealed for Cpl {
 
 }
 
@@ -159,6 +153,13 @@ impl RegSpec for Rsp {
     }
 }
 
+/// The current privilege level: the low two bits of the `CS` selector.
+///
+/// APM Vol. 2, "Segment Selectors"; SDM Vol. 3A, "Segment Selectors".
+pub open spec fn cpl(cs: u16) -> u16 {
+    cs & 3
+}
+
 impl RegSpec for Cs {
     type Value = u16;
 
@@ -193,14 +194,6 @@ impl RegSpec for Es {
 
 impl RegSpec for Gs {
     type Value = u16;
-
-    open(crate) spec fn rust_abi_wf(value: Self::Value) -> bool {
-        true
-    }
-}
-
-impl RegSpec for Cpl {
-    type Value = u64;
 
     open(crate) spec fn rust_abi_wf(value: Self::Value) -> bool {
         true

@@ -53,11 +53,6 @@ pub open spec fn slot_addr<A: ArchPagingMeta>(base: usize, index: int) -> int {
     base as int + index * vstd::layout::size_of::<PageTableEntry<A>>()
 }
 
-/// Number of paging levels, counting the leaf level that maps `MinPageSize`.
-pub open spec fn level_count<A: ArchPagingGeometry>() -> nat {
-    A::root_depth() + 1
-}
-
 /// Whether the level geometry fits the entry width: a table page's entries are
 /// indexed by a whole number of address bits, and the tree spans no more bits
 /// than an address has.
@@ -69,7 +64,7 @@ pub open spec fn level_count<A: ArchPagingGeometry>() -> nat {
 pub open spec fn level_geometry_wf<A: ArchPagingMeta>() -> bool {
     &&& pow2(level_index_width::<A>()) == PageTableEntry::<A>::count_per_page()
     &&& 0 < level_index_width::<A>() < 64
-    &&& page_offset_width::<A>() + level_count::<A>() * level_index_width::<A>() <= 64
+    &&& page_offset_width::<A>() + (A::root_depth() + 1) * level_index_width::<A>() <= 64
 }
 
 /// A host's page-table flags type.

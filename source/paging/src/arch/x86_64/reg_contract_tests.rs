@@ -6,7 +6,7 @@
 use vstd::prelude::*;
 
 use machine_model::arch::x86_64::state::RegisterState;
-use machine_model::arch::x86_64::{Cr0Value, Cr4, Cr4Value, EferValue};
+use machine_model::arch::x86_64::{cpl, Cr0Value, Cr4, Cr4Value, EferValue};
 
 use super::reg_contract::{cr0_paging_precondition, efer_paging_precondition, paging_inv};
 use crate::structs::arch_contract::ArchPagingGeometry;
@@ -36,14 +36,14 @@ proof fn efer_paging_precondition_holds_for_concrete_value() {
 fn enable_smep<A: ArchPagingGeometry>(Tracked(regs): Tracked<&mut RegisterState>)
     requires
         paging_inv::<A>(old(regs)),
-        old(regs).cpl.value() == 0,
+        cpl(old(regs).cs.value()) == 0,
     ensures
         paging_inv::<A>(final(regs)),
         final(regs).cr4.value().contains(Cr4Value::SMEP),
 {
-    let cr4 = Cr4.read(Tracked(&regs.cpl), Tracked(&mut regs.rflags), Tracked(&regs.cr4));
+    let cr4 = Cr4.read(Tracked(&regs.cs), Tracked(&mut regs.rflags), Tracked(&regs.cr4));
     let new_cr4 = cr4.union(Cr4Value::SMEP);
-    Cr4.write(new_cr4, Tracked(&regs.cpl), Tracked(&mut regs.rflags), Tracked(&mut regs.cr4));
+    Cr4.write(new_cr4, Tracked(&regs.cs), Tracked(&mut regs.rflags), Tracked(&mut regs.cr4));
     proof {
         let old_bits = cr4@;
         let new_bits = new_cr4@;

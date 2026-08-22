@@ -3,11 +3,10 @@
 //! Values are always built with `from_bits_retain`, never `from_bits_truncate`:
 //! control registers carry architectural state outside the named flags (CR3's
 //! page-table base address, for example), which must not be dropped.
-
-#[cfg(verus_only)]
-use bitflags_verus::bitflags_verus as bitflags;
 #[cfg(not(verus_only))]
 use bitflags::bitflags;
+#[cfg(verus_only)]
+use bitflags_verus::bitflags_verus as bitflags;
 
 use vstd::prelude::*;
 
@@ -177,18 +176,18 @@ pub broadcast proof fn lemma_same_control_flags_preserves_df(a: RflagsValue, b: 
         ),
 {
     if a.same_control_flags(b) {
-    let sa = a@;
-    let sb = b@;
-    let mask = RflagsValue::status_flags()@;
-    assert(mask == 0x1u64 | 0x4u64 | 0x10u64 | 0x40u64 | 0x80u64 | 0x800u64);
-    assert(mask == 0x8d5u64) by (bit_vector)
-        requires
-            mask == 0x1u64 | 0x4u64 | 0x10u64 | 0x40u64 | 0x80u64 | 0x800u64,
-    ;
-    assert(a.difference(RflagsValue::status_flags())@ == b.difference(
-        RflagsValue::status_flags(),
-    )@);
-    assert(sa & !0x8d5u64 == sb & !0x8d5u64);
+        let sa = a@;
+        let sb = b@;
+        let mask = RflagsValue::status_flags()@;
+        assert(mask == 0x1u64 | 0x4u64 | 0x10u64 | 0x40u64 | 0x80u64 | 0x800u64);
+        assert(mask == 0x8d5u64) by (bit_vector)
+            requires
+                mask == 0x1u64 | 0x4u64 | 0x10u64 | 0x40u64 | 0x80u64 | 0x800u64,
+        ;
+        assert(a.difference(RflagsValue::status_flags())@ == b.difference(
+            RflagsValue::status_flags(),
+        )@);
+        assert(sa & !0x8d5u64 == sb & !0x8d5u64);
         assert((sa & 0x400u64) == (sb & 0x400u64)) by (bit_vector)
             requires
                 sa & !0x8d5u64 == sb & !0x8d5u64,

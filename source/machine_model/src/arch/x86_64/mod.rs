@@ -10,6 +10,6 @@ pub use flags::{
     Cr3Value, Cr4Value, EferValue, RflagsValue,
 };
 pub use spec::{
-    Cpl, Cr0, Cr1, Cr2, Cr3, Cr4, Cs, DescriptorTableValue, Ds, Es, GdtrBaseLimit, Gs,
+    cpl, Cr0, Cr1, Cr2, Cr3, Cr4, Cs, DescriptorTableValue, Ds, Es, GdtrBaseLimit, Gs,
     IdtrBaseLimit, Msr, Pkru, Rax, Rflags, Rsp, Ss, Xcr0,
 };
