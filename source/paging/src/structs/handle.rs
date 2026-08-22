@@ -24,6 +24,7 @@ use crate::structs::map::map_at;
 use crate::structs::os_contract::{PTPageInit, PageLock, PagingError, PagingHandler};
 use crate::structs::range::{range_at, RangeOp};
 use crate::structs::state::PTInstallState;
+use crate::structs::tlb::MayNeedFlush;
 use crate::structs::unmap::{update_leaf_at, LeafUpdate};
 use crate::structs::walk::{descend, WalkResult};
 
@@ -197,21 +198,25 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
     /// Replaces the permissions of the mapping `vaddr` leads to, keeping the
     /// frame, and returns the entry that was there.
     pub fn protect(&self, vaddr: VirtAddr, flags: A::PTFlags) -> (ret: Result<
-        PTEntry<A>,
+        (PTEntry<A>, MayNeedFlush),
         PagingError,
     >)
         requires
             self.inv(),
+            vaddr@ < usize::MAX,
         ensures
-            ret matches Ok(old) ==> !old.is_table_spec(),
+            ret matches Ok((old, _)) ==> !old.is_table_spec(),
     {
-        update_leaf_at::<A, H>(
+        match update_leaf_at::<A, H>(
             self.root,
             self.level,
             self.borrow_page(),
             vaddr,
             LeafUpdate::SetFlags(flags),
-        )
+        ) {
+            Err(e) => Err(e),
+            Ok(old) => Ok((old, MayNeedFlush::range(vaddr.bits(), vaddr.bits() + 1))),
+        }
     }
 
     /// Maps `[vstart, vend)` to the physical range starting at `paddr`.
@@ -255,14 +260,14 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
     /// not know which parts of a region were mapped. As with [`Self::unmap`],
     /// the TLB is not invalidated here.
     pub fn unmap_range(&self, vstart: usize, vend: usize, target: PageLevel) -> (ret: Result<
-        (),
+        MayNeedFlush,
         PagingError,
     >)
         requires
             self.inv(),
             vstart <= vend,
     {
-        range_at::<A, H>(
+        match range_at::<A, H>(
             self.root,
             self.level,
             self.borrow_page(),
@@ -270,7 +275,10 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
             vend,
             target,
             RangeOp::Unmap,
-        )
+        ) {
+            Err(e) => Err(e),
+            Ok(()) => Ok(MayNeedFlush::range(vstart, vend)),
+        }
     }
 
     /// Replaces the permissions of every mapping in `[vstart, vend)` that was
@@ -281,7 +289,7 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
         vend: usize,
         target: PageLevel,
         flags: A::PTFlags,
-    ) -> (ret: Result<(), PagingError>)
+    ) -> (ret: Result<MayNeedFlush, PagingError>)
         requires
             self.inv(),
             vstart <= vend,
@@ -291,7 +299,7 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
         } else {
             flags.with(A::PTFlags::HUGE)
         };
-        range_at::<A, H>(
+        match range_at::<A, H>(
             self.root,
             self.level,
             self.borrow_page(),
@@ -299,7 +307,10 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
             vend,
             target,
             RangeOp::Protect { flags: leaf_flags },
-        )
+        ) {
+            Err(e) => Err(e),
+            Ok(()) => Ok(MayNeedFlush::range(vstart, vend)),
+        }
     }
 
     /// Frees every table page of the tree and gives the root's frame back as

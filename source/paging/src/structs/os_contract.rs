@@ -206,6 +206,16 @@ pub trait PagingHandler: 'static + Sized {
             page.base == A::spec_paddr_to_vaddr(paddr@),
     ;
 
+    /// Invalidates the cached translations of `[start, end)` on every
+    /// processor that may be walking this table.
+    ///
+    /// Which processors those are, and whether reaching them takes an IPI, is
+    /// the OS's to know; the page table only says which addresses changed. It
+    /// is always correct to flush more than asked.
+    fn flush_range(start: usize, end: usize)
+        opens_invariants none
+    ;
+
     /// The lock guarding the table page mapped at `vaddr`.
     ///
     /// Returning a `&'static` is what makes the inner level of locking

@@ -13,6 +13,7 @@ pub mod range;
 pub mod sizes;
 pub mod slot;
 pub mod state;
+pub mod tlb;
 pub mod unmap;
 pub mod update;
 pub mod walk;
