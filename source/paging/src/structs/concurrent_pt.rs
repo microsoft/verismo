@@ -57,6 +57,29 @@ impl<A: ArchPagingMeta> PTPageSharedPerm<A> {
     }
 }
 
+/// Matching ids is matching slots: the readers and writers of a page line up
+/// entry by entry, which is what lets an update take the writer of the slot it
+/// walked to.
+pub proof fn lemma_ids_match<A: ArchPagingMeta>(
+    writers: PTPageWritePerm<A>,
+    page: PTPageSharedPerm<A>,
+)
+    requires
+        writers.ids() =~= page.ids(),
+    ensures
+        writers.slots.len() == page.slots.len(),
+        forall|index: int|
+            0 <= index < writers.slots.len() ==> (#[trigger] writers.slots[index]).id()
+                == page.slots[index].id(),
+{
+    assert(writers.ids().len() == writers.slots.len());
+    assert(page.ids().len() == page.slots.len());
+    assert forall|index: int| 0 <= index < writers.slots.len() implies (
+    #[trigger] writers.slots[index]).id() == page.slots[index].id() by {
+        assert(writers.ids()[index] == page.ids()[index]);
+    }
+}
+
 /// The writer half of the same page, matched to the reader half entry by entry.
 ///
 /// A host lock hands this out; holding it is what makes an update the only

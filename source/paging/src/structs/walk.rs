@@ -24,6 +24,7 @@ use crate::structs::entry::PTEntry;
 use crate::structs::geometry::entry_index;
 use crate::structs::level::PageLevel;
 use crate::structs::os_contract::PagingHandler;
+use crate::structs::slot::slot_ptr;
 
 verus! {
 
@@ -68,9 +69,7 @@ pub fn descend<A: ArchPagingMeta, H: PagingHandler>(
 {
     let index = entry_index::<A>(vaddr, level);
     let ghost i = index as int;
-    assert(page.slots[i].ptr()@.addr == slot_addr::<A>(page.base, i));
-    let addr = base.bits() + index * core::mem::size_of::<PTEntry<A>>();
-    let ptr: *mut usize = with_exposed_provenance(addr, Tracked(page.provenance));
+    let ptr = slot_ptr::<A>(base, index, Tracked(page));
     let tracked slot = page.slots.tracked_borrow(i);
     let (entry, Tracked(_observed), Tracked(ticket)) = PTEntry::read_published(
         ptr,

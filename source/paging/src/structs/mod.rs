@@ -8,5 +8,7 @@ pub mod handle;
 pub mod level;
 pub mod os_contract;
 pub mod sizes;
+pub mod slot;
 pub mod state;
+pub mod update;
 pub mod walk;

@@ -322,6 +322,77 @@ impl<A: ArchPagingMeta> PTEntry<A> {
         ret
     }
 
+    /// An entry pointing at a table page, which this crate marks as escrowing
+    /// that page's tokens.
+    ///
+    /// Present, not huge and escrowing whatever `flags` says: those three bits
+    /// are what "points at a table" means, so they are not the caller's to
+    /// choose. Everything else in `flags` is kept.
+    pub fn new_table(addr: PhysAddr, flags: A::PTFlags) -> (ret: Self)
+        requires
+            addr@ & !A::spec_address_mask() == 0,
+        ensures
+            ret.is_table_spec(),
+            ret.paddr_field_spec() == addr@,
+    {
+        proof {
+            A::lemma_pte_masks_wf();
+            A::PTFlags::lemma_flag_bits_wf();
+        }
+        let masked_addr = addr.bits() & A::address_mask();
+        let flag_bits = flags.bits() & !A::address_mask() & !A::PTFlags::huge_bit();
+        let val = masked_addr | flag_bits | A::PTFlags::present_bit() | A::PTFlags::escrow_bit();
+        let ret = Self { val, dummy: PhantomData };
+        proof {
+            let am = A::spec_address_mask();
+            let pb = A::PTFlags::spec_present_bit();
+            let hb = A::PTFlags::spec_huge_bit();
+            let eb = A::PTFlags::spec_escrow_bit();
+            let a = addr@;
+            let fb = flags.bits_spec();
+            assert((flag_bits == fb & !am & !hb) ==> (flag_bits & am == 0 && flag_bits & hb == 0))
+                by (bit_vector);
+            assert((am & pb == 0 && am & hb == 0 && am & eb == 0 && pb & hb == 0 && eb & hb == 0
+                && pb != 0 && eb != 0 && a & !am == 0 && masked_addr == a & am && flag_bits & am
+                == 0 && flag_bits & hb == 0 && val == masked_addr | flag_bits | pb | eb) ==> (val
+                & am == a && val & pb != 0 && val & hb == 0 && val & eb != 0)) by (bit_vector);
+        }
+        ret
+    }
+
+    /// An entry mapping a page rather than pointing at a table.
+    ///
+    /// The escrow bit is cleared whatever `flags` says: a leaf escrows no
+    /// tokens, and an entry that claimed to would be followed by a walk.
+    pub fn new_leaf(addr: PhysAddr, flags: A::PTFlags) -> (ret: Self)
+        requires
+            addr@ & !A::spec_address_mask() == 0,
+        ensures
+            !ret.is_table_spec(),
+            ret.paddr_field_spec() == addr@,
+            ret.present_spec() == (flags.bits_spec() & A::PTFlags::spec_present_bit() != 0),
+    {
+        proof {
+            A::lemma_pte_masks_wf();
+            A::PTFlags::lemma_flag_bits_wf();
+        }
+        let masked_addr = addr.bits() & A::address_mask();
+        let flag_bits = flags.bits() & !A::address_mask() & !A::PTFlags::escrow_bit();
+        let val = masked_addr | flag_bits;
+        let ret = Self { val, dummy: PhantomData };
+        proof {
+            let am = A::spec_address_mask();
+            let pb = A::PTFlags::spec_present_bit();
+            let eb = A::PTFlags::spec_escrow_bit();
+            let a = addr@;
+            let fb = flags.bits_spec();
+            assert((am & pb == 0 && am & eb == 0 && eb & pb == 0 && a & !am == 0 && masked_addr == a
+                & am && flag_bits == fb & !am & !eb && val == masked_addr | flag_bits) ==> (val & am
+                == a && val & eb == 0 && (val & pb != 0) == (fb & pb != 0))) by (bit_vector);
+        }
+        ret
+    }
+
     pub fn set(&mut self, addr: PhysAddr, flags: A::PTFlags)
         requires
             addr@ & !A::spec_address_mask() == 0,

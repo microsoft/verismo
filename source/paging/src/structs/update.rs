@@ -1,0 +1,157 @@
+//! Updating one slot of a table page.
+//!
+//! Both operations take the page's writers, which come from the page's lock:
+//! this is the inner of the two levels of exclusion, so two threads updating
+//! different pages never contend. Neither touches the shape of the tree above
+//! the page, which is what the outer level guards.
+//!
+//! Both refuse to overwrite a present entry. A page-table update that silently
+//! replaced a live mapping would leak whatever the old entry pointed at -- for
+//! a table entry, a whole subtree along with the tokens escrowed in it.
+use concurrent_rw::{PayloadTicket, RWContract, WithPayload};
+use vstd::prelude::*;
+
+use crate::structs::address::VirtAddr;
+use crate::structs::arch_contract::ArchPagingMeta;
+use crate::structs::concurrent_pt::{lemma_ids_match, PTPageSharedPerm, PTPageWritePerm};
+use crate::structs::entry::PTEntry;
+use crate::structs::os_contract::PagingError;
+use crate::structs::slot::{slot_ptr, store_slot, store_slot_publishing};
+
+verus! {
+
+/// Writes a mapping into an empty slot.
+///
+/// `entry` must not be a table pointer: an entry that escrows a page has to be
+/// installed with the page's tokens, which is [`link_table_slot`].
+pub fn set_leaf_slot<A: ArchPagingMeta>(
+    base: VirtAddr,
+    index: usize,
+    Tracked(page): Tracked<&PTPageSharedPerm<A>>,
+    Tracked(writers): Tracked<&mut PTPageWritePerm<A>>,
+    entry: PTEntry<A>,
+) -> (ret: Result<(), PagingError>)
+    requires
+        page.wf(),
+        page.base == base@,
+        old(writers).ids() =~= page.ids(),
+        index < PTEntry::<A>::count_per_page(),
+        !entry.is_table_spec(),
+    ensures
+        final(writers).ids() =~= page.ids(),
+{
+    let ghost i = index as int;
+    proof {
+        lemma_ids_match::<A>(*writers, *page);
+    }
+    let ptr = slot_ptr::<A>(base, index, Tracked(page));
+    let tracked reader = page.slots.tracked_borrow(i);
+    let current = read_slot_exact::<A>(ptr, Tracked(reader), Tracked(writers), index);
+    if current.present() {
+        return Err(PagingError::EntryAlreadyPresent);
+    }
+    let ghost before = *writers;
+    let tracked writer = writers.slots.tracked_borrow_mut(i);
+    let Tracked(_observed) = store_slot::<A>(ptr, entry, Tracked(reader), Tracked(writer));
+    proof {
+        lemma_ids_unchanged::<A>(before, *writers, i);
+    }
+    Ok(())
+}
+
+/// Links a page this crate has just built into an empty slot, publishing its
+/// tokens with it.
+///
+/// After this the child is reachable by every walker, and its writers are
+/// reachable only through its lock -- which is why the caller deposits them
+/// there and not here.
+pub fn link_table_slot<A: ArchPagingMeta>(
+    base: VirtAddr,
+    index: usize,
+    Tracked(page): Tracked<&PTPageSharedPerm<A>>,
+    Tracked(writers): Tracked<&mut PTPageWritePerm<A>>,
+    entry: PTEntry<A>,
+    Tracked(child): Tracked<PTPageSharedPerm<A>>,
+) -> (ret: Result<Tracked<PayloadTicket<Option<PTPageSharedPerm<A>>>>, PagingError>)
+    requires
+        page.wf(),
+        page.base == base@,
+        old(writers).ids() =~= page.ids(),
+        index < PTEntry::<A>::count_per_page(),
+        entry.is_table_spec(),
+        child.wf(),
+        child.frame == entry.page_frame_spec(),
+    ensures
+        final(writers).ids() =~= page.ids(),
+        ret matches Ok(ticket) ==> {
+            &&& ticket@.id() == page.slots[index as int].slot_id()
+            &&& ticket@.version() == page.slots[index as int].slot_version()
+            &&& entry.wf_payload(ticket@.payload())
+        },
+{
+    let ghost i = index as int;
+    proof {
+        lemma_ids_match::<A>(*writers, *page);
+    }
+    let ptr = slot_ptr::<A>(base, index, Tracked(page));
+    let tracked reader = page.slots.tracked_borrow(i);
+    let current = read_slot_exact::<A>(ptr, Tracked(reader), Tracked(writers), index);
+    if current.present() {
+        return Err(PagingError::EntryAlreadyPresent);
+    }
+    let ghost before = *writers;
+    let tracked writer = writers.slots.tracked_borrow_mut(i);
+    let (Tracked(_observed), Tracked(ticket)) = store_slot_publishing::<A>(
+        ptr,
+        entry,
+        Tracked(reader),
+        Tracked(writer),
+        Tracked(Some(child)),
+    );
+    proof {
+        lemma_ids_unchanged::<A>(before, *writers, i);
+    }
+    Ok(Tracked(ticket))
+}
+
+/// The value really in the slot, which only the holder of the writer can know.
+///
+/// A walk reads a *reachable* value; here the writers are in hand, so no store
+/// can be in flight and the value is exact. That is what makes the
+/// "already present" check meaningful rather than advisory.
+fn read_slot_exact<A: ArchPagingMeta>(
+    ptr: *mut usize,
+    Tracked(reader): Tracked<&crate::structs::os_contract::SlotShared<A>>,
+    Tracked(writers): Tracked<&PTPageWritePerm<A>>,
+    index: usize,
+) -> (ret: PTEntry<A>)
+    requires
+        reader.ptr() == ptr,
+        index < writers.slots.len(),
+        reader.id() == writers.slots[index as int].id(),
+    ensures
+        ret == writers.slots[index as int]@,
+{
+    let tracked writer = writers.slots.tracked_borrow(index as int);
+    let (value, Tracked(_observed)) = PTEntry::read_exact(ptr, Tracked(reader), Tracked(writer));
+    value
+}
+
+/// A store leaves every writer's identity alone, so the page's writers are
+/// still the writer halves of its readers and may go back to its lock.
+pub proof fn lemma_ids_unchanged<A: ArchPagingMeta>(
+    before: PTPageWritePerm<A>,
+    after: PTPageWritePerm<A>,
+    index: int,
+)
+    requires
+        0 <= index < before.slots.len(),
+        after.slots.len() == before.slots.len(),
+        after.slots =~= before.slots.update(index, after.slots[index]),
+        after.slots[index].id() == before.slots[index].id(),
+    ensures
+        after.ids() =~= before.ids(),
+{
+}
+
+} // verus!
