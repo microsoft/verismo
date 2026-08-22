@@ -92,6 +92,33 @@ pub open spec fn low_bits_mask_u64(n: nat) -> u64 {
 }
 
 // ---------------------------------------------------------------------------
+// Paging depth
+// ---------------------------------------------------------------------------
+/// How many levels of table the hardware walks. The four paging modes are the
+/// only depths x86 defines, so the depth is a closed set rather than a `nat`.
+pub enum PageLevel {
+    /// 32-bit paging.
+    L2,
+    /// PAE paging.
+    L3,
+    /// Long mode without `CR4.LA57`.
+    L4,
+    /// 5-level paging.
+    L5,
+}
+
+impl PageLevel {
+    pub open spec fn count(self) -> nat {
+        match self {
+            PageLevel::L2 => 2nat,
+            PageLevel::L3 => 3nat,
+            PageLevel::L4 => 4nat,
+            PageLevel::L5 => 5nat,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // PagingRegisters
 // ---------------------------------------------------------------------------
 /// The paging-relevant values held by the register state, gathered into one
@@ -107,12 +134,12 @@ pub ghost struct PagingRegisters<A: ArchPagingGeometry> {
 
 pub open spec fn paging_inv<A: ArchPagingGeometry>(registers: &RegisterState) -> bool {
     &&& registers.msrs.dom().contains(MSR_EFER)
-    &&& PagingRegisters::<A>::of(registers).inv()
+    &&& PagingRegisters::<A>::from_registers(registers).inv()
 }
 
 impl<A: ArchPagingGeometry> PagingRegisters<A> {
     /// The paging-relevant values the tracked register tokens hold.
-    pub open spec fn of(registers: &RegisterState) -> PagingRegisters<A> {
+    pub open spec fn from_registers(registers: &RegisterState) -> PagingRegisters<A> {
         PagingRegisters {
             cr0: registers.cr0.value(),
             cr3: registers.cr3.value(),
@@ -130,17 +157,17 @@ impl<A: ArchPagingGeometry> PagingRegisters<A> {
     /// APM Vol. 2, "Legacy-Mode Page Translation", "Long-Mode Page Translation"
     /// and "5-Level Address Translation"; SDM Vol. 3A, "32-Bit Paging", "PAE
     /// Paging" and "4-Level Paging and 5-Level Paging".
-    pub open spec fn level_count(&self) -> nat {
+    pub open spec fn level_count(&self) -> PageLevel {
         if !self.efer.contains(EferValue::LMA) {
             if self.cr4.contains(Cr4Value::PAE) {
-                3nat
+                PageLevel::L3
             } else {
-                2nat
+                PageLevel::L2
             }
         } else if self.cr4.contains(Cr4Value::LA57) {
-            5nat
+            PageLevel::L5
         } else {
-            4nat
+            PageLevel::L4
         }
     }
 
