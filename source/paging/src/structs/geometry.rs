@@ -33,14 +33,26 @@ pub fn shift_at<A: ArchPagingMeta>(level: PageLevel) -> usize {
     requires
         level_geometry_wf::<A>(),
     ensures
+        ret == spec_entry_index::<A>(vaddr, level),
+        ret < PTEntry::<A>::count_per_page(),
+)]
+pub fn entry_index_bits<A: ArchPagingMeta>(vaddr: usize, level: PageLevel) -> usize {
+    let shift = shift_at::<A>(level);
+    let count = A::entries_per_page();
+    proof! { lemma_count_per_page_positive::<A>(); }
+    (vaddr >> shift) % count
+}
+
+#[verus_verify]
+#[verus_spec(ret =>
+    requires
+        level_geometry_wf::<A>(),
+    ensures
         ret == spec_entry_index::<A>(vaddr@, level),
         ret < PTEntry::<A>::count_per_page(),
 )]
 pub fn entry_index<A: ArchPagingMeta>(vaddr: VirtAddr, level: PageLevel) -> usize {
-    let shift = shift_at::<A>(level);
-    let count = A::entries_per_page();
-    proof! { lemma_count_per_page_positive::<A>(); }
-    (vaddr.bits() >> shift) % count
+    entry_index_bits::<A>(vaddr.bits(), level)
 }
 
 verus! {

@@ -21,6 +21,7 @@ use crate::structs::entry::PTEntry;
 use crate::structs::level::PageLevel;
 use crate::structs::map::map_at;
 use crate::structs::os_contract::{PagingError, PagingHandler};
+use crate::structs::range::{range_at, RangeOp};
 use crate::structs::state::PTInstallState;
 use crate::structs::unmap::{update_leaf_at, LeafUpdate};
 use crate::structs::walk::{descend, WalkResult};
@@ -209,6 +210,94 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
             self.borrow_page(),
             vaddr,
             LeafUpdate::SetFlags(flags),
+        )
+    }
+
+    /// Maps `[vstart, vend)` to the physical range starting at `paddr`.
+    ///
+    /// One pass over the tree rather than one walk per page, and one
+    /// acquisition of each leaf page's lock rather than one per entry -- see
+    /// [`range_at`]. Fails, leaving what it has already written in place, on
+    /// the first address that already maps.
+    pub fn map_range(
+        &self,
+        vstart: usize,
+        vend: usize,
+        paddr: usize,
+        target: PageLevel,
+        flags: A::PTFlags,
+    ) -> (ret: Result<(), PagingError>)
+        requires
+            self.inv(),
+            vstart <= vend,
+            paddr + (vend - vstart) <= usize::MAX,
+    {
+        let leaf_flags = if target.is_leaf() {
+            flags
+        } else {
+            flags.with(A::PTFlags::HUGE)
+        };
+        range_at::<A, H>(
+            self.root,
+            self.level,
+            self.borrow_page(),
+            vstart,
+            vend,
+            target,
+            RangeOp::Map { paddr, flags: leaf_flags },
+        )
+    }
+
+    /// Clears every mapping in `[vstart, vend)` that was installed at `target`.
+    ///
+    /// Addresses in the range that do not map are left alone, so a caller need
+    /// not know which parts of a region were mapped. As with [`Self::unmap`],
+    /// the TLB is not invalidated here.
+    pub fn unmap_range(&self, vstart: usize, vend: usize, target: PageLevel) -> (ret: Result<
+        (),
+        PagingError,
+    >)
+        requires
+            self.inv(),
+            vstart <= vend,
+    {
+        range_at::<A, H>(
+            self.root,
+            self.level,
+            self.borrow_page(),
+            vstart,
+            vend,
+            target,
+            RangeOp::Unmap,
+        )
+    }
+
+    /// Replaces the permissions of every mapping in `[vstart, vend)` that was
+    /// installed at `target`, keeping the frames.
+    pub fn protect_range(
+        &self,
+        vstart: usize,
+        vend: usize,
+        target: PageLevel,
+        flags: A::PTFlags,
+    ) -> (ret: Result<(), PagingError>)
+        requires
+            self.inv(),
+            vstart <= vend,
+    {
+        let leaf_flags = if target.is_leaf() {
+            flags
+        } else {
+            flags.with(A::PTFlags::HUGE)
+        };
+        range_at::<A, H>(
+            self.root,
+            self.level,
+            self.borrow_page(),
+            vstart,
+            vend,
+            target,
+            RangeOp::Protect { flags: leaf_flags },
         )
     }
 

@@ -12,14 +12,12 @@
 //! publishes the page's readers along with the entry, which is what lets the
 //! very next step of this recursion -- and every later walk -- borrow them out
 //! of the slot instead of being handed them.
-use concurrent_rw::RWWithPublishPayloadContract;
+use concurrent_rw::{PayloadTicket, RWWithPublishPayloadContract};
 use vstd::prelude::*;
 
 use crate::structs::address::lemma_phys_addr_from_bits;
 use crate::structs::address::{Address, PhysAddr, VirtAddr};
-use crate::structs::arch_contract::{
-    level_geometry_wf, spec_entry_index, ArchPagingMeta, GenericPageTableFlags,
-};
+use crate::structs::arch_contract::{level_geometry_wf, ArchPagingMeta, GenericPageTableFlags};
 use crate::structs::concurrent_pt::PTPageSharedPerm;
 use crate::structs::entry::PTEntry;
 use crate::structs::geometry::entry_index;
@@ -110,7 +108,6 @@ fn grow_and_map<A: ArchPagingMeta, H: PagingHandler>(
         page.wf(),
         page.base == base@,
         index < PTEntry::<A>::count_per_page(),
-        index == spec_entry_index::<A>(vaddr@, level),
         level.spec_child() is Some,
         !entry.is_table_spec(),
     decreases level.spec_depth(), 0nat,
@@ -121,6 +118,51 @@ fn grow_and_map<A: ArchPagingMeta, H: PagingHandler>(
         },
         Some(child_level) => child_level,
     };
+    let (child_base, ticket) = match create_and_link_child::<A, H>(
+        base,
+        index,
+        Tracked(page),
+        child_level,
+    ) {
+        Err(e) => {
+            return Err(e);
+        },
+        Ok(linked) => linked,
+    };
+    let tracked slot = page.slots.tracked_borrow(index as int);
+    let tracked child_page = slot.borrow_published_payload(ticket.borrow()).tracked_borrow();
+    map_at::<A, H>(child_base, child_level, Tracked(child_page), vaddr, target, entry)
+}
+
+/// Allocates a table page, publishes it, and links it into the empty slot
+/// `index`.
+///
+/// The ticket that comes back names the child's reader tokens, so the caller
+/// borrows them out of the slot rather than being handed them: the same route
+/// every later walk takes, and the only one that stays valid once other threads
+/// can see the entry.
+///
+/// The writers go into the child's own lock before the link, because after the
+/// link the page is reachable and whoever wants to write it will look there.
+pub fn create_and_link_child<A: ArchPagingMeta, H: PagingHandler>(
+    base: VirtAddr,
+    index: usize,
+    Tracked(page): Tracked<&PTPageSharedPerm<A>>,
+    child_level: PageLevel,
+) -> (ret: Result<(VirtAddr, Tracked<PayloadTicket<Option<PTPageSharedPerm<A>>>>), PagingError>)
+    requires
+        page.wf(),
+        page.base == base@,
+        index < PTEntry::<A>::count_per_page(),
+    ensures
+        ret matches Ok((child_base, ticket)) ==> {
+            &&& ticket@.id() == page.slots[index as int].slot_id()
+            &&& ticket@.version() == page.slots[index as int].slot_version()
+            &&& ticket@.payload() is Some
+            &&& ticket@.payload()->Some_0.wf()
+            &&& ticket@.payload()->Some_0.base == child_base@
+        },
+{
     let (paddr, Tracked(init)) = match H::allocate_table_page::<A>() {
         Err(e) => {
             return Err(e);
@@ -163,13 +205,7 @@ fn grow_and_map<A: ArchPagingMeta, H: PagingHandler>(
     lock.unlock::<A>(Tracked(page), Tracked(writers));
     match linked {
         Err(e) => Err(e),
-        Ok(ticket) => {
-            let tracked slot = page.slots.tracked_borrow(index as int);
-            let tracked linked_page = slot.borrow_published_payload(
-                ticket.borrow(),
-            ).tracked_borrow();
-            map_at::<A, H>(child_base, child_level, Tracked(linked_page), vaddr, target, entry)
-        },
+        Ok(ticket) => Ok((child_base, ticket)),
     }
 }
 
