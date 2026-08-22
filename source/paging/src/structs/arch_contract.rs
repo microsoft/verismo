@@ -56,6 +56,22 @@ pub trait GenericPageTableFlags:
         Self::from_bits_retain(self.bits() | other.bits())
     }
 
+    /// `self` with every flag of `other` cleared.
+    ///
+    /// The counterpart of [`Self::with`], and written the same way and for the
+    /// same reason. Splitting a large mapping needs it: the pieces inherit the
+    /// permissions of the entry they came from, but not its size bit.
+    #[verus_spec(ret =>
+        ensures
+            Self::obeys_bitflags_spec() ==> ret.bits_spec() == self.bits_spec() & !other.bits_spec(),
+    )]
+    fn without(self, other: Self) -> Self {
+        proof! {
+            broadcast use bitflags_verus::traits::axiom_from_bits_retain;
+        }
+        Self::from_bits_retain(self.bits() & !other.bits())
+    }
+
     #[verus_spec(ret =>
         ensures
             Self::obeys_bitflags_spec() ==> ret == self.contains_spec(Self::HUGE),

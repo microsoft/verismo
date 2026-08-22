@@ -155,12 +155,73 @@ pub fn replace_leaf_slot<A: ArchPagingMeta>(
     Ok(current)
 }
 
+/// Replaces a live mapping with a pointer at the table that reproduces it,
+/// publishing that table's tokens with the entry.
+///
+/// This is the one update that overwrites a *present* entry, and it is sound
+/// only because the caller has already built the child to cover exactly what
+/// the old entry covered: the translation of every address in it is unchanged,
+/// so no thread can observe the moment of the swap. What comes back is the
+/// entry that was replaced, which the caller needs in order to know what it
+/// promised to reproduce.
+pub fn split_leaf_slot<A: ArchPagingMeta>(
+    base: VirtAddr,
+    index: usize,
+    Tracked(page): Tracked<&PTPageSharedPerm<A>>,
+    Tracked(writers): Tracked<&mut PTPageWritePerm<A>>,
+    entry: PTEntry<A>,
+    Tracked(child): Tracked<PTPageSharedPerm<A>>,
+) -> (ret: Result<Tracked<PayloadTicket<Option<PTPageSharedPerm<A>>>>, PagingError>)
+    requires
+        page.wf(),
+        page.base == base@,
+        old(writers).ids() =~= page.ids(),
+        index < PTEntry::<A>::count_per_page(),
+        entry.is_table_spec(),
+        child.wf(),
+        child.frame == entry.page_frame_spec(),
+    ensures
+        final(writers).ids() =~= page.ids(),
+        ret matches Ok(ticket) ==> {
+            &&& ticket@.id() == page.slots[index as int].slot_id()
+            &&& ticket@.version() == page.slots[index as int].slot_version()
+            &&& entry.wf_payload(ticket@.payload())
+        },
+{
+    let ghost i = index as int;
+    proof {
+        lemma_ids_match::<A>(*writers, *page);
+    }
+    let ptr = slot_ptr::<A>(base, index, Tracked(page));
+    let tracked reader = page.slots.tracked_borrow(i);
+    let current = read_slot_exact::<A>(ptr, Tracked(reader), Tracked(writers), index);
+    if current.is_table() {
+        return Err(PagingError::NotLeafEntry);
+    }
+    if !current.present() {
+        return Err(PagingError::NotMapped);
+    }
+    let ghost before = *writers;
+    let tracked writer = writers.slots.tracked_borrow_mut(i);
+    let (Tracked(_observed), Tracked(ticket)) = store_slot_publishing::<A>(
+        ptr,
+        entry,
+        Tracked(reader),
+        Tracked(writer),
+        Tracked(Some(child)),
+    );
+    proof {
+        lemma_ids_unchanged::<A>(before, *writers, i);
+    }
+    Ok(Tracked(ticket))
+}
+
 /// The value really in the slot, which only the holder of the writer can know.
 ///
 /// A walk reads a *reachable* value; here the writers are in hand, so no store
 /// can be in flight and the value is exact. That is what makes the
 /// "already present" check meaningful rather than advisory.
-fn read_slot_exact<A: ArchPagingMeta>(
+pub fn read_slot_exact<A: ArchPagingMeta>(
     ptr: *mut usize,
     Tracked(reader): Tracked<&crate::structs::os_contract::SlotShared<A>>,
     Tracked(writers): Tracked<&PTPageWritePerm<A>>,

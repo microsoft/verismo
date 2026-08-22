@@ -12,6 +12,7 @@ pub mod os_contract;
 pub mod range;
 pub mod sizes;
 pub mod slot;
+pub mod split;
 pub mod state;
 pub mod tlb;
 pub mod unmap;

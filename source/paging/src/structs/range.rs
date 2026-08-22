@@ -10,6 +10,11 @@
 //! The range is cut at the boundaries of what each entry covers, so a recursive
 //! call always gets a range that lies inside the page it is given -- which is
 //! what makes the loop at the bottom a loop over that page's own slots.
+//!
+//! A range whose ends fall inside a larger mapping is handled by splitting it
+//! (`structs::split`), but only when it really has to be: an entry the range
+//! covers whole is changed where it stands, so unmapping a region built out of
+//! huge pages does not take the tree apart and put it back together.
 use concurrent_rw::{RWContract, RWWithPublishPayloadContract};
 use vstd::prelude::*;
 
@@ -23,6 +28,7 @@ use crate::structs::level::PageLevel;
 use crate::structs::map::create_and_link_child;
 use crate::structs::os_contract::{PageLock, PagingError, PagingHandler};
 use crate::structs::slot::slot_ptr;
+use crate::structs::split::split_huge_at;
 use crate::structs::update::{replace_leaf_slot, set_leaf_slot};
 
 verus! {
@@ -174,9 +180,52 @@ fn range_step<A: ArchPagingMeta, H: PagingHandler>(
         );
     }
     if current.present() {
-        // A mapping larger than the target sits across this part of the range.
-        // Splitting it is a policy decision that belongs to the caller.
-        return Err(PagingError::EntryAlreadyPresent);
+        if op.creates() {
+            // A mapping larger than the target already covers part of what the
+            // caller asked to map; replacing it silently would strand it.
+            return Err(PagingError::EntryAlreadyPresent);
+        }
+        let shift = shift_at::<A>(level);
+        assert((1usize << shift) != 0) by (bit_vector)
+            requires
+                shift < 64,
+        ;
+        let mask = sub(1usize << shift, 1);
+        if cur & mask == 0 && cur < next && sub(next, 1) == cur | mask {
+            // The range covers this entry whole, so it can be changed where it
+            // is -- no need to break it into pieces only to change all of them.
+            let lock = H::page_lock(base);
+            let Tracked(mut writers) = lock.lock::<A>(Tracked(page));
+            let ret = leaf_step::<A>(base, index, Tracked(page), Tracked(&mut writers), 0, op);
+            lock.unlock::<A>(Tracked(page), Tracked(writers));
+            return ret;
+        }
+        // Only part of what this entry maps is in the range, so it has to
+        // become a table before the parts can be told apart.
+
+        let (child_base, child_ticket) = match split_huge_at::<A, H>(
+            base,
+            index,
+            Tracked(page),
+            child_level,
+        ) {
+            Err(e) => {
+                return Err(e);
+            },
+            Ok(split) => split,
+        };
+        let tracked child_page = slot.borrow_published_payload(
+            child_ticket.borrow(),
+        ).tracked_borrow();
+        return range_at::<A, H>(
+            child_base,
+            child_level,
+            Tracked(child_page),
+            cur,
+            next,
+            target,
+            op,
+        );
     }
     if !op.creates() {
         // Nothing is mapped here, and this operation only changes what is.

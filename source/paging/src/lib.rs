@@ -6,7 +6,8 @@
 //! [`handle::PageTableHandle`] owns a tree and offers the operations an OS
 //! needs: `query` and `translate` walk it, `map`, `unmap` and `protect` change
 //! one address, `map_range`, `unmap_range` and `protect_range` change a whole
-//! range in one pass, `install_self_map` makes the tables visible to
+//! range in one pass -- splitting a larger mapping when, and only when, the
+//! range ends inside one -- `install_self_map` makes the tables visible to
 //! themselves, and `free` takes the tree apart.
 //!
 //! # Two levels of exclusion
@@ -77,6 +78,7 @@ pub use structs::os_contract;
 pub use structs::free;
 pub use structs::map;
 pub use structs::range;
+pub use structs::split;
 pub use structs::tlb;
 pub use structs::unmap;
 pub use structs::walk;
