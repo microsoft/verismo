@@ -18,7 +18,7 @@ use vstd::prelude::*;
 use crate::structs::address::{Address, VirtAddr};
 use crate::structs::arch_contract::ArchPagingMeta;
 use crate::structs::host_contract::PagingHost;
-use crate::structs::table::TablePage;
+use crate::structs::concurrent_pt::PTPageSharedPerm;
 
 verus! {
 
@@ -30,7 +30,7 @@ verus! {
 /// update its slots.
 pub struct PageTableHandle<A: ArchPagingMeta, H: PagingHost> {
     root: VirtAddr,
-    page: Tracked<TablePage<A>>,
+    page: Tracked<PTPageSharedPerm<A>>,
     deposit: Tracked<H::Deposit>,
     dummy: PhantomData<(A, H)>,
 }
@@ -40,7 +40,7 @@ impl<A: ArchPagingMeta, H: PagingHost> PageTableHandle<A, H> {
         self.root
     }
 
-    pub closed spec fn page_spec(&self) -> TablePage<A> {
+    pub closed spec fn page_spec(&self) -> PTPageSharedPerm<A> {
         self.page@
     }
 
@@ -69,7 +69,7 @@ impl<A: ArchPagingMeta, H: PagingHost> PageTableHandle<A, H> {
     /// Adopts a root page whose slots the caller already owns.
     pub fn new(
         root: VirtAddr,
-        Tracked(page): Tracked<TablePage<A>>,
+        Tracked(page): Tracked<PTPageSharedPerm<A>>,
         Tracked(deposit): Tracked<H::Deposit>,
     ) -> (ret: Self)
         requires
@@ -89,7 +89,7 @@ impl<A: ArchPagingMeta, H: PagingHost> PageTableHandle<A, H> {
 
     /// The root tokens, as a walk needs them: shared, so several walks may hold
     /// them at once.
-    pub fn borrow_page(&self) -> (ret: Tracked<&TablePage<A>>)
+    pub fn borrow_page(&self) -> (ret: Tracked<&PTPageSharedPerm<A>>)
         ensures
             *ret@ == self.page_spec(),
     {
@@ -104,7 +104,7 @@ impl<A: ArchPagingMeta, H: PagingHost> PageTableHandle<A, H> {
     }
 
     /// Gives the root tokens back, dissolving the handle.
-    pub fn into_parts(self) -> (ret: (VirtAddr, Tracked<TablePage<A>>, Tracked<H::Deposit>))
+    pub fn into_parts(self) -> (ret: (VirtAddr, Tracked<PTPageSharedPerm<A>>, Tracked<H::Deposit>))
         ensures
             ret.0 == self.root_spec(),
             ret.1@ == self.page_spec(),

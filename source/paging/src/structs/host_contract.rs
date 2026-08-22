@@ -16,7 +16,7 @@ use vstd::resource::Loc;
 
 use crate::structs::address::{Address, PhysAddr, VirtAddr};
 use crate::structs::arch_contract::ArchPagingMeta;
-use crate::structs::table::TableWriters;
+use crate::structs::concurrent_pt::PTPageWritePerm;
 
 verus! {
 
@@ -47,7 +47,7 @@ pub trait PagingHost: 'static + Sized {
         &self,
         base: VirtAddr,
         Tracked(deposit): Tracked<&Self::Deposit>,
-    ) -> (ret: Tracked<TableWriters<A>>)
+    ) -> (ret: Tracked<PTPageWritePerm<A>>)
         requires
             Self::deposit_page(*deposit) == base@,
         ensures
@@ -59,7 +59,7 @@ pub trait PagingHost: 'static + Sized {
     fn unlock_page<A: ArchPagingMeta>(
         &self,
         base: VirtAddr,
-        Tracked(writers): Tracked<TableWriters<A>>,
+        Tracked(writers): Tracked<PTPageWritePerm<A>>,
         Tracked(deposit): Tracked<&Self::Deposit>,
     )
         requires
@@ -75,7 +75,7 @@ pub trait PagingHost: 'static + Sized {
     fn deposit_writers<A: ArchPagingMeta>(
         &self,
         base: VirtAddr,
-        Tracked(writers): Tracked<TableWriters<A>>,
+        Tracked(writers): Tracked<PTPageWritePerm<A>>,
     ) -> (ret: Tracked<Self::Deposit>)
         ensures
             Self::deposit_page(ret@) == base@,

@@ -25,17 +25,17 @@ verus! {
 /// This is also a slot's payload, which is what makes it self-referential: the
 /// tokens of a page at depth `d` are escrowed in the entry at depth `d + 1`
 /// that points at it.
-pub struct TablePage<A: ArchPagingMeta> {
-    pub slots: Seq<RWShared<PageTableEntry<A>, TablePage<A>>>,
+pub struct PTPageSharedPerm<A: ArchPagingMeta> {
+    pub slots: Seq<RWShared<PageTableEntry<A>, PTPageSharedPerm<A>>>,
     pub provenance: IsExposed,
     pub base: usize,
     pub frame: usize,
     pub depth: usize,
 }
 
-impl<A: ArchPagingMeta> TablePage<A> {
+impl<A: ArchPagingMeta> PTPageSharedPerm<A> {
     pub open spec fn ids(self) -> Seq<Loc> {
-        self.slots.map_values(|slot: RWShared<PageTableEntry<A>, TablePage<A>>| slot.id())
+        self.slots.map_values(|slot: RWShared<PageTableEntry<A>, PTPageSharedPerm<A>>| slot.id())
     }
 
     /// Every entry of the page is owned, and entry `index` is the token for the
@@ -54,11 +54,11 @@ impl<A: ArchPagingMeta> TablePage<A> {
 ///
 /// A host lock hands this out; holding it is what makes an update the only
 /// writer of those slots.
-pub struct TableWriters<A: ArchPagingMeta> {
+pub struct PTPageWritePerm<A: ArchPagingMeta> {
     pub slots: Seq<WritePerm<PageTableEntry<A>>>,
 }
 
-impl<A: ArchPagingMeta> TableWriters<A> {
+impl<A: ArchPagingMeta> PTPageWritePerm<A> {
     pub open spec fn ids(self) -> Seq<Loc> {
         self.slots.map_values(|slot: WritePerm<PageTableEntry<A>>| slot.id())
     }

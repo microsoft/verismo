@@ -18,7 +18,7 @@ pub use structs::address;
 pub use structs::entry;
 pub use structs::handle;
 pub use structs::host_contract;
-pub use structs::table;
+pub use structs::concurrent_pt;
 pub use structs::level;
 pub use structs::sizes;
 pub use structs::arch_contract::{

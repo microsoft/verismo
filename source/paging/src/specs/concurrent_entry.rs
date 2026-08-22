@@ -12,12 +12,12 @@ use vstd::prelude::*;
 use crate::specs::entry::{lemma_entry_from_usize, lemma_usize_from_entry};
 use crate::structs::arch_contract::ArchPagingMeta;
 use crate::structs::entry::{entry_step, PageTableEntry};
-use crate::structs::table::TablePage;
+use crate::structs::concurrent_pt::PTPageSharedPerm;
 
 verus! {
 
 impl<A: ArchPagingMeta> WithPayload for PageTableEntry<A> {
-    type Payload = TablePage<A>;
+    type Payload = PTPageSharedPerm<A>;
 
     /// An entry that points at a table describes the page whose tokens it
     /// escrows: the same frame, one level down.
