@@ -12,7 +12,7 @@ use vstd::prelude::*;
 use machine_model::arch::x86_64::state::RegisterState;
 use machine_model::arch::x86_64::{Cr0Value, Cr3Value, Cr4Value, EferValue};
 
-use crate::structs::arch_contract::{page_offset_width, ArchPagingGeometry};
+use crate::structs::arch_contract::{level_count, page_offset_width, ArchPagingGeometry};
 
 verus! {
 
@@ -57,8 +57,8 @@ pub open spec fn cr3_paging_precondition<A: ArchPagingGeometry>(
 ) -> bool {
     &&& (cr3@ & !(low_bits_mask_u64(A::phys_addr_width()))) == 0
     &&& !cr3.intersects(Cr3Value::NOFLUSH)
-    &&& (!cr4.contains(Cr4Value::PCIDE) ==> (cr3@ & (low_bits_mask_u64(page_offset_width::<A>()) & !(
-    Cr3Value::PWT@ | Cr3Value::PCD@))) == 0)
+    &&& (!cr4.contains(Cr4Value::PCIDE) ==> (cr3@ & (low_bits_mask_u64(page_offset_width::<A>())
+        & !(Cr3Value::PWT@ | Cr3Value::PCD@))) == 0)
 }
 
 /// CR4 bits required for long-mode paging: `PAE` is mandatory, and both `PCIDE`
@@ -81,6 +81,22 @@ pub open spec fn cr4_paging_precondition(cr0: Cr0Value, cr4: Cr4Value, efer: Efe
 pub open spec fn efer_paging_precondition(efer: EferValue) -> bool {
     &&& efer.contains(EferValue::LME)
     &&& efer.contains(EferValue::LMA)
+}
+
+/// The geometry `A` describes has to be the one this processor walks: long mode
+/// maps 4 KiB pages at the leaf, and `CR4.LA57` is what chooses whether the walk
+/// starts four or five levels above it. `CR3` names the root of a tree of that
+/// depth, so a mismatch would let a table be read at the wrong level.
+///
+/// APM Vol. 2, "Long-Mode Page Translation" and "5-Level Address Translation";
+/// SDM Vol. 3A, "4-Level Paging and 5-Level Paging".
+pub open spec fn geometry_paging_precondition<A: ArchPagingGeometry>(cr4: Cr4Value) -> bool {
+    &&& page_offset_width::<A>() == 12
+    &&& level_count::<A>() == (if cr4.contains(Cr4Value::LA57) {
+        5nat
+    } else {
+        4nat
+    })
 }
 
 /// The current privilege level is a two-bit field.
@@ -128,6 +144,7 @@ impl PagingView {
         &&& cr0_paging_precondition(self.cr0)
         &&& cr3_paging_precondition::<A>(self.cr3, self.cr4)
         &&& cr4_paging_precondition(self.cr0, self.cr4, self.efer)
+        &&& geometry_paging_precondition::<A>(self.cr4)
         &&& efer_paging_precondition(self.efer)
         &&& cpl_precondition(self.cpl)
     }
