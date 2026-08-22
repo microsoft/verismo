@@ -14,7 +14,7 @@ use vstd::prelude::*;
 use vstd::raw_ptr::IsExposed;
 use vstd::resource::Loc;
 
-use crate::structs::arch_contract::{entries_per_table, slot_addr, ArchPagingMeta};
+use crate::structs::arch_contract::{slot_addr, ArchPagingMeta};
 use crate::structs::entry::PageTableEntry;
 
 verus! {
@@ -41,7 +41,7 @@ impl<A: ArchPagingMeta> PTPageSharedPerm<A> {
     /// Every entry of the page is owned, and entry `index` is the token for the
     /// word the architecture puts at that index.
     pub open spec fn wf(self) -> bool {
-        &&& self.slots.len() == entries_per_table::<A>()
+        &&& self.slots.len() == PageTableEntry::<A>::count_per_page()
         &&& forall|index: int|
             0 <= index < self.slots.len() ==> {
                 &&& (#[trigger] self.slots[index]).ptr()@.addr == slot_addr::<A>(self.base, index)

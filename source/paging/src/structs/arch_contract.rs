@@ -1,7 +1,11 @@
+use vstd::arithmetic::logarithm::log;
+use vstd::arithmetic::power2::pow2;
 use vstd::prelude::*;
 
 use crate::address::{Address, PhysAddr};
 use crate::sizes::{PageOffset, PageSize};
+use crate::structs::entry::PageTableEntry;
+use crate::structs::level::PagingLevel;
 
 verus! {
 
@@ -13,24 +17,17 @@ pub trait ArchPagingGeometry: Sized {
     /// in-page byte offset.
     type MinPageSize: PageSize;
 
+    /// Top of the paging tree. Its depth is the number of levels below it, so
+    /// a table page at `RootLevel::DEPTH` is a root.
+    type RootLevel: PagingLevel;
+
     spec fn phys_addr_width() -> nat;
-
-    /// Number of virtual-address bits one paging level consumes, so a table page
-    /// holds `1 << level_index_width()` entries.
-    spec fn level_index_width() -> nat;
-
-    /// Number of paging levels, counting the leaf level that maps `MinPageSize`.
-    spec fn level_count() -> nat;
 
     /// Sanity condition on the geometry, discharged by the host so that callers
     /// need not carry it as a precondition.
     proof fn lemma_geometry_wf()
         ensures
             <Self::MinPageSize as PageOffset>::SHIFT < Self::phys_addr_width() <= 64,
-            0 < Self::level_index_width() < 64,
-            0 < Self::level_count(),
-            <Self::MinPageSize as PageOffset>::SHIFT + Self::level_count()
-                * Self::level_index_width() <= 64,
     ;
 }
 
@@ -39,25 +36,42 @@ pub open spec fn page_offset_width<A: ArchPagingGeometry>() -> nat {
     <A::MinPageSize as PageOffset>::SHIFT as nat
 }
 
-/// Shift of the page a level maps: `depth` levels above the leaf, each level
-/// covering `level_index_width` more address bits.
-pub open spec fn level_shift<A: ArchPagingGeometry>(depth: nat) -> nat {
-    (page_offset_width::<A>() + depth * A::level_index_width()) as nat
+/// Number of virtual-address bits one paging level consumes: enough to index
+/// every entry of a table page.
+pub open spec fn level_index_width<A: ArchPagingMeta>() -> nat {
+    log(2, PageTableEntry::<A>::count_per_page() as int) as nat
 }
 
-/// Number of entries in one table page.
-pub open spec fn entries_per_table<A: ArchPagingGeometry>() -> nat {
-    vstd::arithmetic::power2::pow2(A::level_index_width())
+/// Shift of the page a level maps: `depth` levels above the leaf, each level
+/// covering `level_index_width` more address bits.
+pub open spec fn level_shift<A: ArchPagingMeta>(depth: nat) -> nat {
+    (page_offset_width::<A>() + depth * level_index_width::<A>()) as nat
 }
 
 /// Address of a table page's entry `index`. Stated once here so that no
 /// specification has to spell out the entry stride.
-pub open spec fn slot_addr<A: ArchPagingGeometry>(base: usize, index: int) -> int {
-    base as int + index * ENTRY_BYTES
+pub open spec fn slot_addr<A: ArchPagingMeta>(base: usize, index: int) -> int {
+    base as int + index * vstd::layout::size_of::<PageTableEntry<A>>()
 }
 
-/// Width of one table entry, in bytes.
-pub spec const ENTRY_BYTES: int = 8;
+/// Number of paging levels, counting the leaf level that maps `MinPageSize`.
+pub open spec fn level_count<A: ArchPagingGeometry>() -> nat {
+    (A::RootLevel::DEPTH + 1) as nat
+}
+
+/// Whether the level geometry fits the entry width: a table page's entries are
+/// indexed by a whole number of address bits, and the tree spans no more bits
+/// than an address has.
+///
+/// Stated as a predicate rather than a trait obligation because it is defined
+/// in terms of `PageTableEntry<A>`, which is itself indexed by `A`; each
+/// architecture instantiates and discharges it, as with
+/// `maps_page_shift_agrees_with_geometry`.
+pub open spec fn level_geometry_wf<A: ArchPagingMeta>() -> bool {
+    &&& pow2(level_index_width::<A>()) == PageTableEntry::<A>::count_per_page()
+    &&& 0 < level_index_width::<A>() < 64
+    &&& page_offset_width::<A>() + level_count::<A>() * level_index_width::<A>() <= 64
+}
 
 /// A host's page-table flags type.
 ///

@@ -1,6 +1,6 @@
 use vstd::prelude::*;
 
-use crate::structs::arch_contract::{level_shift, ArchPagingGeometry};
+use crate::structs::arch_contract::{level_shift, ArchPagingMeta};
 use crate::structs::sizes::{PageOffset, PageSize, Size1GiB, Size2MiB, Size4KiB};
 
 verus! {
@@ -58,7 +58,7 @@ pub trait InteriorLevel: PagingLevel {
 ///
 /// This trait deliberately says nothing about how `Size::SHIFT` relates to
 /// the architecture's level geometry: that agreement only holds for
-/// architectures whose `level_index_width()` matches the marker's spacing
+/// architectures whose `level_index_width` matches the marker's spacing
 /// (9 bits, for the `Level0`/`Level1`/`Level2` markers below), and is left
 /// for `maps_page_shift_agrees_with_geometry` to state and each architecture
 /// to discharge.
@@ -68,13 +68,10 @@ pub trait MapsPage: PagingLevel {
 
 /// Whether `L`'s mapped page size shift matches the shift `A`'s geometry
 /// assigns to `L`'s depth. Not proved here: it only holds once
-/// `A::level_index_width()` is fixed to match how `L::Size` was chosen (9,
+/// `level_index_width::<A>()` is fixed to match how `L::Size` was chosen (9,
 /// for `Level0`/`Level1`/`Level2`). Architectures instantiate and discharge
 /// this themselves.
-pub open spec fn maps_page_shift_agrees_with_geometry<
-    A: ArchPagingGeometry,
-    L: MapsPage,
->() -> bool {
+pub open spec fn maps_page_shift_agrees_with_geometry<A: ArchPagingMeta, L: MapsPage>() -> bool {
     <L::Size as PageOffset>::SHIFT as nat == level_shift::<A>(L::DEPTH as nat)
 }
 

@@ -17,6 +17,7 @@ use vstd::prelude::*;
 
 use crate::structs::address::{Address, VirtAddr};
 use crate::structs::arch_contract::ArchPagingMeta;
+use crate::structs::level::PagingLevel;
 use crate::structs::host_contract::PagingHost;
 use crate::structs::concurrent_pt::PTPageSharedPerm;
 
@@ -53,7 +54,7 @@ impl<A: ArchPagingMeta, H: PagingHost> PageTableHandle<A, H> {
     pub open spec fn inv(&self) -> bool {
         &&& self.page_spec().wf()
         &&& self.page_spec().base == self.root_spec()@
-        &&& self.page_spec().depth == A::level_count() - 1
+        &&& self.page_spec().depth == A::RootLevel::DEPTH
         &&& H::deposit_page(self.deposit_spec()) == self.root_spec()@
         &&& H::deposit_slot_ids(self.deposit_spec()) =~= self.page_spec().ids()
     }
@@ -75,7 +76,7 @@ impl<A: ArchPagingMeta, H: PagingHost> PageTableHandle<A, H> {
         requires
             page.wf(),
             page.base == root@,
-            page.depth == A::level_count() - 1,
+            page.depth == A::RootLevel::DEPTH,
             H::deposit_page(deposit) == root@,
             H::deposit_slot_ids(deposit) =~= page.ids(),
         ensures

@@ -12,6 +12,7 @@ use vstd::prelude::*;
 
 use crate::structs::address::{Address, PhysAddr};
 use crate::structs::arch_contract::{ArchPagingMeta, GenericPageTableFlags};
+use crate::structs::sizes::PageSize;
 
 verus! {
 
@@ -19,7 +20,7 @@ verus! {
 /// architecture whose bit layout it follows.
 ///
 /// Carries no invariant of its own -- a page-table page is exactly
-/// `ENTRY_COUNT` of these, freshly zeroed or freshly read off hardware, so
+/// `count_per_page()` of these, freshly zeroed or freshly read off hardware, so
 /// any `usize` (garbage included) is a well-formed value. What each bit
 /// *means* is stated by the spec functions below, in terms of the masks
 /// `ArchPagingMeta` supplies.
@@ -30,6 +31,12 @@ pub struct PageTableEntry<A: ArchPagingMeta> {
 }
 
 impl<A: ArchPagingMeta> PageTableEntry<A> {
+    /// How many entries a table page holds: a table page is one page of the
+    /// architecture's smallest size, filled with entries.
+    pub open spec fn count_per_page() -> nat {
+        (<A::MinPageSize as PageSize>::SIZE as nat) / vstd::layout::size_of::<Self>()
+    }
+
     /// Raw word.
     pub closed spec fn view(&self) -> usize {
         self.val
