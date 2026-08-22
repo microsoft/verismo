@@ -18,9 +18,10 @@ use crate::structs::address::{Address, PhysAddr, VirtAddr};
 use crate::structs::arch_contract::{level_geometry_wf, ArchPagingMeta, GenericPageTableFlags};
 use crate::structs::concurrent_pt::PTPageSharedPerm;
 use crate::structs::entry::PTEntry;
+use crate::structs::free::free_page_tree;
 use crate::structs::level::PageLevel;
 use crate::structs::map::map_at;
-use crate::structs::os_contract::{PagingError, PagingHandler};
+use crate::structs::os_contract::{PTPageInit, PageLock, PagingError, PagingHandler};
 use crate::structs::range::{range_at, RangeOp};
 use crate::structs::state::PTInstallState;
 use crate::structs::unmap::{update_leaf_at, LeafUpdate};
@@ -299,6 +300,32 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
             target,
             RangeOp::Protect { flags: leaf_flags },
         )
+    }
+
+    /// Frees every table page of the tree and gives the root's frame back as
+    /// plain ownership.
+    ///
+    /// Consumes the handle, which is the outer level of exclusion at its
+    /// strongest: no walk, map or unmap can be in progress, because every one
+    /// of them borrows the handle. It also requires that the tree is not
+    /// installed -- Rust cannot see the hardware walker, so that has to be
+    /// said.
+    ///
+    /// The root frame comes back rather than being deallocated: the root was
+    /// adopted, not allocated here, so returning it is the caller's to decide.
+    pub fn free(self) -> (ret: (Tracked<PTPageInit<A>>, Tracked<PTInstallState<A>>))
+        requires
+            self.inv(),
+            !self.installed(),
+        ensures
+            ret.0@.wf_owned(),
+            ret.0@.base == self.root_spec()@,
+    {
+        let (root, level, page, install) = self.into_parts();
+        let lock = H::page_lock(root);
+        let writers = lock.lock::<A>(Tracked(page.borrow()));
+        let init = free_page_tree::<A, H>(root, level, page, writers);
+        (init, install)
     }
 
     /// The root tokens, as a walk needs them: shared, so several walks may hold

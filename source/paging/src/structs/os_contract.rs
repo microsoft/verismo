@@ -63,17 +63,28 @@ pub tracked struct PTPageInit<A: ArchPagingMeta> {
 }
 
 impl<A: ArchPagingMeta> PTPageInit<A> {
-    /// Every word of the frame is owned, zeroed, and lies where the
-    /// architecture puts the entry of that index.
-    pub open spec fn wf(self) -> bool {
+    /// Every word of the frame is owned and lies where the architecture puts
+    /// the entry of that index.
+    ///
+    /// This is what returning a frame needs: a page being given back holds
+    /// whatever was last written to it, and the allocator is the one that
+    /// decides whether to zero it.
+    pub open spec fn wf_owned(self) -> bool {
         &&& self.slots.len() == PTEntry::<A>::count_per_page()
         &&& forall|index: int|
             0 <= index < self.slots.len() ==> {
                 &&& (#[trigger] self.slots[index]).ptr()@.addr == slot_addr::<A>(self.base, index)
                 &&& self.slots[index].ptr()@.provenance == self.provenance@
                 &&& self.slots[index].is_init()
-                &&& self.slots[index].value() == 0usize
             }
+    }
+
+    /// [`Self::wf_owned`], and zeroed: what a page has to be before it can
+    /// become a table page, since every slot starts out empty.
+    pub open spec fn wf(self) -> bool {
+        &&& self.wf_owned()
+        &&& forall|index: int|
+            0 <= index < self.slots.len() ==> (#[trigger] self.slots[index]).value() == 0usize
     }
 }
 
@@ -191,6 +202,7 @@ pub trait PagingHandler: 'static + Sized {
         Tracked(page): Tracked<PTPageInit<A>>,
     )
         requires
+            page.wf_owned(),
             page.base == A::spec_paddr_to_vaddr(paddr@),
     ;
 
