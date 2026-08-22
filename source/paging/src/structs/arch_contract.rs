@@ -39,17 +39,26 @@ pub trait GenericPageTableFlags:
     /// Flags for the self-map entry itself. This may differ from `parent_flags`
     fn self_map_table_flags() -> Self;
 
-    #[verus_verify(external_body)]
+    #[verus_spec(ret =>
+        ensures
+            Self::obeys_bitflags_spec() ==> ret == self.contains_spec(Self::HUGE),
+    )]
     fn huge(&self) -> bool {
         self.contains(Self::HUGE)
     }
 
-    #[verus_verify(external_body)]
+    #[verus_spec(ret =>
+        ensures
+            Self::obeys_bitflags_spec() ==> ret == self.contains_spec(Self::PRESENT),
+    )]
     fn present(&self) -> bool {
         self.contains(Self::PRESENT)
     }
 
-    #[verus_verify(external_body)]
+    #[verus_spec(ret =>
+        ensures
+            Self::obeys_bitflags_spec() ==> ret == self.contains_spec(Self::USER),
+    )]
     fn user(&self) -> bool {
         self.contains(Self::USER)
     }

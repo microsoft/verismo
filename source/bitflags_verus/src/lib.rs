@@ -552,6 +552,12 @@ macro_rules! __bitflags_verus_one {
                 impl $crate::traits::FlagsSpecImpl for $name {
                     open spec fn obeys_bitflags_spec() -> bool { true }
                     uninterp spec fn bits_spec(&self) -> Self::Bits;
+
+                    open spec fn contains_spec(&self, other: Self) -> bool {
+                        let bits = $crate::traits::FlagsSpec::bits_spec(self);
+                        let other_bits = $crate::traits::FlagsSpec::bits_spec(&other);
+                        (bits & other_bits) == other_bits
+                    }
                 }
 
                 impl vstd::std_specs::ops::BitOrSpecImpl for $name {

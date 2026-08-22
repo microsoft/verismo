@@ -6,7 +6,7 @@
 #![cfg(verus_only)]
 use bitflags::Bits;
 use vstd::prelude::*;
-
+use vstd::std_specs::ops::BitAndSpec;
 verus! {
 
 pub uninterp spec fn spec_from_bits_retain<B, T>(bits: B) -> T;
@@ -39,6 +39,8 @@ pub trait ExFlags: Sized + 'static {
 
     spec fn bits_spec(&self) -> Self::Bits;
 
+    spec fn contains_spec(&self, other: Self) -> bool;
+
     fn from_bits_retain(bits: Self::Bits) -> (ret: Self)
         ensures
             Self::obeys_bitflags_spec() ==> ret == spec_from_bits_retain::<Self::Bits, Self>(bits),
@@ -47,6 +49,11 @@ pub trait ExFlags: Sized + 'static {
     fn bits(&self) -> (ret: Self::Bits)
         ensures
             Self::obeys_bitflags_spec() ==> ret == self.bits_spec(),
+    ;
+
+    fn contains(&self, other: Self) -> (ret: bool)
+        ensures
+            Self::obeys_bitflags_spec() ==> ret == self.contains_spec(other),
     ;
 }
 
