@@ -30,6 +30,7 @@ use crate::structs::address::{Address, PhysAddr, VirtAddr};
 use crate::structs::arch_contract::{slot_addr, ArchPagingMeta};
 use crate::structs::concurrent_pt::{PTPageSharedPerm, PTPageWritePerm};
 use crate::structs::entry::PTEntry;
+use crate::structs::ptpage::PTPage;
 
 verus! {
 
@@ -166,9 +167,10 @@ pub trait PagingHandler: 'static + Sized {
             ret@ == A::spec_paddr_to_vaddr(paddr@),
     ;
 
-    fn vaddr_to_paddr(vaddr: VirtAddr) -> (ret: PhysAddr)
+    /// The frame a table page occupies, given a pointer to the page.
+    fn page_paddr<A: ArchPagingMeta>(page: *mut PTPage<A>) -> (ret: PhysAddr)
         ensures
-            ret@ == Self::spec_vaddr_to_paddr(vaddr@),
+            ret@ == Self::spec_vaddr_to_paddr(page@.addr),
     ;
 
     /// Allocates a zeroed frame for a table page and gives up the ownership of
@@ -216,14 +218,14 @@ pub trait PagingHandler: 'static + Sized {
         opens_invariants none
     ;
 
-    /// The lock guarding the table page mapped at `vaddr`.
+    /// The lock guarding the table page `page` points at.
     ///
     /// Returning a `&'static` is what makes the inner level of locking
     /// reachable from anywhere in a walk: a thread that has descended to a page
     /// can lock it having been handed nothing but the page's address.
-    fn page_lock(vaddr: VirtAddr) -> (ret: &'static Self::PageLock)
+    fn page_lock<A: ArchPagingMeta>(page: *mut PTPage<A>) -> (ret: &'static Self::PageLock)
         ensures
-            ret.page() == vaddr@,
+            ret.page() == page@.addr,
     ;
 }
 

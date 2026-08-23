@@ -14,11 +14,12 @@ use vstd::prelude::*;
 use crate::structs::address::lemma_phys_addr_from_bits;
 use crate::structs::address::{Address, PhysAddr, VirtAddr};
 use crate::structs::arch_contract::{level_geometry_wf, ArchPagingMeta};
-use crate::structs::concurrent_pt::{entry_ptr, PTPageSharedPerm};
+use crate::structs::concurrent_pt::PTPageSharedPerm;
 use crate::structs::entry::PTEntry;
 use crate::structs::geometry::entry_index;
 use crate::structs::level::PageLevel;
 use crate::structs::os_contract::{PageLock, PagingError, PagingHandler};
+use crate::structs::ptpage::{entry_ptr, page_from_vaddr, PTPage};
 
 use crate::structs::update::replace_leaf_slot;
 
@@ -43,7 +44,7 @@ pub enum LeafUpdate<A: ArchPagingMeta> {
 /// pointer is still a table pointer, and the entry that is finally replaced is
 /// read again under the writer, so what comes back is what was really there.
 pub fn update_leaf_at<A: ArchPagingMeta, P: PagingHandler>(
-    base: VirtAddr,
+    page_ptr: *mut PTPage<A>,
     level: PageLevel,
     Tracked(page): Tracked<&PTPageSharedPerm<A>>,
     vaddr: VirtAddr,
@@ -52,14 +53,14 @@ pub fn update_leaf_at<A: ArchPagingMeta, P: PagingHandler>(
     requires
         level_geometry_wf::<A>(),
         page.wf(),
-        page.base == base@,
+        page.base == page_ptr@.addr,
     ensures
         ret matches Ok(old) ==> !old.is_table_spec(),
     decreases level.spec_depth(),
 {
     let index = entry_index::<A>(vaddr, level);
     let ghost i = index as int;
-    let ptr = entry_ptr::<A>(base, index, Tracked(page));
+    let ptr = entry_ptr::<A>(page_ptr, index, Tracked(page));
     let tracked slot = page.slots.tracked_borrow(i);
     let (current, Tracked(_observed), Tracked(ticket)) = PTEntry::<A>::read_published(
         ptr,
@@ -81,16 +82,17 @@ pub fn update_leaf_at<A: ArchPagingMeta, P: PagingHandler>(
             lemma_phys_addr_from_bits(current.page_frame_spec());
         }
         let child_base = P::paddr_to_vaddr::<A>(PhysAddr::from(current.page_frame()));
-        return update_leaf_at::<A, P>(child_base, child_level, Tracked(child_page), vaddr, update);
+        let child_ptr = page_from_vaddr::<A>(child_base, Tracked(child_page));
+        return update_leaf_at::<A, P>(child_ptr, child_level, Tracked(child_page), vaddr, update);
     }
     if !current.present() {
         return Err(PagingError::NotMapped);
     }
     let replacement = leaf_replacement::<A>(current, update);
-    let lock = P::page_lock(base);
+    let lock = P::page_lock(page_ptr);
     let Tracked(mut writers) = lock.lock::<A>(Tracked(page));
     let ret = replace_leaf_slot::<A>(
-        base,
+        page_ptr,
         index,
         Tracked(page),
         Tracked(&mut writers),

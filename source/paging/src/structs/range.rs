@@ -21,12 +21,13 @@ use vstd::prelude::*;
 use crate::structs::address::lemma_phys_addr_from_bits;
 use crate::structs::address::{Address, PhysAddr, VirtAddr};
 use crate::structs::arch_contract::{level_geometry_wf, ArchPagingMeta, GenericPageTableFlags};
-use crate::structs::concurrent_pt::{entry_ptr, PTPageSharedPerm, PTPageWritePerm};
+use crate::structs::concurrent_pt::{PTPageSharedPerm, PTPageWritePerm};
 use crate::structs::entry::PTEntry;
 use crate::structs::geometry::{entry_index_bits, shift_at};
 use crate::structs::level::PageLevel;
 use crate::structs::map::create_and_link_child;
 use crate::structs::os_contract::{PageLock, PagingError, PagingHandler};
+use crate::structs::ptpage::{entry_ptr, page_from_vaddr, PTPage};
 
 use crate::structs::split::split_huge_at;
 use crate::structs::update::{replace_leaf_slot, set_leaf_slot};
@@ -74,11 +75,11 @@ impl<A: ArchPagingMeta> RangeOp<A> {
 /// Applies `op` to every entry of `[vstart, vend)` at `target`, descending once
 /// per table page the range touches.
 ///
-/// `vstart` and `vend` are byte addresses, half-open. `base` is the page the
+/// `vstart` and `vend` are byte addresses, half-open. `page_ptr` is the page the
 /// pass is currently in, and the range is always inside what that page covers,
 /// which is what makes the loop below a loop over this page's slots.
 pub fn range_at<A: ArchPagingMeta, P: PagingHandler>(
-    base: VirtAddr,
+    page_ptr: *mut PTPage<A>,
     level: PageLevel,
     Tracked(page): Tracked<&PTPageSharedPerm<A>>,
     vstart: usize,
@@ -89,13 +90,13 @@ pub fn range_at<A: ArchPagingMeta, P: PagingHandler>(
     requires
         level_geometry_wf::<A>(),
         page.wf(),
-        page.base == base@,
+        page.base == page_ptr@.addr,
         op matches RangeOp::Map { paddr, .. } ==> paddr + (vend - vstart) <= usize::MAX,
         vstart <= vend,
     decreases level.spec_depth(), 1nat,
 {
     if level.depth() == target.depth() {
-        return leaf_range::<A, P>(base, level, Tracked(page), vstart, vend, op);
+        return leaf_range::<A, P>(page_ptr, level, Tracked(page), vstart, vend, op);
     }
     let shift = shift_at::<A>(level);
     assert((1usize << shift) != 0) by (bit_vector)
@@ -108,14 +109,14 @@ pub fn range_at<A: ArchPagingMeta, P: PagingHandler>(
         invariant
             level_geometry_wf::<A>(),
             page.wf(),
-            page.base == base@,
+            page.base == page_ptr@.addr,
             vstart <= cur,
             op matches RangeOp::Map { paddr, .. } ==> paddr + (vend - vstart) <= usize::MAX,
         decreases vend - cur,
     {
         let next = range_end(cur, vend, mask);
         let index = entry_index_bits::<A>(cur, level);
-        match range_step::<A, P>(base, index, level, Tracked(page), cur, next, target, op) {
+        match range_step::<A, P>(page_ptr, index, level, Tracked(page), cur, next, target, op) {
             Err(e) => {
                 return Err(e);
             },
@@ -129,7 +130,7 @@ pub fn range_at<A: ArchPagingMeta, P: PagingHandler>(
 /// One entry's worth of a ranged pass: descend into the child that covers
 /// `[cur, next)`, creating it if the operation is one that grows the tree.
 fn range_step<A: ArchPagingMeta, P: PagingHandler>(
-    base: VirtAddr,
+    page_ptr: *mut PTPage<A>,
     index: usize,
     level: PageLevel,
     Tracked(page): Tracked<&PTPageSharedPerm<A>>,
@@ -141,7 +142,7 @@ fn range_step<A: ArchPagingMeta, P: PagingHandler>(
     requires
         level_geometry_wf::<A>(),
         page.wf(),
-        page.base == base@,
+        page.base == page_ptr@.addr,
         index < PTEntry::<A>::count_per_page(),
         cur <= next,
         op matches RangeOp::Map { paddr, .. } ==> paddr + (next - cur) <= usize::MAX,
@@ -153,7 +154,7 @@ fn range_step<A: ArchPagingMeta, P: PagingHandler>(
         },
         Some(child_level) => child_level,
     };
-    let ptr = entry_ptr::<A>(base, index, Tracked(page));
+    let ptr = entry_ptr::<A>(page_ptr, index, Tracked(page));
     let tracked slot = page.slots.tracked_borrow(index as int);
     let (current, Tracked(_observed), Tracked(ticket)) = PTEntry::<A>::read_published(
         ptr,
@@ -169,15 +170,8 @@ fn range_step<A: ArchPagingMeta, P: PagingHandler>(
             lemma_phys_addr_from_bits(current.page_frame_spec());
         }
         let child_base = P::paddr_to_vaddr::<A>(PhysAddr::from(current.page_frame()));
-        return range_at::<A, P>(
-            child_base,
-            child_level,
-            Tracked(child_page),
-            cur,
-            next,
-            target,
-            op,
-        );
+        let child_ptr = page_from_vaddr::<A>(child_base, Tracked(child_page));
+        return range_at::<A, P>(child_ptr, child_level, Tracked(child_page), cur, next, target, op);
     }
     if current.present() {
         if op.creates() {
@@ -194,17 +188,17 @@ fn range_step<A: ArchPagingMeta, P: PagingHandler>(
         if cur & mask == 0 && cur < next && sub(next, 1) == cur | mask {
             // The range covers this entry whole, so it can be changed where it
             // is -- no need to break it into pieces only to change all of them.
-            let lock = P::page_lock(base);
+            let lock = P::page_lock(page_ptr);
             let Tracked(mut writers) = lock.lock::<A>(Tracked(page));
-            let ret = leaf_step::<A>(base, index, Tracked(page), Tracked(&mut writers), 0, op);
+            let ret = leaf_step::<A>(page_ptr, index, Tracked(page), Tracked(&mut writers), 0, op);
             lock.unlock::<A>(Tracked(page), Tracked(writers));
             return ret;
         }
         // Only part of what this entry maps is in the range, so it has to
         // become a table before the parts can be told apart.
 
-        let (child_base, child_ticket) = match split_huge_at::<A, P>(
-            base,
+        let (child_ptr, child_ticket) = match split_huge_at::<A, P>(
+            page_ptr,
             index,
             Tracked(page),
             child_level,
@@ -217,22 +211,14 @@ fn range_step<A: ArchPagingMeta, P: PagingHandler>(
         let tracked child_page = slot.borrow_published_payload(
             child_ticket.borrow(),
         ).tracked_borrow();
-        return range_at::<A, P>(
-            child_base,
-            child_level,
-            Tracked(child_page),
-            cur,
-            next,
-            target,
-            op,
-        );
+        return range_at::<A, P>(child_ptr, child_level, Tracked(child_page), cur, next, target, op);
     }
     if !op.creates() {
         // Nothing is mapped here, and this operation only changes what is.
         return Ok(());
     }
-    let (child_base, child_ticket) = match create_and_link_child::<A, P>(
-        base,
+    let (child_ptr, child_ticket) = match create_and_link_child::<A, P>(
+        page_ptr,
         index,
         Tracked(page),
         child_level,
@@ -243,13 +229,13 @@ fn range_step<A: ArchPagingMeta, P: PagingHandler>(
         Ok(linked) => linked,
     };
     let tracked child_page = slot.borrow_published_payload(child_ticket.borrow()).tracked_borrow();
-    range_at::<A, P>(child_base, child_level, Tracked(child_page), cur, next, target, op)
+    range_at::<A, P>(child_ptr, child_level, Tracked(child_page), cur, next, target, op)
 }
 
 /// The entries of one table page that a range covers, under one acquisition of
 /// that page's lock.
 fn leaf_range<A: ArchPagingMeta, P: PagingHandler>(
-    base: VirtAddr,
+    page_ptr: *mut PTPage<A>,
     level: PageLevel,
     Tracked(page): Tracked<&PTPageSharedPerm<A>>,
     vstart: usize,
@@ -259,7 +245,7 @@ fn leaf_range<A: ArchPagingMeta, P: PagingHandler>(
     requires
         level_geometry_wf::<A>(),
         page.wf(),
-        page.base == base@,
+        page.base == page_ptr@.addr,
         vstart <= vend,
         op matches RangeOp::Map { paddr, .. } ==> paddr + (vend - vstart) <= usize::MAX,
 {
@@ -269,7 +255,7 @@ fn leaf_range<A: ArchPagingMeta, P: PagingHandler>(
             shift < 64,
     ;
     let mask = sub(1usize << shift, 1);
-    let lock = P::page_lock(base);
+    let lock = P::page_lock(page_ptr);
     let Tracked(mut writers) = lock.lock::<A>(Tracked(page));
     let mut cur = vstart;
     let mut result = Ok(());
@@ -277,7 +263,7 @@ fn leaf_range<A: ArchPagingMeta, P: PagingHandler>(
         invariant
             level_geometry_wf::<A>(),
             page.wf(),
-            page.base == base@,
+            page.base == page_ptr@.addr,
             vstart <= cur,
             writers.ids() =~= page.ids(),
             op matches RangeOp::Map { paddr, .. } ==> paddr + (vend - vstart) <= usize::MAX,
@@ -286,7 +272,7 @@ fn leaf_range<A: ArchPagingMeta, P: PagingHandler>(
         let next = range_end(cur, vend, mask);
         let index = entry_index_bits::<A>(cur, level);
         let step = leaf_step::<A>(
-            base,
+            page_ptr,
             index,
             Tracked(page),
             Tracked(&mut writers),
@@ -309,7 +295,7 @@ fn leaf_range<A: ArchPagingMeta, P: PagingHandler>(
 /// One entry of a ranged pass at the target level, with the page's writers
 /// already in hand.
 fn leaf_step<A: ArchPagingMeta>(
-    base: VirtAddr,
+    page_ptr: *mut PTPage<A>,
     index: usize,
     Tracked(page): Tracked<&PTPageSharedPerm<A>>,
     Tracked(writers): Tracked<&mut PTPageWritePerm<A>>,
@@ -318,7 +304,7 @@ fn leaf_step<A: ArchPagingMeta>(
 ) -> (ret: Result<(), PagingError>)
     requires
         page.wf(),
-        page.base == base@,
+        page.base == page_ptr@.addr,
         old(writers).ids() =~= page.ids(),
         index < PTEntry::<A>::count_per_page(),
         op matches RangeOp::Map { paddr, .. } ==> paddr + offset <= usize::MAX,
@@ -328,11 +314,11 @@ fn leaf_step<A: ArchPagingMeta>(
     match op {
         RangeOp::Map { paddr, flags } => {
             let entry = leaf_entry::<A>(paddr + offset, flags);
-            set_leaf_slot::<A>(base, index, Tracked(page), Tracked(writers), entry)
+            set_leaf_slot::<A>(page_ptr, index, Tracked(page), Tracked(writers), entry)
         },
         RangeOp::Unmap => {
             match replace_leaf_slot::<A>(
-                base,
+                page_ptr,
                 index,
                 Tracked(page),
                 Tracked(writers),
@@ -346,7 +332,7 @@ fn leaf_step<A: ArchPagingMeta>(
             proof {
                 crate::structs::concurrent_pt::lemma_ids_match::<A>(*writers, *page);
             }
-            let ptr = entry_ptr::<A>(base, index, Tracked(page));
+            let ptr = entry_ptr::<A>(page_ptr, index, Tracked(page));
             let tracked reader = page.slots.tracked_borrow(index as int);
             let tracked writer = writers.slots.tracked_borrow(index as int);
             let (current, Tracked(_observed)) = PTEntry::<A>::read_exact(
@@ -358,7 +344,7 @@ fn leaf_step<A: ArchPagingMeta>(
                 return Ok(());
             }
             let entry = leaf_entry::<A>(current.paddr_field(), flags);
-            match replace_leaf_slot::<A>(base, index, Tracked(page), Tracked(writers), entry) {
+            match replace_leaf_slot::<A>(page_ptr, index, Tracked(page), Tracked(writers), entry) {
                 Err(e) => Err(e),
                 Ok(_) => Ok(()),
             }

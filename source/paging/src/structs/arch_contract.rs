@@ -10,6 +10,7 @@ use builtin_macros::verus_verify;
 
 use crate::structs::entry::PTEntry;
 use crate::structs::level::PageLevel;
+use crate::structs::ptpage::ENTRY_COUNT;
 
 /// Executable interface to a page table entry's flag word.
 ///
@@ -186,7 +187,11 @@ pub open spec fn level_geometry_wf<A: ArchPagingMeta>() -> bool {
         < usize::BITS
     // The values exec code can read agree with the derived ones.
     &&& A::spec_entries_per_page() == PTEntry::<A>::count_per_page()
-    &&& A::spec_index_width() == level_index_width::<A>()
+    &&& A::spec_index_width() == level_index_width::<
+        A,
+    >()
+    // A page of entries is a `PTPage`, whose size is fixed by its type.
+    &&& PTEntry::<A>::count_per_page() == ENTRY_COUNT
 }
 
 /// The ghost half of [`GenericPageTableFlags`]: which bit each named flag

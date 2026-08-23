@@ -11,13 +11,11 @@
 use concurrent_rw::{PayloadTicket, RWContract, RWWithPublishPayloadContract, WithPayload};
 use vstd::prelude::*;
 
-use crate::structs::address::VirtAddr;
 use crate::structs::arch_contract::ArchPagingMeta;
-use crate::structs::concurrent_pt::{
-    entry_ptr, lemma_ids_match, PTPageSharedPerm, PTPageWritePerm,
-};
+use crate::structs::concurrent_pt::{lemma_ids_match, PTPageSharedPerm, PTPageWritePerm};
 use crate::structs::entry::PTEntry;
 use crate::structs::os_contract::PagingError;
+use crate::structs::ptpage::{entry_ptr, PTPage};
 
 verus! {
 
@@ -26,7 +24,7 @@ verus! {
 /// `entry` must not be a table pointer: an entry that escrows a page has to be
 /// installed with the page's tokens, which is [`link_table_slot`].
 pub fn set_leaf_slot<A: ArchPagingMeta>(
-    base: VirtAddr,
+    page_ptr: *mut PTPage<A>,
     index: usize,
     Tracked(page): Tracked<&PTPageSharedPerm<A>>,
     Tracked(writers): Tracked<&mut PTPageWritePerm<A>>,
@@ -34,7 +32,7 @@ pub fn set_leaf_slot<A: ArchPagingMeta>(
 ) -> (ret: Result<(), PagingError>)
     requires
         page.wf(),
-        page.base == base@,
+        page.base == page_ptr@.addr,
         old(writers).ids() =~= page.ids(),
         index < PTEntry::<A>::count_per_page(),
         !entry.is_table_spec(),
@@ -46,7 +44,7 @@ pub fn set_leaf_slot<A: ArchPagingMeta>(
     proof {
         lemma_ids_match::<A>(*writers, *page);
     }
-    let ptr = entry_ptr::<A>(base, index, Tracked(page));
+    let ptr = entry_ptr::<A>(page_ptr, index, Tracked(page));
     let tracked reader = page.slots.tracked_borrow(i);
     let current = read_slot_exact::<A>(ptr, Tracked(reader), Tracked(writers), index);
     if current.present() {
@@ -68,7 +66,7 @@ pub fn set_leaf_slot<A: ArchPagingMeta>(
 /// reachable only through its lock -- which is why the caller deposits them
 /// there and not here.
 pub fn link_table_slot<A: ArchPagingMeta>(
-    base: VirtAddr,
+    page_ptr: *mut PTPage<A>,
     index: usize,
     Tracked(page): Tracked<&PTPageSharedPerm<A>>,
     Tracked(writers): Tracked<&mut PTPageWritePerm<A>>,
@@ -77,7 +75,7 @@ pub fn link_table_slot<A: ArchPagingMeta>(
 ) -> (ret: Result<Tracked<PayloadTicket<Option<PTPageSharedPerm<A>>>>, PagingError>)
     requires
         page.wf(),
-        page.base == base@,
+        page.base == page_ptr@.addr,
         old(writers).ids() =~= page.ids(),
         index < PTEntry::<A>::count_per_page(),
         entry.is_table_spec(),
@@ -95,7 +93,7 @@ pub fn link_table_slot<A: ArchPagingMeta>(
     proof {
         lemma_ids_match::<A>(*writers, *page);
     }
-    let ptr = entry_ptr::<A>(base, index, Tracked(page));
+    let ptr = entry_ptr::<A>(page_ptr, index, Tracked(page));
     let tracked reader = page.slots.tracked_borrow(i);
     let current = read_slot_exact::<A>(ptr, Tracked(reader), Tracked(writers), index);
     if current.present() {
@@ -122,7 +120,7 @@ pub fn link_table_slot<A: ArchPagingMeta>(
 /// need it. It refuses a table pointer, because dropping one would strand
 /// everything below it along with the tokens escrowed in the slot.
 pub fn replace_leaf_slot<A: ArchPagingMeta>(
-    base: VirtAddr,
+    page_ptr: *mut PTPage<A>,
     index: usize,
     Tracked(page): Tracked<&PTPageSharedPerm<A>>,
     Tracked(writers): Tracked<&mut PTPageWritePerm<A>>,
@@ -130,7 +128,7 @@ pub fn replace_leaf_slot<A: ArchPagingMeta>(
 ) -> (ret: Result<PTEntry<A>, PagingError>)
     requires
         page.wf(),
-        page.base == base@,
+        page.base == page_ptr@.addr,
         old(writers).ids() =~= page.ids(),
         index < PTEntry::<A>::count_per_page(),
         !entry.is_table_spec(),
@@ -144,7 +142,7 @@ pub fn replace_leaf_slot<A: ArchPagingMeta>(
     proof {
         lemma_ids_match::<A>(*writers, *page);
     }
-    let ptr = entry_ptr::<A>(base, index, Tracked(page));
+    let ptr = entry_ptr::<A>(page_ptr, index, Tracked(page));
     let tracked reader = page.slots.tracked_borrow(i);
     let current = read_slot_exact::<A>(ptr, Tracked(reader), Tracked(writers), index);
     if current.is_table() {
@@ -169,7 +167,7 @@ pub fn replace_leaf_slot<A: ArchPagingMeta>(
 /// entry that was replaced, which the caller needs in order to know what it
 /// promised to reproduce.
 pub fn split_leaf_slot<A: ArchPagingMeta>(
-    base: VirtAddr,
+    page_ptr: *mut PTPage<A>,
     index: usize,
     Tracked(page): Tracked<&PTPageSharedPerm<A>>,
     Tracked(writers): Tracked<&mut PTPageWritePerm<A>>,
@@ -178,7 +176,7 @@ pub fn split_leaf_slot<A: ArchPagingMeta>(
 ) -> (ret: Result<Tracked<PayloadTicket<Option<PTPageSharedPerm<A>>>>, PagingError>)
     requires
         page.wf(),
-        page.base == base@,
+        page.base == page_ptr@.addr,
         old(writers).ids() =~= page.ids(),
         index < PTEntry::<A>::count_per_page(),
         entry.is_table_spec(),
@@ -196,7 +194,7 @@ pub fn split_leaf_slot<A: ArchPagingMeta>(
     proof {
         lemma_ids_match::<A>(*writers, *page);
     }
-    let ptr = entry_ptr::<A>(base, index, Tracked(page));
+    let ptr = entry_ptr::<A>(page_ptr, index, Tracked(page));
     let tracked reader = page.slots.tracked_borrow(i);
     let current = read_slot_exact::<A>(ptr, Tracked(reader), Tracked(writers), index);
     if current.is_table() {

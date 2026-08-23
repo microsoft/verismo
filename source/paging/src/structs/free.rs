@@ -23,10 +23,11 @@ use crate::structs::concurrent_pt::{lemma_ids_match, PTPageSharedPerm, PTPageWri
 use crate::structs::entry::PTEntry;
 use crate::structs::level::PageLevel;
 use crate::structs::os_contract::{PTPageInit, PageLock, PagingHandler, SlotShared};
+use crate::structs::ptpage::{page_from_vaddr, PTPage};
 
 verus! {
 
-/// Frees every table page below `base`, and returns `base`'s own frame as
+/// Frees every table page below `page_ptr`, and returns its own frame as
 /// plain ownership.
 ///
 /// The page this is called on is *not* handed back: whoever knows its physical
@@ -37,7 +38,7 @@ verus! {
 /// entries claim to point at tables below the leaf level is simply not
 /// followed. Nothing this crate writes produces one.
 pub fn free_page_tree<A: ArchPagingMeta, P: PagingHandler>(
-    base: VirtAddr,
+    page_ptr: *mut PTPage<A>,
     level: PageLevel,
     Tracked(page): Tracked<PTPageSharedPerm<A>>,
     Tracked(writers): Tracked<PTPageWritePerm<A>>,
@@ -45,7 +46,7 @@ pub fn free_page_tree<A: ArchPagingMeta, P: PagingHandler>(
     requires
         level_geometry_wf::<A>(),
         page.wf(),
-        page.base == base@,
+        page.base == page_ptr@.addr,
         writers.ids() =~= page.ids(),
     ensures
         ret@.wf_owned(),
@@ -60,7 +61,7 @@ pub fn free_page_tree<A: ArchPagingMeta, P: PagingHandler>(
         page;
     let tracked PTPageWritePerm { slots: writer_slots } = writers;
     let Tracked(points) = free_slots::<A, P>(
-        base,
+        page_ptr,
         level,
         count,
         Tracked(&provenance),
@@ -79,7 +80,7 @@ pub fn free_page_tree<A: ArchPagingMeta, P: PagingHandler>(
 /// undoes. The recursive call comes first so that the words come back in index
 /// order.
 fn free_slots<A: ArchPagingMeta, P: PagingHandler>(
-    base: VirtAddr,
+    page_ptr: *mut PTPage<A>,
     level: PageLevel,
     count: usize,
     Tracked(provenance): Tracked<&IsExposed>,
@@ -92,7 +93,7 @@ fn free_slots<A: ArchPagingMeta, P: PagingHandler>(
         readers.len() == writers.len(),
         forall|i: int|
             0 <= i < readers.len() ==> {
-                &&& (#[trigger] readers[i]).ptr()@.addr == slot_addr::<A>(base@, i)
+                &&& (#[trigger] readers[i]).ptr()@.addr == slot_addr::<A>(page_ptr@.addr, i)
                 &&& readers[i].ptr()@.provenance == provenance@
                 &&& readers[i].id() == writers[i].id()
             },
@@ -100,7 +101,7 @@ fn free_slots<A: ArchPagingMeta, P: PagingHandler>(
         ret@.len() == count,
         forall|i: int|
             0 <= i < ret@.len() ==> {
-                &&& (#[trigger] ret@[i]).ptr()@.addr == slot_addr::<A>(base@, i)
+                &&& (#[trigger] ret@[i]).ptr()@.addr == slot_addr::<A>(page_ptr@.addr, i)
                 &&& ret@[i].ptr()@.provenance == provenance@
                 &&& ret@[i].is_init()
             },
@@ -116,7 +117,7 @@ fn free_slots<A: ArchPagingMeta, P: PagingHandler>(
     let tracked reader = readers.tracked_pop();
     let tracked writer = writers.tracked_pop();
     let Tracked(mut points) = free_slots::<A, P>(
-        base,
+        page_ptr,
         level,
         index,
         Tracked(provenance),
@@ -124,7 +125,7 @@ fn free_slots<A: ArchPagingMeta, P: PagingHandler>(
         Tracked(writers),
     );
     let ptr = with_exposed_provenance(
-        base.bits() + index * core::mem::size_of::<usize>(),
+        page_ptr.addr() + index * core::mem::size_of::<usize>(),
         Tracked(*provenance),
     );
     let (entry, Tracked(_observed)) = PTEntry::<A>::read_exact(
@@ -170,10 +171,11 @@ fn free_child<A: ArchPagingMeta, P: PagingHandler>(
     let paddr = PhysAddr::from(entry.page_frame());
     let child_base = P::paddr_to_vaddr::<A>(paddr);
     let tracked child = payload.tracked_unwrap();
-    let child_lock = P::page_lock(child_base);
+    let child_ptr = page_from_vaddr::<A>(child_base, Tracked(&child));
+    let child_lock = P::page_lock(child_ptr);
     let Tracked(child_writers) = child_lock.lock::<A>(Tracked(&child));
     let init = free_page_tree::<A, P>(
-        child_base,
+        child_ptr,
         child_level,
         Tracked(child),
         Tracked(child_writers),

@@ -17,6 +17,7 @@ use crate::structs::concurrent_pt::PTPageSharedPerm;
 use crate::structs::geometry::shift_at;
 use crate::structs::level::PageLevel;
 use crate::structs::os_contract::{PagingError, PagingHandler};
+use crate::structs::ptpage::PTPage;
 use crate::structs::range::{level_flags, range_at, RangeOp};
 
 verus! {
@@ -29,7 +30,7 @@ verus! {
 /// pass has, for the same reason: undoing the writes would mean unmapping
 /// addresses that another thread may have started using.
 pub fn map_region<A: ArchPagingMeta, P: PagingHandler>(
-    base: VirtAddr,
+    page_ptr: *mut PTPage<A>,
     level: PageLevel,
     Tracked(page): Tracked<&PTPageSharedPerm<A>>,
     vstart: usize,
@@ -42,7 +43,7 @@ pub fn map_region<A: ArchPagingMeta, P: PagingHandler>(
     requires
         level_geometry_wf::<A>(),
         page.wf(),
-        page.base == base@,
+        page.base == page_ptr@.addr,
         vstart <= vend,
         paddr + (vend - vstart) <= usize::MAX,
 {
@@ -59,25 +60,25 @@ pub fn map_region<A: ArchPagingMeta, P: PagingHandler>(
     if (vstart ^ paddr) & mask != 0 {
         // The two addresses do not agree on where a big block begins, so no
         // big page can map any part of this region.
-        return range_at::<A, P>(base, level, Tracked(page), vstart, vend, small, small_op);
+        return range_at::<A, P>(page_ptr, level, Tracked(page), vstart, vend, small, small_op);
     }
     let head_end = block_start_after::<A>(vstart, vend, size, mask);
     let mid_end = block_start_at_or_before::<A>(head_end, vend, mask);
-    match range_at::<A, P>(base, level, Tracked(page), vstart, head_end, small, small_op) {
+    match range_at::<A, P>(page_ptr, level, Tracked(page), vstart, head_end, small, small_op) {
         Err(e) => {
             return Err(e);
         },
         Ok(()) => {},
     }
     let mid_op = RangeOp::Map { paddr: paddr + (head_end - vstart), flags: big_flags };
-    match range_at::<A, P>(base, level, Tracked(page), head_end, mid_end, big, mid_op) {
+    match range_at::<A, P>(page_ptr, level, Tracked(page), head_end, mid_end, big, mid_op) {
         Err(e) => {
             return Err(e);
         },
         Ok(()) => {},
     }
     let tail_op = RangeOp::Map { paddr: paddr + (mid_end - vstart), flags: small_flags };
-    range_at::<A, P>(base, level, Tracked(page), mid_end, vend, small, tail_op)
+    range_at::<A, P>(page_ptr, level, Tracked(page), mid_end, vend, small, tail_op)
 }
 
 /// Where the first whole block of `size` bytes inside `[vstart, vend)` begins,

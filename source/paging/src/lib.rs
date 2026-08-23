@@ -34,10 +34,19 @@
 //! Its *readers* are escrowed in the entry that points at it, so a walker that
 //! reads a table entry gets the child's readers with it and may descend on a
 //! `&` borrow alone; its *writers* are deposited in the page's own lock, so a
-//! thread that has walked to a page can lock it knowing only its address.
+//! thread that has walked to a page can lock it knowing only a pointer to it.
 //! Hardware bits cannot say which entries escrow a page -- at the leaf level
 //! "present and not huge" means a 4 KiB mapping -- so an ignored software bit
 //! marks them; see `structs::arch_contract::GenericPageTableFlagsSpec`.
+//!
+//! # How a page is named
+//!
+//! Every operation names the page it works on by a `*mut PTPage<A>`, built
+//! from that page's own tokens, so the pointer's provenance is the provenance
+//! the tokens were made with and the entry at an index is a pointer
+//! computation rather than an address arithmetic the type system knows
+//! nothing about. `structs::ptpage` is where a pointer is made and where a
+//! slot's word is found.
 //!
 //! # What is proved, and what is not
 //!
@@ -97,6 +106,7 @@ pub use structs::entry;
 pub use structs::handle;
 pub use structs::level;
 pub use structs::os_contract;
+pub use structs::ptpage;
 pub use structs::free;
 pub use structs::map;
 pub use structs::range;

@@ -19,28 +19,29 @@ use crate::structs::address::{Address, PhysAddr, VirtAddr};
 use crate::structs::arch_contract::{
     level_geometry_wf, slot_addr, spec_entry_index, ArchPagingMeta,
 };
-use crate::structs::concurrent_pt::{entry_ptr, PTPageSharedPerm};
+use crate::structs::concurrent_pt::PTPageSharedPerm;
 use crate::structs::entry::PTEntry;
 use crate::structs::geometry::entry_index;
 use crate::structs::level::PageLevel;
 use crate::structs::os_contract::PagingHandler;
+use crate::structs::ptpage::{entry_ptr, page_from_vaddr, PTPage};
 
 verus! {
 
 /// Where a walk came to rest: the entry it stopped at, and enough about the
 /// page holding it to go back and update it.
 ///
-/// `base` and `index` are what an update needs -- the page's lock is looked up
-/// by address, and the slot is written by index -- and `level` is what says
+/// `page_ptr` and `index` are what an update needs -- the page's lock is looked
+/// up by the page, and the slot is written by index -- and `level` is what says
 /// how large a page the entry maps.
 pub struct WalkResult<A: ArchPagingMeta> {
     pub level: PageLevel,
-    pub base: VirtAddr,
+    pub page_ptr: *mut PTPage<A>,
     pub index: usize,
     pub entry: PTEntry<A>,
 }
 
-/// Follows `vaddr` down from the page at `base`, stopping at the first entry
+/// Follows `vaddr` down from `page_ptr`, stopping at the first entry
 /// that is not a table pointer, or at the leaf level.
 ///
 /// The level is a parameter rather than a property read off the page's tokens:
@@ -49,7 +50,7 @@ pub struct WalkResult<A: ArchPagingMeta> {
 /// of a leaf entry as "points at a table" -- at level 0 the hardware reads that
 /// bit as PAT.
 pub fn walk<A: ArchPagingMeta, P: PagingHandler>(
-    base: VirtAddr,
+    page_ptr: *mut PTPage<A>,
     level: PageLevel,
     Tracked(page): Tracked<&PTPageSharedPerm<A>>,
     vaddr: VirtAddr,
@@ -57,7 +58,7 @@ pub fn walk<A: ArchPagingMeta, P: PagingHandler>(
     requires
         level_geometry_wf::<A>(),
         page.wf(),
-        page.base == base@,
+        page.base == page_ptr@.addr,
     ensures
         ret.level.spec_depth() <= level.spec_depth(),
         ret.index == spec_entry_index::<A>(vaddr@, ret.level),
@@ -68,14 +69,14 @@ pub fn walk<A: ArchPagingMeta, P: PagingHandler>(
 {
     let index = entry_index::<A>(vaddr, level);
     let ghost i = index as int;
-    let ptr = entry_ptr::<A>(base, index, Tracked(page));
+    let ptr = entry_ptr::<A>(page_ptr, index, Tracked(page));
     let tracked slot = page.slots.tracked_borrow(i);
     let (entry, Tracked(_observed), Tracked(ticket)) = PTEntry::read_published(
         ptr,
         Tracked(slot),
         Tracked(None),
     );
-    let stop = WalkResult { level, base, index, entry };
+    let stop = WalkResult { level, page_ptr, index, entry };
     if !entry.is_table() {
         return stop;
     }
@@ -96,7 +97,8 @@ pub fn walk<A: ArchPagingMeta, P: PagingHandler>(
                 lemma_phys_addr_from_bits(entry.page_frame_spec());
             }
             let child_base = P::paddr_to_vaddr::<A>(PhysAddr::from(entry.page_frame()));
-            walk::<A, P>(child_base, child_level, Tracked(child_page), vaddr)
+            let child_ptr = page_from_vaddr::<A>(child_base, Tracked(child_page));
+            walk::<A, P>(child_ptr, child_level, Tracked(child_page), vaddr)
         },
     }
 }

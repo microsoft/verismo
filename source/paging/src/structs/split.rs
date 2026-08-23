@@ -20,18 +20,19 @@ use vstd::prelude::*;
 use crate::structs::address::lemma_phys_addr_from_bits;
 use crate::structs::address::{Address, PhysAddr, VirtAddr};
 use crate::structs::arch_contract::{level_geometry_wf, ArchPagingMeta, GenericPageTableFlags};
-use crate::structs::concurrent_pt::{entry_ptr, PTPageSharedPerm, PTPageWritePerm};
+use crate::structs::concurrent_pt::{PTPageSharedPerm, PTPageWritePerm};
 use crate::structs::entry::PTEntry;
 use crate::structs::geometry::{lemma_count_per_page_positive, shift_at};
 use crate::structs::level::PageLevel;
 use crate::structs::os_contract::{PageLock, PagingError, PagingHandler};
+use crate::structs::ptpage::{entry_ptr, page_from_vaddr, PTPage};
 use crate::structs::range::leaf_entry;
 
 use crate::structs::update::{read_slot_exact, set_leaf_slot, split_leaf_slot};
 
 verus! {
 
-/// Replaces the mapping in slot `index` of `base` with a `child_level` table
+/// Replaces the mapping in slot `index` of `page_ptr` with a `child_level` table
 /// that maps the same bytes the same way, and hands back the way into it.
 ///
 /// Fails, harmlessly, if the slot does not hold a mapping: another thread may
@@ -39,23 +40,26 @@ verus! {
 /// call, and in both cases the caller's next look at the slot tells it what to
 /// do.
 pub fn split_huge_at<A: ArchPagingMeta, P: PagingHandler>(
-    base: VirtAddr,
+    page_ptr: *mut PTPage<A>,
     index: usize,
     Tracked(page): Tracked<&PTPageSharedPerm<A>>,
     child_level: PageLevel,
-) -> (ret: Result<(VirtAddr, Tracked<PayloadTicket<Option<PTPageSharedPerm<A>>>>), PagingError>)
+) -> (ret: Result<
+    (*mut PTPage<A>, Tracked<PayloadTicket<Option<PTPageSharedPerm<A>>>>),
+    PagingError,
+>)
     requires
         level_geometry_wf::<A>(),
         page.wf(),
-        page.base == base@,
+        page.base == page_ptr@.addr,
         index < PTEntry::<A>::count_per_page(),
     ensures
-        ret matches Ok((child_base, ticket)) ==> {
+        ret matches Ok((child_ptr, ticket)) ==> {
             &&& ticket@.id() == page.slots[index as int].slot_id()
             &&& ticket@.version() == page.slots[index as int].slot_version()
             &&& ticket@.payload() is Some
             &&& ticket@.payload()->Some_0.wf()
-            &&& ticket@.payload()->Some_0.base == child_base@
+            &&& ticket@.payload()->Some_0.base == child_ptr@.addr
         },
 {
     let (paddr, Tracked(init)) = match P::allocate_table_page::<A>() {
@@ -65,12 +69,12 @@ pub fn split_huge_at<A: ArchPagingMeta, P: PagingHandler>(
         Ok(allocated) => allocated,
     };
     let child_base = P::paddr_to_vaddr::<A>(paddr);
-    let lock = P::page_lock(base);
+    let lock = P::page_lock(page_ptr);
     let Tracked(mut writers) = lock.lock::<A>(Tracked(page));
     proof {
         crate::structs::concurrent_pt::lemma_ids_match::<A>(writers, *page);
     }
-    let ptr = entry_ptr::<A>(base, index, Tracked(page));
+    let ptr = entry_ptr::<A>(page_ptr, index, Tracked(page));
     let tracked reader = page.slots.tracked_borrow(index as int);
     let current = read_slot_exact::<A>(ptr, Tracked(reader), Tracked(&writers), index);
     if current.is_table() || !current.present() {
@@ -86,14 +90,15 @@ pub fn split_huge_at<A: ArchPagingMeta, P: PagingHandler>(
         child_page = readers;
         child_writers = ws;
     }
+    let child_ptr = page_from_vaddr::<A>(child_base, Tracked(&child_page));
     fill_split_page::<A>(
-        child_base,
+        child_ptr,
         Tracked(&child_page),
         Tracked(&mut child_writers),
         child_level,
         current,
     );
-    let child_lock = P::page_lock(child_base);
+    let child_lock = P::page_lock(child_ptr);
     child_lock.deposit::<A>(Tracked(&child_page), Tracked(child_writers));
 
     let tagged = PhysAddr::from(paddr.bits() | A::private_pte_mask());
@@ -107,7 +112,7 @@ pub fn split_huge_at<A: ArchPagingMeta, P: PagingHandler>(
     }
     let table_entry = PTEntry::<A>::new_table(tagged, A::PTFlags::parent_flags());
     let linked = split_leaf_slot::<A>(
-        base,
+        page_ptr,
         index,
         Tracked(page),
         Tracked(&mut writers),
@@ -117,7 +122,7 @@ pub fn split_huge_at<A: ArchPagingMeta, P: PagingHandler>(
     lock.unlock::<A>(Tracked(page), Tracked(writers));
     match linked {
         Err(e) => Err(e),
-        Ok(ticket) => Ok((child_base, ticket)),
+        Ok(ticket) => Ok((child_ptr, ticket)),
     }
 }
 
@@ -130,7 +135,7 @@ pub fn split_huge_at<A: ArchPagingMeta, P: PagingHandler>(
 /// only the size bit is recomputed, since it says "maps a page" at every level
 /// but the leaf, where the hardware reads that bit as something else entirely.
 fn fill_split_page<A: ArchPagingMeta>(
-    child_base: VirtAddr,
+    child_ptr: *mut PTPage<A>,
     Tracked(child): Tracked<&PTPageSharedPerm<A>>,
     Tracked(writers): Tracked<&mut PTPageWritePerm<A>>,
     child_level: PageLevel,
@@ -139,7 +144,7 @@ fn fill_split_page<A: ArchPagingMeta>(
     requires
         level_geometry_wf::<A>(),
         child.wf(),
-        child.base == child_base@,
+        child.base == child_ptr@.addr,
         old(writers).ids() =~= child.ids(),
     ensures
         final(writers).ids() =~= child.ids(),
@@ -160,7 +165,7 @@ fn fill_split_page<A: ArchPagingMeta>(
     while i < count
         invariant
             child.wf(),
-            child.base == child_base@,
+            child.base == child_ptr@.addr,
             writers.ids() =~= child.ids(),
             count == PTEntry::<A>::count_per_page(),
             shift < 64,
@@ -168,7 +173,7 @@ fn fill_split_page<A: ArchPagingMeta>(
         decreases count - i,
     {
         let entry = leaf_entry::<A>(frame | (i << shift), piece_flags);
-        let _ = set_leaf_slot::<A>(child_base, i, Tracked(child), Tracked(writers), entry);
+        let _ = set_leaf_slot::<A>(child_ptr, i, Tracked(child), Tracked(writers), entry);
         i = i + 1;
     }
 }

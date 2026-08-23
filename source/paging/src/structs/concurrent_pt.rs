@@ -11,10 +11,9 @@
 //! slot's value may go -- is in `specs::concurrent_entry`.
 use concurrent_rw::WritePerm;
 use vstd::prelude::*;
-use vstd::raw_ptr::{with_exposed_provenance, IsExposed};
+use vstd::raw_ptr::IsExposed;
 use vstd::resource::Loc;
 
-use crate::structs::address::{Address, VirtAddr};
 use crate::structs::arch_contract::{slot_addr, ArchPagingMeta};
 use crate::structs::entry::PTEntry;
 use crate::structs::level::PageLevel;
@@ -93,29 +92,6 @@ impl<A: ArchPagingMeta> PTPageWritePerm<A> {
     pub open spec fn ids(self) -> Seq<Loc> {
         self.slots.map_values(|slot: WritePerm<PTEntry<A>>| slot.id())
     }
-}
-
-/// A pointer to the word entry `index` of this page occupies.
-///
-/// The page's own provenance is what makes the pointer usable: a table page is
-/// reached by address, not by keeping a pointer to it, so the provenance has to
-/// come from the tokens rather than from a pointer the caller already had.
-pub fn entry_ptr<A: ArchPagingMeta>(
-    base: VirtAddr,
-    index: usize,
-    Tracked(page): Tracked<&PTPageSharedPerm<A>>,
-) -> (ret: *mut usize)
-    requires
-        page.wf(),
-        page.base == base@,
-        index < PTEntry::<A>::count_per_page(),
-    ensures
-        ret == page.slots[index as int].ptr(),
-{
-    let ghost i = index as int;
-    assert(page.slots[i].ptr()@.addr == slot_addr::<A>(page.base, i));
-    let addr = base.bits() + index * core::mem::size_of::<usize>();
-    with_exposed_provenance(addr, Tracked(page.provenance))
 }
 
 } // verus!
