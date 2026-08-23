@@ -143,8 +143,7 @@ pub trait RWContract: RWModel + From<Self::AtomicType> + Into<Self::AtomicType> 
             ret.0.ptr() == r.ptr(),
             ret.0.value().into_spec() == w@,
             w@.wf_payload(ret.1),
-        opens_invariants
-            [r.namespace()]
+        opens_invariants [r.namespace()]
     ;
 
     /// Reads, optionally holding an `Observed` for a value seen earlier.
@@ -219,6 +218,7 @@ pub trait RWContract: RWModel + From<Self::AtomicType> + Into<Self::AtomicType> 
             r.has_observed(ret@),
             ret@@ == value,
             value == final(w)@,
+            final(w).id() == old(w).id(),
         opens_invariants any
     ;
 
@@ -246,6 +246,7 @@ pub trait RWContract: RWModel + From<Self::AtomicType> + Into<Self::AtomicType> 
             r.has_observed(ret@),
             ret@@ == value,
             value == final(w)@,
+            final(w).id() == old(w).id(),
         opens_invariants any
     ;
 
@@ -362,6 +363,7 @@ pub trait RWWithPublishPayloadContract: RWContract + PublishPayload {
             r.has_observed(ret.0@),
             ret.0@@ == value,
             value == final(w)@,
+            final(w).id() == old(w).id(),
             // The ticket is good at this reader's slot and version, so `payloads_agree` applies
             // to it and every ticket a later read mints.
             ret.1@.id() == r.slot_id(),

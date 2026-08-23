@@ -215,6 +215,7 @@ pub fn write_with_payload<T: RWModel<AtomicType = usize> + From<usize> + Into<us
         r.has_observed(ret@),
         ret@@ == value,
         value == final(w)@,
+        final(w).id() == old(w).id(),
 {
     let tracked observed;
     let value_atomic: usize = value.into();
@@ -254,6 +255,7 @@ pub fn write_with_published_payload<
         r.has_observed(ret.0@),
         ret.0@@ == value,
         value == final(w)@,
+        final(w).id() == old(w).id(),
         ret.1@.id() == r.slot_id(),
         ret.1@.version() == r.slot_version(),
         value.wf_payload(ret.1@.payload()),
@@ -297,6 +299,7 @@ pub fn write<T: RWModel<AtomicType = usize> + From<usize> + Into<usize>>(
         r.has_observed(ret@),
         ret@@ == value,
         value == final(w)@,
+        final(w).id() == old(w).id(),
 {
     let tracked observed;
     let value_atomic: usize = value.into();
