@@ -36,7 +36,7 @@ verus! {
 /// `level` bounds the descent; it is not read off the pages, so a page whose
 /// entries claim to point at tables below the leaf level is simply not
 /// followed. Nothing this crate writes produces one.
-pub fn free_page_tree<A: ArchPagingMeta, H: PagingHandler>(
+pub fn free_page_tree<A: ArchPagingMeta, P: PagingHandler>(
     base: VirtAddr,
     level: PageLevel,
     Tracked(page): Tracked<PTPageSharedPerm<A>>,
@@ -59,7 +59,7 @@ pub fn free_page_tree<A: ArchPagingMeta, H: PagingHandler>(
     let tracked PTPageSharedPerm { slots: readers, provenance, base: page_base, frame, level: _ } =
         page;
     let tracked PTPageWritePerm { slots: writer_slots } = writers;
-    let Tracked(points) = free_slots::<A, H>(
+    let Tracked(points) = free_slots::<A, P>(
         base,
         level,
         count,
@@ -78,7 +78,7 @@ pub fn free_page_tree<A: ArchPagingMeta, H: PagingHandler>(
 /// stay prefixes of the originals -- the same shape as `build_slots`, which it
 /// undoes. The recursive call comes first so that the words come back in index
 /// order.
-fn free_slots<A: ArchPagingMeta, H: PagingHandler>(
+fn free_slots<A: ArchPagingMeta, P: PagingHandler>(
     base: VirtAddr,
     level: PageLevel,
     count: usize,
@@ -115,7 +115,7 @@ fn free_slots<A: ArchPagingMeta, H: PagingHandler>(
     let tracked mut writers = writers;
     let tracked reader = readers.tracked_pop();
     let tracked writer = writers.tracked_pop();
-    let Tracked(mut points) = free_slots::<A, H>(
+    let Tracked(mut points) = free_slots::<A, P>(
         base,
         level,
         index,
@@ -133,7 +133,7 @@ fn free_slots<A: ArchPagingMeta, H: PagingHandler>(
         Tracked(&writer),
     );
     let tracked (word, payload) = PTEntry::<A>::teardown_rw(reader, writer);
-    free_child::<A, H>(level, entry, Tracked(payload));
+    free_child::<A, P>(level, entry, Tracked(payload));
     proof {
         points.tracked_push(word);
     }
@@ -145,7 +145,7 @@ fn free_slots<A: ArchPagingMeta, H: PagingHandler>(
 /// The child's writers come out of the child's lock: that is where they were
 /// left when the page was linked, and taking them back is what says no other
 /// thread is in the middle of an update to it.
-fn free_child<A: ArchPagingMeta, H: PagingHandler>(
+fn free_child<A: ArchPagingMeta, P: PagingHandler>(
     level: PageLevel,
     entry: PTEntry<A>,
     Tracked(payload): Tracked<Option<PTPageSharedPerm<A>>>,
@@ -168,17 +168,17 @@ fn free_child<A: ArchPagingMeta, H: PagingHandler>(
         lemma_phys_addr_from_bits(entry.page_frame_spec());
     }
     let paddr = PhysAddr::from(entry.page_frame());
-    let child_base = H::paddr_to_vaddr::<A>(paddr);
+    let child_base = P::paddr_to_vaddr::<A>(paddr);
     let tracked child = payload.tracked_unwrap();
-    let child_lock = H::page_lock(child_base);
+    let child_lock = P::page_lock(child_base);
     let Tracked(child_writers) = child_lock.lock::<A>(Tracked(&child));
-    let init = free_page_tree::<A, H>(
+    let init = free_page_tree::<A, P>(
         child_base,
         child_level,
         Tracked(child),
         Tracked(child_writers),
     );
-    H::deallocate_table_page::<A>(paddr, init);
+    P::deallocate_table_page::<A>(paddr, init);
 }
 
 } // verus!

@@ -38,7 +38,7 @@ verus! {
 /// have unmapped or already split it between the walk that found it and this
 /// call, and in both cases the caller's next look at the slot tells it what to
 /// do.
-pub fn split_huge_at<A: ArchPagingMeta, H: PagingHandler>(
+pub fn split_huge_at<A: ArchPagingMeta, P: PagingHandler>(
     base: VirtAddr,
     index: usize,
     Tracked(page): Tracked<&PTPageSharedPerm<A>>,
@@ -58,14 +58,14 @@ pub fn split_huge_at<A: ArchPagingMeta, H: PagingHandler>(
             &&& ticket@.payload()->Some_0.base == child_base@
         },
 {
-    let (paddr, Tracked(init)) = match H::allocate_table_page::<A>() {
+    let (paddr, Tracked(init)) = match P::allocate_table_page::<A>() {
         Err(e) => {
             return Err(e);
         },
         Ok(allocated) => allocated,
     };
-    let child_base = H::paddr_to_vaddr::<A>(paddr);
-    let lock = H::page_lock(base);
+    let child_base = P::paddr_to_vaddr::<A>(paddr);
+    let lock = P::page_lock(base);
     let Tracked(mut writers) = lock.lock::<A>(Tracked(page));
     proof {
         crate::structs::concurrent_pt::lemma_ids_match::<A>(writers, *page);
@@ -75,7 +75,7 @@ pub fn split_huge_at<A: ArchPagingMeta, H: PagingHandler>(
     let current = read_slot_exact::<A>(ptr, Tracked(reader), Tracked(&writers), index);
     if current.is_table() || !current.present() {
         lock.unlock::<A>(Tracked(page), Tracked(writers));
-        H::deallocate_table_page::<A>(paddr, Tracked(init));
+        P::deallocate_table_page::<A>(paddr, Tracked(init));
         return Err(PagingError::NotLeafEntry);
     }
     let tracked child_page;
@@ -93,7 +93,7 @@ pub fn split_huge_at<A: ArchPagingMeta, H: PagingHandler>(
         child_level,
         current,
     );
-    let child_lock = H::page_lock(child_base);
+    let child_lock = P::page_lock(child_base);
     child_lock.deposit::<A>(Tracked(&child_page), Tracked(child_writers));
 
     let tagged = PhysAddr::from(paddr.bits() | A::private_pte_mask());

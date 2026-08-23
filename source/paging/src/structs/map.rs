@@ -35,7 +35,7 @@ verus! {
 /// unmapped first, so that whoever owns the old mapping learns that it is
 /// gone. Fails too if `target` is deeper than the tree, which is the only way
 /// a caller can ask for a page size the architecture does not have here.
-pub fn map_at<A: ArchPagingMeta, H: PagingHandler>(
+pub fn map_at<A: ArchPagingMeta, P: PagingHandler>(
     base: VirtAddr,
     level: PageLevel,
     Tracked(page): Tracked<&PTPageSharedPerm<A>>,
@@ -54,7 +54,7 @@ pub fn map_at<A: ArchPagingMeta, H: PagingHandler>(
     let ghost i = index as int;
     let ptr = slot_ptr::<A>(base, index, Tracked(page));
     if level.depth() == target.depth() {
-        let lock = H::page_lock(base);
+        let lock = P::page_lock(base);
         let Tracked(mut writers) = lock.lock::<A>(Tracked(page));
         let ret = set_leaf_slot::<A>(base, index, Tracked(page), Tracked(&mut writers), entry);
         lock.unlock::<A>(Tracked(page), Tracked(writers));
@@ -80,13 +80,13 @@ pub fn map_at<A: ArchPagingMeta, H: PagingHandler>(
             child_page = slot.borrow_published_payload(&slot_ticket).tracked_borrow();
             lemma_phys_addr_from_bits(current.page_frame_spec());
         }
-        let child_base = H::paddr_to_vaddr::<A>(PhysAddr::from(current.page_frame()));
-        return map_at::<A, H>(child_base, child_level, Tracked(child_page), vaddr, target, entry);
+        let child_base = P::paddr_to_vaddr::<A>(PhysAddr::from(current.page_frame()));
+        return map_at::<A, P>(child_base, child_level, Tracked(child_page), vaddr, target, entry);
     }
     if current.present() {
         return Err(PagingError::EntryAlreadyPresent);
     }
-    grow_and_map::<A, H>(base, index, level, Tracked(page), vaddr, target, entry)
+    grow_and_map::<A, P>(base, index, level, Tracked(page), vaddr, target, entry)
 }
 
 /// Puts a new table page under the empty slot `index` and continues the map in
@@ -94,7 +94,7 @@ pub fn map_at<A: ArchPagingMeta, H: PagingHandler>(
 ///
 /// Split out of [`map_at`] only to keep that function's shape readable; it is
 /// one step of the same recursion and calls back into it.
-fn grow_and_map<A: ArchPagingMeta, H: PagingHandler>(
+fn grow_and_map<A: ArchPagingMeta, P: PagingHandler>(
     base: VirtAddr,
     index: usize,
     level: PageLevel,
@@ -118,7 +118,7 @@ fn grow_and_map<A: ArchPagingMeta, H: PagingHandler>(
         },
         Some(child_level) => child_level,
     };
-    let (child_base, ticket) = match create_and_link_child::<A, H>(
+    let (child_base, ticket) = match create_and_link_child::<A, P>(
         base,
         index,
         Tracked(page),
@@ -131,7 +131,7 @@ fn grow_and_map<A: ArchPagingMeta, H: PagingHandler>(
     };
     let tracked slot = page.slots.tracked_borrow(index as int);
     let tracked child_page = slot.borrow_published_payload(ticket.borrow()).tracked_borrow();
-    map_at::<A, H>(child_base, child_level, Tracked(child_page), vaddr, target, entry)
+    map_at::<A, P>(child_base, child_level, Tracked(child_page), vaddr, target, entry)
 }
 
 /// Allocates a table page, publishes it, and links it into the empty slot
@@ -144,7 +144,7 @@ fn grow_and_map<A: ArchPagingMeta, H: PagingHandler>(
 ///
 /// The writers go into the child's own lock before the link, because after the
 /// link the page is reachable and whoever wants to write it will look there.
-pub fn create_and_link_child<A: ArchPagingMeta, H: PagingHandler>(
+pub fn create_and_link_child<A: ArchPagingMeta, P: PagingHandler>(
     base: VirtAddr,
     index: usize,
     Tracked(page): Tracked<&PTPageSharedPerm<A>>,
@@ -163,13 +163,13 @@ pub fn create_and_link_child<A: ArchPagingMeta, H: PagingHandler>(
             &&& ticket@.payload()->Some_0.base == child_base@
         },
 {
-    let (paddr, Tracked(init)) = match H::allocate_table_page::<A>() {
+    let (paddr, Tracked(init)) = match P::allocate_table_page::<A>() {
         Err(e) => {
             return Err(e);
         },
         Ok(allocated) => allocated,
     };
-    let child_base = H::paddr_to_vaddr::<A>(paddr);
+    let child_base = P::paddr_to_vaddr::<A>(paddr);
     let tracked child_page;
     let tracked child_writers;
     proof {
@@ -178,7 +178,7 @@ pub fn create_and_link_child<A: ArchPagingMeta, H: PagingHandler>(
         child_page = readers;
         child_writers = writers;
     }
-    let child_lock = H::page_lock(child_base);
+    let child_lock = P::page_lock(child_base);
     child_lock.deposit::<A>(Tracked(&child_page), Tracked(child_writers));
 
     let tagged = PhysAddr::from(paddr.bits() | A::private_pte_mask());
@@ -192,7 +192,7 @@ pub fn create_and_link_child<A: ArchPagingMeta, H: PagingHandler>(
     }
     let table_entry = PTEntry::<A>::new_table(tagged, A::PTFlags::parent_flags());
 
-    let lock = H::page_lock(base);
+    let lock = P::page_lock(base);
     let Tracked(mut writers) = lock.lock::<A>(Tracked(page));
     let linked = link_table_slot::<A>(
         base,

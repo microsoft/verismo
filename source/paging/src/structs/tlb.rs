@@ -50,9 +50,9 @@ impl MayNeedFlush {
     }
 
     /// Hands the range to the OS to invalidate.
-    pub fn flush<H: PagingHandler>(self) {
+    pub fn flush<P: PagingHandler>(self) {
         if self.start < self.end {
-            H::flush_range(self.start, self.end);
+            P::flush_range(self.start, self.end);
         }
     }
 

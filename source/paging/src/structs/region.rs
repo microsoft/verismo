@@ -28,7 +28,7 @@ verus! {
 /// that already maps -- the same partial-failure behaviour a single ranged
 /// pass has, for the same reason: undoing the writes would mean unmapping
 /// addresses that another thread may have started using.
-pub fn map_region<A: ArchPagingMeta, H: PagingHandler>(
+pub fn map_region<A: ArchPagingMeta, P: PagingHandler>(
     base: VirtAddr,
     level: PageLevel,
     Tracked(page): Tracked<&PTPageSharedPerm<A>>,
@@ -59,25 +59,25 @@ pub fn map_region<A: ArchPagingMeta, H: PagingHandler>(
     if (vstart ^ paddr) & mask != 0 {
         // The two addresses do not agree on where a big block begins, so no
         // big page can map any part of this region.
-        return range_at::<A, H>(base, level, Tracked(page), vstart, vend, small, small_op);
+        return range_at::<A, P>(base, level, Tracked(page), vstart, vend, small, small_op);
     }
     let head_end = block_start_after::<A>(vstart, vend, size, mask);
     let mid_end = block_start_at_or_before::<A>(head_end, vend, mask);
-    match range_at::<A, H>(base, level, Tracked(page), vstart, head_end, small, small_op) {
+    match range_at::<A, P>(base, level, Tracked(page), vstart, head_end, small, small_op) {
         Err(e) => {
             return Err(e);
         },
         Ok(()) => {},
     }
     let mid_op = RangeOp::Map { paddr: paddr + (head_end - vstart), flags: big_flags };
-    match range_at::<A, H>(base, level, Tracked(page), head_end, mid_end, big, mid_op) {
+    match range_at::<A, P>(base, level, Tracked(page), head_end, mid_end, big, mid_op) {
         Err(e) => {
             return Err(e);
         },
         Ok(()) => {},
     }
     let tail_op = RangeOp::Map { paddr: paddr + (mid_end - vstart), flags: small_flags };
-    range_at::<A, H>(base, level, Tracked(page), mid_end, vend, small, tail_op)
+    range_at::<A, P>(base, level, Tracked(page), mid_end, vend, small, tail_op)
 }
 
 /// Where the first whole block of `size` bytes inside `[vstart, vend)` begins,

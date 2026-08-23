@@ -42,7 +42,7 @@ pub enum LeafUpdate<A: ArchPagingMeta> {
 /// The value the walk sees on the way down may be stale, but a stale table
 /// pointer is still a table pointer, and the entry that is finally replaced is
 /// read again under the writer, so what comes back is what was really there.
-pub fn update_leaf_at<A: ArchPagingMeta, H: PagingHandler>(
+pub fn update_leaf_at<A: ArchPagingMeta, P: PagingHandler>(
     base: VirtAddr,
     level: PageLevel,
     Tracked(page): Tracked<&PTPageSharedPerm<A>>,
@@ -80,14 +80,14 @@ pub fn update_leaf_at<A: ArchPagingMeta, H: PagingHandler>(
             child_page = slot.borrow_published_payload(&slot_ticket).tracked_borrow();
             lemma_phys_addr_from_bits(current.page_frame_spec());
         }
-        let child_base = H::paddr_to_vaddr::<A>(PhysAddr::from(current.page_frame()));
-        return update_leaf_at::<A, H>(child_base, child_level, Tracked(child_page), vaddr, update);
+        let child_base = P::paddr_to_vaddr::<A>(PhysAddr::from(current.page_frame()));
+        return update_leaf_at::<A, P>(child_base, child_level, Tracked(child_page), vaddr, update);
     }
     if !current.present() {
         return Err(PagingError::NotMapped);
     }
     let replacement = leaf_replacement::<A>(current, update);
-    let lock = H::page_lock(base);
+    let lock = P::page_lock(base);
     let Tracked(mut writers) = lock.lock::<A>(Tracked(page));
     let ret = replace_leaf_slot::<A>(
         base,

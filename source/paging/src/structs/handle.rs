@@ -44,15 +44,15 @@ verus! {
 /// The root page is adopted, never allocated here: whoever installs a table in
 /// hardware owns its lifetime, and this handle owns only the right to read and
 /// update its slots.
-pub struct PageTableHandle<A: ArchPagingMeta, H: PagingHandler> {
+pub struct PageTableHandle<A: ArchPagingMeta, P: PagingHandler> {
     root: VirtAddr,
     level: PageLevel,
     page: Tracked<PTPageSharedPerm<A>>,
     install: Tracked<PTInstallState<A>>,
-    dummy: PhantomData<(A, H)>,
+    dummy: PhantomData<(A, P)>,
 }
 
-impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
+impl<A: ArchPagingMeta, P: PagingHandler> PageTableHandle<A, P> {
     pub closed spec fn root_spec(&self) -> VirtAddr {
         self.root
     }
@@ -84,7 +84,7 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
         &&& self.page_spec().wf()
         &&& self.page_spec().level == self.root_level()
         &&& self.page_spec().base == self.root_spec()@
-        &&& self.install_spec().root_frame() == H::spec_vaddr_to_paddr(self.root_spec()@)
+        &&& self.install_spec().root_frame() == P::spec_vaddr_to_paddr(self.root_spec()@)
     }
 
     #[verifier::when_used_as_spec(root_spec)]
@@ -107,7 +107,7 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
             page.wf(),
             page.base == root@,
             page.level == level,
-            install.root_frame() == H::spec_vaddr_to_paddr(root@),
+            install.root_frame() == P::spec_vaddr_to_paddr(root@),
         ensures
             ret.inv(),
             ret.root_spec() == root,
@@ -137,7 +137,7 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
             ret.level.spec_depth() <= self.root_level().spec_depth(),
             ret.entry.is_table_spec() ==> ret.level.spec_is_leaf(),
     {
-        descend::<A, H>(self.root, self.level, self.borrow_page(), vaddr)
+        descend::<A, P>(self.root, self.level, self.borrow_page(), vaddr)
     }
 
     /// The physical address `vaddr` maps to, or why it does not map.
@@ -217,7 +217,7 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
     {
         let leaf_flags = level_flags::<A>(flags, target);
         let entry = PTEntry::<A>::new_leaf(paddr, leaf_flags);
-        map_at::<A, H>(self.root, self.level, self.borrow_page(), vaddr, target, entry)
+        map_at::<A, P>(self.root, self.level, self.borrow_page(), vaddr, target, entry)
     }
 
     /// Removes the mapping `vaddr` leads to, returning the entry that was
@@ -232,7 +232,7 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
         ensures
             ret matches Ok(old) ==> !old.is_table_spec(),
     {
-        update_leaf_at::<A, H>(self.root, self.level, self.borrow_page(), vaddr, LeafUpdate::Clear)
+        update_leaf_at::<A, P>(self.root, self.level, self.borrow_page(), vaddr, LeafUpdate::Clear)
     }
 
     /// Replaces the permissions of the mapping `vaddr` leads to, keeping the
@@ -247,7 +247,7 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
         ensures
             ret matches Ok((old, _)) ==> !old.is_table_spec(),
     {
-        match update_leaf_at::<A, H>(
+        match update_leaf_at::<A, P>(
             self.root,
             self.level,
             self.borrow_page(),
@@ -278,7 +278,7 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
         ensures
             ret matches Ok((old, _)) ==> !old.is_table_spec(),
     {
-        match update_leaf_at::<A, H>(
+        match update_leaf_at::<A, P>(
             self.root,
             self.level,
             self.borrow_page(),
@@ -298,7 +298,7 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
         ensures
             ret@ == self.install_spec().root_frame(),
     {
-        H::vaddr_to_paddr(self.root)
+        P::vaddr_to_paddr(self.root)
     }
 
     /// Records that the paging-root register now names this tree, so that the
@@ -318,7 +318,7 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
             final(self).root_level() == old(self).root_level(),
             final(self).page_spec() == old(self).page_spec(),
     {
-        let root = H::vaddr_to_paddr(self.root);
+        let root = P::vaddr_to_paddr(self.root);
         PTInstallState::<A>::mark_installed(Tracked(self.install.borrow_mut()), root, Tracked(cr3));
     }
 
@@ -360,7 +360,7 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
             paddr + (vend - vstart) <= usize::MAX,
     {
         let leaf_flags = level_flags::<A>(flags, target);
-        range_at::<A, H>(
+        range_at::<A, P>(
             self.root,
             self.level,
             self.borrow_page(),
@@ -393,7 +393,7 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
             vstart <= vend,
             paddr + (vend - vstart) <= usize::MAX,
     {
-        map_region::<A, H>(
+        map_region::<A, P>(
             self.root,
             self.level,
             self.borrow_page(),
@@ -419,7 +419,7 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
             self.inv(),
             vstart <= vend,
     {
-        match range_at::<A, H>(
+        match range_at::<A, P>(
             self.root,
             self.level,
             self.borrow_page(),
@@ -447,7 +447,7 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
             vstart <= vend,
     {
         let leaf_flags = level_flags::<A>(flags, target);
-        match range_at::<A, H>(
+        match range_at::<A, P>(
             self.root,
             self.level,
             self.borrow_page(),
@@ -516,9 +516,9 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
             ret.0@.base == self.root_spec()@,
     {
         let (root, level, page, install) = self.into_parts();
-        let lock = H::page_lock(root);
+        let lock = P::page_lock(root);
         let writers = lock.lock::<A>(Tracked(page.borrow()));
-        let init = free_page_tree::<A, H>(root, level, page, writers);
+        let init = free_page_tree::<A, P>(root, level, page, writers);
         (init, install)
     }
 
@@ -539,9 +539,9 @@ impl<A: ArchPagingMeta, H: PagingHandler> PageTableHandle<A, H> {
             self.inv(),
             index < PTEntry::<A>::count_per_page(),
     {
-        let frame = H::vaddr_to_paddr(self.root);
+        let frame = P::vaddr_to_paddr(self.root);
         let entry = leaf_entry::<A>(frame.bits() | A::private_pte_mask(), flags);
-        let lock = H::page_lock(self.root);
+        let lock = P::page_lock(self.root);
         let Tracked(mut writers) = lock.lock::<A>(self.borrow_page());
         let ret = set_leaf_slot::<A>(
             self.root,
