@@ -7,9 +7,9 @@
 //! the inner one -- see `os_contract`.
 //!
 //! The tokens live in the handle rather than being threaded through every call:
-//! the reader half of a table page is shareable by `&`, so `&PageTableHandle`
+//! the reader half of a table page is shareable by `&`, so `&GenericPageTable`
 //! is exactly the capability a lock-free walk needs, and `&mut
-//! PageTableHandle` is exactly the exclusion `free` needs.
+//! GenericPageTable` is exactly the exclusion `free` needs.
 use machine_model::arch::x86_64::Cr3;
 use machine_model::register::RustRegisterPointsTo;
 
@@ -25,7 +25,7 @@ use crate::structs::concurrent_pt::PTPageSharedPerm;
 use crate::structs::entry::PTEntry;
 use crate::structs::free::free_page_tree;
 use crate::structs::geometry::shift_at;
-use crate::structs::level::PageLevel;
+use crate::structs::level::{PageLevel, PagingLevel};
 use crate::structs::map::map_at;
 use crate::structs::os_contract::{PTPageInit, PageLock, PagingError, PagingHandler};
 use crate::structs::range::{leaf_entry, level_flags, range_at, RangeOp};
@@ -34,7 +34,7 @@ use crate::structs::state::PTInstallState;
 use crate::structs::tlb::MayNeedFlush;
 use crate::structs::unmap::{update_leaf_at, LeafUpdate};
 use crate::structs::update::set_leaf_slot;
-use crate::structs::walk::{descend, WalkResult};
+use crate::structs::walk::WalkResult;
 
 verus! {
 
@@ -44,15 +44,14 @@ verus! {
 /// The root page is adopted, never allocated here: whoever installs a table in
 /// hardware owns its lifetime, and this handle owns only the right to read and
 /// update its slots.
-pub struct PageTableHandle<A: ArchPagingMeta, P: PagingHandler> {
+pub struct GenericPageTable<A: ArchPagingMeta, P: PagingHandler, L: PagingLevel> {
     root: VirtAddr,
-    level: PageLevel,
     page: Tracked<PTPageSharedPerm<A>>,
     install: Tracked<PTInstallState<A>>,
-    dummy: PhantomData<(A, P)>,
+    dummy: PhantomData<(A, P, L)>,
 }
 
-impl<A: ArchPagingMeta, P: PagingHandler> PageTableHandle<A, P> {
+impl<A: ArchPagingMeta, P: PagingHandler, L: PagingLevel> GenericPageTable<A, P, L> {
     pub closed spec fn root_spec(&self) -> VirtAddr {
         self.root
     }
@@ -65,11 +64,11 @@ impl<A: ArchPagingMeta, P: PagingHandler> PageTableHandle<A, P> {
         self.install@
     }
 
-    /// The level of the root page, and so how deep the tree is. Nothing static
-    /// fixes it: an operation that also holds the register state checks it
-    /// against `PagingRegisters::level_count`.
-    pub closed spec fn root_level(&self) -> PageLevel {
-        self.level
+    /// The level of the root page, and so how deep the tree is. This is the
+    /// one level that is static: every level below it is a value the walk
+    /// carries.
+    pub open spec fn root_level(&self) -> PageLevel {
+        L::TOP_LEVEL
     }
 
     /// Whether the hardware may be walking this tree.
@@ -98,7 +97,6 @@ impl<A: ArchPagingMeta, P: PagingHandler> PageTableHandle<A, P> {
     /// Adopts a root page whose slots the caller already owns.
     pub fn new(
         root: VirtAddr,
-        level: PageLevel,
         Tracked(page): Tracked<PTPageSharedPerm<A>>,
         Tracked(install): Tracked<PTInstallState<A>>,
     ) -> (ret: Self)
@@ -106,18 +104,17 @@ impl<A: ArchPagingMeta, P: PagingHandler> PageTableHandle<A, P> {
             level_geometry_wf::<A>(),
             page.wf(),
             page.base == root@,
-            page.level == level,
+            page.level == L::TOP_LEVEL,
             install.root_frame() == P::spec_vaddr_to_paddr(root@),
         ensures
             ret.inv(),
             ret.root_spec() == root,
-            ret.root_level() == level,
+            ret.root_level() == L::TOP_LEVEL,
             ret.page_spec() == page,
             ret.install_spec() == install,
     {
-        PageTableHandle {
+        GenericPageTable {
             root,
-            level,
             page: Tracked(page),
             install: Tracked(install),
             dummy: PhantomData,
@@ -130,14 +127,14 @@ impl<A: ArchPagingMeta, P: PagingHandler> PageTableHandle<A, P> {
     /// Takes `&self`, so any number of threads may query at once, and takes no
     /// lock: what comes back is an observation of the tree, and only what
     /// `entry_step` preserves stays true of it afterwards.
-    pub fn query(&self, vaddr: VirtAddr) -> (ret: WalkResult<A>)
+    pub fn walk(&self, vaddr: VirtAddr) -> (ret: WalkResult<A>)
         requires
             self.inv(),
         ensures
             ret.level.spec_depth() <= self.root_level().spec_depth(),
             ret.entry.is_table_spec() ==> ret.level.spec_is_leaf(),
     {
-        descend::<A, P>(self.root, self.level, self.borrow_page(), vaddr)
+        crate::structs::walk::walk::<A, P>(self.root, L::TOP_LEVEL, self.borrow_page(), vaddr)
     }
 
     /// The physical address `vaddr` maps to, or why it does not map.
@@ -186,7 +183,7 @@ impl<A: ArchPagingMeta, P: PagingHandler> PageTableHandle<A, P> {
         requires
             self.inv(),
     {
-        let stop = self.query(vaddr);
+        let stop = self.walk(vaddr);
         if stop.entry.present() && !stop.entry.is_table() {
             Ok((PhysAddr::from(stop.entry.address()), stop.level))
         } else {
@@ -217,7 +214,7 @@ impl<A: ArchPagingMeta, P: PagingHandler> PageTableHandle<A, P> {
     {
         let leaf_flags = level_flags::<A>(flags, target);
         let entry = PTEntry::<A>::new_leaf(paddr, leaf_flags);
-        map_at::<A, P>(self.root, self.level, self.borrow_page(), vaddr, target, entry)
+        map_at::<A, P>(self.root, L::TOP_LEVEL, self.borrow_page(), vaddr, target, entry)
     }
 
     /// Removes the mapping `vaddr` leads to, returning the entry that was
@@ -232,7 +229,13 @@ impl<A: ArchPagingMeta, P: PagingHandler> PageTableHandle<A, P> {
         ensures
             ret matches Ok(old) ==> !old.is_table_spec(),
     {
-        update_leaf_at::<A, P>(self.root, self.level, self.borrow_page(), vaddr, LeafUpdate::Clear)
+        update_leaf_at::<A, P>(
+            self.root,
+            L::TOP_LEVEL,
+            self.borrow_page(),
+            vaddr,
+            LeafUpdate::Clear,
+        )
     }
 
     /// Replaces the permissions of the mapping `vaddr` leads to, keeping the
@@ -249,7 +252,7 @@ impl<A: ArchPagingMeta, P: PagingHandler> PageTableHandle<A, P> {
     {
         match update_leaf_at::<A, P>(
             self.root,
-            self.level,
+            L::TOP_LEVEL,
             self.borrow_page(),
             vaddr,
             LeafUpdate::SetFlags(flags),
@@ -280,7 +283,7 @@ impl<A: ArchPagingMeta, P: PagingHandler> PageTableHandle<A, P> {
     {
         match update_leaf_at::<A, P>(
             self.root,
-            self.level,
+            L::TOP_LEVEL,
             self.borrow_page(),
             vaddr,
             LeafUpdate::SetSharing { shared },
@@ -362,7 +365,7 @@ impl<A: ArchPagingMeta, P: PagingHandler> PageTableHandle<A, P> {
         let leaf_flags = level_flags::<A>(flags, target);
         range_at::<A, P>(
             self.root,
-            self.level,
+            L::TOP_LEVEL,
             self.borrow_page(),
             vstart,
             vend,
@@ -395,7 +398,7 @@ impl<A: ArchPagingMeta, P: PagingHandler> PageTableHandle<A, P> {
     {
         map_region::<A, P>(
             self.root,
-            self.level,
+            L::TOP_LEVEL,
             self.borrow_page(),
             vstart,
             vend,
@@ -421,7 +424,7 @@ impl<A: ArchPagingMeta, P: PagingHandler> PageTableHandle<A, P> {
     {
         match range_at::<A, P>(
             self.root,
-            self.level,
+            L::TOP_LEVEL,
             self.borrow_page(),
             vstart,
             vend,
@@ -449,7 +452,7 @@ impl<A: ArchPagingMeta, P: PagingHandler> PageTableHandle<A, P> {
         let leaf_flags = level_flags::<A>(flags, target);
         match range_at::<A, P>(
             self.root,
-            self.level,
+            L::TOP_LEVEL,
             self.borrow_page(),
             vstart,
             vend,
@@ -515,10 +518,10 @@ impl<A: ArchPagingMeta, P: PagingHandler> PageTableHandle<A, P> {
             ret.0@.wf_owned(),
             ret.0@.base == self.root_spec()@,
     {
-        let (root, level, page, install) = self.into_parts();
+        let (root, page, install) = self.into_parts();
         let lock = P::page_lock(root);
         let writers = lock.lock::<A>(Tracked(page.borrow()));
-        let init = free_page_tree::<A, P>(root, level, page, writers);
+        let init = free_page_tree::<A, P>(root, L::TOP_LEVEL, page, writers);
         (init, install)
     }
 
@@ -566,17 +569,15 @@ impl<A: ArchPagingMeta, P: PagingHandler> PageTableHandle<A, P> {
     /// Gives the root tokens back, dissolving the handle.
     pub fn into_parts(self) -> (ret: (
         VirtAddr,
-        PageLevel,
         Tracked<PTPageSharedPerm<A>>,
         Tracked<PTInstallState<A>>,
     ))
         ensures
             ret.0 == self.root_spec(),
-            ret.1 == self.root_level(),
-            ret.2@ == self.page_spec(),
-            ret.3@ == self.install_spec(),
+            ret.1@ == self.page_spec(),
+            ret.2@ == self.install_spec(),
     {
-        (self.root, self.level, self.page, self.install)
+        (self.root, self.page, self.install)
     }
 }
 

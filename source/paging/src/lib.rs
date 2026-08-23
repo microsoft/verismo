@@ -3,8 +3,8 @@
 //!
 //! # What the crate provides
 //!
-//! [`handle::PageTableHandle`] owns a tree and offers the operations an OS
-//! needs: `query` and `translate` walk it, `map`, `unmap` and `protect` change
+//! [`handle::GenericPageTable`] owns a tree and offers the operations an OS
+//! needs: `walk` and `translate` walk it, `map`, `unmap` and `protect` change
 //! one address, `map_range`, `unmap_range` and `protect_range` change a whole
 //! range in one pass -- splitting a larger mapping when, and only when, the
 //! range ends inside one -- `install_self_map` makes the tables visible to

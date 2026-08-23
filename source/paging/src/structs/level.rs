@@ -95,6 +95,43 @@ impl PageLevel {
 }
 
 } // verus!
+verus! {
+
+/// The level a page table is rooted at, as a type.
+///
+/// Only the root level is static. Every level *below* it is a value carried by
+/// the walk, so this fixes how deep the tree is without generating a family of
+/// per-level functions -- which is the whole reason the level of an interior
+/// page is ghost state instead of a type parameter.
+pub trait PagingLevel: 'static {
+    const TOP_LEVEL: PageLevel;
+}
+
+pub struct PagingLevel4;
+
+impl PagingLevel for PagingLevel4 {
+    const TOP_LEVEL: PageLevel = PageLevel::Level4;
+}
+
+pub struct PagingLevel3;
+
+impl PagingLevel for PagingLevel3 {
+    const TOP_LEVEL: PageLevel = PageLevel::Level3;
+}
+
+pub struct PagingLevel2;
+
+impl PagingLevel for PagingLevel2 {
+    const TOP_LEVEL: PageLevel = PageLevel::Level2;
+}
+
+pub struct PagingLevel1;
+
+impl PagingLevel for PagingLevel1 {
+    const TOP_LEVEL: PageLevel = PageLevel::Level1;
+}
+
+} // verus!
 #[verus_verify]
 impl PageLevel {
     #[verus_spec(ret =>

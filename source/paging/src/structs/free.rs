@@ -31,7 +31,7 @@ verus! {
 ///
 /// The page this is called on is *not* handed back: whoever knows its physical
 /// address deallocates it, which for a child is the recursive step below and
-/// for the root is the caller of [`PageTableHandle::free`].
+/// for the root is the caller of [`GenericPageTable::free`].
 ///
 /// `level` bounds the descent; it is not read off the pages, so a page whose
 /// entries claim to point at tables below the leaf level is simply not

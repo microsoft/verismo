@@ -25,7 +25,6 @@ use crate::structs::geometry::entry_index;
 use crate::structs::level::PageLevel;
 use crate::structs::os_contract::PagingHandler;
 
-
 verus! {
 
 /// Where a walk came to rest: the entry it stopped at, and enough about the
@@ -49,7 +48,7 @@ pub struct WalkResult<A: ArchPagingMeta> {
 /// it both bounds the recursion and is what stops the walk from reading bit 7
 /// of a leaf entry as "points at a table" -- at level 0 the hardware reads that
 /// bit as PAT.
-pub fn descend<A: ArchPagingMeta, P: PagingHandler>(
+pub fn walk<A: ArchPagingMeta, P: PagingHandler>(
     base: VirtAddr,
     level: PageLevel,
     Tracked(page): Tracked<&PTPageSharedPerm<A>>,
@@ -97,7 +96,7 @@ pub fn descend<A: ArchPagingMeta, P: PagingHandler>(
                 lemma_phys_addr_from_bits(entry.page_frame_spec());
             }
             let child_base = P::paddr_to_vaddr::<A>(PhysAddr::from(entry.page_frame()));
-            descend::<A, P>(child_base, child_level, Tracked(child_page), vaddr)
+            walk::<A, P>(child_base, child_level, Tracked(child_page), vaddr)
         },
     }
 }
