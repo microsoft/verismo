@@ -14,12 +14,12 @@ use vstd::prelude::*;
 use crate::structs::address::lemma_phys_addr_from_bits;
 use crate::structs::address::{Address, PhysAddr, VirtAddr};
 use crate::structs::arch_contract::{level_geometry_wf, ArchPagingMeta};
-use crate::structs::concurrent_pt::PTPageSharedPerm;
+use crate::structs::concurrent_pt::{entry_ptr, PTPageSharedPerm};
 use crate::structs::entry::PTEntry;
 use crate::structs::geometry::entry_index;
 use crate::structs::level::PageLevel;
 use crate::structs::os_contract::{PageLock, PagingError, PagingHandler};
-use crate::structs::slot::slot_ptr;
+
 use crate::structs::update::replace_leaf_slot;
 
 verus! {
@@ -59,7 +59,7 @@ pub fn update_leaf_at<A: ArchPagingMeta, P: PagingHandler>(
 {
     let index = entry_index::<A>(vaddr, level);
     let ghost i = index as int;
-    let ptr = slot_ptr::<A>(base, index, Tracked(page));
+    let ptr = entry_ptr::<A>(base, index, Tracked(page));
     let tracked slot = page.slots.tracked_borrow(i);
     let (current, Tracked(_observed), Tracked(ticket)) = PTEntry::<A>::read_published(
         ptr,

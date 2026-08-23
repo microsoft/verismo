@@ -19,12 +19,12 @@ use crate::structs::address::{Address, PhysAddr, VirtAddr};
 use crate::structs::arch_contract::{
     level_geometry_wf, slot_addr, spec_entry_index, ArchPagingMeta,
 };
-use crate::structs::concurrent_pt::PTPageSharedPerm;
+use crate::structs::concurrent_pt::{entry_ptr, PTPageSharedPerm};
 use crate::structs::entry::PTEntry;
 use crate::structs::geometry::entry_index;
 use crate::structs::level::PageLevel;
 use crate::structs::os_contract::PagingHandler;
-use crate::structs::slot::slot_ptr;
+
 
 verus! {
 
@@ -69,7 +69,7 @@ pub fn descend<A: ArchPagingMeta, P: PagingHandler>(
 {
     let index = entry_index::<A>(vaddr, level);
     let ghost i = index as int;
-    let ptr = slot_ptr::<A>(base, index, Tracked(page));
+    let ptr = entry_ptr::<A>(base, index, Tracked(page));
     let tracked slot = page.slots.tracked_borrow(i);
     let (entry, Tracked(_observed), Tracked(ticket)) = PTEntry::read_published(
         ptr,

@@ -20,13 +20,13 @@ use vstd::prelude::*;
 use crate::structs::address::lemma_phys_addr_from_bits;
 use crate::structs::address::{Address, PhysAddr, VirtAddr};
 use crate::structs::arch_contract::{level_geometry_wf, ArchPagingMeta, GenericPageTableFlags};
-use crate::structs::concurrent_pt::{PTPageSharedPerm, PTPageWritePerm};
+use crate::structs::concurrent_pt::{entry_ptr, PTPageSharedPerm, PTPageWritePerm};
 use crate::structs::entry::PTEntry;
 use crate::structs::geometry::{lemma_count_per_page_positive, shift_at};
 use crate::structs::level::PageLevel;
 use crate::structs::os_contract::{PageLock, PagingError, PagingHandler};
 use crate::structs::range::leaf_entry;
-use crate::structs::slot::slot_ptr;
+
 use crate::structs::update::{read_slot_exact, set_leaf_slot, split_leaf_slot};
 
 verus! {
@@ -70,7 +70,7 @@ pub fn split_huge_at<A: ArchPagingMeta, P: PagingHandler>(
     proof {
         crate::structs::concurrent_pt::lemma_ids_match::<A>(writers, *page);
     }
-    let ptr = slot_ptr::<A>(base, index, Tracked(page));
+    let ptr = entry_ptr::<A>(base, index, Tracked(page));
     let tracked reader = page.slots.tracked_borrow(index as int);
     let current = read_slot_exact::<A>(ptr, Tracked(reader), Tracked(&writers), index);
     if current.is_table() || !current.present() {

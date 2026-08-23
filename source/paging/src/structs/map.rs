@@ -18,12 +18,12 @@ use vstd::prelude::*;
 use crate::structs::address::lemma_phys_addr_from_bits;
 use crate::structs::address::{Address, PhysAddr, VirtAddr};
 use crate::structs::arch_contract::{level_geometry_wf, ArchPagingMeta, GenericPageTableFlags};
-use crate::structs::concurrent_pt::PTPageSharedPerm;
+use crate::structs::concurrent_pt::{entry_ptr, PTPageSharedPerm};
 use crate::structs::entry::PTEntry;
 use crate::structs::geometry::entry_index;
 use crate::structs::level::PageLevel;
 use crate::structs::os_contract::{PageLock, PagingError, PagingHandler};
-use crate::structs::slot::slot_ptr;
+
 use crate::structs::update::{link_table_slot, set_leaf_slot};
 
 verus! {
@@ -52,7 +52,7 @@ pub fn map_at<A: ArchPagingMeta, P: PagingHandler>(
 {
     let index = entry_index::<A>(vaddr, level);
     let ghost i = index as int;
-    let ptr = slot_ptr::<A>(base, index, Tracked(page));
+    let ptr = entry_ptr::<A>(base, index, Tracked(page));
     if level.depth() == target.depth() {
         let lock = P::page_lock(base);
         let Tracked(mut writers) = lock.lock::<A>(Tracked(page));

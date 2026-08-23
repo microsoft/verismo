@@ -8,15 +8,16 @@
 //! Both refuse to overwrite a present entry. A page-table update that silently
 //! replaced a live mapping would leak whatever the old entry pointed at -- for
 //! a table entry, a whole subtree along with the tokens escrowed in it.
-use concurrent_rw::{PayloadTicket, RWContract, WithPayload};
+use concurrent_rw::{PayloadTicket, RWContract, RWWithPublishPayloadContract, WithPayload};
 use vstd::prelude::*;
 
 use crate::structs::address::VirtAddr;
 use crate::structs::arch_contract::ArchPagingMeta;
-use crate::structs::concurrent_pt::{lemma_ids_match, PTPageSharedPerm, PTPageWritePerm};
+use crate::structs::concurrent_pt::{
+    entry_ptr, lemma_ids_match, PTPageSharedPerm, PTPageWritePerm,
+};
 use crate::structs::entry::PTEntry;
 use crate::structs::os_contract::PagingError;
-use crate::structs::slot::{slot_ptr, store_slot, store_slot_publishing};
 
 verus! {
 
@@ -45,7 +46,7 @@ pub fn set_leaf_slot<A: ArchPagingMeta>(
     proof {
         lemma_ids_match::<A>(*writers, *page);
     }
-    let ptr = slot_ptr::<A>(base, index, Tracked(page));
+    let ptr = entry_ptr::<A>(base, index, Tracked(page));
     let tracked reader = page.slots.tracked_borrow(i);
     let current = read_slot_exact::<A>(ptr, Tracked(reader), Tracked(writers), index);
     if current.present() {
@@ -53,7 +54,7 @@ pub fn set_leaf_slot<A: ArchPagingMeta>(
     }
     let ghost before = *writers;
     let tracked writer = writers.slots.tracked_borrow_mut(i);
-    let Tracked(_observed) = store_slot::<A>(ptr, entry, Tracked(reader), Tracked(writer));
+    let Tracked(_observed) = PTEntry::write(ptr, entry, Tracked(reader), Tracked(writer));
     proof {
         lemma_ids_unchanged::<A>(before, *writers, i);
     }
@@ -94,7 +95,7 @@ pub fn link_table_slot<A: ArchPagingMeta>(
     proof {
         lemma_ids_match::<A>(*writers, *page);
     }
-    let ptr = slot_ptr::<A>(base, index, Tracked(page));
+    let ptr = entry_ptr::<A>(base, index, Tracked(page));
     let tracked reader = page.slots.tracked_borrow(i);
     let current = read_slot_exact::<A>(ptr, Tracked(reader), Tracked(writers), index);
     if current.present() {
@@ -102,7 +103,7 @@ pub fn link_table_slot<A: ArchPagingMeta>(
     }
     let ghost before = *writers;
     let tracked writer = writers.slots.tracked_borrow_mut(i);
-    let (Tracked(_observed), Tracked(ticket)) = store_slot_publishing::<A>(
+    let (Tracked(_observed), Tracked(ticket)) = PTEntry::write_with_published_payload(
         ptr,
         entry,
         Tracked(reader),
@@ -143,7 +144,7 @@ pub fn replace_leaf_slot<A: ArchPagingMeta>(
     proof {
         lemma_ids_match::<A>(*writers, *page);
     }
-    let ptr = slot_ptr::<A>(base, index, Tracked(page));
+    let ptr = entry_ptr::<A>(base, index, Tracked(page));
     let tracked reader = page.slots.tracked_borrow(i);
     let current = read_slot_exact::<A>(ptr, Tracked(reader), Tracked(writers), index);
     if current.is_table() {
@@ -151,7 +152,7 @@ pub fn replace_leaf_slot<A: ArchPagingMeta>(
     }
     let ghost before = *writers;
     let tracked writer = writers.slots.tracked_borrow_mut(i);
-    let Tracked(_observed) = store_slot::<A>(ptr, entry, Tracked(reader), Tracked(writer));
+    let Tracked(_observed) = PTEntry::write(ptr, entry, Tracked(reader), Tracked(writer));
     proof {
         lemma_ids_unchanged::<A>(before, *writers, i);
     }
@@ -195,7 +196,7 @@ pub fn split_leaf_slot<A: ArchPagingMeta>(
     proof {
         lemma_ids_match::<A>(*writers, *page);
     }
-    let ptr = slot_ptr::<A>(base, index, Tracked(page));
+    let ptr = entry_ptr::<A>(base, index, Tracked(page));
     let tracked reader = page.slots.tracked_borrow(i);
     let current = read_slot_exact::<A>(ptr, Tracked(reader), Tracked(writers), index);
     if current.is_table() {
@@ -206,7 +207,7 @@ pub fn split_leaf_slot<A: ArchPagingMeta>(
     }
     let ghost before = *writers;
     let tracked writer = writers.slots.tracked_borrow_mut(i);
-    let (Tracked(_observed), Tracked(ticket)) = store_slot_publishing::<A>(
+    let (Tracked(_observed), Tracked(ticket)) = PTEntry::write_with_published_payload(
         ptr,
         entry,
         Tracked(reader),
