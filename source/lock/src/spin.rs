@@ -44,6 +44,54 @@ pub struct Hold<V, Pred: LockPredicate<V>> {
     tok: Tracked<TicketToks::holding<V, Pred>>,
 }
 
+/// A fair spin lock over tracked state.
+///
+/// Guards nothing the compiler can see: what goes in and comes out is ghost,
+/// which is what a lock over memory owned elsewhere -- a page's write tokens,
+/// a permission to a device register -- needs. [`SpinLock`] is this lock over
+/// a cell, for the ordinary case of a lock that owns its data.
+///
+/// There is no `try_lock`. Taking a ticket commits a thread to the queue, and
+/// a thread that gave up its place would leave everyone behind it waiting for
+/// a ticket that never gets served.
+#[verus_verify]
+pub struct RawSpinLock<V, Pred: LockPredicate<V>> {
+    current: AtomicU64<InstanceId, TicketToks::current<V, Pred>, CurrentInv<V, Pred>>,
+    holder: AtomicU64<InstanceId, TicketToks::holder<V, Pred>, HolderInv<V, Pred>>,
+    inst: Tracked<TicketToks::Instance<V, Pred>>,
+}
+
+/// The predicate a [`SpinLock`]'s cell permission satisfies: it is that cell's
+/// permission, and the value in the cell is what the user asked for.
+#[verus_verify]
+pub struct CellInv<Pred> {
+    pub cell: CellId,
+    pub pred: Pred,
+}
+
+/// A fair mutual-exclusion lock that owns its data, in the shape of
+/// `std::sync::Mutex`.
+///
+/// [`lock`](Self::lock) hands back a guard that derefs to the data. Unlike
+/// `std::sync::Mutex`, dropping the guard does *not* release the lock --
+/// [`SpinGuard::unlock`] does, and Verus does not check that it is called.
+#[verus_verify]
+pub struct SpinLock<T, Pred: LockPredicate<T>> {
+    cell: PCell<T>,
+    raw: RawSpinLock<PointsTo<T>, CellInv<Pred>>,
+}
+
+/// Proof that the lock is held, and the way to the data while it is.
+///
+/// The lock stays held until [`unlock`](Self::unlock) is called; dropping the
+/// guard leaks it, and leaks every thread queued behind it.
+#[verus_verify]
+pub struct SpinGuard<'a, T, Pred: LockPredicate<T>> {
+    lock: &'a SpinLock<T, Pred>,
+    perm: Tracked<PointsTo<T>>,
+    hold: Hold<PointsTo<T>, CellInv<Pred>>,
+}
+
 verus! {
 
 impl<V, Pred: LockPredicate<V>> Ticket<V, Pred> {
@@ -63,22 +111,6 @@ impl<V, Pred: LockPredicate<V>> Hold<V, Pred> {
     pub closed spec fn instance_id(&self) -> InstanceId {
         self.tok@.instance_id()
     }
-}
-
-/// A fair spin lock over tracked state.
-///
-/// Guards nothing the compiler can see: what goes in and comes out is ghost,
-/// which is what a lock over memory owned elsewhere -- a page's write tokens,
-/// a permission to a device register -- needs. [`SpinLock`] is this lock over
-/// a cell, for the ordinary case of a lock that owns its data.
-///
-/// There is no `try_lock`. Taking a ticket commits a thread to the queue, and
-/// a thread that gave up its place would leave everyone behind it waiting for
-/// a ticket that never gets served.
-pub struct RawSpinLock<V, Pred: LockPredicate<V>> {
-    pub(crate) current: AtomicU64<InstanceId, TicketToks::current<V, Pred>, CurrentInv<V, Pred>>,
-    pub(crate) holder: AtomicU64<InstanceId, TicketToks::holder<V, Pred>, HolderInv<V, Pred>>,
-    pub(crate) inst: Tracked<TicketToks::Instance<V, Pred>>,
 }
 
 impl<V, Pred: LockPredicate<V>> RawSpinLock<V, Pred> {
@@ -106,29 +138,11 @@ impl<V, Pred: LockPredicate<V>> RawSpinLock<V, Pred> {
     }
 }
 
-/// The predicate a [`SpinLock`]'s cell permission satisfies: it is that cell's
-/// permission, and the value in the cell is what the user asked for.
-pub struct CellInv<Pred> {
-    pub cell: CellId,
-    pub pred: Pred,
-}
-
 impl<T, Pred: LockPredicate<T>> LockPredicate<PointsTo<T>> for CellInv<Pred> {
     open spec fn inv(self, perm: PointsTo<T>) -> bool {
         &&& perm.id() == self.cell
         &&& self.pred.inv(*perm.value())
     }
-}
-
-/// A fair mutual-exclusion lock that owns its data, in the shape of
-/// `std::sync::Mutex`.
-///
-/// [`lock`](Self::lock) hands back a guard that derefs to the data. Unlike
-/// `std::sync::Mutex`, dropping the guard does *not* release the lock --
-/// [`SpinGuard::unlock`] does, and Verus does not check that it is called.
-pub struct SpinLock<T, Pred: LockPredicate<T>> {
-    pub(crate) cell: PCell<T>,
-    pub(crate) raw: RawSpinLock<PointsTo<T>, CellInv<Pred>>,
 }
 
 impl<T, Pred: LockPredicate<T>> SpinLock<T, Pred> {
@@ -141,16 +155,6 @@ impl<T, Pred: LockPredicate<T>> SpinLock<T, Pred> {
     pub closed spec fn inv(&self, v: T) -> bool {
         self.raw.pred().pred.inv(v)
     }
-}
-
-/// Proof that the lock is held, and the way to the data while it is.
-///
-/// The lock stays held until [`unlock`](Self::unlock) is called; dropping the
-/// guard leaks it, and leaks every thread queued behind it.
-pub struct SpinGuard<'a, T, Pred: LockPredicate<T>> {
-    pub(crate) lock: &'a SpinLock<T, Pred>,
-    pub(crate) perm: Tracked<PointsTo<T>>,
-    pub(crate) hold: Hold<PointsTo<T>, CellInv<Pred>>,
 }
 
 impl<'a, T, Pred: LockPredicate<T>> SpinGuard<'a, T, Pred> {
