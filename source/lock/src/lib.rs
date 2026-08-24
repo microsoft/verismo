@@ -18,9 +18,9 @@
 //!
 //! # Using a different lock
 //!
-//! [`RawLock`] is what the raw form promises, as a trait. An embedder whose
-//! system already has a lock -- one its scheduler knows about, or one the
-//! hardware offers -- implements that trait instead of using [`RawSpinLock`],
+//! [`SpinLockTrait`] is what the data form promises, as a trait. An embedder
+//! whose system already has a lock -- one its scheduler knows about, or one
+//! the hardware offers -- implements that trait instead of using [`SpinLock`],
 //! and whatever was written against the trait keeps verifying unchanged.
 //!
 //! # What "excludes" means here
@@ -63,11 +63,11 @@
 use builtin_macros::*;
 
 pub mod pred;
-pub mod raw;
 pub mod spin;
 pub mod spin_spec;
 pub mod spin_tok;
+pub mod spin_trait;
 
 pub use pred::LockPredicate;
-pub use raw::RawLock;
 pub use spin::{Hold, RawSpinLock, SpinGuard, SpinLock, Ticket};
+pub use spin_trait::SpinLockTrait;

@@ -25,9 +25,9 @@ use vstd::tokens::InstanceId;
 use common_proofs::{ghost, tracked};
 
 use crate::pred::LockPredicate;
-use crate::raw::RawLock;
 use crate::spin_spec::{CurrentInv, HolderInv};
 use crate::spin_tok::TicketToks;
+use crate::spin_trait::SpinLockTrait;
 
 /// A place in a lock's queue.
 ///
@@ -153,11 +153,6 @@ impl<T, Pred: LockPredicate<T>> SpinLock<T, Pred> {
     pub(crate) closed spec fn wf(&self) -> bool {
         self.raw.pred().cell == self.cell.id()
     }
-
-    /// What is true of the data whenever no one holds the lock.
-    pub closed spec fn inv(&self, v: T) -> bool {
-        self.raw.pred().pred.inv(v)
-    }
 }
 
 impl<'a, T, Pred: LockPredicate<T>> SpinGuard<'a, T, Pred> {
@@ -179,33 +174,35 @@ impl<'a, T, Pred: LockPredicate<T>> SpinGuard<'a, T, Pred> {
     }
 }
 
-impl<V, Pred: LockPredicate<V>> RawLock<V, Pred> for RawSpinLock<V, Pred> {
-    type Hold = Hold<V, Pred>;
+impl<'a, T: 'a, Pred: LockPredicate<T> + 'a> SpinLockTrait<'a, T, Pred> for SpinLock<T, Pred> {
+    type Guard = SpinGuard<'a, T, Pred>;
 
-    type Id = InstanceId;
-
-    closed spec fn id(&self) -> InstanceId {
-        self.inst@.id()
+    closed spec fn inv(&self, v: T) -> bool {
+        self.raw.pred().pred.inv(v)
     }
 
-    closed spec fn pred(&self) -> Pred {
-        self.inst@.pred()
+    closed spec fn guard_view(guard: &SpinGuard<'a, T, Pred>) -> T {
+        *guard.perm@.value()
     }
 
-    closed spec fn hold_id(hold: &Hold<V, Pred>) -> InstanceId {
-        hold.tok@.instance_id()
+    closed spec fn guard_lock(guard: &SpinGuard<'a, T, Pred>) -> &'a SpinLock<T, Pred> {
+        guard.lock
     }
 
-    fn new(v: Tracked<V>, pred: Ghost<Pred>) -> RawSpinLock<V, Pred> {
-        RawSpinLock::new(v, pred)
+    fn new(v: T, pred: Ghost<Pred>) -> SpinLock<T, Pred> {
+        SpinLock::new(v, pred)
     }
 
-    fn acquire(&self) -> (Tracked<V>, Hold<V, Pred>) {
-        RawSpinLock::acquire(self)
+    fn lock(&'a self) -> SpinGuard<'a, T, Pred> {
+        SpinLock::lock(self)
     }
 
-    fn release(&self, hold: Hold<V, Pred>, v: Tracked<V>) {
-        RawSpinLock::release(self, hold, v)
+    fn unlock(guard: SpinGuard<'a, T, Pred>) {
+        guard.unlock()
+    }
+
+    fn into_inner(self) -> T {
+        SpinLock::into_inner(self)
     }
 }
 
@@ -433,7 +430,7 @@ impl<T, Pred: LockPredicate<T>> SpinLock<T, Pred> {
         requires
             pred@.inv(v),
         ensures
-            forall|w: T| ret.inv(w) == pred@.inv(w),
+            forall|w: T| #[trigger] ret.inv(w) == pred@.inv(w),
     )]
     pub fn new(v: T, pred: Ghost<Pred>) -> SpinLock<T, Pred> {
         let (cell, perm) = PCell::new(v);
