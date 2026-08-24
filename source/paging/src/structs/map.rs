@@ -109,7 +109,7 @@ fn grow_and_map<A: ArchPagingMeta, P: OSPagingContract<A>>(
         level_geometry_wf::<A>(),
         page.wf(),
         page.base == page_ptr@.addr,
-        index < PTEntry::<A>::count_per_page(),
+        index < PTPage::<A>::count(),
         level.spec_child() is Some,
         !entry.is_table_spec(),
     decreases level.spec_depth(), 0nat,
@@ -158,7 +158,7 @@ pub fn create_and_link_child<A: ArchPagingMeta, P: OSPagingContract<A>>(
     requires
         page.wf(),
         page.base == page_ptr@.addr,
-        index < PTEntry::<A>::count_per_page(),
+        index < PTPage::<A>::count(),
     ensures
         ret matches Ok((child_ptr, ticket)) ==> {
             &&& ticket@.id() == page.slots[index as int].slot_id()

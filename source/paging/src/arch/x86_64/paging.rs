@@ -15,6 +15,7 @@ use crate::structs::arch_contract::{
     level_geometry_wf, ArchPagingGeometry, ArchPagingMeta, GenericPageTableFlagsSpec,
 };
 use crate::structs::entry::PTEntry;
+use crate::structs::ptpage::PTPage;
 use crate::structs::level::PageLevel;
 use crate::structs::sizes::{lemma_size_4k, PageOffset, Size4KiB};
 use vstd::arithmetic::logarithm::log;
@@ -153,7 +154,7 @@ pub proof fn lemma_x86_geometry_wf<P: X86PagingParams>()
         level_geometry_wf::<X86Paging<P>>(),
 {
     lemma_size_4k();
-    assert(PTEntry::<X86Paging<P>>::count_per_page() == 512);
+    assert(PTPage::<X86Paging<P>>::count() == 512);
     vstd::arithmetic::power2::lemma2_to64();
     vstd::arithmetic::power2::lemma_pow2(9);
     vstd::arithmetic::logarithm::lemma_log_pow(2, 9);

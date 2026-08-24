@@ -22,7 +22,7 @@ use crate::structs::address::{Address, PhysAddr, VirtAddr};
 use crate::structs::arch_contract::{level_geometry_wf, ArchPagingMeta, GenericPageTableFlags};
 use crate::structs::concurrent_pt::{PTPageSharedPerm, PTPageWritePerm};
 use crate::structs::entry::PTEntry;
-use crate::structs::geometry::{lemma_count_per_page_positive, shift_at};
+use crate::structs::geometry::{lemma_per_page_positive, shift_at};
 use crate::structs::level::PageLevel;
 use crate::structs::os_contract::{PageLock, PagingError, OSPagingContract};
 use crate::structs::ptpage::{entry_ptr, page_from_vaddr, PTPage};
@@ -52,7 +52,7 @@ pub fn split_huge_at<A: ArchPagingMeta, P: OSPagingContract<A>>(
         level_geometry_wf::<A>(),
         page.wf(),
         page.base == page_ptr@.addr,
-        index < PTEntry::<A>::count_per_page(),
+        index < PTPage::<A>::count(),
     ensures
         ret matches Ok((child_ptr, ticket)) ==> {
             &&& ticket@.id() == page.slots[index as int].slot_id()
@@ -158,7 +158,7 @@ fn fill_split_page<A: ArchPagingMeta>(
     };
     let frame = current.paddr_field();
     proof {
-        lemma_count_per_page_positive::<A>();
+        lemma_per_page_positive::<A>();
     }
     let count = A::entries_per_page();
     let mut i = 0;
@@ -167,7 +167,7 @@ fn fill_split_page<A: ArchPagingMeta>(
             child.wf(),
             child.base == child_ptr@.addr,
             writers.ids() =~= child.ids(),
-            count == PTEntry::<A>::count_per_page(),
+            count == PTPage::<A>::count(),
             shift < 64,
             i <= count,
         decreases count - i,

@@ -10,7 +10,7 @@ use builtin_macros::verus_verify;
 
 use crate::structs::entry::PTEntry;
 use crate::structs::level::PageLevel;
-use crate::structs::ptpage::ENTRY_COUNT;
+use crate::structs::ptpage::{ENTRY_COUNT, PTPage};
 
 /// Executable interface to a page table entry's flag word.
 ///
@@ -148,7 +148,7 @@ pub open spec fn page_offset_width<A: ArchPagingGeometry>() -> nat {
 /// Number of virtual-address bits one paging level consumes: enough to index
 /// every entry of a table page.
 pub open spec fn level_index_width<A: ArchPagingMeta>() -> nat {
-    log(2, PTEntry::<A>::count_per_page() as int) as nat
+    log(2, PTPage::<A>::count() as int) as nat
 }
 
 /// Shift of the page a level maps: `depth` levels above the leaf, each level
@@ -160,7 +160,7 @@ pub open spec fn level_shift<A: ArchPagingMeta>(depth: nat) -> nat {
 /// Which entry of a level's table page an address selects: the address bits
 /// just above the region that level maps.
 pub open spec fn spec_entry_index<A: ArchPagingMeta>(vaddr: usize, level: PageLevel) -> nat {
-    ((vaddr >> level_shift::<A>(level.spec_depth())) as nat) % PTEntry::<A>::count_per_page()
+    ((vaddr >> level_shift::<A>(level.spec_depth())) as nat) % PTPage::<A>::count()
 }
 
 /// Address of a table page's entry `index`. Stated once here so that no
@@ -178,7 +178,7 @@ pub open spec fn slot_addr<A: ArchPagingMeta>(base: usize, index: int) -> int {
 /// inside `ArchPagingMeta` would be a cyclic definition. Each architecture
 /// instantiates and discharges it.
 pub open spec fn level_geometry_wf<A: ArchPagingMeta>() -> bool {
-    &&& pow2(level_index_width::<A>()) == PTEntry::<A>::count_per_page()
+    &&& pow2(level_index_width::<A>()) == PTPage::<A>::count()
     &&& 0 < level_index_width::<A>()
         < 64
     // The deepest tree the level type can describe still shifts by less than a
@@ -186,12 +186,12 @@ pub open spec fn level_geometry_wf<A: ArchPagingMeta>() -> bool {
     &&& level_shift::<A>(PageLevel::Level4.spec_depth())
         < usize::BITS
     // The values exec code can read agree with the derived ones.
-    &&& A::spec_entries_per_page() == PTEntry::<A>::count_per_page()
+    &&& A::spec_entries_per_page() == PTPage::<A>::count()
     &&& A::spec_index_width() == level_index_width::<
         A,
     >()
     // A page of entries is a `PTPage`, whose size is fixed by its type.
-    &&& PTEntry::<A>::count_per_page() == ENTRY_COUNT
+    &&& PTPage::<A>::count() == ENTRY_COUNT
 }
 
 /// The ghost half of [`GenericPageTableFlags`]: which bit each named flag

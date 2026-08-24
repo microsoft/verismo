@@ -541,7 +541,7 @@ impl<A: ArchPagingMeta, P: OSPagingContract<A>, L: PagingLevel> GenericPageTable
     >)
         requires
             self.inv(),
-            index < PTEntry::<A>::count_per_page(),
+            index < PTPage::<A>::count(),
     {
         let frame = P::page_paddr(self.root);
         let entry = leaf_entry::<A>(frame.bits() | A::private_pte_mask(), flags);

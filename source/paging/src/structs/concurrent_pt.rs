@@ -16,6 +16,7 @@ use vstd::resource::Loc;
 
 use crate::structs::arch_contract::{slot_addr, ArchPagingMeta};
 use crate::structs::entry::PTEntry;
+use crate::structs::ptpage::PTPage;
 use crate::structs::level::PageLevel;
 use crate::structs::os_contract::SlotShared;
 
@@ -49,7 +50,7 @@ impl<A: ArchPagingMeta> PTPageSharedPerm<A> {
     /// belongs to the entry that points at the page -- see
     /// `PTEntry::wf_payload`.
     pub open spec fn wf(self) -> bool {
-        &&& self.slots.len() == PTEntry::<A>::count_per_page()
+        &&& self.slots.len() == PTPage::<A>::count()
         &&& forall|index: int|
             0 <= index < self.slots.len() ==> {
                 &&& (#[trigger] self.slots[index]).location()@.addr == slot_addr::<A>(self.base, index)

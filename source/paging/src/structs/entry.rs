@@ -11,6 +11,7 @@ use core::marker::PhantomData;
 use vstd::prelude::*;
 
 use crate::structs::address::{Address, PhysAddr};
+use crate::structs::ptpage::PTPage;
 use crate::structs::arch_contract::{
     ArchPagingMeta, GenericPageTableFlags, GenericPageTableFlagsSpec,
 };
@@ -25,7 +26,7 @@ verus! {
 /// architecture whose bit layout it follows.
 ///
 /// Carries no invariant of its own -- a page-table page is exactly
-/// `count_per_page()` of these, freshly zeroed or freshly read off hardware, so
+/// `PTPage::<A>::count()` of these, freshly zeroed or freshly read off hardware, so
 /// any `usize` (garbage included) is a well-formed value. What each bit
 /// *means* is stated by the spec functions below, in terms of the masks
 /// `ArchPagingMeta` supplies.
@@ -36,17 +37,6 @@ pub struct PTEntry<A: ArchPagingMeta> {
 }
 
 impl<A: ArchPagingMeta> PTEntry<A> {
-    /// How many entries a table page holds: a table page is one page of the
-    /// architecture's smallest size, filled with entries.
-    ///
-    /// Stated in terms of `usize` rather than `Self`, which it is
-    /// `repr(transparent)` over: a generic struct has no layout Verus can
-    /// evaluate, and the word size is the thing the architecture actually
-    /// fixes.
-    pub open spec fn count_per_page() -> nat {
-        (<A::MinPageSize as PageSize>::SIZE as nat) / vstd::layout::size_of::<usize>()
-    }
-
     /// Raw word.
     pub closed spec fn view(&self) -> usize {
         self.val

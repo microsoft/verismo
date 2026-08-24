@@ -143,7 +143,7 @@ fn range_step<A: ArchPagingMeta, P: OSPagingContract<A>>(
         level_geometry_wf::<A>(),
         page.wf(),
         page.base == page_ptr@.addr,
-        index < PTEntry::<A>::count_per_page(),
+        index < PTPage::<A>::count(),
         cur <= next,
         op matches RangeOp::Map { paddr, .. } ==> paddr + (next - cur) <= usize::MAX,
     decreases level.spec_depth(), 0nat,
@@ -306,7 +306,7 @@ fn leaf_step<A: ArchPagingMeta>(
         page.wf(),
         page.base == page_ptr@.addr,
         old(writers).ids() =~= page.ids(),
-        index < PTEntry::<A>::count_per_page(),
+        index < PTPage::<A>::count(),
         op matches RangeOp::Map { paddr, .. } ==> paddr + offset <= usize::MAX,
     ensures
         final(writers).ids() =~= page.ids(),

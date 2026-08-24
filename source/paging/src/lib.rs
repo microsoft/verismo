@@ -30,7 +30,7 @@
 //!
 //! # Where the tokens of a page live
 //!
-//! A table page is `count_per_page` slots under the `concurrent_rw` protocol.
+//! A table page is `PTPage::count` slots under the `concurrent_rw` protocol.
 //! Its *readers* are escrowed in the entry that points at it, so a walker that
 //! reads a table entry gets the child's readers with it and may descend on a
 //! `&` borrow alone; its *writers* are deposited in the page's own lock, so a

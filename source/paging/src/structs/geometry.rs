@@ -12,6 +12,7 @@ use crate::structs::arch_contract::{
     ArchPagingMeta,
 };
 use crate::structs::entry::PTEntry;
+use crate::structs::ptpage::PTPage;
 use crate::structs::level::PageLevel;
 use crate::structs::sizes::PageOffset;
 
@@ -34,12 +35,12 @@ pub fn shift_at<A: ArchPagingMeta>(level: PageLevel) -> usize {
         level_geometry_wf::<A>(),
     ensures
         ret == spec_entry_index::<A>(vaddr, level),
-        ret < PTEntry::<A>::count_per_page(),
+        ret < PTPage::<A>::count(),
 )]
 pub fn entry_index_bits<A: ArchPagingMeta>(vaddr: usize, level: PageLevel) -> usize {
     let shift = shift_at::<A>(level);
     let count = A::entries_per_page();
-    proof! { lemma_count_per_page_positive::<A>(); }
+    proof! { lemma_per_page_positive::<A>(); }
     (vaddr >> shift) % count
 }
 
@@ -49,7 +50,7 @@ pub fn entry_index_bits<A: ArchPagingMeta>(vaddr: usize, level: PageLevel) -> us
         level_geometry_wf::<A>(),
     ensures
         ret == spec_entry_index::<A>(vaddr@, level),
-        ret < PTEntry::<A>::count_per_page(),
+        ret < PTPage::<A>::count(),
 )]
 pub fn entry_index<A: ArchPagingMeta>(vaddr: VirtAddr, level: PageLevel) -> usize {
     entry_index_bits::<A>(vaddr.bits(), level)
@@ -78,11 +79,11 @@ pub proof fn lemma_level_shift_monotone<A: ArchPagingMeta>(level: PageLevel)
 
 /// A table page holds at least one entry, so an index modulo the count is a
 /// legal index.
-pub proof fn lemma_count_per_page_positive<A: ArchPagingMeta>()
+pub proof fn lemma_per_page_positive<A: ArchPagingMeta>()
     requires
         level_geometry_wf::<A>(),
     ensures
-        PTEntry::<A>::count_per_page() > 0,
+        PTPage::<A>::count() > 0,
 {
     vstd::arithmetic::power2::lemma_pow2_pos(level_index_width::<A>());
 }

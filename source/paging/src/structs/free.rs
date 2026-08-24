@@ -51,7 +51,7 @@ pub fn free_page_tree<A: ArchPagingMeta, P: OSPagingContract<A>>(
     ensures
         ret@.wf_owned(),
         ret@.base == page.base,
-    decreases level.spec_depth(), PTEntry::<A>::count_per_page() + 1,
+    decreases level.spec_depth(), PTPage::<A>::count() + 1,
 {
     proof {
         lemma_ids_match::<A>(writers, page);

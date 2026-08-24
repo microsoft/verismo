@@ -19,6 +19,7 @@ use crate::structs::address::{Address, VirtAddr};
 use crate::structs::arch_contract::{slot_addr, ArchPagingMeta};
 use crate::structs::concurrent_pt::PTPageSharedPerm;
 use crate::structs::entry::PTEntry;
+use crate::structs::sizes::PageSize;
 
 verus! {
 
@@ -39,6 +40,14 @@ pub const ENTRY_COUNT: usize = 512;
 pub struct PTPage<A: ArchPagingMeta> {
     entries: [PTEntry<A>; ENTRY_COUNT],
     dummy: PhantomData<A>,
+}
+
+impl<A: ArchPagingMeta> PTPage<A> {
+    /// How many entries a table page holds: one page of the architecture's smallest size, filled
+    /// with entries.
+    pub open spec fn count() -> nat {
+        (<A::MinPageSize as PageSize>::SIZE as nat) / vstd::layout::size_of::<usize>()
+    }
 }
 
 /// The page `perm` describes, as a pointer.
@@ -72,7 +81,7 @@ pub fn entry_ptr<A: ArchPagingMeta>(
     requires
         perm.wf(),
         perm.base == page_ptr@.addr,
-        index < PTEntry::<A>::count_per_page(),
+        index < PTPage::<A>::count(),
     ensures
         ret == perm.slots[index as int].location(),
 {

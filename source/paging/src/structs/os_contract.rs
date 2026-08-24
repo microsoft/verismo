@@ -71,7 +71,7 @@ impl<A: ArchPagingMeta> PTPageInit<A> {
     /// whatever was last written to it, and the allocator is the one that
     /// decides whether to zero it.
     pub open spec fn wf_owned(self) -> bool {
-        &&& self.slots.len() == PTEntry::<A>::count_per_page()
+        &&& self.slots.len() == PTPage::<A>::count()
         &&& forall|index: int|
             0 <= index < self.slots.len() ==> {
                 &&& (#[trigger] self.slots[index]).ptr()@.addr == slot_addr::<A>(self.base, index)
