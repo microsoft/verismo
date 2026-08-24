@@ -22,6 +22,8 @@ use vstd::invariant::open_atomic_invariant;
 use vstd::prelude::*;
 use vstd::tokens::InstanceId;
 
+use common_proofs::{ghost, tracked};
+
 use crate::pred::LockPredicate;
 use crate::spin_spec::{CurrentInv, HolderInv};
 use crate::spin_tok::TicketToks;
@@ -194,17 +196,9 @@ impl<V, Pred: LockPredicate<V>> RawSpinLock<V, Pred> {
             let ghost id = inst.id();
         }
         RawSpinLock {
-            current: AtomicU64::new(
-                verus_exec_expr! { Ghost(id) },
-                0,
-                verus_exec_expr! { Tracked(cur_tok) },
-            ),
-            holder: AtomicU64::new(
-                verus_exec_expr! { Ghost(id) },
-                0,
-                verus_exec_expr! { Tracked(holder_tok) },
-            ),
-            inst: verus_exec_expr! { Tracked(inst) },
+            current: AtomicU64::new(ghost!(id), 0, tracked!(cur_tok)),
+            holder: AtomicU64::new(ghost!(id), 0, tracked!(holder_tok)),
+            inst: tracked!(inst),
         }
     }
 
@@ -251,7 +245,7 @@ impl<V, Pred: LockPredicate<V>> RawSpinLock<V, Pred> {
                         None => proof_from_false(),
                     };
                 }
-                Some(Ticket { num: cur, tok: verus_exec_expr! { Tracked(tok) } })
+                Some(Ticket { num: cur, tok: tracked!(tok) })
             }
             Err(_) => None,
         }
@@ -309,7 +303,7 @@ impl<V, Pred: LockPredicate<V>> RawSpinLock<V, Pred> {
                     None => proof_from_false(),
                 };
             }
-            Ok((verus_exec_expr! { Tracked(v) }, Hold { tok: verus_exec_expr! { Tracked(h) } }))
+            Ok((tracked!(v), Hold { tok: tracked!(h) }))
         } else {
             proof_decl! {
                 let tracked t = match waiting {
@@ -317,7 +311,7 @@ impl<V, Pred: LockPredicate<V>> RawSpinLock<V, Pred> {
                     None => proof_from_false(),
                 };
             }
-            Err(Ticket { num, tok: verus_exec_expr! { Tracked(t) } })
+            Err(Ticket { num, tok: tracked!(t) })
         }
     }
 
@@ -415,7 +409,7 @@ impl<T, Pred: LockPredicate<T>> SpinLock<T, Pred> {
         proof_decl! {
             let ghost cell_pred = CellInv { cell: cell.id(), pred: pred@ };
         }
-        let raw = RawSpinLock::new(perm, verus_exec_expr!(Ghost(cell_pred)));
+        let raw = RawSpinLock::new(perm, ghost!(cell_pred));
         SpinLock { cell, raw }
     }
 
@@ -479,7 +473,7 @@ impl<'a, T, Pred: LockPredicate<T>> Deref for SpinGuard<'a, T, Pred> {
         proof! {
             use_type_invariant(self);
         }
-        self.lock.cell.borrow(verus_exec_expr! { Tracked(self.perm.borrow()) })
+        self.lock.cell.borrow(tracked!(self.perm.borrow()))
     }
 }
 
@@ -495,6 +489,6 @@ impl<'a, T, Pred: LockPredicate<T>> DerefMut for SpinGuard<'a, T, Pred> {
         proof! {
             use_type_invariant(&*self);
         }
-        self.lock.cell.borrow_mut(verus_exec_expr! { Tracked(self.perm.borrow_mut()) })
+        self.lock.cell.borrow_mut(tracked!(self.perm.borrow_mut()))
     }
 }

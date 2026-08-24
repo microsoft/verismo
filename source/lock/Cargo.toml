@@ -8,6 +8,7 @@ edition = "2021"
 vstd = { workspace = true, features = ["alloc"], default-features = false }
 verus_state_machines_macros = { workspace = true }
 builtin_macros = { workspace = true }
+common_proofs = { path = "../common_proofs" }
 
 [package.metadata.verus]
 verify = true
