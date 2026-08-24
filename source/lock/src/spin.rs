@@ -19,8 +19,6 @@ use vstd::atomic_ghost::*;
 use vstd::cell::pcell::{PCell, PointsTo};
 use vstd::cell::CellId;
 use vstd::invariant::open_atomic_invariant;
-#[cfg(verus_only)]
-use vstd::pervasive::proof_from_false;
 use vstd::prelude::*;
 use vstd::tokens::InstanceId;
 
@@ -28,17 +26,18 @@ use crate::pred::LockPredicate;
 use crate::spin_spec::{CurrentInv, HolderInv};
 use crate::spin_tok::TicketToks;
 
-verus! {
-
 /// A place in a lock's queue.
 ///
 /// Handed out by [`RawSpinLock::try_take_ticket`] and given up by entering the
 /// lock. A ticket cannot be dropped back into the queue: once a thread has
 /// one, the threads behind it wait until it takes the lock and releases it.
+#[verus_verify]
 pub struct Ticket<V, Pred: LockPredicate<V>> {
-    pub(crate) num: u64,
-    pub(crate) tok: Tracked<TicketToks::tickets<V, Pred>>,
+    num: u64,
+    tok: Tracked<TicketToks::tickets<V, Pred>>,
 }
+
+verus! {
 
 impl<V, Pred: LockPredicate<V>> Ticket<V, Pred> {
     #[verifier::type_invariant]
