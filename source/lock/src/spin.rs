@@ -199,7 +199,8 @@ impl<'a, T: 'a, Pred: LockPredicate<T> + 'a> SpinLockSpec<'a, T, Pred> for SpinL
 #[verus_verify]
 impl<'a, T: 'a, Pred: LockPredicate<T> + 'a> SpinLockTrait<'a, T, Pred> for SpinLock<T, Pred> {
     fn new(v: T, pred: Ghost<Pred>) -> SpinLock<T, Pred> {
-        SpinLock::new(v, pred)
+        proof_with!{ Ghost(pred@) }
+        SpinLock::new(v)
     }
 
     fn lock(&'a self) -> SpinGuard<'a, T, Pred> {
@@ -219,16 +220,16 @@ impl<'a, T: 'a, Pred: LockPredicate<T> + 'a> SpinLockTrait<'a, T, Pred> for Spin
 impl<V, Pred: LockPredicate<V>> RawSpinLock<V, Pred> {
     /// Builds a lock, free, holding `v`.
     #[verus_spec(ret =>
+        with Tracked(v): Tracked<V>, Ghost(pred): Ghost<Pred>
         requires
-            pred@.inv(v@),
+            pred.inv(v),
         ensures
-            ret.pred() == pred@,
+            ret.pred() == pred,
     )]
-    pub fn new(v: Tracked<V>, pred: Ghost<Pred>) -> RawSpinLock<V, Pred> {
+    pub fn new() -> RawSpinLock<V, Pred> {
         proof_decl! {
-            let tracked val = v.get();
             let tracked (Tracked(inst), Tracked(cur_tok), Tracked(holder_tok), _, _) =
-                TicketToks::Instance::initialize(pred@, val, Some(val));
+                TicketToks::Instance::initialize(arbitrary(), v, Some(v));
             let ghost id = inst.id();
         }
         RawSpinLock {
@@ -435,17 +436,19 @@ impl<V, Pred: LockPredicate<V>> RawSpinLock<V, Pred> {
 impl<T, Pred: LockPredicate<T>> SpinLock<T, Pred> {
     /// Builds a lock owning `v`.
     #[verus_spec(ret =>
+        with Ghost(pred): Ghost<Pred>
         requires
-            pred@.inv(v),
+            pred.inv(v),
         ensures
-            forall|w: T| #[trigger] ret.inv(w) == pred@.inv(w),
+            forall|w: T| #[trigger] ret.inv(w) == pred.inv(w),
     )]
-    pub fn new(v: T, pred: Ghost<Pred>) -> SpinLock<T, Pred> {
+    pub fn new(v: T) -> SpinLock<T, Pred> {
         let (cell, perm) = PCell::new(v);
         proof_decl! {
-            let ghost cell_pred = CellInv { cell: cell.id(), pred: pred@ };
+            let ghost cell_pred = CellInv { cell: cell.id(), pred };
         }
-        let raw = RawSpinLock::new(perm, ghost!(cell_pred));
+        proof_with!{ tracked!(perm.get()), ghost!(cell_pred) }
+        let raw = RawSpinLock::new();
         SpinLock { cell, raw }
     }
 
