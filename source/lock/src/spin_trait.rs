@@ -43,6 +43,26 @@ pub trait SpinLockTrait<'a, T, Pred: LockPredicate<T>>: Sized + 'a {
     /// The lock a guard was taken from.
     spec fn guard_lock(guard: &Self::Guard) -> &'a Self;
 
+    /// The data, to read.
+    ///
+    /// `Deref` is required of [`Guard`](Self::Guard) so that `*guard` works,
+    /// but `core::ops::Deref` carries no specification, and what a call to it
+    /// promises is whatever the implementation declared -- which a caller
+    /// generic over the lock cannot see. This is the readout that says what is
+    /// there, and an implementation discharges it by dereferencing.
+    fn borrow<'b>(guard: &'b Self::Guard) -> (ret: &'b T)
+        ensures
+            *ret == Self::guard_view(guard),
+    ;
+
+    /// The data, to change. See [`borrow`](Self::borrow).
+    fn borrow_mut<'b>(guard: &'b mut Self::Guard) -> (ret: &'b mut T)
+        ensures
+            *ret == Self::guard_view(old(guard)),
+            Self::guard_view(final(guard)) == *final(ret),
+            Self::guard_lock(final(guard)) == Self::guard_lock(old(guard)),
+    ;
+
     /// Builds a lock owning `v`.
     fn new(v: T, pred: Ghost<Pred>) -> (ret: Self)
         requires
@@ -58,6 +78,7 @@ pub trait SpinLockTrait<'a, T, Pred: LockPredicate<T>>: Sized + 'a {
     fn lock(&'a self) -> (ret: Self::Guard)
         ensures
             Self::guard_lock(&ret) == self,
+            self.inv(Self::guard_view(&ret)),
     ;
 
     /// Releases the lock.

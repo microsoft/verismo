@@ -189,6 +189,14 @@ impl<'a, T: 'a, Pred: LockPredicate<T> + 'a> SpinLockTrait<'a, T, Pred> for Spin
         guard.lock
     }
 
+    fn borrow<'b>(guard: &'b SpinGuard<'a, T, Pred>) -> &'b T {
+        guard.deref()
+    }
+
+    fn borrow_mut<'b>(guard: &'b mut SpinGuard<'a, T, Pred>) -> &'b mut T {
+        guard.deref_mut()
+    }
+
     fn new(v: T, pred: Ghost<Pred>) -> SpinLock<T, Pred> {
         SpinLock::new(v, pred)
     }
@@ -445,6 +453,7 @@ impl<T, Pred: LockPredicate<T>> SpinLock<T, Pred> {
     #[verus_spec(ret =>
         ensures
             ret.lock() == self,
+            self.inv(ret@),
     )]
     pub fn lock(&self) -> SpinGuard<'_, T, Pred> {
         proof! {
