@@ -44,6 +44,7 @@
 //! the predicate with `|v| true`.
 #![no_std]
 #![cfg_attr(verus_keep_ghost, feature(sized_hierarchy))]
+#![feature(proc_macro_hygiene)]
 #![cfg_attr(not(verus_only), allow(dead_code, unused_imports))]
 #![cfg_attr(verus_only, allow(macro_expanded_macro_exports_accessed_by_absolute_paths))]
 #![allow(unused_braces)]

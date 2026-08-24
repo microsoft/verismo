@@ -62,17 +62,17 @@ impl<V, Pred: LockPredicate<V>> AtomicInvariantPredicate<
 
 /// A place in a lock's queue.
 ///
-/// Handed out by [`RawSpinLock::take_ticket`] and given up by entering the
+/// Handed out by [`RawSpinLock::try_take_ticket`] and given up by entering the
 /// lock. A ticket cannot be dropped back into the queue: once a thread has
 /// one, the threads behind it wait until it takes the lock and releases it.
 pub struct Ticket<V, Pred: LockPredicate<V>> {
-    num: u64,
-    tok: Tracked<TicketToks::tickets<V, Pred>>,
+    pub(crate) num: u64,
+    pub(crate) tok: Tracked<TicketToks::tickets<V, Pred>>,
 }
 
 impl<V, Pred: LockPredicate<V>> Ticket<V, Pred> {
     #[verifier::type_invariant]
-    closed spec fn wf(&self) -> bool {
+    pub(crate) closed spec fn wf(&self) -> bool {
         self.tok@.key() == self.num as nat
     }
 
@@ -85,7 +85,7 @@ impl<V, Pred: LockPredicate<V>> Ticket<V, Pred> {
 /// Proof that the caller is the one being served, and the right to serve the
 /// next thread by releasing.
 pub struct Hold<V, Pred: LockPredicate<V>> {
-    tok: Tracked<TicketToks::holding<V, Pred>>,
+    pub(crate) tok: Tracked<TicketToks::holding<V, Pred>>,
 }
 
 impl<V, Pred: LockPredicate<V>> Hold<V, Pred> {
@@ -106,14 +106,14 @@ impl<V, Pred: LockPredicate<V>> Hold<V, Pred> {
 /// a thread that gave up its place would leave everyone behind it waiting for
 /// a ticket that never gets served.
 pub struct RawSpinLock<V, Pred: LockPredicate<V>> {
-    current: AtomicU64<InstanceId, TicketToks::current<V, Pred>, CurrentInv<V, Pred>>,
-    holder: AtomicU64<InstanceId, TicketToks::holder<V, Pred>, HolderInv<V, Pred>>,
-    inst: Tracked<TicketToks::Instance<V, Pred>>,
+    pub(crate) current: AtomicU64<InstanceId, TicketToks::current<V, Pred>, CurrentInv<V, Pred>>,
+    pub(crate) holder: AtomicU64<InstanceId, TicketToks::holder<V, Pred>, HolderInv<V, Pred>>,
+    pub(crate) inst: Tracked<TicketToks::Instance<V, Pred>>,
 }
 
 impl<V, Pred: LockPredicate<V>> RawSpinLock<V, Pred> {
     #[verifier::type_invariant]
-    closed spec fn wf(&self) -> bool {
+    pub(crate) closed spec fn wf(&self) -> bool {
         &&& self.current.well_formed()
         &&& self.holder.well_formed()
         &&& self.current.constant() == self.inst@.id()
@@ -133,191 +133,6 @@ impl<V, Pred: LockPredicate<V>> RawSpinLock<V, Pred> {
     /// What is true of the contents whenever no one holds them.
     pub open spec fn inv(&self, v: V) -> bool {
         self.pred().inv(v)
-    }
-
-    /// Builds a lock, free, holding `v`.
-    pub fn new(Tracked(v): Tracked<V>, Ghost(pred): Ghost<Pred>) -> (ret: Self)
-        requires
-            pred.inv(v),
-        ensures
-            ret.pred() == pred,
-    {
-        let tracked (Tracked(inst), Tracked(cur_tok), Tracked(holder_tok), _, _) =
-            TicketToks::Instance::initialize(pred, v, Some(v));
-        let ghost id = inst.id();
-        RawSpinLock {
-            current: AtomicU64::new(Ghost(id), 0, Tracked(cur_tok)),
-            holder: AtomicU64::new(Ghost(id), 0, Tracked(holder_tok)),
-            inst: Tracked(inst),
-        }
-    }
-
-    /// Joins the queue, if a ticket can be had without contention.
-    ///
-    /// Fails when another thread took a ticket at the same moment, or -- after
-    /// `u64::MAX` acquisitions -- when the queue has run out of numbers.
-    pub fn try_take_ticket(&self) -> (ret: Option<Ticket<V, Pred>>)
-        ensures
-            ret matches Some(t) ==> t.instance_id() == self.id(),
-    {
-        proof {
-            use_type_invariant(self);
-        }
-        let cur = atomic_with_ghost!(&self.current => load(); ghost g => { });
-        if cur == u64::MAX {
-            return None;
-        }
-        let tracked mut got: Option<TicketToks::tickets<V, Pred>> = None;
-        let res =
-            atomic_with_ghost!(
-            &self.current => compare_exchange(cur, cur + 1);
-            returning res;
-            ghost g =>
-        {
-            if res is Ok {
-                got = Some(self.inst.borrow().take_ticket(&mut g));
-            }
-        });
-        match res {
-            Ok(_) => {
-                let tracked tok = match got {
-                    Some(tok) => tok,
-                    None => proof_from_false(),
-                };
-                Some(Ticket { num: cur, tok: Tracked(tok) })
-            },
-            Err(_) => None,
-        }
-    }
-
-    /// Takes the lock if this ticket is the one being served, and hands the
-    /// ticket back otherwise so the caller can ask again.
-    pub fn try_enter(&self, ticket: Ticket<V, Pred>) -> (ret: Result<
-        (Tracked<V>, Hold<V, Pred>),
-        Ticket<V, Pred>,
-    >)
-        requires
-            ticket.instance_id() == self.id(),
-        ensures
-            ret matches Ok((v, hold)) ==> self.inv(v@) && hold.instance_id() == self.id(),
-            ret matches Err(t) ==> t.instance_id() == self.id(),
-    {
-        proof {
-            use_type_invariant(self);
-            use_type_invariant(&ticket);
-        }
-        let Ticket { num, tok: Tracked(tok) } = ticket;
-        let tracked mut waiting: Option<TicketToks::tickets<V, Pred>> = Some(tok);
-        let tracked mut entered: Option<V> = None;
-        let tracked mut hold: Option<TicketToks::holding<V, Pred>> = None;
-        let served =
-            atomic_with_ghost!(
-            &self.holder => load();
-            returning served;
-            ghost g =>
-        {
-            if served == num {
-                let tracked t = waiting.tracked_take();
-                let tracked (Tracked(h), _, Tracked(v)) = self.inst.borrow().enter(
-                    num as nat,
-                    &g,
-                    t,
-                );
-                entered = Some(v);
-                hold = Some(h);
-            }
-        });
-        if served == num {
-            let tracked v = match entered {
-                Some(v) => v,
-                None => proof_from_false(),
-            };
-            let tracked h = match hold {
-                Some(h) => h,
-                None => proof_from_false(),
-            };
-            Ok((Tracked(v), Hold { tok: Tracked(h) }))
-        } else {
-            let tracked t = match waiting {
-                Some(t) => t,
-                None => proof_from_false(),
-            };
-            Err(Ticket { num, tok: Tracked(t) })
-        }
-    }
-
-    /// Takes the lock, waiting for every thread already in the queue.
-    ///
-    /// Nothing here bounds how long that is: a holder that never releases
-    /// blocks the whole queue for ever, and this crate proves nothing about
-    /// whether a waiting thread ever runs. This is one of the two functions in
-    /// the crate that Verus accepts without a termination argument.
-    #[verifier::exec_allows_no_decreases_clause]
-    pub fn acquire(&self) -> (ret: (Tracked<V>, Hold<V, Pred>))
-        ensures
-            self.inv(ret.0@),
-            ret.1.instance_id() == self.id(),
-    {
-        let mut ticket: Option<Ticket<V, Pred>> = None;
-        loop
-            invariant
-                ticket matches Some(t) ==> t.instance_id() == self.id(),
-        {
-            let held = ticket;
-            ticket = None;
-            match held {
-                None => {
-                    ticket = self.try_take_ticket();
-                },
-                Some(t) => {
-                    match self.try_enter(t) {
-                        Ok(held) => {
-                            return held;
-                        },
-                        Err(t) => {
-                            ticket = Some(t);
-                        },
-                    }
-                },
-            }
-        }
-    }
-
-    /// Gives the contents back and serves the next thread in the queue.
-    ///
-    /// Takes the contents rather than trusting the caller to have left them
-    /// alone, so whatever is put back has to satisfy the lock's predicate.
-    pub fn release(&self, hold: Hold<V, Pred>, Tracked(v): Tracked<V>)
-        requires
-            hold.instance_id() == self.id(),
-            self.inv(v),
-    {
-        proof {
-            use_type_invariant(self);
-        }
-        let Hold { tok: Tracked(tok) } = hold;
-        let tracked mut held: Option<TicketToks::holding<V, Pred>> = Some(tok);
-        let _ =
-            atomic_with_ghost!(
-            &self.holder => fetch_add(1);
-            ghost g =>
-        {
-            let tracked t = held.tracked_take();
-            let ghost n = t.value();
-            self.inst.borrow().leave(n, v, &mut g, t, v);
-        });
-    }
-
-    /// Dissolves the lock and returns its contents.
-    ///
-    /// Queues first: a lock can be consumed while another thread holds it only
-    /// if that thread is done, and waiting is the only way to know.
-    pub fn into_inner(self) -> (ret: Tracked<V>)
-        ensures
-            self.inv(ret@),
-    {
-        let (v, _hold) = self.acquire();
-        v
     }
 }
 
@@ -342,57 +157,19 @@ impl<T, Pred: LockPredicate<T>> LockPredicate<PointsTo<T>> for CellInv<Pred> {
 /// `std::sync::Mutex`, dropping the guard does *not* release the lock --
 /// [`SpinGuard::unlock`] does, and Verus does not check that it is called.
 pub struct SpinLock<T, Pred: LockPredicate<T>> {
-    cell: PCell<T>,
-    raw: RawSpinLock<PointsTo<T>, CellInv<Pred>>,
+    pub(crate) cell: PCell<T>,
+    pub(crate) raw: RawSpinLock<PointsTo<T>, CellInv<Pred>>,
 }
 
 impl<T, Pred: LockPredicate<T>> SpinLock<T, Pred> {
     #[verifier::type_invariant]
-    closed spec fn wf(&self) -> bool {
+    pub(crate) closed spec fn wf(&self) -> bool {
         self.raw.pred().cell == self.cell.id()
     }
 
     /// What is true of the data whenever no one holds the lock.
     pub closed spec fn inv(&self, v: T) -> bool {
         self.raw.pred().pred.inv(v)
-    }
-
-    /// Builds a lock owning `v`.
-    pub fn new(v: T, Ghost(pred): Ghost<Pred>) -> (ret: Self)
-        requires
-            pred.inv(v),
-        ensures
-            forall|w: T| ret.inv(w) == pred.inv(w),
-    {
-        let (cell, Tracked(perm)) = PCell::new(v);
-        let ghost cell_pred = CellInv { cell: cell.id(), pred };
-        let raw = RawSpinLock::new(Tracked(perm), Ghost(cell_pred));
-        SpinLock { cell, raw }
-    }
-
-    /// Takes the lock, waiting for every thread already in the queue.
-    pub fn lock(&self) -> (ret: SpinGuard<'_, T, Pred>)
-        ensures
-            ret.lock() == self,
-    {
-        proof {
-            use_type_invariant(self);
-        }
-        let (Tracked(perm), hold) = self.raw.acquire();
-        SpinGuard { lock: self, perm: Tracked(perm), hold }
-    }
-
-    /// Dissolves the lock and returns the data, waiting until it is free.
-    pub fn into_inner(self) -> (ret: T)
-        ensures
-            self.inv(ret),
-    {
-        proof {
-            use_type_invariant(&self);
-        }
-        let SpinLock { cell, raw } = self;
-        let Tracked(perm) = raw.into_inner();
-        cell.into_inner(Tracked(perm))
     }
 }
 
@@ -401,14 +178,14 @@ impl<T, Pred: LockPredicate<T>> SpinLock<T, Pred> {
 /// The lock stays held until [`unlock`](Self::unlock) is called; dropping the
 /// guard leaks it, and leaks every thread queued behind it.
 pub struct SpinGuard<'a, T, Pred: LockPredicate<T>> {
-    lock: &'a SpinLock<T, Pred>,
-    perm: Tracked<PointsTo<T>>,
-    hold: Hold<PointsTo<T>, CellInv<Pred>>,
+    pub(crate) lock: &'a SpinLock<T, Pred>,
+    pub(crate) perm: Tracked<PointsTo<T>>,
+    pub(crate) hold: Hold<PointsTo<T>, CellInv<Pred>>,
 }
 
 impl<'a, T, Pred: LockPredicate<T>> SpinGuard<'a, T, Pred> {
     #[verifier::type_invariant]
-    closed spec fn wf(&self) -> bool {
+    pub(crate) closed spec fn wf(&self) -> bool {
         &&& self.lock.wf()
         &&& self.perm@.id() == self.lock.cell.id()
         &&& self.hold.instance_id() == self.lock.raw.id()
@@ -423,50 +200,308 @@ impl<'a, T, Pred: LockPredicate<T>> SpinGuard<'a, T, Pred> {
     pub closed spec fn view(&self) -> T {
         *self.perm@.value()
     }
+}
 
+} // verus!
+#[verus_verify]
+impl<V, Pred: LockPredicate<V>> RawSpinLock<V, Pred> {
+    /// Builds a lock, free, holding `v`.
+    #[verus_spec(ret =>
+        requires
+            pred@.inv(v@),
+        ensures
+            ret.pred() == pred@,
+    )]
+    pub fn new(v: Tracked<V>, pred: Ghost<Pred>) -> RawSpinLock<V, Pred> {
+        proof_decl! {
+            let tracked val = v.get();
+            let tracked (Tracked(inst), Tracked(cur_tok), Tracked(holder_tok), _, _) =
+                TicketToks::Instance::initialize(pred@, val, Some(val));
+            let ghost id = inst.id();
+        }
+        RawSpinLock {
+            current: verus_exec_expr! { AtomicU64::new(Ghost(id), 0, Tracked(cur_tok)) },
+            holder: verus_exec_expr! { AtomicU64::new(Ghost(id), 0, Tracked(holder_tok)) },
+            inst: verus_exec_expr! { Tracked(inst) },
+        }
+    }
+
+    /// Joins the queue, if a ticket can be had without contention.
+    ///
+    /// Fails when another thread took a ticket at the same moment, or -- after
+    /// `u64::MAX` acquisitions -- when the queue has run out of numbers.
+    #[verus_spec(ret =>
+        ensures
+            ret matches Some(t) ==> t.instance_id() == self.id(),
+    )]
+    pub fn try_take_ticket(&self) -> Option<Ticket<V, Pred>> {
+        proof! {
+            use_type_invariant(self);
+        }
+        let cur = atomic_with_ghost!(&self.current => load(); ghost g => { });
+        if cur == u64::MAX {
+            return None;
+        }
+        proof_decl! {
+            let tracked mut got: Option<TicketToks::tickets<V, Pred>> = None;
+        }
+        let res = atomic_with_ghost!(
+            &self.current => compare_exchange(cur, cur + 1);
+            returning res;
+            ghost g =>
+        {
+            if res is Ok {
+                got = Some(self.inst.borrow().take_ticket(&mut g));
+            }
+        });
+        match res {
+            Ok(_) => {
+                proof_decl! {
+                    let tracked tok = match got {
+                        Some(tok) => tok,
+                        None => proof_from_false(),
+                    };
+                }
+                Some(Ticket { num: cur, tok: verus_exec_expr! { Tracked(tok) } })
+            }
+            Err(_) => None,
+        }
+    }
+
+    /// Takes the lock if this ticket is the one being served, and hands the
+    /// ticket back otherwise so the caller can ask again.
+    #[verus_spec(ret =>
+        requires
+            ticket.instance_id() == self.id(),
+        ensures
+            ret matches Ok((v, hold)) ==> self.inv(v@) && hold.instance_id() == self.id(),
+            ret matches Err(t) ==> t.instance_id() == self.id(),
+    )]
+    pub fn try_enter(
+        &self,
+        ticket: Ticket<V, Pred>,
+    ) -> Result<(Tracked<V>, Hold<V, Pred>), Ticket<V, Pred>> {
+        proof! {
+            use_type_invariant(self);
+            use_type_invariant(&ticket);
+        }
+        let num = ticket.num;
+        proof_decl! {
+            let tracked mut waiting: Option<TicketToks::tickets<V, Pred>> = Some(ticket.tok.get());
+            let tracked mut entered: Option<V> = None;
+            let tracked mut hold: Option<TicketToks::holding<V, Pred>> = None;
+        }
+        let served = atomic_with_ghost!(
+            &self.holder => load();
+            returning served;
+            ghost g =>
+        {
+            if served == num {
+                let tracked t = waiting.tracked_take();
+                let tracked (Tracked(h), _, Tracked(v)) = self.inst.borrow().enter(
+                    num as nat,
+                    &g,
+                    t,
+                );
+                entered = Some(v);
+                hold = Some(h);
+            }
+        });
+        if served == num {
+            proof_decl! {
+                let tracked v = match entered {
+                    Some(v) => v,
+                    None => proof_from_false(),
+                };
+                let tracked h = match hold {
+                    Some(h) => h,
+                    None => proof_from_false(),
+                };
+            }
+            Ok((verus_exec_expr! { Tracked(v) }, Hold { tok: verus_exec_expr! { Tracked(h) } }))
+        } else {
+            proof_decl! {
+                let tracked t = match waiting {
+                    Some(t) => t,
+                    None => proof_from_false(),
+                };
+            }
+            Err(Ticket { num, tok: verus_exec_expr! { Tracked(t) } })
+        }
+    }
+
+    /// Takes the lock, waiting for every thread already in the queue.
+    ///
+    /// Nothing here bounds how long that is: a holder that never releases
+    /// blocks the whole queue for ever, and this crate proves nothing about
+    /// whether a waiting thread ever runs. This is one of the three functions
+    /// in the crate that Verus accepts without a termination argument.
+    #[verifier::exec_allows_no_decreases_clause]
+    #[verus_spec(ret =>
+        ensures
+            self.inv(ret.0@),
+            ret.1.instance_id() == self.id(),
+    )]
+    pub fn acquire(&self) -> (Tracked<V>, Hold<V, Pred>) {
+        let mut ticket: Option<Ticket<V, Pred>> = None;
+        #[verus_spec(
+            invariant
+                ticket matches Some(t) ==> t.instance_id() == self.id(),
+        )]
+        loop {
+            let queued = ticket;
+            ticket = None;
+            match queued {
+                None => {
+                    ticket = self.try_take_ticket();
+                }
+                Some(t) => match self.try_enter(t) {
+                    Ok(held) => {
+                        return held;
+                    }
+                    Err(t) => {
+                        ticket = Some(t);
+                    }
+                },
+            }
+        }
+    }
+
+    /// Gives the contents back and serves the next thread in the queue.
+    ///
+    /// Takes the contents rather than trusting the caller to have left them
+    /// alone, so whatever is put back has to satisfy the lock's predicate.
+    #[verus_spec(
+        requires
+            hold.instance_id() == self.id(),
+            self.inv(v@),
+    )]
+    pub fn release(&self, hold: Hold<V, Pred>, v: Tracked<V>) {
+        proof! {
+            use_type_invariant(self);
+        }
+        proof_decl! {
+            let tracked mut held: Option<TicketToks::holding<V, Pred>> = Some(hold.tok.get());
+            let tracked val = v.get();
+        }
+        let _ = atomic_with_ghost!(
+            &self.holder => fetch_add(1);
+            ghost g =>
+        {
+            let tracked t = held.tracked_take();
+            let ghost n = t.value();
+            self.inst.borrow().leave(n, val, &mut g, t, val);
+        });
+    }
+
+    /// Dissolves the lock and returns its contents.
+    ///
+    /// Queues first: a lock can be consumed while another thread holds it only
+    /// if that thread is done, and waiting is the only way to know.
+    #[verus_spec(ret =>
+        ensures
+            self.inv(ret@),
+    )]
+    pub fn into_inner(self) -> Tracked<V> {
+        let (v, _hold) = self.acquire();
+        v
+    }
+}
+
+#[verus_verify]
+impl<T, Pred: LockPredicate<T>> SpinLock<T, Pred> {
+    /// Builds a lock owning `v`.
+    #[verus_spec(ret =>
+        requires
+            pred@.inv(v),
+        ensures
+            forall|w: T| ret.inv(w) == pred@.inv(w),
+    )]
+    pub fn new(v: T, pred: Ghost<Pred>) -> SpinLock<T, Pred> {
+        let (cell, perm) = PCell::new(v);
+        proof_decl! {
+            let ghost cell_pred = CellInv { cell: cell.id(), pred: pred@ };
+        }
+        let raw = verus_exec_expr! { RawSpinLock::new(perm, Ghost(cell_pred)) };
+        SpinLock { cell, raw }
+    }
+
+    /// Takes the lock, waiting for every thread already in the queue.
+    #[verus_spec(ret =>
+        ensures
+            ret.lock() == self,
+    )]
+    pub fn lock(&self) -> SpinGuard<'_, T, Pred> {
+        proof! {
+            use_type_invariant(self);
+        }
+        let (perm, hold) = self.raw.acquire();
+        SpinGuard { lock: self, perm, hold }
+    }
+
+    /// Dissolves the lock and returns the data, waiting until it is free.
+    #[verus_spec(ret =>
+        ensures
+            self.inv(ret),
+    )]
+    pub fn into_inner(self) -> T {
+        proof! {
+            use_type_invariant(&self);
+        }
+        let SpinLock { cell, raw } = self;
+        let perm = raw.into_inner();
+        cell.into_inner(perm)
+    }
+}
+
+#[verus_verify]
+impl<'a, T, Pred: LockPredicate<T>> SpinGuard<'a, T, Pred> {
     /// Releases the lock and serves the next thread in the queue.
     ///
     /// The data has to satisfy the lock's predicate again: whatever a holder
     /// does to it while holding it, it leaves true what every other thread is
     /// entitled to assume.
-    pub fn unlock(self)
+    #[verus_spec(
         requires
             self.lock().inv(self@),
-    {
-        proof {
+    )]
+    pub fn unlock(self) {
+        proof! {
             use_type_invariant(&self);
         }
-        let SpinGuard { lock, perm: Tracked(perm), hold } = self;
-        lock.raw.release(hold, Tracked(perm));
+        let SpinGuard { lock, perm, hold } = self;
+        lock.raw.release(hold, perm);
     }
 }
 
+#[verus_verify]
 impl<'a, T, Pred: LockPredicate<T>> Deref for SpinGuard<'a, T, Pred> {
     type Target = T;
 
-    fn deref(&self) -> (ret: &T)
+    #[verus_spec(ret =>
         ensures
             *ret == self@,
-    {
-        proof {
+    )]
+    fn deref(&self) -> &T {
+        proof! {
             use_type_invariant(self);
         }
-        self.lock.cell.borrow(Tracked(self.perm.borrow()))
+        verus_exec_expr! { self.lock.cell.borrow(Tracked(self.perm.borrow())) }
     }
 }
 
+#[verus_verify]
 impl<'a, T, Pred: LockPredicate<T>> DerefMut for SpinGuard<'a, T, Pred> {
-    fn deref_mut(&mut self) -> (ret: &mut T)
+    #[verus_spec(ret =>
         ensures
             *ret == old(self)@,
             final(self)@ == *final(ret),
             final(self).lock() == old(self).lock(),
-    {
-        proof {
+    )]
+    fn deref_mut(&mut self) -> &mut T {
+        proof! {
             use_type_invariant(&*self);
         }
-        self.lock.cell.borrow_mut(Tracked(self.perm.borrow_mut()))
+        verus_exec_expr! { self.lock.cell.borrow_mut(Tracked(self.perm.borrow_mut())) }
     }
 }
-
-} // verus!
