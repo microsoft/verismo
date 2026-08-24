@@ -16,17 +16,17 @@ verus! {
 /// The specification side of a lock over data: what a lock and its guard
 /// mean, with no operations.
 ///
-/// Split from [`SpinLockTrait`] so that the operations can be written as
+/// Split from [`SpinLockContract`] so that the operations can be written as
 /// ordinary Rust; an implementation provides both.
 ///
 /// The lifetime is on the trait rather than on `Guard`, because Verus does
 /// not support generic associated types. A caller generic over the lock
-/// therefore writes `L: for<'a> SpinLockTrait<'a, T, Pred>`.
+/// therefore writes `L: for<'a> SpinLockContract<'a, T, Pred>`.
 pub trait SpinLockSpec<'a, T, Pred: LockPredicate<T>>: Sized + 'a {
     /// Proof that the caller holds the lock, and the way to the data.
     ///
-    /// Linear: produced by [`lock`](SpinLockTrait::lock) and consumed by
-    /// [`unlock`](SpinLockTrait::unlock), so it cannot be duplicated to
+    /// Linear: produced by [`lock`](SpinLockContract::lock) and consumed by
+    /// [`unlock`](SpinLockContract::unlock), so it cannot be duplicated to
     /// release twice, and dropping it leaves the lock held for ever.
     type Guard: Deref<Target = T> + DerefMut;
 
@@ -62,7 +62,7 @@ pub trait SpinLockSpec<'a, T, Pred: LockPredicate<T>>: Sized + 'a {
 /// threads behind the abandoned place waiting for a turn that never comes, and
 /// an implementation that can offer one is free to do so on its own type.
 #[verus_verify]
-pub trait SpinLockTrait<'a, T, Pred: LockPredicate<T>>: SpinLockSpec<'a, T, Pred> {
+pub trait SpinLockContract<'a, T, Pred: LockPredicate<T>>: SpinLockSpec<'a, T, Pred> {
     /// Builds a lock owning `v`.
     #[verus_spec(ret =>
         requires

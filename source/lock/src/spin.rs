@@ -27,7 +27,7 @@ use common_proofs::{ghost, tracked};
 use crate::pred::LockPredicate;
 use crate::spin_spec::{CurrentInv, HolderInv};
 use crate::spin_tok::TicketToks;
-use crate::spin_contract::{SpinLockSpec, SpinLockTrait};
+use crate::spin_contract::{SpinLockContract, SpinLockSpec};
 
 /// A place in a lock's queue.
 ///
@@ -197,7 +197,7 @@ impl<'a, T: 'a, Pred: LockPredicate<T> + 'a> SpinLockSpec<'a, T, Pred> for SpinL
 
 } // verus!
 #[verus_verify]
-impl<'a, T: 'a, Pred: LockPredicate<T> + 'a> SpinLockTrait<'a, T, Pred> for SpinLock<T, Pred> {
+impl<'a, T: 'a, Pred: LockPredicate<T> + 'a> SpinLockContract<'a, T, Pred> for SpinLock<T, Pred> {
     fn new(v: T, pred: Ghost<Pred>) -> SpinLock<T, Pred> {
         proof_with!{ Ghost(pred@) }
         SpinLock::new(v)

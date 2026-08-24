@@ -18,9 +18,10 @@
 //!
 //! # Using a different lock
 //!
-//! [`SpinLockTrait`] is what the data form promises, as a trait. An embedder
-//! whose system already has a lock -- one its scheduler knows about, or one
-//! the hardware offers -- implements that trait instead of using [`SpinLock`],
+//! [`SpinLockSpec`] says what a lock over data *means* and [`SpinLockContract`]
+//! what it *does*. An embedder whose system already has a lock -- one its
+//! scheduler knows about, or one the hardware offers -- implements the two
+//! instead of using [`SpinLock`],
 //! and whatever was written against the trait keeps verifying unchanged.
 //!
 //! # What "excludes" means here
@@ -70,4 +71,4 @@ pub mod spin_contract;
 
 pub use pred::LockPredicate;
 pub use spin::{Hold, RawSpinLock, SpinGuard, SpinLock, Ticket};
-pub use spin_contract::{SpinLockSpec, SpinLockTrait};
+pub use spin_contract::{SpinLockContract, SpinLockSpec};
