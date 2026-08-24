@@ -53,6 +53,7 @@ use builtin_macros::*;
 pub mod pred;
 pub mod rwlock;
 pub mod spin;
+pub mod spin_tok;
 
 pub use pred::LockPredicate;
 pub use rwlock::{RawRwLock, ReadGuard, RwLock, WriteGuard};
