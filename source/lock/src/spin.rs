@@ -19,6 +19,7 @@ use core::ops::{Deref, DerefMut};
 use vstd::atomic_ghost::*;
 use vstd::cell::pcell::{PCell, PointsTo};
 use vstd::cell::CellId;
+use vstd::invariant::open_atomic_invariant;
 use vstd::pervasive::proof_from_false;
 use vstd::prelude::*;
 use vstd::tokens::InstanceId;
@@ -238,20 +239,27 @@ impl<V, Pred: LockPredicate<V>> RawSpinLock<V, Pred> {
         proof! {
             use_type_invariant(self);
         }
-        let cur = atomic_with_ghost!(&self.current => load(); ghost g => { });
+        let cur;
+        open_atomic_invariant!(self.current.atomic_inv.borrow() => pair => {
+            let tracked (perm, g) = pair;
+            cur = self.current.patomic.load(Tracked(&perm));
+            proof { pair = (perm, g); }
+        });
         if cur == u64::MAX {
             return None;
         }
         proof_decl! {
             let tracked mut got: Option<TicketToks::tickets<V, Pred>> = None;
         }
-        let res = atomic_with_ghost!(
-            &self.current => compare_exchange(cur, cur + 1);
-            returning res;
-            ghost g =>
-        {
-            if res is Ok {
-                got = Some(self.inst.borrow().take_ticket(&mut g));
+        let res;
+        open_atomic_invariant!(self.current.atomic_inv.borrow() => pair => {
+            let tracked (mut perm, mut g) = pair;
+            res = self.current.patomic.compare_exchange(Tracked(&mut perm), cur, cur + 1);
+            proof {
+                if res is Ok {
+                    got = Some(self.inst.borrow().take_ticket(&mut g));
+                }
+                pair = (perm, g);
             }
         });
         match res {
@@ -291,20 +299,22 @@ impl<V, Pred: LockPredicate<V>> RawSpinLock<V, Pred> {
             let tracked mut entered: Option<V> = None;
             let tracked mut hold: Option<TicketToks::holding<V, Pred>> = None;
         }
-        let served = atomic_with_ghost!(
-            &self.holder => load();
-            returning served;
-            ghost g =>
-        {
-            if served == num {
-                let tracked t = waiting.tracked_take();
-                let tracked (Tracked(h), _, Tracked(v)) = self.inst.borrow().enter(
-                    num as nat,
-                    &g,
-                    t,
-                );
-                entered = Some(v);
-                hold = Some(h);
+        let served;
+        open_atomic_invariant!(self.holder.atomic_inv.borrow() => pair => {
+            let tracked (perm, g) = pair;
+            served = self.holder.patomic.load(Tracked(&perm));
+            proof {
+                if served == num {
+                    let tracked t = waiting.tracked_take();
+                    let tracked (Tracked(h), _, Tracked(v)) = self.inst.borrow().enter(
+                        num as nat,
+                        &g,
+                        t,
+                    );
+                    entered = Some(v);
+                    hold = Some(h);
+                }
+                pair = (perm, g);
             }
         });
         if served == num {
@@ -384,13 +394,15 @@ impl<V, Pred: LockPredicate<V>> RawSpinLock<V, Pred> {
             let tracked mut held: Option<TicketToks::holding<V, Pred>> = Some(hold.tok.get());
             let tracked val = v.get();
         }
-        let _ = atomic_with_ghost!(
-            &self.holder => fetch_add(1);
-            ghost g =>
-        {
-            let tracked t = held.tracked_take();
-            let ghost n = t.value();
-            self.inst.borrow().leave(n, val, &mut g, t, val);
+        open_atomic_invariant!(self.holder.atomic_inv.borrow() => pair => {
+            let tracked (mut perm, mut g) = pair;
+            proof {
+                let tracked t = held.tracked_take();
+                let ghost n = t.value();
+                self.inst.borrow().leave(n, val, &mut g, t, val);
+            }
+            self.holder.patomic.fetch_add(Tracked(&mut perm), 1);
+            proof { pair = (perm, g); }
         });
     }
 
