@@ -48,6 +48,10 @@ impl GenericPageTableFlagsSpec for PTEntryFlags {
         0x80
     }
 
+    open spec fn spec_writable_bit() -> usize {
+        0x2
+    }
+
     open spec fn spec_user_bit() -> usize {
         0x4
     }
@@ -64,6 +68,10 @@ impl GenericPageTableFlagsSpec for PTEntryFlags {
 
     fn huge_bit() -> (ret: usize) {
         0x80
+    }
+
+    fn writable_bit() -> (ret: usize) {
+        0x2
     }
 
     fn user_bit() -> (ret: usize) {
@@ -84,6 +92,10 @@ impl GenericPageTableFlagsSpec for PTEntryFlags {
         assert(0x200usize & 0x1usize == 0usize) by (bit_vector);
         assert(0x200usize & 0x80usize == 0usize) by (bit_vector);
         assert(0x200usize & 0x8000_0000_0000_03ffusize == 0x200usize) by (bit_vector);
+        assert(0x2usize & 0x1usize == 0usize) by (bit_vector);
+        assert(0x2usize & 0x80usize == 0usize) by (bit_vector);
+        assert(0x2usize & 0x200usize == 0usize) by (bit_vector);
+        assert(0x2usize & 0x8000_0000_0000_03ffusize == 0x2usize) by (bit_vector);
     }
 }
 
@@ -93,6 +105,9 @@ impl GenericPageTableFlagsSpec for PTEntryFlags {
 impl GenericPageTableFlags for PTEntryFlags {
     #[verifier::external_body]
     const PRESENT: Self = Self::PRESENT;
+
+    #[verifier::external_body]
+    const WRITABLE: Self = Self::WRITABLE;
 
     #[verifier::external_body]
     const USER: Self = Self::USER;

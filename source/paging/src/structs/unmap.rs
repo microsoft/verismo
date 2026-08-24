@@ -55,7 +55,7 @@ pub fn update_leaf_at<A: ArchPagingMeta, P: OSPagingContract<A>>(
         page.wf(),
         page.base == page_ptr@.addr,
     ensures
-        ret matches Ok(old) ==> !old.is_table_spec(),
+        ret matches Ok(old) ==> !old.escrows_spec(),
     decreases level.spec_depth(),
 {
     let index = entry_index::<A>(vaddr, level);
@@ -67,7 +67,7 @@ pub fn update_leaf_at<A: ArchPagingMeta, P: OSPagingContract<A>>(
         Tracked(slot),
         Tracked(None),
     );
-    if current.is_table() {
+    if current.escrows() {
         let child_level = match level.child() {
             None => {
                 return Err(PagingError::NotMapped);
@@ -110,7 +110,7 @@ fn leaf_replacement<A: ArchPagingMeta>(current: PTEntry<A>, update: LeafUpdate<A
     A,
 >)
     ensures
-        !ret.is_table_spec(),
+        !ret.escrows_spec(),
 {
     match update {
         LeafUpdate::Clear => PTEntry::<A>::empty(),

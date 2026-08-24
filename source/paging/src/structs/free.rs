@@ -156,7 +156,7 @@ fn free_child<A: ArchPagingMeta, P: OSPagingContract<A>>(
         entry.wf_payload(payload),
     decreases level.spec_depth(), 0nat,
 {
-    if !entry.is_table() {
+    if !entry.escrows() {
         return;
     }
     let child_level = match level.child() {

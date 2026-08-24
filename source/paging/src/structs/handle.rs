@@ -133,7 +133,7 @@ impl<A: ArchPagingMeta, P: OSPagingContract<A>, L: PagingLevel> GenericPageTable
             self.inv(),
         ensures
             ret.level.spec_depth() <= self.root_level().spec_depth(),
-            ret.entry.is_table_spec() ==> ret.level.spec_is_leaf(),
+            ret.entry.is_table_spec(ret.level) ==> !ret.entry.escrows_spec(),
     {
         crate::structs::walk::walk::<A, P>(self.root, L::TOP_LEVEL, self.borrow_page(), vaddr)
     }
@@ -185,7 +185,7 @@ impl<A: ArchPagingMeta, P: OSPagingContract<A>, L: PagingLevel> GenericPageTable
             self.inv(),
     {
         let stop = self.walk(vaddr);
-        if stop.entry.present() && !stop.entry.is_table() {
+        if stop.entry.is_leaf(stop.level) {
             Ok((PhysAddr::from(stop.entry.address()), stop.level))
         } else {
             Err(PagingError::NotMapped)
@@ -228,7 +228,7 @@ impl<A: ArchPagingMeta, P: OSPagingContract<A>, L: PagingLevel> GenericPageTable
         requires
             self.inv(),
         ensures
-            ret matches Ok(old) ==> !old.is_table_spec(),
+            ret matches Ok(old) ==> !old.escrows_spec(),
     {
         update_leaf_at::<A, P>(
             self.root,
@@ -249,7 +249,7 @@ impl<A: ArchPagingMeta, P: OSPagingContract<A>, L: PagingLevel> GenericPageTable
             self.inv(),
             vaddr@ < usize::MAX,
         ensures
-            ret matches Ok((old, _)) ==> !old.is_table_spec(),
+            ret matches Ok((old, _)) ==> !old.escrows_spec(),
     {
         match update_leaf_at::<A, P>(
             self.root,
@@ -280,7 +280,7 @@ impl<A: ArchPagingMeta, P: OSPagingContract<A>, L: PagingLevel> GenericPageTable
             self.inv(),
             vaddr@ < usize::MAX,
         ensures
-            ret matches Ok((old, _)) ==> !old.is_table_spec(),
+            ret matches Ok((old, _)) ==> !old.escrows_spec(),
     {
         match update_leaf_at::<A, P>(
             self.root,

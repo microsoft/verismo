@@ -161,7 +161,7 @@ fn range_step<A: ArchPagingMeta, P: OSPagingContract<A>>(
         Tracked(slot),
         Tracked(None),
     );
-    if current.is_table() {
+    if current.escrows() {
         let tracked slot_ticket;
         let tracked child_page;
         proof {
@@ -359,7 +359,7 @@ fn leaf_step<A: ArchPagingMeta>(
 /// address field, so a tagged address survives.
 pub fn leaf_entry<A: ArchPagingMeta>(paddr: usize, flags: A::PTFlags) -> (ret: PTEntry<A>)
     ensures
-        !ret.is_table_spec(),
+        !ret.escrows_spec(),
 {
     let masked = paddr & A::address_mask();
     proof {

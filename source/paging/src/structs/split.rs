@@ -77,7 +77,7 @@ pub fn split_huge_at<A: ArchPagingMeta, P: OSPagingContract<A>>(
     let ptr = entry_ptr::<A>(page_ptr, index, Tracked(page));
     let tracked reader = page.slots.tracked_borrow(index as int);
     let current = read_slot_exact::<A>(ptr, Tracked(reader), Tracked(&writers), index);
-    if current.is_table() || !current.present() {
+    if current.escrows() || !current.present() {
         lock.unlock::<A>(Tracked(page), Tracked(writers));
         P::deallocate_table_page(paddr, Tracked(init));
         return Err(PagingError::NotLeafEntry);

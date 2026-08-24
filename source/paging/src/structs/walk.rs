@@ -64,7 +64,7 @@ pub fn walk<A: ArchPagingMeta, P: OSPagingContract<A>>(
         ret.index == spec_entry_index::<A>(vaddr@, ret.level),
         // Stopping on a table pointer is only allowed where descending is not:
         // at the leaf, where the bit that looks like PS is PAT.
-        ret.entry.is_table_spec() ==> ret.level.spec_is_leaf(),
+        ret.entry.is_table_spec(ret.level) ==> !ret.entry.escrows_spec(),
     decreases level.spec_depth(),
 {
     let index = entry_index::<A>(vaddr, level);
@@ -77,7 +77,7 @@ pub fn walk<A: ArchPagingMeta, P: OSPagingContract<A>>(
         Tracked(None),
     );
     let stop = WalkResult { level, page_ptr, index, entry };
-    if !entry.is_table() {
+    if !entry.is_table(level) || !entry.escrows() {
         return stop;
     }
     match level.child() {

@@ -63,11 +63,12 @@ pub proof fn build_slots<A: ArchPagingMeta>(tracked points: Seq<PointsTo<usize>>
 /// built from it escrows nothing and publishes nothing.
 pub proof fn lemma_zero_entry_is_not_a_table<A: ArchPagingMeta>()
     ensures
-        !PTEntry::<A>::spec_from_bits(0).is_table_spec(),
+        !PTEntry::<A>::spec_from_bits(0).escrows_spec(),
         !PTEntry::<A>::spec_from_bits(0).present_spec(),
 {
     PTEntry::<A>::lemma_view_of_bits(0);
     assert(0usize & A::PTFlags::spec_present_bit() == 0) by (bit_vector);
+    assert(0usize & A::PTFlags::spec_escrow_bit() == 0) by (bit_vector);
 }
 
 impl<A: ArchPagingMeta> PTPageInit<A> {

@@ -123,6 +123,7 @@ impl<P: X86PagingParams> ArchPagingMeta for X86Paging<P> {
         assert(0x000f_ffff_ffff_f000usize & 0x1usize == 0) by (bit_vector);
         assert(0x000f_ffff_ffff_f000usize & 0x80usize == 0) by (bit_vector);
         assert(0x000f_ffff_ffff_f000usize & 0x200usize == 0) by (bit_vector);
+        assert(0x000f_ffff_ffff_f000usize & 0x2usize == 0) by (bit_vector);
         assert(0x8000_0000_0000_03ffusize & !0x000f_ffff_ffff_f000usize
             == 0x8000_0000_0000_03ffusize) by (bit_vector);
         assert(forall|m: usize| m & 0usize == 0) by (bit_vector);

@@ -48,7 +48,7 @@ pub fn map_at<A: ArchPagingMeta, P: OSPagingContract<A>>(
         level_geometry_wf::<A>(),
         page.wf(),
         page.base == page_ptr@.addr,
-        !entry.is_table_spec(),
+        !entry.escrows_spec(),
     decreases level.spec_depth(), 1nat,
 {
     let index = entry_index::<A>(vaddr, level);
@@ -73,7 +73,7 @@ pub fn map_at<A: ArchPagingMeta, P: OSPagingContract<A>>(
         Tracked(slot),
         Tracked(None),
     );
-    if current.is_table() {
+    if current.escrows() {
         let tracked slot_ticket;
         let tracked child_page;
         proof {
@@ -111,7 +111,7 @@ fn grow_and_map<A: ArchPagingMeta, P: OSPagingContract<A>>(
         page.base == page_ptr@.addr,
         index < PTPage::<A>::count(),
         level.spec_child() is Some,
-        !entry.is_table_spec(),
+        !entry.escrows_spec(),
     decreases level.spec_depth(), 0nat,
 {
     let child_level = match level.child() {

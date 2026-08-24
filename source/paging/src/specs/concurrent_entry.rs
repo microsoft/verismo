@@ -23,11 +23,10 @@ impl<A: ArchPagingMeta> WithPayload for PTEntry<A> {
     /// -- a page's tokens cannot be fabricated.
     type Payload = Option<PTPageSharedPerm<A>>;
 
-    /// An entry that points at a table describes the page whose tokens it
-    /// escrows: the page readable where the frame in this entry is mapped, one
-    /// level down.
+    /// An entry escrowing a child describes the page whose tokens it holds: the
+    /// page readable where the frame in this entry is mapped, one level down.
     open spec fn wf_payload(self, payload: Self::Payload) -> bool {
-        self.is_table_spec() ==> {
+        self.escrows_spec() ==> {
             &&& payload is Some
             &&& payload->Some_0.wf()
             &&& payload->Some_0.base == A::spec_paddr_to_vaddr(self.page_frame_spec())
@@ -40,10 +39,10 @@ impl<A: ArchPagingMeta> IsValidAtomicType for PTEntry<A> {
 }
 
 impl<A: ArchPagingMeta> RWModel for PTEntry<A> {
-    /// PIN, as the protocol states it: a reader that saw a table pointer may
+    /// PIN, as the protocol states it: a reader that saw an escrowed child may
     /// act on it later, because no writer may take it back.
     ///
-    /// A slot that already points at a table keeps pointing at the same page,
+    /// A slot that already escrows a child keeps escrowing the same page,
     /// so the level of the page its payload describes is fixed from then on.
     /// Before that it escrows nothing, and an update is free to link a page of
     /// whatever level the slot's own level calls for.
@@ -51,7 +50,7 @@ impl<A: ArchPagingMeta> RWModel for PTEntry<A> {
         pair: Snapshot<Self, Self::Payload>,
         other: Snapshot<Self, Self::Payload>,
     ) -> bool {
-        &&& pair.value().is_table_spec() ==> other.payload()->Some_0.level
+        &&& pair.value().escrows_spec() ==> other.payload()->Some_0.level
             == pair.payload()->Some_0.level
         &&& entry_step(pair.value(), other.value())
     }
@@ -59,7 +58,7 @@ impl<A: ArchPagingMeta> RWModel for PTEntry<A> {
     /// A table entry has published its child: that is what lets a walk borrow
     /// the child's tokens outside the invariant block that produced them.
     open spec fn has_published_payload(self) -> bool {
-        self.is_table_spec()
+        self.escrows_spec()
     }
 
     proof fn reachable_self(pair: Snapshot<Self, Self::Payload>) {

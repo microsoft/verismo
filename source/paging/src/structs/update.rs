@@ -35,7 +35,7 @@ pub fn set_leaf_slot<A: ArchPagingMeta>(
         page.base == page_ptr@.addr,
         old(writers).ids() =~= page.ids(),
         index < PTPage::<A>::count(),
-        !entry.is_table_spec(),
+        !entry.escrows_spec(),
     ensures
         final(writers).ids() =~= page.ids(),
         ret is Ok ==> final(writers).slots[index as int]@ == entry,
@@ -47,7 +47,7 @@ pub fn set_leaf_slot<A: ArchPagingMeta>(
     let ptr = entry_ptr::<A>(page_ptr, index, Tracked(page));
     let tracked reader = page.slots.tracked_borrow(i);
     let current = read_slot_exact::<A>(ptr, Tracked(reader), Tracked(writers), index);
-    if current.present() {
+    if current.present() || current.escrows() {
         return Err(PagingError::EntryAlreadyPresent);
     }
     let ghost before = *writers;
@@ -78,7 +78,7 @@ pub fn link_table_slot<A: ArchPagingMeta>(
         page.base == page_ptr@.addr,
         old(writers).ids() =~= page.ids(),
         index < PTPage::<A>::count(),
-        entry.is_table_spec(),
+        entry.escrows_spec(),
         child.wf(),
         child.base == A::spec_paddr_to_vaddr(entry.page_frame_spec()),
     ensures
@@ -96,7 +96,7 @@ pub fn link_table_slot<A: ArchPagingMeta>(
     let ptr = entry_ptr::<A>(page_ptr, index, Tracked(page));
     let tracked reader = page.slots.tracked_borrow(i);
     let current = read_slot_exact::<A>(ptr, Tracked(reader), Tracked(writers), index);
-    if current.present() {
+    if current.present() || current.escrows() {
         return Err(PagingError::EntryAlreadyPresent);
     }
     let ghost before = *writers;
@@ -131,10 +131,10 @@ pub fn replace_leaf_slot<A: ArchPagingMeta>(
         page.base == page_ptr@.addr,
         old(writers).ids() =~= page.ids(),
         index < PTPage::<A>::count(),
-        !entry.is_table_spec(),
+        !entry.escrows_spec(),
     ensures
         final(writers).ids() =~= page.ids(),
-        ret matches Ok(old) ==> !old.is_table_spec(),
+        ret matches Ok(old) ==> !old.escrows_spec(),
         ret matches Ok(prev) ==> prev == old(writers).slots[index as int]@,
         ret is Ok ==> final(writers).slots[index as int]@ == entry,
 {
@@ -145,7 +145,7 @@ pub fn replace_leaf_slot<A: ArchPagingMeta>(
     let ptr = entry_ptr::<A>(page_ptr, index, Tracked(page));
     let tracked reader = page.slots.tracked_borrow(i);
     let current = read_slot_exact::<A>(ptr, Tracked(reader), Tracked(writers), index);
-    if current.is_table() {
+    if current.escrows() {
         return Err(PagingError::NotLeafEntry);
     }
     let ghost before = *writers;
@@ -179,7 +179,7 @@ pub fn split_leaf_slot<A: ArchPagingMeta>(
         page.base == page_ptr@.addr,
         old(writers).ids() =~= page.ids(),
         index < PTPage::<A>::count(),
-        entry.is_table_spec(),
+        entry.escrows_spec(),
         child.wf(),
         child.base == A::spec_paddr_to_vaddr(entry.page_frame_spec()),
     ensures
@@ -197,7 +197,7 @@ pub fn split_leaf_slot<A: ArchPagingMeta>(
     let ptr = entry_ptr::<A>(page_ptr, index, Tracked(page));
     let tracked reader = page.slots.tracked_borrow(i);
     let current = read_slot_exact::<A>(ptr, Tracked(reader), Tracked(writers), index);
-    if current.is_table() {
+    if current.escrows() {
         return Err(PagingError::NotLeafEntry);
     }
     if !current.present() {

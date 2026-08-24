@@ -27,6 +27,8 @@ pub trait GenericPageTableFlags:
 {
     const PRESENT: Self;
 
+    const WRITABLE: Self;
+
     const USER: Self;
 
     const HUGE: Self;
@@ -210,6 +212,8 @@ pub trait GenericPageTableFlagsSpec: GenericPageTableFlags {
 
     spec fn spec_huge_bit() -> usize;
 
+    spec fn spec_writable_bit() -> usize;
+
     spec fn spec_user_bit() -> usize;
 
     /// A bit the hardware ignores in every kind of entry, which this crate uses
@@ -237,6 +241,11 @@ pub trait GenericPageTableFlagsSpec: GenericPageTableFlags {
             ret == Self::spec_huge_bit(),
     ;
 
+    fn writable_bit() -> (ret: usize)
+        ensures
+            ret == Self::spec_writable_bit(),
+    ;
+
     fn user_bit() -> (ret: usize)
         ensures
             ret == Self::spec_user_bit(),
@@ -260,6 +269,11 @@ pub trait GenericPageTableFlagsSpec: GenericPageTableFlags {
             Self::spec_escrow_bit() & Self::spec_present_bit() == 0,
             Self::spec_escrow_bit() & Self::spec_huge_bit() == 0,
             Self::spec_escrow_bit() & Self::spec_all_bits() == Self::spec_escrow_bit(),
+            Self::spec_writable_bit() != 0,
+            Self::spec_writable_bit() & Self::spec_present_bit() == 0,
+            Self::spec_writable_bit() & Self::spec_huge_bit() == 0,
+            Self::spec_writable_bit() & Self::spec_escrow_bit() == 0,
+            Self::spec_writable_bit() & Self::spec_all_bits() == Self::spec_writable_bit(),
     ;
 }
 
@@ -295,6 +309,7 @@ pub trait ArchPagingMeta: 'static + Copy + ArchPagingGeometry {
             Self::spec_address_mask() & Self::PTFlags::spec_present_bit() == 0,
             Self::spec_address_mask() & Self::PTFlags::spec_huge_bit() == 0,
             Self::spec_address_mask() & Self::PTFlags::spec_escrow_bit() == 0,
+            Self::spec_address_mask() & Self::PTFlags::spec_writable_bit() == 0,
             Self::spec_private_mask() & Self::spec_shared_mask() == 0,
             // Both tags live inside the address field, so tagging an address
             // keeps it a legal entry payload.

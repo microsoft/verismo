@@ -11,6 +11,7 @@ use core::marker::PhantomData;
 use vstd::prelude::*;
 
 use crate::structs::address::{Address, PhysAddr};
+use crate::structs::level::PageLevel;
 use crate::structs::ptpage::PTPage;
 use crate::structs::arch_contract::{
     ArchPagingMeta, GenericPageTableFlags, GenericPageTableFlagsSpec,
@@ -204,6 +205,22 @@ impl<A: ArchPagingMeta> PTEntry<A> {
         self.raw() & A::PTFlags::huge_bit() != 0
     }
 
+    /// Hardware writable bit.
+    pub open spec fn writable_spec(&self) -> bool {
+        self.view() & A::PTFlags::spec_writable_bit() != 0
+    }
+
+    #[verifier::when_used_as_spec(writable_spec)]
+    pub fn writable(&self) -> (ret: bool)
+        returns
+            self.writable_spec(),
+    {
+        proof {
+            A::PTFlags::lemma_flag_bits_wf();
+        }
+        self.raw() & A::PTFlags::writable_bit() != 0
+    }
+
     /// Hardware user-accessible bit.
     pub open spec fn user_spec(&self) -> bool {
         self.view() & A::PTFlags::spec_user_bit() != 0
@@ -239,35 +256,33 @@ impl<A: ArchPagingMeta> PTEntry<A> {
 
     /// An entry a walker may follow down to a child table.
     ///
-    /// The hardware bits alone cannot say this. At the leaf level a present
-    /// entry with the large-page bit clear maps a 4K page, and the hardware
-    /// reads that bit as PAT there; above the leaf the same two bits mean
-    /// "points at a table". The escrow bit is what distinguishes them at every
-    /// level, and it is set only by the code in this crate that links a page it
-    /// has just built.
-    pub open spec fn is_table_spec(&self) -> bool {
+    /// The bits alone cannot say this, which is why the level is an argument:
+    /// at the leaf level the hardware reads bit 7 as PAT, so every present
+    /// entry there maps a page, while above the leaf that bit is PS and a
+    /// present entry with it clear points at a table.
+    pub open spec fn is_table_spec(&self, level: PageLevel) -> bool {
+        &&& !level.spec_is_leaf()
         &&& self.present_spec()
         &&& !self.huge_spec()
-        &&& self.escrows_spec()
     }
 
-    pub fn is_table(&self) -> (ret: bool)
+    pub fn is_table(&self, level: PageLevel) -> (ret: bool)
         returns
-            self.is_table_spec(),
+            self.is_table_spec(level),
     {
-        self.present() && !self.huge() && self.escrows()
+        self.present() && (!level.is_leaf() && !self.huge())
     }
 
     /// A present entry that maps a page rather than pointing at a table.
-    pub open spec fn is_leaf_spec(&self) -> bool {
-        self.present_spec() && !self.is_table_spec()
+    pub open spec fn is_leaf_spec(&self, level: PageLevel) -> bool {
+        self.present_spec() && !self.is_table_spec(level)
     }
 
-    pub fn is_leaf(&self) -> (ret: bool)
+    pub fn is_leaf(&self, level: PageLevel) -> (ret: bool)
         returns
-            self.is_leaf_spec(),
+            self.is_leaf_spec(level),
     {
-        self.present() && !self.is_table()
+        self.present() && (self.huge() || level.is_leaf())
     }
 
     /// The all-zero entry: not present, and so neither a table nor a leaf.
@@ -275,9 +290,11 @@ impl<A: ArchPagingMeta> PTEntry<A> {
         ensures
             ret.is_clear_spec(),
             !ret.present_spec(),
+            !ret.escrows_spec(),
     {
         let ret = Self { val: 0, dummy: PhantomData };
         assert(0usize & A::PTFlags::spec_present_bit() == 0) by (bit_vector);
+        assert(0usize & A::PTFlags::spec_escrow_bit() == 0) by (bit_vector);
         ret
     }
 
@@ -327,7 +344,8 @@ impl<A: ArchPagingMeta> PTEntry<A> {
         requires
             addr@ & !A::spec_address_mask() == 0,
         ensures
-            ret.is_table_spec(),
+            forall|level: PageLevel| !level.spec_is_leaf() ==> ret.is_table_spec(level),
+            ret.escrows_spec(),
             ret.paddr_field_spec() == addr@,
     {
         proof {
@@ -358,14 +376,18 @@ impl<A: ArchPagingMeta> PTEntry<A> {
     /// An entry mapping a page rather than pointing at a table.
     ///
     /// The escrow bit is cleared whatever `flags` says: a leaf escrows no
-    /// tokens, and an entry that claimed to would be followed by a walk.
+    /// tokens, and an entry that claimed to would be followed by a walk. The
+    /// large-page bit is left to `flags`, since above the leaf level it is what
+    /// stops the hardware reading this entry as a table pointer -- see
+    /// `level_flags`.
     pub fn new_leaf(addr: PhysAddr, flags: A::PTFlags) -> (ret: Self)
         requires
             addr@ & !A::spec_address_mask() == 0,
         ensures
-            !ret.is_table_spec(),
+            !ret.escrows_spec(),
             ret.paddr_field_spec() == addr@,
             ret.present_spec() == (flags.bits_spec() & A::PTFlags::spec_present_bit() != 0),
+            ret.huge_spec() == (flags.bits_spec() & A::PTFlags::spec_huge_bit() != 0),
     {
         proof {
             A::lemma_pte_masks_wf();
@@ -378,12 +400,14 @@ impl<A: ArchPagingMeta> PTEntry<A> {
         proof {
             let am = A::spec_address_mask();
             let pb = A::PTFlags::spec_present_bit();
+            let hb = A::PTFlags::spec_huge_bit();
             let eb = A::PTFlags::spec_escrow_bit();
             let a = addr@;
             let fb = flags.bits_spec();
-            assert((am & pb == 0 && am & eb == 0 && eb & pb == 0 && a & !am == 0 && masked_addr == a
-                & am && flag_bits == fb & !am & !eb && val == masked_addr | flag_bits) ==> (val & am
-                == a && val & eb == 0 && (val & pb != 0) == (fb & pb != 0))) by (bit_vector);
+            assert((am & pb == 0 && am & hb == 0 && am & eb == 0 && eb & pb == 0 && eb & hb == 0
+                && a & !am == 0 && masked_addr == a & am && flag_bits == fb & !am & !eb && val
+                == masked_addr | flag_bits) ==> (val & am == a && val & eb == 0 && (val & pb != 0)
+                == (fb & pb != 0) && (val & hb != 0) == (fb & hb != 0))) by (bit_vector);
         }
         ret
     }
@@ -432,11 +456,15 @@ impl<A: ArchPagingMeta> From<PTEntry<A>> for usize {
 }
 
 /// The PIN invariant a lock-free reader depends on: once a slot is observed
-/// holding a table entry, every later value of that slot is still a table
-/// entry with the *same* child frame. A leaf or empty observation carries no
-/// such promise -- it may already be stale by the time the reader acts on it.
+/// escrowing a child page, every later value of that slot still escrows the
+/// *same* frame. A leaf or empty observation carries no such promise -- it may
+/// already be stale by the time the reader acts on it.
+///
+/// Stated on the escrow bit rather than on `is_table_spec` because a slot's
+/// level is not available here, and because what must not be taken back are the
+/// escrowed tokens.
 pub open spec fn entry_step<A: ArchPagingMeta>(a: PTEntry<A>, b: PTEntry<A>) -> bool {
-    a.is_table_spec() ==> (b.is_table_spec() && a.paddr_field_spec() == b.paddr_field_spec())
+    a.escrows_spec() ==> (b.escrows_spec() && a.paddr_field_spec() == b.paddr_field_spec())
 }
 
 pub proof fn lemma_entry_step_reflexive<A: ArchPagingMeta>(a: PTEntry<A>)
