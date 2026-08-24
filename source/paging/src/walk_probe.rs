@@ -660,6 +660,12 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
         #[sharding(variable)]
         pub asids: Set<nat>,
 
+        /// CPU -> the address space it is running, i.e. what its CR3 holds. Holding this token
+        /// is what lets code dereference an address of that space: a certificate names an
+        /// address space, and only the CPU running it can follow the walk.
+        #[sharding(map)]
+        pub cpus: Map<nat, nat>,
+
         /// Address space -> the frame its walk starts from, i.e. what CR3 holds while it runs.
         #[sharding(variable)]
         pub cr3: Map<nat, nat>,
@@ -775,6 +781,11 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
     }
 
     #[invariant]
+    pub spec fn cpus_run_spaces(&self) -> bool {
+        forall|c: nat| #[trigger] self.cpus.dom().contains(c) ==> self.asids.contains(self.cpus[c])
+    }
+
+    #[invariant]
     pub spec fn asids_fresh(&self) -> bool {
         forall|a: nat| #[trigger] self.asids.contains(a) ==> a < self.next_asid
     }
@@ -876,6 +887,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             init allocated = Set::<nat>::empty().insert(root);
             init frames_dom = frames;
             init asids = Set::<nat>::empty().insert(boot_asid);
+            init cpus = Map::<nat, nat>::empty().insert(0, boot_asid);
             init next_asid = boot_asid + 1;
             init cr3 = Map::<nat, nat>::empty().insert(boot_asid, root);
             init levels = levels;
@@ -886,6 +898,17 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             init vmem = Map::new(space_keys(boot_asid, vaddrs), |k: (nat, nat)| Option::<nat>::None);
             init vmem_dom = space_keys(boot_asid, vaddrs);
             init marker = PhantomData;
+        }
+    }
+
+    /// Switch this CPU to another address space, which on the machine is a write to CR3. The
+    /// token is linear, so certificates of the space left behind stop being usable at exactly
+    /// the point the hardware stops resolving them.
+    transition!{
+        switch(cpu: nat, a: nat) {
+            remove cpus -= [cpu => let old];
+            require pre.asids.contains(a);
+            add cpus += [cpu => a];
         }
     }
 
@@ -963,7 +986,8 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
     /// No page table entry is consulted, so a concurrent remap cannot block a write. That is
     /// sound because the word written is not a table word, and a translation reads nothing else.
     transition!{
-        write_non_pt(a: nat, v: nat, val: usize) {
+        write_non_pt(cpu: nat, v: nat, val: usize) {
+            have cpus >= [cpu => let a];
             have vmem >= [(a, v) => let oid];
             require oid is Some;
             let obj = obj_of::<A>(oid->Some_0, v);
@@ -988,7 +1012,8 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
 
     /// Read through a certificate and the content it names.
     property!{
-        read(a: nat, v: nat) {
+        read(cpu: nat, v: nat) {
+            have cpus >= [cpu => let a];
             have vmem >= [(a, v) => let oid];
             require oid is Some;
             have data >= [oid->Some_0 => let w];
@@ -998,7 +1023,8 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
     /// Read shared content. Never writable, because writing consumes a `data` token and frozen
     /// content has none.
     property!{
-        read_shared(a: nat, v: nat) {
+        read_shared(cpu: nat, v: nat) {
+            have cpus >= [cpu => let a];
             have vmem >= [(a, v) => let oid];
             require oid is Some;
             have frozen >= [oid->Some_0 => let w];
@@ -1015,6 +1041,11 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             have vmem >= [(a2, v2) => let c2];
             require c1 is Some && c1 == c2;
         }
+    }
+
+    /// Switching CPUs changes nothing about memory or the page tables.
+    #[inductive(switch)]
+    fn switch_inductive(pre: Self, post: Self, cpu: nat, a: nat) {
     }
 
     /// A frame no one held is a frame no walk landed on, so handing it out moves nothing.
@@ -1319,7 +1350,8 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
     /// Every translation is unmoved by a write that touches no table word, which is exactly
     /// what [`lemma_translate_local`] gives.
     #[inductive(write_non_pt)]
-    fn write_non_pt_inductive(pre: Self, post: Self, a: nat, v: nat, val: usize) {
+    fn write_non_pt_inductive(pre: Self, post: Self, cpu: nat, v: nat, val: usize) {
+        let a = pre.cpus[cpu];
         let oid = pre.vmem[(a, v)]->Some_0;
         assert forall|c: nat| c != oid implies word_at(pre.data, pre.frozen, c) == word_at(
             post.data,
