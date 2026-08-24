@@ -25,6 +25,7 @@ use vstd::tokens::InstanceId;
 use common_proofs::{ghost, tracked};
 
 use crate::pred::LockPredicate;
+use crate::raw::RawLock;
 use crate::spin_spec::{CurrentInv, HolderInv};
 use crate::spin_tok::TicketToks;
 
@@ -175,6 +176,36 @@ impl<'a, T, Pred: LockPredicate<T>> SpinGuard<'a, T, Pred> {
     /// The data as it stands.
     pub closed spec fn view(&self) -> T {
         *self.perm@.value()
+    }
+}
+
+impl<V, Pred: LockPredicate<V>> RawLock<V, Pred> for RawSpinLock<V, Pred> {
+    type Hold = Hold<V, Pred>;
+
+    type Id = InstanceId;
+
+    closed spec fn id(&self) -> InstanceId {
+        self.inst@.id()
+    }
+
+    closed spec fn pred(&self) -> Pred {
+        self.inst@.pred()
+    }
+
+    closed spec fn hold_id(hold: &Hold<V, Pred>) -> InstanceId {
+        hold.tok@.instance_id()
+    }
+
+    fn new(v: Tracked<V>, pred: Ghost<Pred>) -> RawSpinLock<V, Pred> {
+        RawSpinLock::new(v, pred)
+    }
+
+    fn acquire(&self) -> (Tracked<V>, Hold<V, Pred>) {
+        RawSpinLock::acquire(self)
+    }
+
+    fn release(&self, hold: Hold<V, Pred>, v: Tracked<V>) {
+        RawSpinLock::release(self, hold, v)
     }
 }
 
