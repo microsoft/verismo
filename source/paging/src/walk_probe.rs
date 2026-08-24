@@ -328,6 +328,42 @@ pub proof fn lemma_frame_at_local<A: ArchPagingMeta>(
 
 /// Where `vp` leads depends only on the entries its own walk reads. This is what lets a
 /// transition that rewrites entries elsewhere leave every other translation alone.
+/// Where a walk goes depends only on the residents of the frames it lands on, so changing the
+/// placement of a frame no walk lands on moves nothing. `live` names the frames the walks in
+/// question stay within.
+pub proof fn lemma_frame_at_frames<A: ArchPagingMeta>(
+    data: Map<nat, usize>,
+    frozen: Map<nat, usize>,
+    m1: Map<nat, Set<nat>>,
+    m2: Map<nat, Set<nat>>,
+    live: Set<nat>,
+    cr3: nat,
+    top: nat,
+    level: nat,
+    vp: nat,
+)
+    requires
+        forall|f: nat| #[trigger] live.contains(f) ==> m1[f] == m2[f],
+        forall|l: nat|
+            l <= top && #[trigger] frame_at::<A>(data, frozen, m1, cr3, top, l, vp) is Some
+                ==> live.contains(frame_at::<A>(data, frozen, m1, cr3, top, l, vp)->Some_0),
+    ensures
+        frame_at::<A>(data, frozen, m1, cr3, top, level, vp) == frame_at::<A>(
+            data,
+            frozen,
+            m2,
+            cr3,
+            top,
+            level,
+            vp,
+        ),
+    decreases top - level,
+{
+    if level < top {
+        lemma_frame_at_frames::<A>(data, frozen, m1, m2, live, cr3, top, (level + 1) as nat, vp);
+    }
+}
+
 pub proof fn lemma_translate_local<A: ArchPagingMeta>(
     d1: Map<nat, usize>,
     f1: Map<nat, usize>,
@@ -513,6 +549,11 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
         #[sharding(constant)]
         pub frames_dom: Set<nat>,
 
+        /// The frames handed out. A frame outside this set is free: it has no `frame_to_objs`
+        /// token at all, so nothing can be placed in it until it is allocated.
+        #[sharding(variable)]
+        pub allocated: Set<nat>,
+
         /// The running address spaces. Boot brings up one; threads are added later.
         #[sharding(variable)]
         pub asids: Set<nat>,
@@ -538,7 +579,8 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
     pub spec fn domains_fixed(&self) -> bool {
         &&& self.vmem.dom() =~= self.vmem_dom
         &&& self.vmap.dom() =~= self.vmap_dom
-        &&& self.frame_to_objs.dom() =~= self.frames_dom
+        &&& self.frame_to_objs.dom() =~= self.allocated
+        &&& self.allocated.subset_of(self.frames_dom)
     }
 
     #[invariant]
@@ -598,7 +640,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
     #[invariant]
     pub spec fn residency_sound(&self) -> bool {
         forall|pfn: nat, b: nat|
-            self.frames_dom.contains(pfn) && #[trigger] self.frame_to_objs[pfn].contains(b) ==> {
+            self.allocated.contains(pfn) && #[trigger] self.frame_to_objs[pfn].contains(b) ==> {
                 &&& self.obj_to_frame.dom().contains(b)
                 &&& self.obj_to_frame[b] == Some(pfn)
             }
@@ -608,7 +650,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
     pub spec fn residency_complete(&self) -> bool {
         forall|b: nat| #[trigger] self.obj_to_frame.dom().contains(b) && self.obj_to_frame[b] is Some
             ==> {
-            &&& self.frames_dom.contains(self.obj_to_frame[b]->Some_0)
+            &&& self.allocated.contains(self.obj_to_frame[b]->Some_0)
             &&& self.frame_to_objs[self.obj_to_frame[b]->Some_0].contains(b)
         }
     }
@@ -637,9 +679,10 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
     #[invariant]
     pub spec fn root_placed(&self) -> bool {
         &&& self.cr3.dom() =~= self.asids
-        &&& forall|a: nat| #[trigger] self.asids.contains(a) ==> self.frames_dom.contains(
-            self.cr3[a],
-        )
+        &&& forall|a: nat| #[trigger] self.asids.contains(a) ==> {
+            &&& self.allocated.contains(self.cr3[a])
+            &&& exists|o: nat| self.frame_to_objs[self.cr3[a]] =~= Set::<nat>::empty().insert(o)
+        }
     }
 
     /// A frame a walk lands on holds exactly one object. That is what turns the frame back into
@@ -665,7 +708,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
                     l,
                     k.1,
                 )->Some_0;
-                &&& self.frames_dom.contains(f)
+                &&& self.allocated.contains(f)
                 &&& exists|o: nat| self.frame_to_objs[f] =~= Set::<nat>::empty().insert(o)
             }
     }
@@ -723,10 +766,11 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             init data = Map::new(obj_ids::<A>(0), |c: nat| absent_word());
             init frozen = Map::empty();
             init obj_to_frame = Map::empty().insert(0, Some(root));
-            init frame_to_objs = Map::new(
-                frames,
-                |f: nat| if f == root { Set::<nat>::empty().insert(0) } else { Set::<nat>::empty() },
+            init frame_to_objs = Map::<nat, Set<nat>>::empty().insert(
+                root,
+                Set::<nat>::empty().insert(0),
             );
+            init allocated = Set::<nat>::empty().insert(root);
             init frames_dom = frames;
             init asids = Set::<nat>::empty().insert(boot_asid);
             init next_asid = boot_asid + 1;
@@ -739,6 +783,27 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             init vmem = Map::new(space_keys(boot_asid, vaddrs), |k: (nat, nat)| Option::<nat>::None);
             init vmem_dom = space_keys(boot_asid, vaddrs);
             init marker = PhantomData;
+        }
+    }
+
+    /// Hand out a frame no one holds. The `frame_to_objs` token minted here is what makes the
+    /// frame exclusively owned, and it is the only way a frame becomes usable.
+    transition!{
+        alloc_frame(f: nat) {
+            require pre.frames_dom.contains(f);
+            require !pre.allocated.contains(f);
+            update allocated = pre.allocated.insert(f);
+            add frame_to_objs += [f => Set::<nat>::empty()];
+        }
+    }
+
+    /// Recycle a frame. Giving up the token is what makes it free again, and it may only be
+    /// given up once nothing is placed there.
+    transition!{
+        dealloc_frame(f: nat) {
+            remove frame_to_objs -= [f => let occ];
+            require occ =~= Set::<nat>::empty();
+            update allocated = pre.allocated.remove(f);
         }
     }
 
@@ -824,6 +889,31 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             have vmem >= [(a2, v2) => let c2];
             require c1 is Some && c1 == c2;
         }
+    }
+
+    /// A frame no one held is a frame no walk landed on, so handing it out moves nothing.
+    #[inductive(alloc_frame)]
+    fn alloc_frame_inductive(pre: Self, post: Self, f: nat) {
+        lemma_frames_local::<A>(pre, post, pre.allocated);
+    }
+
+    /// A frame with nothing placed in it is a frame no walk landed on, since a walk lands only
+    /// where a single object resides.
+    #[inductive(dealloc_frame)]
+    fn dealloc_frame_inductive(pre: Self, post: Self, f: nat) {
+        assert forall|g: nat|
+            #[trigger] pre.allocated.contains(g) && (exists|o: nat|
+                pre.frame_to_objs[g] =~= Set::<nat>::empty().insert(o))
+                implies pre.allocated.remove(f).contains(g) by {
+            let o = choose|o: nat| pre.frame_to_objs[g] =~= Set::<nat>::empty().insert(o);
+            assert(pre.frame_to_objs[g].contains(o));
+        }
+        assert forall|a: nat| #[trigger] pre.asids.contains(a) implies pre.cr3[a] != f by {
+            let o = choose|o: nat|
+                pre.frame_to_objs[pre.cr3[a]] =~= Set::<nat>::empty().insert(o);
+            assert(pre.frame_to_objs[pre.cr3[a]].contains(o));
+        }
+        lemma_frames_local::<A>(pre, post, pre.allocated.remove(f));
     }
 
     /// A thread joining an existing address space runs the same root over the same pages, so
@@ -1067,6 +1157,173 @@ pub proof fn lemma_path_words<A: ArchPagingMeta>(
 {
 }
 
+/// A step that only changes where frames outside `live` stand leaves every walk alone. Walks
+/// stay within `live` because they land only on allocated frames with a single resident, which
+/// is what [`path_frames_solo`](Mem::State::path_frames_solo) says.
+pub proof fn lemma_frames_local<A: ArchPagingMeta>(
+    pre: Mem::State<A>,
+    post: Mem::State<A>,
+    live: Set<nat>,
+)
+    requires
+        pre.paths_in_tables(),
+        pre.walk_agrees(),
+        pre.path_frames_solo(),
+        forall|f: nat| #[trigger] live.contains(f) ==> pre.frame_to_objs[f] == post.frame_to_objs[f],
+        forall|f: nat|
+            #[trigger] pre.allocated.contains(f) && (exists|o: nat|
+                pre.frame_to_objs[f] =~= Set::<nat>::empty().insert(o)) ==> live.contains(f),
+        post.data == pre.data,
+        post.frozen == pre.frozen,
+        post.cr3 == pre.cr3,
+        post.asids == pre.asids,
+        post.levels == pre.levels,
+        post.vmap == pre.vmap,
+        post.vmap_dom == pre.vmap_dom,
+        post.obj_to_frame == pre.obj_to_frame,
+        post.table_words == pre.table_words,
+    ensures
+        post.walk_agrees(),
+        post.paths_in_tables(),
+        forall|k: (nat, nat), l: nat| #[trigger]
+            frame_at::<A>(
+                post.data,
+                post.frozen,
+                post.frame_to_objs,
+                post.cr3[k.0],
+                post.top(),
+                l,
+                k.1,
+            ) == frame_at::<A>(
+                pre.data,
+                pre.frozen,
+                pre.frame_to_objs,
+                pre.cr3[k.0],
+                pre.top(),
+                l,
+                k.1,
+            ) || !pre.vmap_dom.contains(k),
+{
+    assert forall|k: (nat, nat), l: nat| pre.vmap_dom.contains(k) implies #[trigger] frame_at::<A>(
+        post.data,
+        post.frozen,
+        post.frame_to_objs,
+        post.cr3[k.0],
+        post.top(),
+        l,
+        k.1,
+    ) == frame_at::<A>(
+        pre.data,
+        pre.frozen,
+        pre.frame_to_objs,
+        pre.cr3[k.0],
+        pre.top(),
+        l,
+        k.1,
+    ) by {
+        lemma_frame_at_frames::<A>(
+            pre.data,
+            pre.frozen,
+            pre.frame_to_objs,
+            post.frame_to_objs,
+            live,
+            pre.cr3[k.0],
+            pre.top(),
+            l,
+            k.1,
+        );
+    }
+    assert forall|k: (nat, nat)| #[trigger] pre.vmap_dom.contains(k) implies translate::<A>(
+        post.data,
+        post.frozen,
+        post.frame_to_objs,
+        post.cr3[k.0],
+        post.top(),
+        k.1,
+    ) == translate::<A>(
+        pre.data,
+        pre.frozen,
+        pre.frame_to_objs,
+        pre.cr3[k.0],
+        pre.top(),
+        k.1,
+    ) by {
+        assert(frame_at::<A>(
+            post.data,
+            post.frozen,
+            post.frame_to_objs,
+            post.cr3[k.0],
+            post.top(),
+            0,
+            k.1,
+        ) == frame_at::<A>(
+            pre.data,
+            pre.frozen,
+            pre.frame_to_objs,
+            pre.cr3[k.0],
+            pre.top(),
+            0,
+            k.1,
+        ));
+    }
+    assert forall|k: (nat, nat), c: nat|
+        post.vmap_dom.contains(k) && #[trigger] on_path::<A>(
+            post.data,
+            post.frozen,
+            post.frame_to_objs,
+            post.cr3[k.0],
+            post.top(),
+            k.1,
+            c,
+        ) implies post.table_words.contains(c) by {
+        let l = choose|l: nat|
+            l <= post.top() && #[trigger] path_id_at::<A>(
+                post.data,
+                post.frozen,
+                post.frame_to_objs,
+                post.cr3[k.0],
+                post.top(),
+                l,
+                k.1,
+            ) == Some(c);
+        assert(frame_at::<A>(
+            post.data,
+            post.frozen,
+            post.frame_to_objs,
+            post.cr3[k.0],
+            post.top(),
+            l,
+            k.1,
+        ) == frame_at::<A>(
+            pre.data,
+            pre.frozen,
+            pre.frame_to_objs,
+            pre.cr3[k.0],
+            pre.top(),
+            l,
+            k.1,
+        ));
+        assert(path_id_at::<A>(
+            pre.data,
+            pre.frozen,
+            pre.frame_to_objs,
+            pre.cr3[k.0],
+            pre.top(),
+            l,
+            k.1,
+        ) == Some(c));
+        assert(on_path::<A>(
+            pre.data,
+            pre.frozen,
+            pre.frame_to_objs,
+            pre.cr3[k.0],
+            pre.top(),
+            k.1,
+            c,
+        ));
+    }
+}
+
 /// A step that leaves every table word alone leaves every walk alone: where a page leads, which
 /// frames the walk lands on, and which words it reads are all unchanged.
 pub proof fn lemma_words_local<A: ArchPagingMeta>(
@@ -1088,6 +1345,7 @@ pub proof fn lemma_words_local<A: ArchPagingMeta>(
         post.vmap_dom == pre.vmap_dom,
         post.obj_to_frame == pre.obj_to_frame,
         post.table_words == pre.table_words,
+        post.allocated == pre.allocated,
         forall|c: nat| c != oid ==> word_at(pre.data, pre.frozen, c) == word_at(
             post.data,
             post.frozen,
