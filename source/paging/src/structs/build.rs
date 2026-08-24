@@ -77,23 +77,21 @@ impl<A: ArchPagingMeta> PTPageInit<A> {
     /// a lock: whoever built the page holds the only writers, and so may fill
     /// it in before anyone else can reach it. Depositing them in the page's
     /// lock is the last step of publishing, and belongs to the caller.
-    pub proof fn into_page(tracked self, frame: usize, level: PageLevel) -> (tracked ret: (
+    pub proof fn into_page(tracked self, level: PageLevel) -> (tracked ret: (
         PTPageSharedPerm<A>,
         PTPageWritePerm<A>,
     ))
         requires
             self.wf(),
-            self.base == A::spec_paddr_to_vaddr(frame),
         ensures
             ret.0.wf(),
             ret.0.base == self.base,
-            ret.0.frame == frame,
             ret.0.level == level,
             ret.1.ids() =~= ret.0.ids(),
     {
         let tracked PTPageInit { base, provenance, slots, arch } = self;
         let tracked (readers, writers) = build_slots::<A>(slots);
-        let tracked page = PTPageSharedPerm { slots: readers, provenance, base, frame, level };
+        let tracked page = PTPageSharedPerm { slots: readers, provenance, base, level };
         let tracked write = PTPageWritePerm { slots: writers };
         assert(page.ids() =~= write.ids());
         (page, write)

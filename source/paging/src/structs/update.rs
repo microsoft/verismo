@@ -80,7 +80,7 @@ pub fn link_table_slot<A: ArchPagingMeta>(
         index < PTEntry::<A>::count_per_page(),
         entry.is_table_spec(),
         child.wf(),
-        child.frame == entry.page_frame_spec(),
+        child.base == A::spec_paddr_to_vaddr(entry.page_frame_spec()),
     ensures
         final(writers).ids() =~= page.ids(),
         ret matches Ok(ticket) ==> {
@@ -181,7 +181,7 @@ pub fn split_leaf_slot<A: ArchPagingMeta>(
         index < PTEntry::<A>::count_per_page(),
         entry.is_table_spec(),
         child.wf(),
-        child.frame == entry.page_frame_spec(),
+        child.base == A::spec_paddr_to_vaddr(entry.page_frame_spec()),
     ensures
         final(writers).ids() =~= page.ids(),
         ret matches Ok(ticket) ==> {

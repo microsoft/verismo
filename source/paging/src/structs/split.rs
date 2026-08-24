@@ -86,7 +86,7 @@ pub fn split_huge_at<A: ArchPagingMeta, P: OSPagingContract<A>>(
     let tracked mut child_writers;
     proof {
         A::lemma_pte_masks_wf();
-        let tracked (readers, ws) = init.into_page(paddr@, child_level);
+        let tracked (readers, ws) = init.into_page(child_level);
         child_page = readers;
         child_writers = ws;
     }

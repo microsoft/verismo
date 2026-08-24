@@ -179,7 +179,7 @@ pub fn create_and_link_child<A: ArchPagingMeta, P: OSPagingContract<A>>(
     let tracked child_writers;
     proof {
         A::lemma_pte_masks_wf();
-        let tracked (readers, writers) = init.into_page(paddr@, child_level);
+        let tracked (readers, writers) = init.into_page(child_level);
         child_page = readers;
         child_writers = writers;
     }

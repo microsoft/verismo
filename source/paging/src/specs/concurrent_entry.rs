@@ -24,12 +24,13 @@ impl<A: ArchPagingMeta> WithPayload for PTEntry<A> {
     type Payload = Option<PTPageSharedPerm<A>>;
 
     /// An entry that points at a table describes the page whose tokens it
-    /// escrows: the same frame, one level down.
+    /// escrows: the page readable where the frame in this entry is mapped, one
+    /// level down.
     open spec fn wf_payload(self, payload: Self::Payload) -> bool {
         self.is_table_spec() ==> {
             &&& payload is Some
             &&& payload->Some_0.wf()
-            &&& payload->Some_0.frame == self.page_frame_spec()
+            &&& payload->Some_0.base == A::spec_paddr_to_vaddr(self.page_frame_spec())
         }
     }
 }

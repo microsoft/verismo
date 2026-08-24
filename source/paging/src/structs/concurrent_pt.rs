@@ -32,7 +32,6 @@ pub tracked struct PTPageSharedPerm<A: ArchPagingMeta> {
     pub tracked slots: Seq<SlotShared<A>>,
     pub tracked provenance: IsExposed,
     pub ghost base: usize,
-    pub ghost frame: usize,
     pub ghost level: PageLevel,
 }
 
@@ -41,13 +40,15 @@ impl<A: ArchPagingMeta> PTPageSharedPerm<A> {
         self.slots.map_values(|slot: SlotShared<A>| slot.id())
     }
 
-    /// Every entry of the page is owned, entry `index` is the token for the
-    /// word the architecture puts at that index, and the page is where the
-    /// platform maps its frame -- which is what lets a walker that has computed
-    /// a child's address know it has the right page's tokens, and what lets it
-    /// name the page to the OS when it wants that page's lock.
+    /// Every entry of the page is owned, and entry `index` is the token for the
+    /// word the architecture puts at that index of the page at `base`.
+    ///
+    /// Which physical frame that is, is not stated here: a page is named by
+    /// where it is readable, which is what a walker computes and what it gives
+    /// the OS when it asks for the page's lock. The correspondence to a frame
+    /// belongs to the entry that points at the page -- see
+    /// `PTEntry::wf_payload`.
     pub open spec fn wf(self) -> bool {
-        &&& self.base == A::spec_paddr_to_vaddr(self.frame)
         &&& self.slots.len() == PTEntry::<A>::count_per_page()
         &&& forall|index: int|
             0 <= index < self.slots.len() ==> {

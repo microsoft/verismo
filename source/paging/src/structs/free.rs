@@ -57,7 +57,7 @@ pub fn free_page_tree<A: ArchPagingMeta, P: OSPagingContract<A>>(
         lemma_ids_match::<A>(writers, page);
     }
     let count = A::entries_per_page();
-    let tracked PTPageSharedPerm { slots: readers, provenance, base: page_base, frame, level: _ } =
+    let tracked PTPageSharedPerm { slots: readers, provenance, base: page_base, level: _ } =
         page;
     let tracked PTPageWritePerm { slots: writer_slots } = writers;
     let Tracked(points) = free_slots::<A, P>(
