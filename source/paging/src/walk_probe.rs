@@ -628,7 +628,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
         /// The word ids that page table entries occupy. A write to anything else cannot move a
         /// translation, which is what lets an ordinary write proceed without a path proof.
         #[sharding(variable)]
-        pub table_words: Set<nat>,
+        pub pt_words: Set<nat>,
 
         /// (address space, page) -> the entry its walk reads at the leaf level, if it gets
         /// there. Kept as state rather than derived because a transition cannot read the page
@@ -737,7 +737,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             ==> b + PTPage::<A>::count() <= self.next_oid
         &&& forall|k: (nat, nat)| #[trigger] self.vmap_dom.contains(k) && self.vmap[k] is Some
             ==> self.vmap[k]->Some_0 + PTPage::<A>::count() <= self.next_oid
-        &&& forall|c: nat| #[trigger] self.table_words.contains(c) ==> c < self.next_oid
+        &&& forall|c: nat| #[trigger] self.pt_words.contains(c) ==> c < self.next_oid
     }
 
     #[invariant]
@@ -864,7 +864,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
                 self.top(),
                 k.1,
                 c,
-            ) ==> self.table_words.contains(c)
+            ) ==> self.pt_words.contains(c)
     }
 
     /// What the hardware finds is what `vmap` says. Stated on the whole walk rather than one
@@ -917,7 +917,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             init cr3 = Map::<nat, nat>::empty().insert(boot_asid, root);
             init levels = levels;
             init next_oid = PTPage::<A>::count();
-            init table_words = obj_ids::<A>(0);
+            init pt_words = obj_ids::<A>(0);
             init vmap = Map::new(space_keys(boot_asid, vpages), |k: (nat, nat)| Option::<nat>::None);
             init vmap_dom = space_keys(boot_asid, vpages);
             init leaf_id = Map::new(
@@ -996,7 +996,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
                 obj_ids::<A>(nobj),
                 |c: nat| words[(c - nobj + robj) as nat],
             ));
-            update table_words = pre.table_words.union(obj_ids::<A>(nobj));
+            update pt_words = pre.pt_words.union(obj_ids::<A>(nobj));
 
             require view.dom() =~= space_keys(src, space_pages(pre.vmap_dom, src));
             have vmap >= (view);
@@ -1039,7 +1039,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             require p is Some;
             have frame_to_objs >= [p->Some_0 => let occupants];
             require occupants =~= Set::<nat>::empty().insert(obj);
-            require !pre.table_words.contains(oid->Some_0);
+            require !pre.pt_words.contains(oid->Some_0);
             remove data -= [oid->Some_0 => let old];
             add data += [oid->Some_0 => val];
         }
@@ -1048,7 +1048,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
     /// Give up the right to write for the right to share.
     transition!{
         freeze(oid: nat) {
-            require !pre.table_words.contains(oid);
+            require !pre.pt_words.contains(oid);
             remove data -= [oid => let w];
             add frozen (union)= [oid => w];
         }
@@ -1144,7 +1144,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
         let mid1 = Mem::State::<A> {
             data: post.data,
             next_oid: post.next_oid,
-            table_words: post.table_words,
+            pt_words: post.pt_words,
             ..pre
         };
         lemma_words_local::<A>(pre, mid1, obj_ids::<A>(nobj));
@@ -1256,7 +1256,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
                 top,
                 k.1,
                 c,
-            ) implies post.table_words.contains(c) by {
+            ) implies post.pt_words.contains(c) by {
             let l = choose|l: nat|
                 l <= top && #[trigger] path_id_at::<A>(
                     post.data,
@@ -1359,7 +1359,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
                 }
             }
         }
-        assert forall|c: nat| #[trigger] post.table_words.contains(c) implies c < post.next_oid
+        assert forall|c: nat| #[trigger] post.pt_words.contains(c) implies c < post.next_oid
             by {}
         assert forall|b1: nat, b2: nat, off: nat|
             post.obj_to_frame.dom().contains(b1) && #[trigger] post.obj_to_frame.dom().contains(b2)
@@ -1449,7 +1449,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             post.frozen,
             c,
         ) by {}
-        assert(!pre.table_words.contains(oid));
+        assert(!pre.pt_words.contains(oid));
         lemma_words_local::<A>(pre, post, Set::<nat>::empty().insert(oid));
         assert forall|b1: nat, b2: nat, off: nat|
             pre.obj_to_frame.dom().contains(b1) && #[trigger] pre.obj_to_frame.dom().contains(b2)
@@ -1571,7 +1571,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
                 post.top(),
                 k.1,
                 c,
-            ) implies post.table_words.contains(c) by {
+            ) implies post.pt_words.contains(c) by {
             let l = choose|l: nat|
                 l <= post.top() && #[trigger] path_id_at::<A>(
                     post.data,
@@ -1637,7 +1637,7 @@ pub proof fn lemma_path_words<A: ArchPagingMeta>(
     requires
         pre.paths_in_tables(),
         pre.vmap_dom.contains(k),
-        forall|c: nat| #[trigger] touched.contains(c) ==> !pre.table_words.contains(c),
+        forall|c: nat| #[trigger] touched.contains(c) ==> !pre.pt_words.contains(c),
         forall|c: nat| !touched.contains(c) ==> word_at(pre.data, pre.frozen, c) == word_at(
             post.data,
             post.frozen,
@@ -1659,7 +1659,7 @@ pub proof fn lemma_path_words<A: ArchPagingMeta>(
             c,
         ) implies word_at(pre.data, pre.frozen, c) == word_at(post.data, post.frozen, c) by {
         if touched.contains(c) {
-            assert(!pre.table_words.contains(c));
+            assert(!pre.pt_words.contains(c));
         }
     }
 }
@@ -1688,7 +1688,7 @@ pub proof fn lemma_frames_local<A: ArchPagingMeta>(
         post.vmap == pre.vmap,
         post.vmap_dom == pre.vmap_dom,
         post.obj_to_frame == pre.obj_to_frame,
-        post.table_words == pre.table_words,
+        post.pt_words == pre.pt_words,
     ensures
         post.walk_agrees(),
         post.paths_in_tables(),
@@ -1782,7 +1782,7 @@ pub proof fn lemma_frames_local<A: ArchPagingMeta>(
             post.top(),
             k.1,
             c,
-        ) implies post.table_words.contains(c) by {
+        ) implies post.pt_words.contains(c) by {
         let l = choose|l: nat|
             l <= post.top() && #[trigger] path_id_at::<A>(
                 post.data,
@@ -1842,7 +1842,7 @@ pub proof fn lemma_words_local<A: ArchPagingMeta>(
         pre.paths_in_tables(),
         pre.walk_agrees(),
         pre.path_frames_solo(),
-        forall|c: nat| #[trigger] touched.contains(c) ==> !pre.table_words.contains(c),
+        forall|c: nat| #[trigger] touched.contains(c) ==> !pre.pt_words.contains(c),
         post.frame_to_objs == pre.frame_to_objs,
         post.frames_dom == pre.frames_dom,
         post.cr3 == pre.cr3,
@@ -1851,7 +1851,7 @@ pub proof fn lemma_words_local<A: ArchPagingMeta>(
         post.vmap == pre.vmap,
         post.vmap_dom == pre.vmap_dom,
         post.obj_to_frame == pre.obj_to_frame,
-        pre.table_words.subset_of(post.table_words),
+        pre.pt_words.subset_of(post.pt_words),
         post.allocated == pre.allocated,
         forall|c: nat| !touched.contains(c) ==> word_at(pre.data, pre.frozen, c) == word_at(
             post.data,
@@ -1941,7 +1941,7 @@ pub proof fn lemma_words_local<A: ArchPagingMeta>(
             post.top(),
             k.1,
             c,
-        ) implies post.table_words.contains(c) by {
+        ) implies post.pt_words.contains(c) by {
         let l = choose|l: nat|
             l <= post.top() && #[trigger] path_id_at::<A>(
                 post.data,
