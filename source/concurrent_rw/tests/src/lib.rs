@@ -4,5 +4,6 @@
 #![cfg_attr(not(verus_only), allow(dead_code, unused_variables))]
 
 pub mod payload_slot;
+pub mod phys_perm;
 pub mod pt;
 pub mod pt2;

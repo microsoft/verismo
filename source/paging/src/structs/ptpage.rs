@@ -74,10 +74,10 @@ pub fn entry_ptr<A: ArchPagingMeta>(
         perm.base == page_ptr@.addr,
         index < PTEntry::<A>::count_per_page(),
     ensures
-        ret == perm.slots[index as int].ptr(),
+        ret == perm.slots[index as int].location(),
 {
     let ghost i = index as int;
-    assert(perm.slots[i].ptr()@.addr == slot_addr::<A>(perm.base, i));
+    assert(perm.slots[i].location()@.addr == slot_addr::<A>(perm.base, i));
     let addr = page_ptr.addr() + index * core::mem::size_of::<usize>();
     with_exposed_provenance(addr, Tracked(perm.provenance))
 }

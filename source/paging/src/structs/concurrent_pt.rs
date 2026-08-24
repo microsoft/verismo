@@ -52,8 +52,8 @@ impl<A: ArchPagingMeta> PTPageSharedPerm<A> {
         &&& self.slots.len() == PTEntry::<A>::count_per_page()
         &&& forall|index: int|
             0 <= index < self.slots.len() ==> {
-                &&& (#[trigger] self.slots[index]).ptr()@.addr == slot_addr::<A>(self.base, index)
-                &&& self.slots[index].ptr()@.provenance == self.provenance@
+                &&& (#[trigger] self.slots[index]).location()@.addr == slot_addr::<A>(self.base, index)
+                &&& self.slots[index].location()@.provenance == self.provenance@
             }
     }
 }

@@ -47,7 +47,7 @@ pub fn read<T: RWModel<AtomicType = usize> + From<usize> + Into<usize>>(
     Tracked(past): Tracked<Option<&Observed<T>>>,
 ) -> (ret: (T, Tracked<Observed<T>>))
     requires
-        r.ptr() == ptr,
+        r.location() == ptr,
         past is Some ==> r.has_observed(*past->Some_0),
     ensures
         ret.0 == ret.1@@,
@@ -69,7 +69,7 @@ pub fn read_value<T: RWModel<AtomicType = usize> + From<usize> + Into<usize>>(
     Tracked(past): Tracked<Option<&Observed<T>>>,
 ) -> (ret: (T::AtomicType, Tracked<Observed<T>>))
     requires
-        r.ptr() == ptr,
+        r.location() == ptr,
         past is Some ==> r.has_observed(*past->Some_0),
     ensures
         ret.0.into_spec() === ret.1@@,
@@ -116,7 +116,7 @@ pub fn read_published<T: PublishPayload<AtomicType = usize> + From<usize> + Into
     Tracked(past): Tracked<Option<&Observed<T>>>,
 ) -> (ret: (T, Tracked<Observed<T>>, Tracked<Option<PayloadTicket<T::Payload>>>))
     requires
-        r.ptr() == ptr,
+        r.location() == ptr,
         past is Some ==> r.has_observed(*past->Some_0),
     ensures
         ret.0 == ret.1@@,
@@ -169,7 +169,7 @@ pub fn read_exact<T: RWModel<AtomicType = usize> + From<usize> + Into<usize>>(
     Tracked(w): Tracked<&WritePerm<T>>,
 ) -> (ret: (T, Tracked<Observed<T>>))
     requires
-        r.ptr() == ptr,
+        r.location() == ptr,
         r.id() == w.id(),
     ensures
         r.has_observed(ret.1@),
@@ -206,7 +206,7 @@ pub fn write_with_payload<T: RWModel<AtomicType = usize> + From<usize> + Into<us
     Tracked(payload): Tracked<T::Payload>,
 ) -> (ret: Tracked<Observed<T>>)
     requires
-        r.ptr() == ptr,
+        r.location() == ptr,
         r.id() == w.id(),
         old(w).write_value_payload_requires(value, payload),
         !old(w)@.has_published_payload(),
@@ -246,7 +246,7 @@ pub fn write_with_published_payload<
     Tracked(payload): Tracked<T::Payload>,
 ) -> (ret: (Tracked<Observed<T>>, Tracked<PayloadTicket<T::Payload>>))
     requires
-        r.ptr() == ptr,
+        r.location() == ptr,
         r.id() == w.id(),
         old(w).write_value_payload_requires(value, payload),
         value.has_published_payload(),
@@ -292,7 +292,7 @@ pub fn write<T: RWModel<AtomicType = usize> + From<usize> + Into<usize>>(
     Tracked(w): Tracked<&mut WritePerm<T>>,
 ) -> (ret: Tracked<Observed<T>>)
     requires
-        r.ptr() == ptr,
+        r.location() == ptr,
         r.id() == w.id(),
         old(w).write_value_requires(value),
     ensures
@@ -333,12 +333,12 @@ fn write_unrestricted_inner<
     Tracked<Option<PayloadTicket<T::Payload>>>,
 )) where usize: From<T>
     requires
-        r.ptr() == ptr,
+        r.location() == ptr,
         r.id() == old(w).id(),
         value.wf_payload(payload),
         value.has_published_payload() == _publish,
     ensures
-        ret.0@.ptr() == r.ptr(),
+        ret.0@.location() == r.location(),
         ret.0@.namespace() == r.namespace(),
         ret.0@.id() == final(w).id(),
         final(w)@ == value,
@@ -431,12 +431,12 @@ pub fn write_unrestricted<T: RWModel<AtomicType = usize> + From<usize> + Into<us
     Tracked(payload): Tracked<T::Payload>,
 ) -> (ret: (Tracked<RWShared<T, T::Payload>>, Tracked<Observed<T>>)) where usize: From<T>
     requires
-        r.ptr() == ptr,
+        r.location() == ptr,
         r.id() == old(w).id(),
         value.wf_payload(payload),
         !value.has_published_payload(),
     ensures
-        ret.0@.ptr() == r.ptr(),
+        ret.0@.location() == r.location(),
         ret.0@.namespace() == r.namespace(),
         ret.0@.id() == final(w).id(),
         final(w)@ == value,
@@ -468,12 +468,12 @@ pub fn write_published_unrestricted<
     Tracked<PayloadTicket<T::Payload>>,
 )) where usize: From<T>
     requires
-        r.ptr() == ptr,
+        r.location() == ptr,
         r.id() == old(w).id(),
         value.wf_payload(payload),
         value.has_published_payload(),
     ensures
-        ret.0@.ptr() == r.ptr(),
+        ret.0@.location() == r.location(),
         ret.0@.namespace() == r.namespace(),
         ret.0@.id() == final(w).id(),
         final(w)@ == value,

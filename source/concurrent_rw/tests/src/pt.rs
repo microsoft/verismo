@@ -103,8 +103,8 @@ impl WithPayload for PTEntry {
         self.present() ==> {
             &&& payload.reader.len() == 512
             &&& forall|i: int|
-                (#[trigger] payload.reader[i]).ptr().addr() == self.next() + i * 8
-                    && payload.reader[i].ptr()@.provenance == payload.provenance@
+                (#[trigger] payload.reader[i]).location().addr() == self.next() + i * 8
+                    && payload.reader[i].location()@.provenance == payload.provenance@
         }
     }
 }
@@ -168,7 +168,7 @@ impl PublishPayload for PTEntry {
 // invariant block has closed. This is the thing an `AtomicInvariant` cannot do by itself.
 fn example_borrow_outlives_invariant(ptr: *mut usize, Tracked(r): Tracked<&RWShared<PTEntry, Extra>>)
     requires
-        r.ptr() == ptr,
+        r.location() == ptr,
 {
     let (value, Tracked(observed), Tracked(ticket)) = PTEntry::read_published(
         ptr,
@@ -195,7 +195,7 @@ fn example_borrow_outlives_invariant(ptr: *mut usize, Tracked(r): Tracked<&RWSha
 // load, and no argument that two separate borrows agree. That is what the ticket buys.
 fn example_read_child_entry(ptr: *mut usize, Tracked(r): Tracked<&RWShared<PTEntry, Extra>>)
     requires
-        r.ptr() == ptr,
+        r.location() == ptr,
 {
     let (value, Tracked(observed), Tracked(ticket)) = PTEntry::read_published(
         ptr,
@@ -236,7 +236,7 @@ fn example_read_moves_forward(
     Tracked(past): Tracked<Observed<PTEntry>>,
 )
     requires
-        r.ptr() == ptr,
+        r.location() == ptr,
         r.has_observed(past),
 {
     let ghost was = past.snapshot();
@@ -266,7 +266,7 @@ fn example_write_published_unrestricted(
     Tracked<PayloadTicket<Extra>>,
 ))
     requires
-        r.ptr() == ptr,
+        r.location() == ptr,
         r.id() == old(w).id(),
         r.has_observed(*old_observed),
         r.slot_id() == old_ticket.id(),
@@ -327,7 +327,7 @@ fn walk(
     level: usize,
 ) -> (ret: usize)
     requires
-        r.ptr() == ptr,
+        r.location() == ptr,
         index < 512,
     decreases level,
 {
@@ -347,7 +347,7 @@ fn walk(
         payload = r.borrow_published_payload(&slot_ticket);
     }
     // `wf_payload` puts entry `index` of the child table at a real address, so the sum fits.
-    assert(payload.reader[index as int].ptr().addr() == value.next() + index * 8);
+    assert(payload.reader[index as int].location().addr() == value.next() + index * 8);
     let child_ptr: *mut usize = vstd::raw_ptr::with_exposed_provenance(
         value.next() + index * 8,
         Tracked(payload.provenance),
@@ -369,7 +369,7 @@ proof fn example_teardown_with_stale_ticket(
         r.slot_version() == ticket.version(),
     ensures
         out.0.is_init(),
-        out.0.ptr() == r.ptr(),
+        out.0.ptr() == r.location(),
         w@ === out.0.value().into_spec(),
         w@.wf_payload(out.1),
     opens_invariants [r.namespace()]

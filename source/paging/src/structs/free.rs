@@ -93,8 +93,8 @@ fn free_slots<A: ArchPagingMeta, P: OSPagingContract<A>>(
         readers.len() == writers.len(),
         forall|i: int|
             0 <= i < readers.len() ==> {
-                &&& (#[trigger] readers[i]).ptr()@.addr == slot_addr::<A>(page_ptr@.addr, i)
-                &&& readers[i].ptr()@.provenance == provenance@
+                &&& (#[trigger] readers[i]).location()@.addr == slot_addr::<A>(page_ptr@.addr, i)
+                &&& readers[i].location()@.provenance == provenance@
                 &&& readers[i].id() == writers[i].id()
             },
     ensures

@@ -103,8 +103,8 @@ impl WithPayload for PTEntry {
         self.present() ==> {
             &&& payload.reader.len() == 512
             &&& forall|i: int|
-                (#[trigger] payload.reader[i]).ptr().addr() == self.next() + i * 8
-                && payload.reader[i].ptr()@.provenance == payload.provenance@
+                (#[trigger] payload.reader[i]).location().addr() == self.next() + i * 8
+                && payload.reader[i].location()@.provenance == payload.provenance@
         }
     }
 }
@@ -167,7 +167,7 @@ fn read_entry(
     requires
         old(state).inv(),
         old(state).constant() == reader.constant(),
-        ptr == reader.ptr(),
+        ptr == reader.location(),
     ensures
         final(state).inv(),
         final(state).constant() == old(state).constant(),
@@ -486,7 +486,7 @@ fn read_level0(
     Tracked(r): Tracked<&RWShared<PTEntry, Extra>>,
 ) -> (out: (usize, Tracked<Observed<PTEntry>>, Tracked<IsExposed>))
     requires
-        r.ptr() == ptr_lvl0,
+        r.location() == ptr_lvl0,
     ensures
         r.has_observed(out.1@),
         out.1@.value() === out.0.into_spec(),
@@ -772,7 +772,7 @@ fn read_level_3(
 // is not atomic, so a level is reached only by restarting from the root and descending further.
 fn walk_level2(ptr_lvl0: *mut usize, Tracked(r): Tracked<&RWShared<PTEntry, Extra>>)
     requires
-        r.ptr() == ptr_lvl0,
+        r.location() == ptr_lvl0,
 {
     let (entry_lvl0, Tracked(o1), Tracked(prov_lvl0)) = read_level0(ptr_lvl0, Tracked(r));
     let entry_lvl0: PTEntry = entry_lvl0.into();
@@ -798,7 +798,7 @@ fn walk_level2(ptr_lvl0: *mut usize, Tracked(r): Tracked<&RWShared<PTEntry, Extr
 // because publishing reaches a child reader without holding the parent open.
 fn walk_level3(ptr_lvl0: *mut usize, Tracked(r): Tracked<&RWShared<PTEntry, Extra>>)
     requires
-        r.ptr() == ptr_lvl0,
+        r.location() == ptr_lvl0,
 {
     let (entry_lvl0, Tracked(o1), Tracked(prov_lvl0)) = read_level0(ptr_lvl0, Tracked(r));
     let entry_lvl0: PTEntry = entry_lvl0.into();
@@ -835,7 +835,7 @@ fn example_read_moves_forward(
     Tracked(past): Tracked<Observed<PTEntry>>,
 )
     requires
-        r.ptr() == ptr,
+        r.location() == ptr,
         r.has_observed(past),
 {
     let ghost was = past.snapshot();
@@ -856,7 +856,7 @@ fn example_write_unrestricted(
     Tracked(old_observed): Tracked<&Observed<PTEntry>>,
 ) -> (ret: (Tracked<RWShared<PTEntry, Extra>>, Tracked<Observed<PTEntry>>))
     requires
-        r.ptr() == ptr,
+        r.location() == ptr,
         r.id() == old(w).id(),
         r.has_observed(*old_observed),
         value.wf_payload(payload),
@@ -878,7 +878,7 @@ proof fn example_teardown_unpublished(
         r.id() == w.id(),
     ensures
         out.0.is_init(),
-        out.0.ptr() == r.ptr(),
+        out.0.ptr() == r.location(),
         w@ === out.0.value().into_spec(),
         w@.wf_payload(out.1),
     opens_invariants [r.namespace()]

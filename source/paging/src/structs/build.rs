@@ -38,7 +38,7 @@ pub proof fn build_slots<A: ArchPagingMeta>(tracked points: Seq<PointsTo<usize>>
         ret.0.len() == points.len(),
         ret.1.len() == points.len(),
         forall|i: int|
-            0 <= i < points.len() ==> (#[trigger] ret.0[i]).ptr() == points[i].ptr()
+            0 <= i < points.len() ==> (#[trigger] ret.0[i]).location() == points[i].ptr()
                 && ret.0[i].id() == ret.1[i].id(),
     decreases points.len(),
 {

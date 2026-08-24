@@ -85,6 +85,8 @@
 //! reader's `SlotHandle`, and nothing in [`crate::tokens_impl`] surrenders that handle yet. What
 //! holds unconditionally is `PublishPayload::payload_stays_published`: no value reachable by
 //! *reading* ever un-publishes, so a concurrent write cannot undercut a ticket you hold.
+#[cfg(verus_only)]
+use crate::protocol::perm::AnyPointsTo;
 use crate::tokens_impl::payload_slot::PayloadTicket;
 use crate::tokens_impl::{Observed, PublishPayload, RWModel, RWShared, WritePerm};
 #[cfg(verus_only)]
@@ -120,7 +122,7 @@ pub trait RWContract: RWModel + From<Self::AtomicType> + Into<Self::AtomicType> 
             value.wf_payload(payload),
             !value.has_published_payload(),
         ensures
-            ret.0.ptr() == points_to.ptr(),
+            ret.0.location() == points_to.id(),
             ret.0.id() == ret.1.id(),
             ret.2@ == value,  // names the value stored at the hand-over
             ret.0.has_observed(ret.2),
@@ -140,7 +142,7 @@ pub trait RWContract: RWModel + From<Self::AtomicType> + Into<Self::AtomicType> 
             r.id() == w.id(),
         ensures
             ret.0.is_init(),
-            ret.0.ptr() == r.ptr(),
+            ret.0.id() == r.location(),
             ret.0.value().into_spec() == w@,
             w@.wf_payload(ret.1),
         opens_invariants [r.namespace()]
@@ -161,7 +163,7 @@ pub trait RWContract: RWModel + From<Self::AtomicType> + Into<Self::AtomicType> 
         Tracked(past): Tracked<Option<&Observed<Self>>>,
     ) -> (ret: (Self, Tracked<Observed<Self>>))
         requires
-            r.ptr() == ptr,
+            r.location() == ptr,
             past is Some ==> r.has_observed(*past->Some_0),
         ensures
             ret.0 == ret.1@@,
@@ -188,7 +190,7 @@ pub trait RWContract: RWModel + From<Self::AtomicType> + Into<Self::AtomicType> 
         Tracked(w): Tracked<&WritePerm<Self>>,
     ) -> (ret: (Self, Tracked<Observed<Self>>))
         requires
-            r.ptr() == ptr,
+            r.location() == ptr,
             r.id() == w.id(),
         ensures
             ret.0 == ret.1@@,
@@ -211,7 +213,7 @@ pub trait RWContract: RWModel + From<Self::AtomicType> + Into<Self::AtomicType> 
         Tracked(w): Tracked<&mut WritePerm<Self>>,
     ) -> (ret: Tracked<Observed<Self>>)
         requires
-            r.ptr() == ptr,
+            r.location() == ptr,
             r.id() == w.id(),
             old(w).write_value_requires(value),
         ensures
@@ -237,7 +239,7 @@ pub trait RWContract: RWModel + From<Self::AtomicType> + Into<Self::AtomicType> 
         Tracked(payload): Tracked<Self::Payload>,
     ) -> (ret: Tracked<Observed<Self>>)
         requires
-            r.ptr() == ptr,
+            r.location() == ptr,
             r.id() == w.id(),
             old(w).write_value_payload_requires(value, payload),
             !old(w)@.has_published_payload(),
@@ -264,12 +266,12 @@ pub trait RWContract: RWModel + From<Self::AtomicType> + Into<Self::AtomicType> 
         Tracked(payload): Tracked<Self::Payload>,
     ) -> (ret: (Tracked<RWShared<Self, Self::Payload>>, Tracked<Observed<Self>>))
         requires
-            r.ptr() == ptr,
+            r.location() == ptr,
             r.id() == old(w).id(),
             value.wf_payload(payload),
             !value.has_published_payload(),
         ensures
-            ret.0@.ptr() == ptr,
+            ret.0@.location() == ptr,
             ret.0@.namespace() == r.namespace(),
             ret.0@.id() == final(w).id(),
             ret.0@.has_observed(ret.1@),
@@ -300,7 +302,7 @@ pub trait RWWithPublishPayloadContract: RWContract + PublishPayload {
         Tracked(past): Tracked<Option<&Observed<Self>>>,
     ) -> (ret: (Self, Tracked<Observed<Self>>, Tracked<Option<PayloadTicket<Self::Payload>>>))
         requires
-            r.ptr() == ptr,
+            r.location() == ptr,
             past is Some ==> r.has_observed(*past->Some_0),
         ensures
             ret.0 == ret.1@@,
@@ -354,7 +356,7 @@ pub trait RWWithPublishPayloadContract: RWContract + PublishPayload {
         Tracked(payload): Tracked<Self::Payload>,
     ) -> (ret: (Tracked<Observed<Self>>, Tracked<PayloadTicket<Self::Payload>>))
         requires
-            r.ptr() == ptr,
+            r.location() == ptr,
             r.id() == w.id(),
             old(w).write_value_payload_requires(value, payload),
             value.has_published_payload(),
@@ -385,12 +387,12 @@ pub trait RWWithPublishPayloadContract: RWContract + PublishPayload {
         Tracked<PayloadTicket<Self::Payload>>,
     ))
         requires
-            r.ptr() == ptr,
+            r.location() == ptr,
             r.id() == old(w).id(),
             value.wf_payload(payload),
             value.has_published_payload(),
         ensures
-            ret.0@.ptr() == ptr,
+            ret.0@.location() == ptr,
             ret.0@.namespace() == r.namespace(),
             ret.0@.id() == final(w).id(),
             ret.0@.has_observed(ret.1@),

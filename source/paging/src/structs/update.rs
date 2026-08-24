@@ -230,7 +230,7 @@ pub fn read_slot_exact<A: ArchPagingMeta>(
     index: usize,
 ) -> (ret: PTEntry<A>)
     requires
-        reader.ptr() == ptr,
+        reader.location() == ptr,
         index < writers.slots.len(),
         reader.id() == writers.slots[index as int].id(),
     ensures
