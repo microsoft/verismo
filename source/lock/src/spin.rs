@@ -13,7 +13,6 @@
 //! head of the queue at a time, and only the thread at the head owns the
 //! token that lets `holder` move, so there can be at most one holder and a
 //! thread that is not holding the lock cannot release it.
-use core::marker::PhantomData;
 use core::ops::{Deref, DerefMut};
 
 use vstd::atomic_ghost::*;
@@ -25,41 +24,10 @@ use vstd::prelude::*;
 use vstd::tokens::InstanceId;
 
 use crate::pred::LockPredicate;
+use crate::spin_spec::{CurrentInv, HolderInv};
 use crate::spin_tok::TicketToks;
 
 verus! {
-
-/// What the `current` counter and its ghost token must jointly satisfy.
-pub struct CurrentInv<V, Pred> {
-    dummy: PhantomData<(V, Pred)>,
-}
-
-impl<V, Pred: LockPredicate<V>> AtomicInvariantPredicate<
-    InstanceId,
-    u64,
-    TicketToks::current<V, Pred>,
-> for CurrentInv<V, Pred> {
-    open spec fn atomic_inv(k: InstanceId, u: u64, g: TicketToks::current<V, Pred>) -> bool {
-        &&& g.instance_id() == k
-        &&& g.value() == u as nat
-    }
-}
-
-/// What the `holder` counter and its ghost token must jointly satisfy.
-pub struct HolderInv<V, Pred> {
-    dummy: PhantomData<(V, Pred)>,
-}
-
-impl<V, Pred: LockPredicate<V>> AtomicInvariantPredicate<
-    InstanceId,
-    u64,
-    TicketToks::holder<V, Pred>,
-> for HolderInv<V, Pred> {
-    open spec fn atomic_inv(k: InstanceId, u: u64, g: TicketToks::holder<V, Pred>) -> bool {
-        &&& g.instance_id() == k
-        &&& g.value() == u as nat
-    }
-}
 
 /// A place in a lock's queue.
 ///
