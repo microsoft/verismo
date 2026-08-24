@@ -17,9 +17,7 @@ use crate::spin_tok::TicketToks;
 verus! {
 
 /// What the `current` counter and its ghost token must jointly satisfy.
-pub struct CurrentInv<V, Pred> {
-    dummy: PhantomData<(V, Pred)>,
-}
+pub struct CurrentInv<V, Pred>(PhantomData<(V, Pred)>);
 
 impl<V, Pred: LockPredicate<V>> AtomicInvariantPredicate<
     InstanceId,
@@ -33,9 +31,7 @@ impl<V, Pred: LockPredicate<V>> AtomicInvariantPredicate<
 }
 
 /// What the `holder` counter and its ghost token must jointly satisfy.
-pub struct HolderInv<V, Pred> {
-    dummy: PhantomData<(V, Pred)>,
-}
+pub struct HolderInv<V, Pred>(PhantomData<(V, Pred)>);
 
 impl<V, Pred: LockPredicate<V>> AtomicInvariantPredicate<
     InstanceId,

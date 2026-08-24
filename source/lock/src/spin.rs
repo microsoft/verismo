@@ -19,6 +19,7 @@ use vstd::atomic_ghost::*;
 use vstd::cell::pcell::{PCell, PointsTo};
 use vstd::cell::CellId;
 use vstd::invariant::open_atomic_invariant;
+#[cfg(verus_only)]
 use vstd::pervasive::proof_from_false;
 use vstd::prelude::*;
 use vstd::tokens::InstanceId;
@@ -314,7 +315,7 @@ impl<V, Pred: LockPredicate<V>> RawSpinLock<V, Pred> {
     /// blocks the whole queue for ever, and this crate proves nothing about
     /// whether a waiting thread ever runs. This is one of the three functions
     /// in the crate that Verus accepts without a termination argument.
-    #[verifier::exec_allows_no_decreases_clause]
+    #[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
     #[verus_spec(ret =>
         ensures
             self.inv(ret.0@),

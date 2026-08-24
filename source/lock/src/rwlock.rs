@@ -21,6 +21,7 @@ use verus_state_machines_macros::tokenized_state_machine;
 use vstd::atomic_ghost::*;
 use vstd::cell::pcell::{PCell, PointsTo};
 use vstd::multiset::Multiset;
+#[cfg(verus_only)]
 use vstd::pervasive::proof_from_false;
 use vstd::prelude::*;
 use vstd::tokens::InstanceId;
@@ -314,7 +315,7 @@ impl<V, Pred: LockPredicate<V>> RawRwLock<V, Pred> {
     }
 
     /// Takes the lock for writing, spinning until it is free.
-    #[verifier::exec_allows_no_decreases_clause]
+    #[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
     pub fn acquire_write(&self) -> (ret: (Tracked<V>, WriteToken<V, Pred>))
         ensures
             self.inv(ret.0@),
@@ -386,7 +387,7 @@ impl<V, Pred: LockPredicate<V>> RawRwLock<V, Pred> {
     }
 
     /// Takes the lock for reading, spinning until no writer holds it.
-    #[verifier::exec_allows_no_decreases_clause]
+    #[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
     pub fn acquire_read(&self) -> (ret: ReadToken<V, Pred>)
         ensures
             ret.lock_id() == self.id(),

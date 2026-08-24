@@ -43,9 +43,14 @@
 //! known to. A lock over data whose contents are unconstrained instantiates
 //! the predicate with `|v| true`.
 #![no_std]
-#![cfg_attr(verus_keep_ghost, feature(sized_hierarchy))]
+#![cfg_attr(verus_only, feature(sized_hierarchy))]
 #![feature(proc_macro_hygiene)]
+#![cfg_attr(not(verus_only), feature(stmt_expr_attributes))]
 #![cfg_attr(not(verus_only), allow(dead_code, unused_imports))]
+// Without Verus the ghost arguments and assignments are all that is left of
+// the proofs, and the state machines' modules are named after their types.
+#![cfg_attr(not(verus_only), allow(unused_variables, unused_assignments, non_shorthand_field_patterns))]
+#![allow(non_snake_case)]
 #![cfg_attr(verus_only, allow(macro_expanded_macro_exports_accessed_by_absolute_paths))]
 #![allow(unused_braces)]
 
