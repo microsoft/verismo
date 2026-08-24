@@ -37,6 +37,13 @@ pub struct Ticket<V, Pred: LockPredicate<V>> {
     tok: Tracked<TicketToks::tickets<V, Pred>>,
 }
 
+/// Proof that the caller is the one being served, and the right to serve the
+/// next thread by releasing.
+#[verus_verify]
+pub struct Hold<V, Pred: LockPredicate<V>> {
+    tok: Tracked<TicketToks::holding<V, Pred>>,
+}
+
 verus! {
 
 impl<V, Pred: LockPredicate<V>> Ticket<V, Pred> {
@@ -49,12 +56,6 @@ impl<V, Pred: LockPredicate<V>> Ticket<V, Pred> {
     pub closed spec fn instance_id(&self) -> InstanceId {
         self.tok@.instance_id()
     }
-}
-
-/// Proof that the caller is the one being served, and the right to serve the
-/// next thread by releasing.
-pub struct Hold<V, Pred: LockPredicate<V>> {
-    pub(crate) tok: Tracked<TicketToks::holding<V, Pred>>,
 }
 
 impl<V, Pred: LockPredicate<V>> Hold<V, Pred> {
