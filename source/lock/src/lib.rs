@@ -66,8 +66,8 @@ pub mod pred;
 pub mod spin;
 pub mod spin_spec;
 pub mod spin_tok;
-pub mod spin_trait;
+pub mod spin_contract;
 
 pub use pred::LockPredicate;
 pub use spin::{Hold, RawSpinLock, SpinGuard, SpinLock, Ticket};
-pub use spin_trait::{SpinLockSpec, SpinLockTrait};
+pub use spin_contract::{SpinLockSpec, SpinLockTrait};

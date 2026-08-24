@@ -27,7 +27,7 @@ use common_proofs::{ghost, tracked};
 use crate::pred::LockPredicate;
 use crate::spin_spec::{CurrentInv, HolderInv};
 use crate::spin_tok::TicketToks;
-use crate::spin_trait::{SpinLockSpec, SpinLockTrait};
+use crate::spin_contract::{SpinLockSpec, SpinLockTrait};
 
 /// A place in a lock's queue.
 ///
@@ -229,7 +229,7 @@ impl<V, Pred: LockPredicate<V>> RawSpinLock<V, Pred> {
     pub fn new() -> RawSpinLock<V, Pred> {
         proof_decl! {
             let tracked (Tracked(inst), Tracked(cur_tok), Tracked(holder_tok), _, _) =
-                TicketToks::Instance::initialize(arbitrary(), v, Some(v));
+                TicketToks::Instance::initialize(pred, v, Some(v));
             let ghost id = inst.id();
         }
         RawSpinLock {
