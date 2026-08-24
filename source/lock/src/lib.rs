@@ -70,4 +70,4 @@ pub mod spin_trait;
 
 pub use pred::LockPredicate;
 pub use spin::{Hold, RawSpinLock, SpinGuard, SpinLock, Ticket};
-pub use spin_trait::SpinLockTrait;
+pub use spin_trait::{SpinLockSpec, SpinLockTrait};

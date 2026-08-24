@@ -27,7 +27,7 @@ use common_proofs::{ghost, tracked};
 use crate::pred::LockPredicate;
 use crate::spin_spec::{CurrentInv, HolderInv};
 use crate::spin_tok::TicketToks;
-use crate::spin_trait::SpinLockTrait;
+use crate::spin_trait::{SpinLockSpec, SpinLockTrait};
 
 /// A place in a lock's queue.
 ///
@@ -174,7 +174,7 @@ impl<'a, T, Pred: LockPredicate<T>> SpinGuard<'a, T, Pred> {
     }
 }
 
-impl<'a, T: 'a, Pred: LockPredicate<T> + 'a> SpinLockTrait<'a, T, Pred> for SpinLock<T, Pred> {
+impl<'a, T: 'a, Pred: LockPredicate<T> + 'a> SpinLockSpec<'a, T, Pred> for SpinLock<T, Pred> {
     type Guard = SpinGuard<'a, T, Pred>;
 
     closed spec fn inv(&self, v: T) -> bool {
@@ -189,14 +189,15 @@ impl<'a, T: 'a, Pred: LockPredicate<T> + 'a> SpinLockTrait<'a, T, Pred> for Spin
         guard.lock
     }
 
-    fn borrow<'b>(guard: &'b SpinGuard<'a, T, Pred>) -> &'b T {
-        guard.deref()
+    proof fn guard_deref_is_guard_view(guard: &SpinGuard<'a, T, Pred>) {
+        assert forall|r| <Self::Guard as Deref>::deref.ensures((guard,), r) implies *r
+            == guard@ by {}
     }
+}
 
-    fn borrow_mut<'b>(guard: &'b mut SpinGuard<'a, T, Pred>) -> &'b mut T {
-        guard.deref_mut()
-    }
-
+} // verus!
+#[verus_verify]
+impl<'a, T: 'a, Pred: LockPredicate<T> + 'a> SpinLockTrait<'a, T, Pred> for SpinLock<T, Pred> {
     fn new(v: T, pred: Ghost<Pred>) -> SpinLock<T, Pred> {
         SpinLock::new(v, pred)
     }
@@ -214,7 +215,6 @@ impl<'a, T: 'a, Pred: LockPredicate<T> + 'a> SpinLockTrait<'a, T, Pred> for Spin
     }
 }
 
-} // verus!
 #[verus_verify]
 impl<V, Pred: LockPredicate<V>> RawSpinLock<V, Pred> {
     /// Builds a lock, free, holding `v`.
