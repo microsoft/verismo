@@ -1,4 +1,4 @@
-//! **The specification.** Two files, to be read and believed.
+//! **The specification.** Three files, to be read and believed.
 //!
 //! Both are trusted spec: nothing checks that they say the right thing. The failure mode is
 //! vacuity, not unsoundness -- a model whose `wf_payload` is `true` satisfies every obligation
@@ -11,5 +11,9 @@ pub mod model;
 /// **Trusted spec.** What the crate guarantees back, with no bodies.
 pub mod contract;
 
+/// **Trusted spec.** What names a location and what it takes to read one.
+pub mod perm;
+
 pub use contract::*;
 pub use model::*;
+pub use perm::*;

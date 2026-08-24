@@ -101,6 +101,10 @@ pub mod obs_history;
 #[path = "proof/rw.rs"]
 pub mod rw_proof;
 
+/// A `PointsTo` as an [`crate::protocol::perm::AnyPointsTo`], proved rather than assumed.
+#[path = "proof/points_to_perm.rs"]
+pub mod points_to_perm;
+
 /// Discharges [`crate::protocol::contract`] against the types below. Checked, not read: every
 /// impl is a delegation, and a guarantee stated in the contract and missing there is a compile
 /// error.
