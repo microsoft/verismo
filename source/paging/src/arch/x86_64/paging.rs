@@ -130,11 +130,19 @@ impl<P: X86PagingParams> ArchPagingMeta for X86Paging<P> {
         assert(0usize & !0x000f_ffff_ffff_f000usize == 0) by (bit_vector);
     }
 
+    // The asserts name the impl's own spec function, which is what makes its
+    // definition available for discharging the trait's postcondition.
     fn private_pte_mask() -> (ret: usize) {
+        proof {
+            assert(Self::spec_private_mask() == P::spec_private_mask());
+        }
         P::private_mask()
     }
 
     fn shared_pte_mask() -> (ret: usize) {
+        proof {
+            assert(Self::spec_shared_mask() == 0);
+        }
         0
     }
 
