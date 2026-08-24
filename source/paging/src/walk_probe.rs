@@ -630,6 +630,15 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
         #[sharding(variable)]
         pub table_words: Set<nat>,
 
+        /// (address space, page) -> the entry its walk reads at the leaf level, if it gets
+        /// there. Kept as state rather than derived because a transition cannot read the page
+        /// tables: this is what lets a remap see *every* address space that reads the entry it
+        /// writes. Spaces sharing a sub table share these ids, so a kernel range reached from
+        /// every root is remapped for every thread at once, while a range reached from one root
+        /// is remapped for that thread alone.
+        #[sharding(variable)]
+        pub leaf_id: Map<(nat, nat), Option<nat>>,
+
         /// (address space, page) -> the object it maps. A ghost refinement of the entries in
         /// memory. Keyed on the address space because a page means nothing on its own: two
         /// threads running different roots read different entries for the same page.
@@ -780,6 +789,22 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
         (self.levels - 1) as nat
     }
 
+    /// The recorded leaf entry is the one the walk really reads.
+    #[invariant]
+    pub spec fn leaf_ids_agree(&self) -> bool {
+        &&& self.leaf_id.dom() =~= self.vmap_dom
+        &&& forall|k: (nat, nat)| #[trigger] self.vmap_dom.contains(k) ==> self.leaf_id[k]
+            == path_id_at::<A>(
+            self.data,
+            self.frozen,
+            self.frame_to_objs,
+            self.cr3[k.0],
+            self.top(),
+            0,
+            k.1,
+        )
+    }
+
     #[invariant]
     pub spec fn cpus_run_spaces(&self) -> bool {
         forall|c: nat| #[trigger] self.cpus.dom().contains(c) ==> self.asids.contains(self.cpus[c])
@@ -895,6 +920,14 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             init table_words = obj_ids::<A>(0);
             init vmap = Map::new(space_keys(boot_asid, vpages), |k: (nat, nat)| Option::<nat>::None);
             init vmap_dom = space_keys(boot_asid, vpages);
+            init leaf_id = Map::new(
+                space_keys(boot_asid, vpages),
+                |k: (nat, nat)| if levels == 1 {
+                    Some(entry_id::<A>(0, k.1, 0))
+                } else {
+                    Option::<nat>::None
+                },
+            );
             init vmem = Map::new(space_keys(boot_asid, vaddrs), |k: (nat, nat)| Option::<nat>::None);
             init vmem_dom = space_keys(boot_asid, vaddrs);
             init marker = PhantomData;
@@ -971,6 +1004,17 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             update cr3 = pre.cr3.insert(a, nroot);
             update vmap_dom = pre.vmap_dom.union(
                 space_keys(a, space_pages(pre.vmap_dom, src)),
+            );
+            update leaf_id = Map::new(
+                pre.vmap_dom.union(space_keys(a, space_pages(pre.vmap_dom, src))),
+                |k: (nat, nat)| if k.0 != a {
+                    pre.leaf_id[k]
+                } else if pre.levels == 1 {
+                    // The copied root is itself the leaf table, so its entries are new ids.
+                    Some(entry_id::<A>(nobj, k.1, 0))
+                } else {
+                    pre.leaf_id[(src, k.1)]
+                },
             );
             add vmap += (Map::new(
                 space_keys(a, space_pages(pre.vmap_dom, src)),
@@ -1268,6 +1312,53 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             }
         }
 
+        assert(post.leaf_id.dom() =~= post.vmap_dom);
+        assert forall|k: (nat, nat)| #[trigger] post.vmap_dom.contains(k) implies post.leaf_id[k]
+            == path_id_at::<A>(
+            post.data,
+            post.frozen,
+            post.frame_to_objs,
+            post.cr3[k.0],
+            top,
+            0,
+            k.1,
+        ) by {
+            let s = if k.0 == a {
+                src
+            } else {
+                k.0
+            };
+            assert(pre.vmap_dom.contains((s, k.1)));
+            if k.0 == a && top == 0 {
+                assert(frame_at::<A>(
+                    post.data,
+                    post.frozen,
+                    post.frame_to_objs,
+                    nroot,
+                    top,
+                    0,
+                    k.1,
+                ) == Some(nroot));
+            } else {
+                let f = frame_at::<A>(
+                    pre.data,
+                    pre.frozen,
+                    pre.frame_to_objs,
+                    pre.cr3[s],
+                    top,
+                    0,
+                    k.1,
+                );
+                if f is Some {
+                    assert(pre.allocated.contains(f->Some_0));
+                    assert(f->Some_0 != nroot) by {
+                        let o = choose|o: nat|
+                            pre.frame_to_objs[f->Some_0] =~= Set::<nat>::empty().insert(o);
+                        assert(pre.frame_to_objs[f->Some_0].contains(o));
+                    }
+                }
+            }
+        }
         assert forall|c: nat| #[trigger] post.table_words.contains(c) implies c < post.next_oid
             by {}
         assert forall|b1: nat, b2: nat, off: nat|
