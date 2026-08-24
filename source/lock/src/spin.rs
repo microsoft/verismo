@@ -181,12 +181,12 @@ impl<'a, T: 'a, Pred: LockPredicate<T> + 'a> SpinLockSpec<'a, T, Pred> for SpinL
         self.raw.pred().pred.inv(v)
     }
 
-    closed spec fn guard_view(guard: &SpinGuard<'a, T, Pred>) -> T {
-        *guard.perm@.value()
+    open spec fn guard_view(guard: &SpinGuard<'a, T, Pred>) -> T {
+        guard.view()
     }
 
-    closed spec fn guard_lock(guard: &SpinGuard<'a, T, Pred>) -> &'a SpinLock<T, Pred> {
-        guard.lock
+    open spec fn guard_lock(guard: &SpinGuard<'a, T, Pred>) -> &'a SpinLock<T, Pred> {
+        guard.lock()
     }
 
     proof fn guard_deref_is_guard_view(guard: &SpinGuard<'a, T, Pred>) {
