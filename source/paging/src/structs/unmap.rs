@@ -18,7 +18,7 @@ use crate::structs::concurrent_pt::PTPageSharedPerm;
 use crate::structs::entry::PTEntry;
 use crate::structs::geometry::entry_index;
 use crate::structs::level::PageLevel;
-use crate::structs::os_contract::{PageLock, PagingError, PagingHandler};
+use crate::structs::os_contract::{PageLock, PagingError, OSPagingContract};
 use crate::structs::ptpage::{entry_ptr, page_from_vaddr, PTPage};
 
 use crate::structs::update::replace_leaf_slot;
@@ -43,7 +43,7 @@ pub enum LeafUpdate<A: ArchPagingMeta> {
 /// The value the walk sees on the way down may be stale, but a stale table
 /// pointer is still a table pointer, and the entry that is finally replaced is
 /// read again under the writer, so what comes back is what was really there.
-pub fn update_leaf_at<A: ArchPagingMeta, P: PagingHandler>(
+pub fn update_leaf_at<A: ArchPagingMeta, P: OSPagingContract<A>>(
     page_ptr: *mut PTPage<A>,
     level: PageLevel,
     Tracked(page): Tracked<&PTPageSharedPerm<A>>,
@@ -81,7 +81,7 @@ pub fn update_leaf_at<A: ArchPagingMeta, P: PagingHandler>(
             child_page = slot.borrow_published_payload(&slot_ticket).tracked_borrow();
             lemma_phys_addr_from_bits(current.page_frame_spec());
         }
-        let child_base = P::paddr_to_vaddr::<A>(PhysAddr::from(current.page_frame()));
+        let child_base = P::paddr_to_vaddr(PhysAddr::from(current.page_frame()));
         let child_ptr = page_from_vaddr::<A>(child_base, Tracked(child_page));
         return update_leaf_at::<A, P>(child_ptr, child_level, Tracked(child_page), vaddr, update);
     }

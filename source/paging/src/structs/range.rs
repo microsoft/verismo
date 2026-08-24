@@ -26,7 +26,7 @@ use crate::structs::entry::PTEntry;
 use crate::structs::geometry::{entry_index_bits, shift_at};
 use crate::structs::level::PageLevel;
 use crate::structs::map::create_and_link_child;
-use crate::structs::os_contract::{PageLock, PagingError, PagingHandler};
+use crate::structs::os_contract::{PageLock, PagingError, OSPagingContract};
 use crate::structs::ptpage::{entry_ptr, page_from_vaddr, PTPage};
 
 use crate::structs::split::split_huge_at;
@@ -78,7 +78,7 @@ impl<A: ArchPagingMeta> RangeOp<A> {
 /// `vstart` and `vend` are byte addresses, half-open. `page_ptr` is the page the
 /// pass is currently in, and the range is always inside what that page covers,
 /// which is what makes the loop below a loop over this page's slots.
-pub fn range_at<A: ArchPagingMeta, P: PagingHandler>(
+pub fn range_at<A: ArchPagingMeta, P: OSPagingContract<A>>(
     page_ptr: *mut PTPage<A>,
     level: PageLevel,
     Tracked(page): Tracked<&PTPageSharedPerm<A>>,
@@ -129,7 +129,7 @@ pub fn range_at<A: ArchPagingMeta, P: PagingHandler>(
 
 /// One entry's worth of a ranged pass: descend into the child that covers
 /// `[cur, next)`, creating it if the operation is one that grows the tree.
-fn range_step<A: ArchPagingMeta, P: PagingHandler>(
+fn range_step<A: ArchPagingMeta, P: OSPagingContract<A>>(
     page_ptr: *mut PTPage<A>,
     index: usize,
     level: PageLevel,
@@ -169,7 +169,7 @@ fn range_step<A: ArchPagingMeta, P: PagingHandler>(
             child_page = slot.borrow_published_payload(&slot_ticket).tracked_borrow();
             lemma_phys_addr_from_bits(current.page_frame_spec());
         }
-        let child_base = P::paddr_to_vaddr::<A>(PhysAddr::from(current.page_frame()));
+        let child_base = P::paddr_to_vaddr(PhysAddr::from(current.page_frame()));
         let child_ptr = page_from_vaddr::<A>(child_base, Tracked(child_page));
         return range_at::<A, P>(child_ptr, child_level, Tracked(child_page), cur, next, target, op);
     }
@@ -234,7 +234,7 @@ fn range_step<A: ArchPagingMeta, P: PagingHandler>(
 
 /// The entries of one table page that a range covers, under one acquisition of
 /// that page's lock.
-fn leaf_range<A: ArchPagingMeta, P: PagingHandler>(
+fn leaf_range<A: ArchPagingMeta, P: OSPagingContract<A>>(
     page_ptr: *mut PTPage<A>,
     level: PageLevel,
     Tracked(page): Tracked<&PTPageSharedPerm<A>>,

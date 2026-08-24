@@ -112,7 +112,7 @@ pub trait ArchPagingGeometry: Sized {
 
     /// Where the platform maps a physical frame.
     ///
-    /// The executable translation is the OS's (`PagingHandler::paddr_to_vaddr`),
+    /// The executable translation is the OS's (`OSPagingContract::paddr_to_vaddr`),
     /// and this is what ties the two together. It is specified here because a
     /// page's tracked tokens have to state it -- a walker that has just
     /// computed a child page's address must know that the tokens it borrowed

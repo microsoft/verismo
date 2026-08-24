@@ -23,7 +23,7 @@ use crate::structs::concurrent_pt::PTPageSharedPerm;
 use crate::structs::entry::PTEntry;
 use crate::structs::geometry::entry_index;
 use crate::structs::level::PageLevel;
-use crate::structs::os_contract::PagingHandler;
+use crate::structs::os_contract::OSPagingContract;
 use crate::structs::ptpage::{entry_ptr, page_from_vaddr, PTPage};
 
 verus! {
@@ -49,7 +49,7 @@ pub struct WalkResult<A: ArchPagingMeta> {
 /// it both bounds the recursion and is what stops the walk from reading bit 7
 /// of a leaf entry as "points at a table" -- at level 0 the hardware reads that
 /// bit as PAT.
-pub fn walk<A: ArchPagingMeta, P: PagingHandler>(
+pub fn walk<A: ArchPagingMeta, P: OSPagingContract<A>>(
     page_ptr: *mut PTPage<A>,
     level: PageLevel,
     Tracked(page): Tracked<&PTPageSharedPerm<A>>,
@@ -96,7 +96,7 @@ pub fn walk<A: ArchPagingMeta, P: PagingHandler>(
             proof {
                 lemma_phys_addr_from_bits(entry.page_frame_spec());
             }
-            let child_base = P::paddr_to_vaddr::<A>(PhysAddr::from(entry.page_frame()));
+            let child_base = P::paddr_to_vaddr(PhysAddr::from(entry.page_frame()));
             let child_ptr = page_from_vaddr::<A>(child_base, Tracked(child_page));
             walk::<A, P>(child_ptr, child_level, Tracked(child_page), vaddr)
         },

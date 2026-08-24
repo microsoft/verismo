@@ -13,7 +13,8 @@
 //! an oversight.
 use builtin_macros::{verus_spec, verus_verify};
 
-use crate::structs::os_contract::PagingHandler;
+use crate::structs::arch_contract::ArchPagingMeta;
+use crate::structs::os_contract::OSPagingContract;
 
 /// A range of addresses whose cached translations may now be wrong.
 ///
@@ -50,7 +51,7 @@ impl MayNeedFlush {
     }
 
     /// Hands the range to the OS to invalidate.
-    pub fn flush<P: PagingHandler>(self) {
+    pub fn flush<A: ArchPagingMeta, P: OSPagingContract<A>>(self) {
         if self.start < self.end {
             P::flush_range(self.start, self.end);
         }

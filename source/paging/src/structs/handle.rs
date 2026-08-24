@@ -27,7 +27,7 @@ use crate::structs::free::free_page_tree;
 use crate::structs::geometry::shift_at;
 use crate::structs::level::{PageLevel, PagingLevel};
 use crate::structs::map::map_at;
-use crate::structs::os_contract::{PTPageInit, PageLock, PagingError, PagingHandler};
+use crate::structs::os_contract::{PTPageInit, PageLock, PagingError, OSPagingContract};
 use crate::structs::ptpage::PTPage;
 use crate::structs::range::{leaf_entry, level_flags, range_at, RangeOp};
 use crate::structs::region::map_region;
@@ -45,14 +45,14 @@ verus! {
 /// The root page is adopted, never allocated here: whoever installs a table in
 /// hardware owns its lifetime, and this handle owns only the right to read and
 /// update its slots.
-pub struct GenericPageTable<A: ArchPagingMeta, P: PagingHandler, L: PagingLevel> {
+pub struct GenericPageTable<A: ArchPagingMeta, P: OSPagingContract<A>, L: PagingLevel> {
     root: *mut PTPage<A>,
     page: Tracked<PTPageSharedPerm<A>>,
     install: Tracked<PTInstallState<A>>,
     dummy: PhantomData<(A, P, L)>,
 }
 
-impl<A: ArchPagingMeta, P: PagingHandler, L: PagingLevel> GenericPageTable<A, P, L> {
+impl<A: ArchPagingMeta, P: OSPagingContract<A>, L: PagingLevel> GenericPageTable<A, P, L> {
     pub closed spec fn root_spec(&self) -> *mut PTPage<A> {
         self.root
     }
@@ -302,7 +302,7 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: PagingLevel> GenericPageTable<A, P,
         ensures
             ret@ == self.install_spec().root_frame(),
     {
-        P::page_paddr::<A>(self.root)
+        P::page_paddr(self.root)
     }
 
     /// Records that the paging-root register now names this tree, so that the
@@ -322,7 +322,7 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: PagingLevel> GenericPageTable<A, P,
             final(self).root_level() == old(self).root_level(),
             final(self).page_spec() == old(self).page_spec(),
     {
-        let root = P::page_paddr::<A>(self.root);
+        let root = P::page_paddr(self.root);
         PTInstallState::<A>::mark_installed(Tracked(self.install.borrow_mut()), root, Tracked(cr3));
     }
 
@@ -543,7 +543,7 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: PagingLevel> GenericPageTable<A, P,
             self.inv(),
             index < PTEntry::<A>::count_per_page(),
     {
-        let frame = P::page_paddr::<A>(self.root);
+        let frame = P::page_paddr(self.root);
         let entry = leaf_entry::<A>(frame.bits() | A::private_pte_mask(), flags);
         let lock = P::page_lock(self.root);
         let Tracked(mut writers) = lock.lock::<A>(self.borrow_page());

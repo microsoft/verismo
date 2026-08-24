@@ -22,7 +22,7 @@ use crate::structs::concurrent_pt::PTPageSharedPerm;
 use crate::structs::entry::PTEntry;
 use crate::structs::geometry::entry_index;
 use crate::structs::level::PageLevel;
-use crate::structs::os_contract::{PageLock, PagingError, PagingHandler};
+use crate::structs::os_contract::{PageLock, PagingError, OSPagingContract};
 use crate::structs::ptpage::{entry_ptr, page_from_vaddr, PTPage};
 
 use crate::structs::update::{link_table_slot, set_leaf_slot};
@@ -36,7 +36,7 @@ verus! {
 /// unmapped first, so that whoever owns the old mapping learns that it is
 /// gone. Fails too if `target` is deeper than the tree, which is the only way
 /// a caller can ask for a page size the architecture does not have here.
-pub fn map_at<A: ArchPagingMeta, P: PagingHandler>(
+pub fn map_at<A: ArchPagingMeta, P: OSPagingContract<A>>(
     page_ptr: *mut PTPage<A>,
     level: PageLevel,
     Tracked(page): Tracked<&PTPageSharedPerm<A>>,
@@ -81,7 +81,7 @@ pub fn map_at<A: ArchPagingMeta, P: PagingHandler>(
             child_page = slot.borrow_published_payload(&slot_ticket).tracked_borrow();
             lemma_phys_addr_from_bits(current.page_frame_spec());
         }
-        let child_base = P::paddr_to_vaddr::<A>(PhysAddr::from(current.page_frame()));
+        let child_base = P::paddr_to_vaddr(PhysAddr::from(current.page_frame()));
         let child_ptr = page_from_vaddr::<A>(child_base, Tracked(child_page));
         return map_at::<A, P>(child_ptr, child_level, Tracked(child_page), vaddr, target, entry);
     }
@@ -96,7 +96,7 @@ pub fn map_at<A: ArchPagingMeta, P: PagingHandler>(
 ///
 /// Split out of [`map_at`] only to keep that function's shape readable; it is
 /// one step of the same recursion and calls back into it.
-fn grow_and_map<A: ArchPagingMeta, P: PagingHandler>(
+fn grow_and_map<A: ArchPagingMeta, P: OSPagingContract<A>>(
     page_ptr: *mut PTPage<A>,
     index: usize,
     level: PageLevel,
@@ -146,7 +146,7 @@ fn grow_and_map<A: ArchPagingMeta, P: PagingHandler>(
 ///
 /// The writers go into the child's own lock before the link, because after the
 /// link the page is reachable and whoever wants to write it will look there.
-pub fn create_and_link_child<A: ArchPagingMeta, P: PagingHandler>(
+pub fn create_and_link_child<A: ArchPagingMeta, P: OSPagingContract<A>>(
     page_ptr: *mut PTPage<A>,
     index: usize,
     Tracked(page): Tracked<&PTPageSharedPerm<A>>,
@@ -168,13 +168,13 @@ pub fn create_and_link_child<A: ArchPagingMeta, P: PagingHandler>(
             &&& ticket@.payload()->Some_0.base == child_ptr@.addr
         },
 {
-    let (paddr, Tracked(init)) = match P::allocate_table_page::<A>() {
+    let (paddr, Tracked(init)) = match P::allocate_table_page() {
         Err(e) => {
             return Err(e);
         },
         Ok(allocated) => allocated,
     };
-    let child_base = P::paddr_to_vaddr::<A>(paddr);
+    let child_base = P::paddr_to_vaddr(paddr);
     let tracked child_page;
     let tracked child_writers;
     proof {

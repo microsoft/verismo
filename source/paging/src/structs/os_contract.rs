@@ -152,7 +152,7 @@ pub trait PageLock: Sized + 'static {
 ///
 /// Every method is an associated function: the implementing type is a marker
 /// that is never instantiated.
-pub trait PagingHandler: 'static + Sized {
+pub trait OSPagingContract<A: ArchPagingMeta>: 'static + Sized {
     /// The lock the OS keeps for each table page. One type serves every page;
     /// [`Self::page_lock`] says which lock belongs to which page.
     type PageLock: PageLock;
@@ -162,13 +162,13 @@ pub trait PagingHandler: 'static + Sized {
     /// Where the OS has mapped a page-table frame. `paddr` is always clean --
     /// callers strip the architecture's confidentiality tags first.
     ///
-    fn paddr_to_vaddr<A: ArchPagingMeta>(paddr: PhysAddr) -> (ret: VirtAddr)
+    fn paddr_to_vaddr(paddr: PhysAddr) -> (ret: VirtAddr)
         ensures
             ret@ == A::spec_paddr_to_vaddr(paddr@),
     ;
 
     /// The frame a table page occupies, given a pointer to the page.
-    fn page_paddr<A: ArchPagingMeta>(page: *mut PTPage<A>) -> (ret: PhysAddr)
+    fn page_paddr(page: *mut PTPage<A>) -> (ret: PhysAddr)
         ensures
             ret@ == Self::spec_vaddr_to_paddr(page@.addr),
     ;
@@ -179,7 +179,7 @@ pub trait PagingHandler: 'static + Sized {
     /// The address returned is *clean*: no confidentiality or shared tag is
     /// set, and callers apply `ArchPagingMeta::make_private_address` before
     /// storing it in an entry.
-    fn allocate_table_page<A: ArchPagingMeta>() -> (ret: Result<
+    fn allocate_table_page() -> (ret: Result<
         (PhysAddr, Tracked<PTPageInit<A>>),
         PagingError,
     >)
@@ -199,7 +199,7 @@ pub trait PagingHandler: 'static + Sized {
 
     /// Returns a frame to the allocator, taking back the ownership of its words
     /// that [`Self::allocate_table_page`] gave up.
-    fn deallocate_table_page<A: ArchPagingMeta>(
+    fn deallocate_table_page(
         paddr: PhysAddr,
         Tracked(page): Tracked<PTPageInit<A>>,
     )
@@ -223,7 +223,7 @@ pub trait PagingHandler: 'static + Sized {
     /// Returning a `&'static` is what makes the inner level of locking
     /// reachable from anywhere in a walk: a thread that has descended to a page
     /// can lock it having been handed nothing but the page's address.
-    fn page_lock<A: ArchPagingMeta>(page: *mut PTPage<A>) -> (ret: &'static Self::PageLock)
+    fn page_lock(page: *mut PTPage<A>) -> (ret: &'static Self::PageLock)
         ensures
             ret.page() == page@.addr,
     ;

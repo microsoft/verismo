@@ -16,7 +16,7 @@ use crate::structs::arch_contract::{level_geometry_wf, ArchPagingMeta, GenericPa
 use crate::structs::concurrent_pt::PTPageSharedPerm;
 use crate::structs::geometry::shift_at;
 use crate::structs::level::PageLevel;
-use crate::structs::os_contract::{PagingError, PagingHandler};
+use crate::structs::os_contract::{PagingError, OSPagingContract};
 use crate::structs::ptpage::PTPage;
 use crate::structs::range::{level_flags, range_at, RangeOp};
 
@@ -29,7 +29,7 @@ verus! {
 /// that already maps -- the same partial-failure behaviour a single ranged
 /// pass has, for the same reason: undoing the writes would mean unmapping
 /// addresses that another thread may have started using.
-pub fn map_region<A: ArchPagingMeta, P: PagingHandler>(
+pub fn map_region<A: ArchPagingMeta, P: OSPagingContract<A>>(
     page_ptr: *mut PTPage<A>,
     level: PageLevel,
     Tracked(page): Tracked<&PTPageSharedPerm<A>>,
