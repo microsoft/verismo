@@ -85,6 +85,7 @@
 
 use builtin_macros::*;
 
+pub mod walk_probe;
 mod arch;
 mod proofs;
 pub mod specs;
