@@ -419,6 +419,32 @@ pub open spec fn mapped_view<A: ArchPagingMeta>(
     Map::new(page_addrs::<A>(dom, a, vp), |k: (nat, nat)| Some(oid_of::<A>(obj, k.1)))
 }
 
+/// The pages one address space governs.
+pub open spec fn space_pages(dom: Set<(nat, nat)>, a: nat) -> Set<nat> {
+    dom.filter(|k: (nat, nat)| k.0 == a).map_by(|k: (nat, nat)| k.1, |vp: nat| (a, vp))
+}
+
+/// The keys one address space contributes over a set of pages or addresses.
+pub open spec fn space_keys(a: nat, ks: Set<nat>) -> Set<(nat, nat)> {
+    ks.map_by(|vp: nat| (a, vp), |k: (nat, nat)| k.1)
+}
+
+pub broadcast proof fn lemma_space_keys(a: nat, ks: Set<nat>, k: (nat, nat))
+    ensures
+        #[trigger] space_keys(a, ks).contains(k) <==> k.0 == a && ks.contains(k.1),
+{
+    broadcast use Set::lemma_map_by_contains;
+
+}
+
+pub broadcast proof fn lemma_space_pages(dom: Set<(nat, nat)>, a: nat, vp: nat)
+    ensures
+        #[trigger] space_pages(dom, a).contains(vp) <==> dom.contains((a, vp)),
+{
+    broadcast use Set::lemma_map_by_contains;
+
+}
+
 /// The frame a leaf entry for `vp` must name: the frame holding the object the page maps.
 pub open spec fn walk_target(
     vmap: Map<(nat, nat), Option<nat>>,
@@ -456,6 +482,11 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
         #[sharding(variable)]
         pub next_oid: nat,
 
+        /// Source of address space ids. Spawning takes the next one rather than being handed
+        /// one, so uniqueness is the machine's to guarantee, not the caller's to promise.
+        #[sharding(variable)]
+        pub next_asid: nat,
+
         /// The word ids that page table entries occupy. A write to anything else cannot move a
         /// translation, which is what lets an ordinary write proceed without a path proof.
         #[sharding(variable)]
@@ -473,20 +504,21 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
         #[sharding(map)]
         pub vmem: Map<(nat, nat), Option<nat>>,
 
-        #[sharding(constant)]
+        #[sharding(variable)]
         pub vmem_dom: Set<(nat, nat)>,
 
-        #[sharding(constant)]
+        #[sharding(variable)]
         pub vmap_dom: Set<(nat, nat)>,
 
         #[sharding(constant)]
         pub frames_dom: Set<nat>,
 
-        #[sharding(constant)]
+        /// The running address spaces. Boot brings up one; threads are added later.
+        #[sharding(variable)]
         pub asids: Set<nat>,
 
         /// Address space -> the frame its walk starts from, i.e. what CR3 holds while it runs.
-        #[sharding(constant)]
+        #[sharding(variable)]
         pub cr3: Map<nat, nat>,
 
         #[sharding(constant)]
@@ -598,6 +630,11 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
     }
 
     #[invariant]
+    pub spec fn asids_fresh(&self) -> bool {
+        forall|a: nat| #[trigger] self.asids.contains(a) ==> a < self.next_asid
+    }
+
+    #[invariant]
     pub spec fn root_placed(&self) -> bool {
         &&& self.cr3.dom() =~= self.asids
         &&& forall|a: nat| #[trigger] self.asids.contains(a) ==> self.frames_dom.contains(
@@ -663,15 +700,15 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
         ) == walk_target(self.vmap, self.obj_to_frame, k.0, k.1)
     }
 
-    /// Every address space starts on the same all-absent root, which is what threads of one
-    /// process do; a later transition may repoint one of them. Each still gets its *own*
-    /// certificates over the whole address range, so each mints its own permissions.
+    /// Boot brings up one CPU running one kernel thread, so there is a single address space on
+    /// an all-absent root. It governs the whole available address range, and further threads
+    /// join later through [`spawn`](Self::spawn).
     init!{
         boot(
             frames: Set<nat>,
-            asids: Set<nat>,
-            vpages: Set<(nat, nat)>,
-            vaddrs: Set<(nat, nat)>,
+            vpages: Set<nat>,
+            vaddrs: Set<nat>,
+            boot_asid: nat,
             root: nat,
             levels: nat,
         ) {
@@ -680,10 +717,9 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             require frames.contains(root);
             require forall|f: nat| #[trigger] frames.contains(f)
                 ==> f <= usize::MAX && encodable::<A>(f as usize);
-            require forall|k: (nat, nat)| #[trigger] vaddrs.contains(k)
-                ==> vpages.contains((k.0, vpage::<A>(k.1)));
-            require forall|k: (nat, nat)| #[trigger] vpages.contains(k)
-                ==> asids.contains(k.0) && k.1 < pow(PTPage::<A>::count() as int, levels);
+            require forall|v: nat| #[trigger] vaddrs.contains(v) ==> vpages.contains(vpage::<A>(v));
+            require forall|vp: nat| #[trigger] vpages.contains(vp)
+                ==> vp < pow(PTPage::<A>::count() as int, levels);
             init data = Map::new(obj_ids::<A>(0), |c: nat| absent_word());
             init frozen = Map::empty();
             init obj_to_frame = Map::empty().insert(0, Some(root));
@@ -692,16 +728,40 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
                 |f: nat| if f == root { Set::<nat>::empty().insert(0) } else { Set::<nat>::empty() },
             );
             init frames_dom = frames;
-            init asids = asids;
-            init cr3 = Map::new(asids, |a: nat| root);
+            init asids = Set::<nat>::empty().insert(boot_asid);
+            init next_asid = boot_asid + 1;
+            init cr3 = Map::<nat, nat>::empty().insert(boot_asid, root);
             init levels = levels;
             init next_oid = PTPage::<A>::count();
             init table_words = obj_ids::<A>(0);
-            init vmap = Map::new(vpages, |k: (nat, nat)| Option::<nat>::None);
-            init vmap_dom = vpages;
-            init vmem = Map::new(vaddrs, |k: (nat, nat)| Option::<nat>::None);
-            init vmem_dom = vaddrs;
+            init vmap = Map::new(space_keys(boot_asid, vpages), |k: (nat, nat)| Option::<nat>::None);
+            init vmap_dom = space_keys(boot_asid, vpages);
+            init vmem = Map::new(space_keys(boot_asid, vaddrs), |k: (nat, nat)| Option::<nat>::None);
+            init vmem_dom = space_keys(boot_asid, vaddrs);
             init marker = PhantomData;
+        }
+    }
+
+    /// Start another thread in an existing address space. It runs the same root, so it inherits
+    /// that space's pages unchanged, and starts holding no address certificates of its own.
+    /// Presenting `view` is how the caller shows what the source space maps without the
+    /// transition reading a sharded field.
+    transition!{
+        spawn(src: nat, view: Map<(nat, nat), Option<nat>>) {
+            let a = pre.next_asid;
+            require pre.asids.contains(src);
+            update next_asid = pre.next_asid + 1;
+            require view.dom() =~= space_keys(src, space_pages(pre.vmap_dom, src));
+            have vmap >= (view);
+            update asids = pre.asids.insert(a);
+            update cr3 = pre.cr3.insert(a, pre.cr3[src]);
+            update vmap_dom = pre.vmap_dom.union(
+                space_keys(a, space_pages(pre.vmap_dom, src)),
+            );
+            add vmap += (Map::new(
+                space_keys(a, space_pages(pre.vmap_dom, src)),
+                |k: (nat, nat)| view[(src, k.1)],
+            ));
         }
     }
 
@@ -766,6 +826,36 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
         }
     }
 
+    /// A thread joining an existing address space runs the same root over the same pages, so
+    /// every walk it makes is a walk the source space already made.
+    #[inductive(spawn)]
+    fn spawn_inductive(pre: Self, post: Self, src: nat, view: Map<(nat, nat), Option<nat>>) {
+        broadcast use lemma_space_keys, lemma_space_pages;
+
+        let a = pre.next_asid;
+        assert(!pre.asids.contains(a));
+        assert(post.cr3.dom() =~= post.asids);
+        assert(post.vmap.dom() =~= post.vmap_dom);
+        assert forall|k: (nat, nat)| #[trigger] post.vmap_dom.contains(k) implies {
+            let s = if k.0 == a {
+                src
+            } else {
+                k.0
+            };
+            &&& pre.vmap_dom.contains((s, k.1))
+            &&& post.vmap[k] == pre.vmap[(s, k.1)]
+            &&& post.cr3[k.0] == pre.cr3[s]
+        } by {
+            if k.0 == a {
+                assert(space_keys(a, space_pages(pre.vmap_dom, src)).contains(k));
+                assert(space_pages(pre.vmap_dom, src).contains(k.1));
+                assert(pre.vmap_dom.contains((src, k.1)));
+                assert(view.dom().contains((src, k.1)));
+                assert(view.submap_of(pre.vmap));
+            }
+        }
+    }
+
     /// Every translation is unmoved by a write that touches no table word, which is exactly
     /// what [`lemma_translate_local`] gives.
     #[inductive(write_non_pt)]
@@ -814,15 +904,17 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
     fn boot_inductive(
         post: Self,
         frames: Set<nat>,
-        asids: Set<nat>,
-        vpages: Set<(nat, nat)>,
-        vaddrs: Set<(nat, nat)>,
+        vpages: Set<nat>,
+        vaddrs: Set<nat>,
+        boot_asid: nat,
         root: nat,
         levels: nat,
     ) {
         broadcast use vstd::set_lib::group_set_lib_default;
 
-        assert(post.cr3.dom() =~= asids);
+        assert(post.cr3.dom() =~= post.asids);
+        assert(post.vmap.dom() =~= post.vmap_dom);
+        assert(post.vmem.dom() =~= post.vmem_dom);
         assert(post.frame_to_objs[root] =~= Set::<nat>::empty().insert(0));
         assert(resident(post.frame_to_objs, root) == 0) by {
             assert(post.frame_to_objs[root].contains(0));
