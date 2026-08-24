@@ -364,6 +364,108 @@ pub proof fn lemma_frame_at_frames<A: ArchPagingMeta>(
     }
 }
 
+/// Two roots holding equal entries lead a walk to the same place at every level below the top,
+/// which is what makes a copied root page a faithful clone of an address space.
+pub proof fn lemma_frame_at_root_copy<A: ArchPagingMeta>(
+    data: Map<nat, usize>,
+    frozen: Map<nat, usize>,
+    frame_to_objs: Map<nat, Set<nat>>,
+    r1: nat,
+    r2: nat,
+    top: nat,
+    level: nat,
+    vp: nat,
+)
+    requires
+        PTPage::<A>::count() > 0,
+        level < top,
+        forall|i: nat| i < PTPage::<A>::count() ==> #[trigger] word_at(
+            data,
+            frozen,
+            (resident(frame_to_objs, r1) + i) as nat,
+        ) == word_at(data, frozen, (resident(frame_to_objs, r2) + i) as nat),
+    ensures
+        frame_at::<A>(data, frozen, frame_to_objs, r1, top, level, vp) == frame_at::<A>(
+            data,
+            frozen,
+            frame_to_objs,
+            r2,
+            top,
+            level,
+            vp,
+        ),
+    decreases top - level,
+{
+    if level + 1 < top {
+        lemma_frame_at_root_copy::<A>(
+            data,
+            frozen,
+            frame_to_objs,
+            r1,
+            r2,
+            top,
+            (level + 1) as nat,
+            vp,
+        );
+    } else {
+        lemma_vindex_bounded::<A>(vp, top);
+        assert(frame_at::<A>(data, frozen, frame_to_objs, r1, top, (level + 1) as nat, vp) == Some(
+            r1,
+        ));
+        assert(frame_at::<A>(data, frozen, frame_to_objs, r2, top, (level + 1) as nat, vp) == Some(
+            r2,
+        ));
+        assert(path_id::<A>(frame_to_objs, r1, vp, (level + 1) as nat) == (resident(
+            frame_to_objs,
+            r1,
+        ) + vindex::<A>(vp, top)) as nat);
+        assert(path_id::<A>(frame_to_objs, r2, vp, (level + 1) as nat) == (resident(
+            frame_to_objs,
+            r2,
+        ) + vindex::<A>(vp, top)) as nat);
+        assert(word_at(data, frozen, (resident(frame_to_objs, r1) + vindex::<A>(vp, top)) as nat)
+            == word_at(
+            data,
+            frozen,
+            (resident(frame_to_objs, r2) + vindex::<A>(vp, top)) as nat,
+        ));
+    }
+}
+
+/// A copied root translates every page exactly as the root it was copied from.
+pub proof fn lemma_translate_root_copy<A: ArchPagingMeta>(
+    data: Map<nat, usize>,
+    frozen: Map<nat, usize>,
+    frame_to_objs: Map<nat, Set<nat>>,
+    r1: nat,
+    r2: nat,
+    top: nat,
+    vp: nat,
+)
+    requires
+        PTPage::<A>::count() > 0,
+        forall|i: nat| i < PTPage::<A>::count() ==> #[trigger] word_at(
+            data,
+            frozen,
+            (resident(frame_to_objs, r1) + i) as nat,
+        ) == word_at(data, frozen, (resident(frame_to_objs, r2) + i) as nat),
+    ensures
+        translate::<A>(data, frozen, frame_to_objs, r1, top, vp) == translate::<A>(
+            data,
+            frozen,
+            frame_to_objs,
+            r2,
+            top,
+            vp,
+        ),
+{
+    if top > 0 {
+        lemma_frame_at_root_copy::<A>(data, frozen, frame_to_objs, r1, r2, top, 0, vp);
+    } else {
+        lemma_vindex_bounded::<A>(vp, 0);
+    }
+}
+
 pub proof fn lemma_translate_local<A: ArchPagingMeta>(
     d1: Map<nat, usize>,
     f1: Map<nat, usize>,
@@ -620,6 +722,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             ==> b + PTPage::<A>::count() <= self.next_oid
         &&& forall|k: (nat, nat)| #[trigger] self.vmap_dom.contains(k) && self.vmap[k] is Some
             ==> self.vmap[k]->Some_0 + PTPage::<A>::count() <= self.next_oid
+        &&& forall|c: nat| #[trigger] self.table_words.contains(c) ==> c < self.next_oid
     }
 
     #[invariant]
@@ -807,19 +910,42 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
         }
     }
 
-    /// Start another thread in an existing address space. It runs the same root, so it inherits
-    /// that space's pages unchanged, and starts holding no address certificates of its own.
-    /// Presenting `view` is how the caller shows what the source space maps without the
-    /// transition reading a sharded field.
+    /// Start another address space from an existing one. It runs its *own* root, a fresh frame
+    /// whose entries copy the source root's, so it starts out mapping the same pages but may be
+    /// remapped without disturbing the space it came from. The root frame comes from
+    /// [`alloc_frame`](Self::alloc_frame); `view` and `words` are how the caller shows what the
+    /// source space maps and holds without the transition reading a sharded field.
     transition!{
-        spawn(src: nat, view: Map<(nat, nat), Option<nat>>) {
+        spawn(
+            src: nat,
+            nroot: nat,
+            view: Map<(nat, nat), Option<nat>>,
+            words: Map<nat, usize>,
+        ) {
             let a = pre.next_asid;
+            let nobj = pre.next_oid;
             require pre.asids.contains(src);
             update next_asid = pre.next_asid + 1;
+            update next_oid = pre.next_oid + PTPage::<A>::count();
+
+            remove frame_to_objs -= [nroot => let occ];
+            require occ =~= Set::<nat>::empty();
+            have frame_to_objs >= [pre.cr3[src] => let roots];
+            let robj = roots.choose();
+            have data >= (words);
+            require words.dom() =~= obj_ids::<A>(robj);
+            add frame_to_objs += [nroot => Set::<nat>::empty().insert(nobj)];
+            add obj_to_frame += [nobj => Some(nroot)];
+            add data += (Map::new(
+                obj_ids::<A>(nobj),
+                |c: nat| words[(c - nobj + robj) as nat],
+            ));
+            update table_words = pre.table_words.union(obj_ids::<A>(nobj));
+
             require view.dom() =~= space_keys(src, space_pages(pre.vmap_dom, src));
             have vmap >= (view);
             update asids = pre.asids.insert(a);
-            update cr3 = pre.cr3.insert(a, pre.cr3[src]);
+            update cr3 = pre.cr3.insert(a, nroot);
             update vmap_dom = pre.vmap_dom.union(
                 space_keys(a, space_pages(pre.vmap_dom, src)),
             );
@@ -916,32 +1042,276 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
         lemma_frames_local::<A>(pre, post, pre.allocated.remove(f));
     }
 
-    /// A thread joining an existing address space runs the same root over the same pages, so
-    /// every walk it makes is a walk the source space already made.
+    /// A new address space walks its copied root exactly as the source walked its own, so it
+    /// starts out mapping what the source maps; and the walks already in flight see neither the
+    /// fresh words nor the fresh frame.
     #[inductive(spawn)]
-    fn spawn_inductive(pre: Self, post: Self, src: nat, view: Map<(nat, nat), Option<nat>>) {
+    fn spawn_inductive(
+        pre: Self,
+        post: Self,
+        src: nat,
+        nroot: nat,
+        view: Map<(nat, nat), Option<nat>>,
+        words: Map<nat, usize>,
+    ) {
         broadcast use lemma_space_keys, lemma_space_pages;
 
         let a = pre.next_asid;
+        let nobj = pre.next_oid;
+        let robj = pre.frame_to_objs[pre.cr3[src]].choose();
+        let top = pre.top();
+
         assert(!pre.asids.contains(a));
         assert(post.cr3.dom() =~= post.asids);
         assert(post.vmap.dom() =~= post.vmap_dom);
-        assert forall|k: (nat, nat)| #[trigger] post.vmap_dom.contains(k) implies {
+
+        // The fresh words are beyond every id in use, so no walk reads them.
+        let mid1 = Mem::State::<A> {
+            data: post.data,
+            next_oid: post.next_oid,
+            table_words: post.table_words,
+            ..pre
+        };
+        lemma_words_local::<A>(pre, mid1, obj_ids::<A>(nobj));
+
+        // The fresh frame held nothing, so no walk landed on it.
+        let mid2 = Mem::State::<A> {
+            frame_to_objs: post.frame_to_objs,
+            allocated: post.allocated,
+            ..mid1
+        };
+        assert forall|g: nat|
+            #[trigger] pre.allocated.contains(g) && (exists|o: nat|
+                pre.frame_to_objs[g] =~= Set::<nat>::empty().insert(o))
+                implies pre.allocated.remove(nroot).contains(g) by {
+            let o = choose|o: nat| pre.frame_to_objs[g] =~= Set::<nat>::empty().insert(o);
+            assert(pre.frame_to_objs[g].contains(o));
+        }
+        lemma_frames_local::<A>(mid1, mid2, pre.allocated.remove(nroot));
+
+        assert(resident(post.frame_to_objs, nroot) == nobj) by {
+            assert(post.frame_to_objs[nroot].contains(nobj));
+            assert(post.frame_to_objs[nroot].contains(post.frame_to_objs[nroot].choose()));
+        }
+        assert(resident(post.frame_to_objs, pre.cr3[src]) == robj);
+        assert forall|i: nat| i < PTPage::<A>::count() implies #[trigger] word_at(
+            post.data,
+            post.frozen,
+            (nobj + i) as nat,
+        ) == word_at(post.data, post.frozen, (robj + i) as nat) by {
+            assert(obj_ids::<A>(nobj).contains((nobj + i) as nat));
+            assert(obj_ids::<A>(nobj).contains((nobj + i) as nat));
+            assert(obj_ids::<A>(robj).contains((robj + i) as nat));
+        }
+
+        assert forall|k: (nat, nat), l: nat| post.vmap_dom.contains(k) && l <= top implies
+            #[trigger] frame_at::<A>(
+            post.data,
+            post.frozen,
+            post.frame_to_objs,
+            post.cr3[k.0],
+            top,
+            l,
+            k.1,
+        ) == frame_at::<A>(
+            pre.data,
+            pre.frozen,
+            pre.frame_to_objs,
+            pre.cr3[if k.0 == a { src } else { k.0 }],
+            top,
+            l,
+            k.1,
+        ) || (k.0 == a && l == top) by {
+            if k.0 == a {
+                assert(pre.vmap_dom.contains((src, k.1)));
+                if l < top {
+                    lemma_frame_at_root_copy::<A>(
+                        post.data,
+                        post.frozen,
+                        post.frame_to_objs,
+                        nroot,
+                        pre.cr3[src],
+                        top,
+                        l,
+                        k.1,
+                    );
+                }
+            }
+        }
+
+        assert forall|k: (nat, nat)| #[trigger] post.vmap_dom.contains(k) implies translate::<A>(
+            post.data,
+            post.frozen,
+            post.frame_to_objs,
+            post.cr3[k.0],
+            top,
+            k.1,
+        ) == walk_target(post.vmap, post.obj_to_frame, k.0, k.1) by {
             let s = if k.0 == a {
                 src
             } else {
                 k.0
             };
-            &&& pre.vmap_dom.contains((s, k.1))
-            &&& post.vmap[k] == pre.vmap[(s, k.1)]
-            &&& post.cr3[k.0] == pre.cr3[s]
-        } by {
+            assert(pre.vmap_dom.contains((s, k.1)));
+            assert(post.vmap[k] == pre.vmap[(s, k.1)]) by {
+                if k.0 == a {
+                    assert(view.dom().contains((src, k.1)));
+                    assert(view.submap_of(pre.vmap));
+                }
+            }
             if k.0 == a {
-                assert(space_keys(a, space_pages(pre.vmap_dom, src)).contains(k));
-                assert(space_pages(pre.vmap_dom, src).contains(k.1));
-                assert(pre.vmap_dom.contains((src, k.1)));
+                lemma_translate_root_copy::<A>(
+                    post.data,
+                    post.frozen,
+                    post.frame_to_objs,
+                    nroot,
+                    pre.cr3[src],
+                    top,
+                    k.1,
+                );
+            }
+        }
+
+        assert forall|k: (nat, nat), c: nat|
+            post.vmap_dom.contains(k) && #[trigger] on_path::<A>(
+                post.data,
+                post.frozen,
+                post.frame_to_objs,
+                post.cr3[k.0],
+                top,
+                k.1,
+                c,
+            ) implies post.table_words.contains(c) by {
+            let l = choose|l: nat|
+                l <= top && #[trigger] path_id_at::<A>(
+                    post.data,
+                    post.frozen,
+                    post.frame_to_objs,
+                    post.cr3[k.0],
+                    top,
+                    l,
+                    k.1,
+                ) == Some(c);
+            if k.0 == a && l == top {
+                lemma_vindex_bounded::<A>(k.1, l);
+            } else {
+                let s = if k.0 == a {
+                    src
+                } else {
+                    k.0
+                };
+                assert(pre.vmap_dom.contains((s, k.1)));
+                let f = frame_at::<A>(
+                    pre.data,
+                    pre.frozen,
+                    pre.frame_to_objs,
+                    pre.cr3[s],
+                    top,
+                    l,
+                    k.1,
+                )->Some_0;
+                assert(pre.allocated.contains(f));
+                assert(f != nroot) by {
+                    let o = choose|o: nat|
+                        pre.frame_to_objs[f] =~= Set::<nat>::empty().insert(o);
+                    assert(pre.frame_to_objs[f].contains(o));
+                }
+                assert(path_id_at::<A>(
+                    pre.data,
+                    pre.frozen,
+                    pre.frame_to_objs,
+                    pre.cr3[s],
+                    top,
+                    l,
+                    k.1,
+                ) == Some(c));
+                assert(on_path::<A>(
+                    pre.data,
+                    pre.frozen,
+                    pre.frame_to_objs,
+                    pre.cr3[s],
+                    top,
+                    k.1,
+                    c,
+                ));
+            }
+        }
+
+        assert forall|c: nat| #[trigger] post.table_words.contains(c) implies c < post.next_oid
+            by {}
+        assert forall|b1: nat, b2: nat, off: nat|
+            post.obj_to_frame.dom().contains(b1) && #[trigger] post.obj_to_frame.dom().contains(b2)
+                && post.obj_to_frame[b1] is Some && post.obj_to_frame[b1]
+                == post.obj_to_frame[b2] && off < PTPage::<A>::count() implies #[trigger] word_at(
+            post.data,
+            post.frozen,
+            (b1 + off) as nat,
+        ) == word_at(post.data, post.frozen, (b2 + off) as nat) by {
+            if b1 == nobj || b2 == nobj {
+                if b1 != nobj {
+                    assert(pre.frame_to_objs[nroot].contains(b1));
+                }
+                if b2 != nobj {
+                    assert(pre.frame_to_objs[nroot].contains(b2));
+                }
+            } else {
+                assert(pre.obj_to_frame.dom().contains(b1));
+                assert(pre.obj_to_frame.dom().contains(b2));
+                assert(b1 + PTPage::<A>::count() <= nobj);
+                assert(b2 + PTPage::<A>::count() <= nobj);
+                assert(!obj_ids::<A>(nobj).contains((b1 + off) as nat));
+                assert(!obj_ids::<A>(nobj).contains((b2 + off) as nat));
+                assert(word_at(pre.data, pre.frozen, (b1 + off) as nat) == word_at(
+                    pre.data,
+                    pre.frozen,
+                    (b2 + off) as nat,
+                ));
+            }
+        }
+        assert forall|k: (nat, nat)|
+            #[trigger] post.vmap_dom.contains(k) && post.vmap[k] is Some implies post.vmap[k]->Some_0
+                + PTPage::<A>::count() <= post.next_oid by {
+            let s = if k.0 == a {
+                src
+            } else {
+                k.0
+            };
+            assert(pre.vmap_dom.contains((s, k.1)));
+            if k.0 == a {
                 assert(view.dom().contains((src, k.1)));
                 assert(view.submap_of(pre.vmap));
+            }
+        }
+        assert forall|k: (nat, nat), l: nat|
+            post.vmap_dom.contains(k) && l <= top && #[trigger] frame_at::<A>(
+                post.data,
+                post.frozen,
+                post.frame_to_objs,
+                post.cr3[k.0],
+                top,
+                l,
+                k.1,
+            ) is Some implies {
+                let f = frame_at::<A>(
+                    post.data,
+                    post.frozen,
+                    post.frame_to_objs,
+                    post.cr3[k.0],
+                    top,
+                    l,
+                    k.1,
+                )->Some_0;
+                &&& post.allocated.contains(f)
+                &&& exists|o: nat| post.frame_to_objs[f] =~= Set::<nat>::empty().insert(o)
+            } by {
+            let s = if k.0 == a {
+                src
+            } else {
+                k.0
+            };
+            assert(pre.vmap_dom.contains((s, k.1)));
+            if k.0 == a && l == top {
+                assert(post.frame_to_objs[nroot] =~= Set::<nat>::empty().insert(nobj));
             }
         }
     }
@@ -957,7 +1327,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             c,
         ) by {}
         assert(!pre.table_words.contains(oid));
-        lemma_words_local::<A>(pre, post, oid);
+        lemma_words_local::<A>(pre, post, Set::<nat>::empty().insert(oid));
         assert forall|b1: nat, b2: nat, off: nat|
             pre.obj_to_frame.dom().contains(b1) && #[trigger] pre.obj_to_frame.dom().contains(b2)
                 && pre.obj_to_frame[b1] is Some && pre.obj_to_frame[b1] == pre.obj_to_frame[b2]
@@ -987,7 +1357,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
     fn freeze_inductive(pre: Self, post: Self, oid: nat) {
         assert forall|c: nat| word_at(pre.data, pre.frozen, c) == word_at(post.data, post.frozen, c)
             by {}
-        lemma_words_local::<A>(pre, post, oid);
+        lemma_words_local::<A>(pre, post, Set::<nat>::empty());
     }
 
     #[inductive(boot)]
@@ -1138,14 +1508,14 @@ pub proof fn lemma_boot_frame_at<A: ArchPagingMeta>(
 pub proof fn lemma_path_words<A: ArchPagingMeta>(
     pre: Mem::State<A>,
     post: Mem::State<A>,
-    oid: nat,
+    touched: Set<nat>,
     k: (nat, nat),
 )
     requires
         pre.paths_in_tables(),
         pre.vmap_dom.contains(k),
-        !pre.table_words.contains(oid),
-        forall|c: nat| c != oid ==> word_at(pre.data, pre.frozen, c) == word_at(
+        forall|c: nat| #[trigger] touched.contains(c) ==> !pre.table_words.contains(c),
+        forall|c: nat| !touched.contains(c) ==> word_at(pre.data, pre.frozen, c) == word_at(
             post.data,
             post.frozen,
             c,
@@ -1155,6 +1525,20 @@ pub proof fn lemma_path_words<A: ArchPagingMeta>(
             on_path::<A>(pre.data, pre.frozen, pre.frame_to_objs, pre.cr3[k.0], pre.top(), k.1, c)
                 ==> word_at(pre.data, pre.frozen, c) == word_at(post.data, post.frozen, c),
 {
+    assert forall|c: nat| #[trigger]
+        on_path::<A>(
+            pre.data,
+            pre.frozen,
+            pre.frame_to_objs,
+            pre.cr3[k.0],
+            pre.top(),
+            k.1,
+            c,
+        ) implies word_at(pre.data, pre.frozen, c) == word_at(post.data, post.frozen, c) by {
+        if touched.contains(c) {
+            assert(!pre.table_words.contains(c));
+        }
+    }
 }
 
 /// A step that only changes where frames outside `live` stand leaves every walk alone. Walks
@@ -1329,13 +1713,13 @@ pub proof fn lemma_frames_local<A: ArchPagingMeta>(
 pub proof fn lemma_words_local<A: ArchPagingMeta>(
     pre: Mem::State<A>,
     post: Mem::State<A>,
-    oid: nat,
+    touched: Set<nat>,
 )
     requires
         pre.paths_in_tables(),
         pre.walk_agrees(),
         pre.path_frames_solo(),
-        !pre.table_words.contains(oid),
+        forall|c: nat| #[trigger] touched.contains(c) ==> !pre.table_words.contains(c),
         post.frame_to_objs == pre.frame_to_objs,
         post.frames_dom == pre.frames_dom,
         post.cr3 == pre.cr3,
@@ -1344,9 +1728,9 @@ pub proof fn lemma_words_local<A: ArchPagingMeta>(
         post.vmap == pre.vmap,
         post.vmap_dom == pre.vmap_dom,
         post.obj_to_frame == pre.obj_to_frame,
-        post.table_words == pre.table_words,
+        pre.table_words.subset_of(post.table_words),
         post.allocated == pre.allocated,
-        forall|c: nat| c != oid ==> word_at(pre.data, pre.frozen, c) == word_at(
+        forall|c: nat| !touched.contains(c) ==> word_at(pre.data, pre.frozen, c) == word_at(
             post.data,
             post.frozen,
             c,
@@ -1355,6 +1739,24 @@ pub proof fn lemma_words_local<A: ArchPagingMeta>(
         post.walk_agrees(),
         post.path_frames_solo(),
         post.paths_in_tables(),
+        forall|k: (nat, nat), l: nat| pre.vmap_dom.contains(k) && l <= pre.top() ==> #[trigger]
+            frame_at::<A>(
+                post.data,
+                post.frozen,
+                post.frame_to_objs,
+                post.cr3[k.0],
+                post.top(),
+                l,
+                k.1,
+            ) == frame_at::<A>(
+                pre.data,
+                pre.frozen,
+                pre.frame_to_objs,
+                pre.cr3[k.0],
+                pre.top(),
+                l,
+                k.1,
+            ),
 {
     assert forall|k: (nat, nat), l: nat| post.vmap_dom.contains(k) && l <= post.top() implies
         #[trigger] frame_at::<A>(
@@ -1374,7 +1776,7 @@ pub proof fn lemma_words_local<A: ArchPagingMeta>(
         l,
         k.1,
     ) by {
-        lemma_path_words::<A>(pre, post, oid, k);
+        lemma_path_words::<A>(pre, post, touched, k);
         lemma_frame_at_local::<A>(
             pre.data,
             pre.frozen,
@@ -1395,7 +1797,7 @@ pub proof fn lemma_words_local<A: ArchPagingMeta>(
         post.top(),
         k.1,
     ) == walk_target(post.vmap, post.obj_to_frame, k.0, k.1) by {
-        lemma_path_words::<A>(pre, post, oid, k);
+        lemma_path_words::<A>(pre, post, touched, k);
         lemma_translate_local::<A>(
             pre.data,
             pre.frozen,
