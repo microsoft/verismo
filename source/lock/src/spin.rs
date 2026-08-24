@@ -194,8 +194,16 @@ impl<V, Pred: LockPredicate<V>> RawSpinLock<V, Pred> {
             let ghost id = inst.id();
         }
         RawSpinLock {
-            current: verus_exec_expr! { AtomicU64::new(Ghost(id), 0, Tracked(cur_tok)) },
-            holder: verus_exec_expr! { AtomicU64::new(Ghost(id), 0, Tracked(holder_tok)) },
+            current: AtomicU64::new(
+                verus_exec_expr! { Ghost(id) },
+                0,
+                verus_exec_expr! { Tracked(cur_tok) },
+            ),
+            holder: AtomicU64::new(
+                verus_exec_expr! { Ghost(id) },
+                0,
+                verus_exec_expr! { Tracked(holder_tok) },
+            ),
             inst: verus_exec_expr! { Tracked(inst) },
         }
     }
@@ -407,7 +415,7 @@ impl<T, Pred: LockPredicate<T>> SpinLock<T, Pred> {
         proof_decl! {
             let ghost cell_pred = CellInv { cell: cell.id(), pred: pred@ };
         }
-        let raw = verus_exec_expr! { RawSpinLock::new(perm, Ghost(cell_pred)) };
+        let raw = RawSpinLock::new(perm, verus_exec_expr!(Ghost(cell_pred)));
         SpinLock { cell, raw }
     }
 
@@ -471,7 +479,7 @@ impl<'a, T, Pred: LockPredicate<T>> Deref for SpinGuard<'a, T, Pred> {
         proof! {
             use_type_invariant(self);
         }
-        verus_exec_expr! { self.lock.cell.borrow(Tracked(self.perm.borrow())) }
+        self.lock.cell.borrow(verus_exec_expr! { Tracked(self.perm.borrow()) })
     }
 }
 
@@ -487,6 +495,6 @@ impl<'a, T, Pred: LockPredicate<T>> DerefMut for SpinGuard<'a, T, Pred> {
         proof! {
             use_type_invariant(&*self);
         }
-        verus_exec_expr! { self.lock.cell.borrow_mut(Tracked(self.perm.borrow_mut())) }
+        self.lock.cell.borrow_mut(verus_exec_expr! { Tracked(self.perm.borrow_mut()) })
     }
 }
