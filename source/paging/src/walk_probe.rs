@@ -827,6 +827,103 @@ pub broadcast proof fn lemma_space_pages(dom: Set<(nat, nat)>, a: nat, vpage: na
 
 }
 
+/// An entry no walk descends through: absent at every level, or a mapping at every level.
+///
+/// This is what makes an entry a *leaf slot*. A walk goes on only through a table pointer, so
+/// replacing one such entry with another cannot move any walk -- it can only change what the
+/// pages already resting there map. Quantified over all levels because a word carries no level
+/// of its own: the same bits are a table pointer at one level and a huge page at another, and a
+/// self-mapped table is read at several.
+pub open spec fn never_table<A: ArchPagingMeta>(w: usize) -> bool {
+    forall|l: PageLevel| !#[trigger] PTEntry::<A>::spec_from_bits(w).is_table_spec(l)
+}
+
+/// The frame an entry read at `level` hands a walk of `vpage`, or `None` if it maps nothing.
+/// This is the last step of [`PhyMemView::translate`], on its own.
+pub open spec fn leaf_frame<A: ArchPagingMeta>(w: usize, level: PageLevel, vpage: nat) -> Option<
+    FrameId,
+> {
+    let e = PTEntry::<A>::spec_from_bits(w);
+    if e.is_leaf_spec(level) {
+        Some(FrameId((e.page_frame_spec() as nat + leaf_offset::<A>(vpage, level)) as nat))
+    } else {
+        Option::None
+    }
+}
+
+/// A write that neither removes nor installs a table pointer leaves every walk exactly where it
+/// was: which frames it stands in and which entries it reads are decided by the entries it
+/// descends through, and this write touches none of those.
+pub proof fn lemma_leaf_write_local<A: ArchPagingMeta>(
+    v1: PhyMemView<A>,
+    v2: PhyMemView<A>,
+    frame: FrameId,
+    level: PageLevel,
+    vpage: nat,
+)
+    requires
+        v1.frame_to_objs == v2.frame_to_objs,
+        forall|c: WordId| #[trigger]
+            v1.word_at(c) != v2.word_at(c) ==> never_table::<A>(v1.word_at(c)) && never_table::<A>(
+                v2.word_at(c),
+            ),
+    ensures
+        v1.walk_leaf_ptbl(frame, level, vpage) == v2.walk_leaf_ptbl(frame, level, vpage),
+        forall|f: FrameId| #[trigger]
+            v1.walk_visits(frame, level, vpage, f) == v2.walk_visits(frame, level, vpage, f),
+        forall|c: WordId| #[trigger]
+            v1.on_walk_path(frame, level, vpage, c) == v2.on_walk_path(frame, level, vpage, c),
+    decreases level.depth(),
+{
+    let id = v1.path_id(frame, vpage, level);
+    let e1 = PTEntry::<A>::spec_from_bits(v1.word_at(id));
+    let e2 = PTEntry::<A>::spec_from_bits(v2.word_at(id));
+    // Neither view sees a table pointer here unless both see the very same word.
+    if e1.is_table_spec(level) {
+        assert(v1.word_at(id) == v2.word_at(id));
+    }
+    if e2.is_table_spec(level) {
+        assert(v1.word_at(id) == v2.word_at(id));
+    }
+    match level.spec_child() {
+        Option::None => {},
+        Option::Some(child) => {
+            if e1.is_table_spec(level) {
+                let nf = FrameId(e1.page_frame_spec() as nat);
+                lemma_leaf_write_local::<A>(v1, v2, nf, child, vpage);
+                assert forall|f: FrameId| #[trigger]
+                    v1.walk_visits(frame, level, vpage, f) == v2.walk_visits(
+                        frame,
+                        level,
+                        vpage,
+                        f,
+                    ) by {
+                    assert(v1.walk_visits(nf, child, vpage, f) == v2.walk_visits(
+                        nf,
+                        child,
+                        vpage,
+                        f,
+                    ));
+                }
+                assert forall|d: WordId| #[trigger]
+                    v1.on_walk_path(frame, level, vpage, d) == v2.on_walk_path(
+                        frame,
+                        level,
+                        vpage,
+                        d,
+                    ) by {
+                    assert(v1.on_walk_path(nf, child, vpage, d) == v2.on_walk_path(
+                        nf,
+                        child,
+                        vpage,
+                        d,
+                    ));
+                }
+            }
+        },
+    }
+}
+
 /// The frame a leaf entry for `vpage` must name: the frame holding the object the page maps.
 pub open spec fn walk_target(
     vmap: Map<(nat, nat), Option<ObjId>>,
@@ -1296,6 +1393,75 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
         }
     }
 
+    /// Write a leaf slot: an entry no walk descends through, before or after. That is what keeps
+    /// every walk where it was, so this step changes only what the pages already resting on the
+    /// entry map. Installing a table pointer, which does move walks, is a separate step.
+    ///
+    /// The pages remapped are *every* page whose walk rests on that entry, across every address
+    /// space -- which is what makes a shared kernel sub table remap every thread at once. Their
+    /// certificates are revoked and reissued rather than left alone: a certificate names the
+    /// object its page maps, so a page that now maps something else cannot keep the ones it had.
+    ///
+    /// `placement` is how the caller shows where the objects being mapped live; it is a submap of
+    /// `obj_to_frame`, so it cannot claim a placement the machine disagrees with.
+    transition!{
+        write_pt(
+            c: WordId,
+            obj: ObjId,
+            val: usize,
+            placement: Map<ObjId, Option<FrameId>>,
+            oldmap: Map<(nat, nat), Option<ObjId>>,
+            nvmap: Map<(nat, nat), Option<ObjId>>,
+            oldmem: Map<(nat, nat), Option<WordId>>,
+        ) {
+            require pre.pt_words.contains(c);
+            require obj_ids::<A>(obj).contains(c);
+            have obj_to_frame >= [obj => let p];
+            require p is Some;
+            have frame_to_objs >= [p->Some_0 => let occupants];
+            require occupants =~= Set::<ObjId>::empty().insert(obj);
+
+            require never_table::<A>(val);
+            remove data -= [c => let old];
+            require never_table::<A>(old);
+            add data += [c => val];
+
+            let affected = pre.vmap_dom.filter(
+                |k: (nat, nat)| pre.leaf_id[k]->Some_0.0 == c,
+            );
+
+            have obj_to_frame >= (placement);
+            require forall|k: (nat, nat)| #[trigger] affected.contains(k) ==> {
+                &&& nvmap[k] is Some ==> placement.dom().contains(nvmap[k]->Some_0)
+                &&& nvmap[k] is Some ==> nvmap[k]->Some_0.0 + PTPage::<A>::count() <= pre.next_oid
+                &&& leaf_frame::<A>(val, pre.leaf_id[k]->Some_0.1, k.1) == walk_target(
+                    nvmap,
+                    placement,
+                    k.0,
+                    k.1,
+                )
+            };
+
+            require oldmap.dom() =~= affected;
+            require nvmap.dom() =~= affected;
+            remove vmap -= (oldmap);
+            add vmap += (nvmap);
+
+            let readdrs = pre.vmem_dom.filter(
+                |k: (nat, nat)| affected.contains((k.0, addr_to_vpage::<A>(k.1))),
+            );
+            require oldmem.dom() =~= readdrs;
+            remove vmem -= (oldmem);
+            add vmem += (Map::new(
+                readdrs,
+                |k: (nat, nat)| match nvmap[(k.0, addr_to_vpage::<A>(k.1))] {
+                    Option::None => Option::None,
+                    Option::Some(o) => Option::Some(oid_of::<A>(o, k.1)),
+                },
+            ));
+        }
+    }
+
     /// Give up the right to write for the right to share.
     transition!{
         freeze(oid: WordId) {
@@ -1629,6 +1795,137 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             if WordId((b1.0 + off) as nat) == oid || WordId((b2.0 + off) as nat) == oid {
                 assert(obj_ids::<A>(obj).contains(oid));
                 assert(obj_ids::<A>(b1).contains(oid) || obj_ids::<A>(b2).contains(oid));
+                assert(b1 == obj || b2 == obj);
+                assert(pre.obj_to_frame[b1] == Some(p));
+                assert(pre.obj_to_frame[b2] == Some(p));
+                assert(pre.frame_to_objs[p].contains(b1));
+                assert(pre.frame_to_objs[p].contains(b2));
+                assert(b1 == b2);
+            }
+        }
+    }
+
+    /// Freezing moves a word between the two halves of `word_at` without changing it, so nothing
+    /// The write leaves every walk where it was, so the only thing that moves is what the pages
+    /// resting on the written entry map -- and their certificates, which name the object mapped.
+    #[inductive(write_pt)]
+    fn write_pt_inductive(
+        pre: Self,
+        post: Self,
+        c: WordId,
+        obj: ObjId,
+        val: usize,
+        placement: Map<ObjId, Option<FrameId>>,
+        oldmap: Map<(nat, nat), Option<ObjId>>,
+        nvmap: Map<(nat, nat), Option<ObjId>>,
+        oldmem: Map<(nat, nat), Option<WordId>>,
+    ) {
+        let affected = pre.vmap_dom.filter(|k: (nat, nat)| pre.leaf_id[k]->Some_0.0 == c);
+        assert forall|x: ObjId| #[trigger] placement.dom().contains(x) implies pre.obj_to_frame.dom().contains(
+            x,
+        ) && pre.obj_to_frame[x] == placement[x] by {}
+
+        assert forall|d: WordId| d != c implies pre.phy_view().word_at(d) == post.phy_view().word_at(
+            d,
+        ) by {}
+        assert forall|d: WordId| #[trigger]
+            pre.phy_view().word_at(d) != post.phy_view().word_at(d) implies never_table::<A>(
+            pre.phy_view().word_at(d),
+        ) && never_table::<A>(post.phy_view().word_at(d)) by {
+            assert(d == c);
+        }
+        assert forall|k: (nat, nat)| #[trigger] pre.vmap_dom.contains(k) implies post.phy_view().resting_slot(
+            post.cr3[k.0],
+            post.top,
+            k.1,
+        ) == pre.phy_view().resting_slot(pre.cr3[k.0], pre.top, k.1) by {
+            lemma_leaf_write_local::<A>(
+                pre.phy_view(),
+                post.phy_view(),
+                pre.cr3[k.0],
+                pre.top,
+                k.1,
+            );
+        }
+        assert forall|k: (nat, nat), f: FrameId| pre.vmap_dom.contains(k) implies #[trigger] post.phy_view().walk_visits(
+            post.cr3[k.0],
+            post.top,
+            k.1,
+            f,
+        ) == pre.phy_view().walk_visits(pre.cr3[k.0], pre.top, k.1, f) by {
+            lemma_leaf_write_local::<A>(
+                pre.phy_view(),
+                post.phy_view(),
+                pre.cr3[k.0],
+                pre.top,
+                k.1,
+            );
+        }
+        assert forall|k: (nat, nat), d: WordId| pre.vmap_dom.contains(k) implies #[trigger] post.phy_view().on_walk_path(
+            post.cr3[k.0],
+            post.top,
+            k.1,
+            d,
+        ) == pre.phy_view().on_walk_path(pre.cr3[k.0], pre.top, k.1, d) by {
+            lemma_leaf_write_local::<A>(
+                pre.phy_view(),
+                post.phy_view(),
+                pre.cr3[k.0],
+                pre.top,
+                k.1,
+            );
+        }
+
+        // A walk that does not rest on the written entry reads the same word there as before.
+        assert forall|k: (nat, nat)| #[trigger] pre.vmap_dom.contains(k) implies post.phy_view().translate(
+            post.cr3[k.0],
+            post.top,
+            k.1,
+        ) == walk_target(post.vmap, post.obj_to_frame, k.0, k.1) by {
+            let slot = pre.phy_view().resting_slot(pre.cr3[k.0], pre.top, k.1);
+            assert(pre.leaf_id[k] == Some(slot));
+            assert(post.phy_view().resting_slot(post.cr3[k.0], post.top, k.1) == slot);
+            assert(post.phy_view().translate(post.cr3[k.0], post.top, k.1) == leaf_frame::<A>(
+                post.phy_view().word_at(slot.0),
+                slot.1,
+                k.1,
+            ));
+            if affected.contains(k) {
+                assert(slot.0 == c);
+                assert(post.phy_view().word_at(c) == val);
+                assert(leaf_frame::<A>(val, slot.1, k.1) == walk_target(
+                    nvmap,
+                    placement,
+                    k.0,
+                    k.1,
+                ));
+                assert(post.vmap[k] == nvmap[k]);
+                if nvmap[k] is Some {
+                    let o = nvmap[k]->Some_0;
+                    assert(placement.dom().contains(o));
+                    assert(post.obj_to_frame[o] == placement[o]);
+                }
+            } else {
+                assert(slot.0 != c);
+                assert(post.phy_view().word_at(slot.0) == pre.phy_view().word_at(slot.0));
+                assert(pre.phy_view().translate(pre.cr3[k.0], pre.top, k.1) == leaf_frame::<A>(
+                    pre.phy_view().word_at(slot.0),
+                    slot.1,
+                    k.1,
+                ));
+                assert(post.vmap[k] == pre.vmap[k]);
+            }
+        }
+
+        assert forall|b1: ObjId, b2: ObjId, off: nat|
+            pre.obj_to_frame.dom().contains(b1) && #[trigger] pre.obj_to_frame.dom().contains(b2)
+                && pre.obj_to_frame[b1] is Some && pre.obj_to_frame[b1] == pre.obj_to_frame[b2]
+                && off < PTPage::<A>::count() implies #[trigger] post.phy_view().word_at(
+            WordId((b1.0 + off) as nat),
+        ) == post.phy_view().word_at(WordId((b2.0 + off) as nat)) by {
+            let p = pre.obj_to_frame[obj]->Some_0;
+            if WordId((b1.0 + off) as nat) == c || WordId((b2.0 + off) as nat) == c {
+                assert(obj_ids::<A>(b1).contains(c) || obj_ids::<A>(b2).contains(c));
                 assert(b1 == obj || b2 == obj);
                 assert(pre.obj_to_frame[b1] == Some(p));
                 assert(pre.obj_to_frame[b2] == Some(p));
