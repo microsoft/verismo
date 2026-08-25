@@ -60,12 +60,12 @@ pub fn walk<A: ArchPagingMeta, P: OSPagingContract<A>>(
         page.wf(),
         page.base == page_ptr@.addr,
     ensures
-        ret.level.spec_depth() <= level.spec_depth(),
+        ret.level.depth() as nat <= level.depth() as nat,
         ret.index == spec_entry_index::<A>(vaddr@, ret.level),
         // Stopping on a table pointer is only allowed where descending is not:
         // at the leaf, where the bit that looks like PS is PAT.
         ret.entry.is_table_spec(ret.level) ==> !ret.entry.escrows_spec(),
-    decreases level.spec_depth(),
+    decreases level.depth() as nat,
 {
     let index = entry_index::<A>(vaddr, level);
     let ghost i = index as int;
@@ -78,11 +78,21 @@ pub fn walk<A: ArchPagingMeta, P: OSPagingContract<A>>(
     );
     let stop = WalkResult { level, page_ptr, index, entry };
     if !entry.is_table(level) || !entry.escrows() {
+        assert(entry.is_table_spec(level) ==> !entry.escrows_spec());
         return stop;
     }
     match level.child() {
-        None => stop,
+        None => {
+            proof {
+                PageLevel::lemma_no_child_is_leaf(level);
+            }
+            assert(!entry.is_table_spec(level));
+            stop
+        },
         Some(child_level) => {
+            proof {
+                PageLevel::lemma_child_decreases(level);
+            }
             let tracked slot_ticket;
             let tracked child_page;
             proof {
@@ -98,7 +108,9 @@ pub fn walk<A: ArchPagingMeta, P: OSPagingContract<A>>(
             }
             let child_base = P::paddr_to_vaddr(PhysAddr::from(entry.page_frame()));
             let child_ptr = page_from_vaddr::<A>(child_base, Tracked(child_page));
-            walk::<A, P>(child_ptr, child_level, Tracked(child_page), vaddr)
+            let ret = walk::<A, P>(child_ptr, child_level, Tracked(child_page), vaddr);
+            assert(ret.entry.is_table_spec(ret.level) ==> !ret.entry.escrows_spec());
+            ret
         },
     }
 }

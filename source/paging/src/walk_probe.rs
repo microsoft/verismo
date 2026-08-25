@@ -54,11 +54,6 @@ pub open spec fn resident(frame_to_objs: Map<FrameId, Set<ObjId>>, frame: FrameI
     frame_to_objs[frame].choose()
 }
 
-/// The model counts levels from the leaf as a `nat`; the entry decoder names them by `PageLevel`.
-pub open spec fn plevel(level: nat) -> PageLevel {
-    PageLevel::spec_from_depth(level)
-}
-
 /// Where a walk of `vp` stands once it has descended from `cr3` to `level`, or `None` if the
 /// walk stopped above it.
 ///
@@ -84,7 +79,7 @@ pub open spec fn walk_at<A: ArchPagingMeta>(
                 let e = PTEntry::<A>::spec_from_bits(
                     word_at(data, frozen, path_id::<A>(frame_to_objs, f, vp, (level + 1) as nat)),
                 );
-                if e.is_table_spec(plevel((level + 1) as nat)) {
+                if e.is_table_spec(PageLevel::from_nat((level + 1) as nat)) {
                     Some(FrameId(e.page_frame_spec() as nat))
                 } else {
                     Option::None
@@ -159,7 +154,7 @@ pub open spec fn translate<A: ArchPagingMeta>(
             let e = PTEntry::<A>::spec_from_bits(
                 word_at(data, frozen, path_id::<A>(frame_to_objs, f, vp, level)),
             );
-            if e.is_leaf_spec(plevel(level)) {
+            if e.is_leaf_spec(PageLevel::from_nat(level)) {
                 Some(FrameId((e.page_frame_spec() as nat + leaf_offset::<A>(vp, level)) as nat))
             } else {
                 Option::None
@@ -257,9 +252,10 @@ pub proof fn lemma_leaf_word<A: ArchPagingMeta>(frame: usize)
     requires
         encodable::<A>(frame),
     ensures
-        PTEntry::<A>::spec_from_bits(leaf_word::<A>(frame)).is_leaf_spec(plevel(0)),
+        PTEntry::<A>::spec_from_bits(leaf_word::<A>(frame)).is_leaf_spec(PageLevel::from_nat(0)),
         PTEntry::<A>::spec_from_bits(leaf_word::<A>(frame)).page_frame_spec() == frame,
 {
+    PageLevel::lemma_leaf_cases(PageLevel::from_nat(0));
     A::lemma_pte_masks_wf();
     A::PTFlags::lemma_flag_bits_wf();
     let am = A::spec_address_mask();
@@ -278,9 +274,17 @@ pub proof fn lemma_table_word<A: ArchPagingMeta>(frame: usize, level: nat)
         encodable::<A>(frame),
         level > 0,
     ensures
-        PTEntry::<A>::spec_from_bits(table_word::<A>(frame)).is_table_spec(plevel(level)),
+        PTEntry::<A>::spec_from_bits(table_word::<A>(frame)).is_table_spec(PageLevel::from_nat(level)),
         PTEntry::<A>::spec_from_bits(table_word::<A>(frame)).page_frame_spec() == frame,
 {
+    if level == 1 {
+    } else if level == 2 {
+    } else if level == 3 {
+    } else {
+        assert(level >= 4);
+    }
+    PageLevel::lemma_leaf_cases(PageLevel::from_nat(level));
+    assert(!PageLevel::from_nat(level).is_leaf());
     A::lemma_pte_masks_wf();
     A::PTFlags::lemma_flag_bits_wf();
     let am = A::spec_address_mask();
@@ -508,7 +512,7 @@ pub proof fn lemma_resting_level_top_if_not_table<A: ArchPagingMeta>(
         level <= top,
         !PTEntry::<A>::spec_from_bits(
             word_at(data, frozen, path_id::<A>(frame_to_objs, cr3, vp, top)),
-        ).is_table_spec(plevel(top)),
+        ).is_table_spec(PageLevel::from_nat(top)),
     ensures
         resting_level::<A>(data, frozen, frame_to_objs, cr3, top, level, vp) == top,
         level < top ==> walk_at::<A>(data, frozen, frame_to_objs, cr3, top, level, vp) is None,
@@ -805,7 +809,7 @@ pub proof fn lemma_resting_path_root_copy_if_table<A: ArchPagingMeta>(
         PTPage::<A>::count() > 0,
         PTEntry::<A>::spec_from_bits(
             word_at(data, frozen, path_id::<A>(frame_to_objs, r1, vp, top)),
-        ).is_table_spec(plevel(top)),
+        ).is_table_spec(PageLevel::from_nat(top)),
         forall|i: nat| i < PTPage::<A>::count() ==> #[trigger] word_at(
             data,
             frozen,
@@ -827,7 +831,8 @@ pub proof fn lemma_resting_path_root_copy_if_table<A: ArchPagingMeta>(
     assert(l < top) by {
         if l == top {
             if top == 0 {
-                assert(plevel(top).spec_is_leaf());
+                PageLevel::lemma_leaf_cases(PageLevel::from_nat(top));
+                assert(PageLevel::from_nat(top).is_leaf());
             } else {
                 let down = (top - 1) as nat;
                 assert(walk_at::<A>(data, frozen, frame_to_objs, r1, top, down, vp) is Some);
@@ -1107,10 +1112,13 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
         pub marker: PhantomData<A>,
     }
 
+    /// Page-table geometry modeled by this state machine. The level bound makes `PageLevel`
+    /// total over the model's range; the decoder has only five names and saturates beyond them.
     #[invariant]
     pub spec fn geometry(&self) -> bool {
         &&& PTPage::<A>::count() > 0
         &&& self.levels > 0
+        &&& self.levels <= 5
     }
 
     #[invariant]
@@ -1315,6 +1323,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             levels: nat,
         ) {
             require levels > 0;
+            require levels <= 5;
             require PTPage::<A>::count() > 0;
             require frames.contains(root);
             require forall|f: FrameId| #[trigger] frames.contains(f)
@@ -1427,7 +1436,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
                     pre.leaf_id[k]
                 } else if !PTEntry::<A>::spec_from_bits(
                     words[entry_id::<A>(robj, k.1, (pre.levels - 1) as nat)],
-                ).is_table_spec(plevel((pre.levels - 1) as nat)) {
+                ).is_table_spec(PageLevel::from_nat((pre.levels - 1) as nat)) {
                     Some(entry_id::<A>(nobj, k.1, (pre.levels - 1) as nat))
                 } else {
                     pre.leaf_id[(src, k.1)]
@@ -1769,7 +1778,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
                 let e = PTEntry::<A>::spec_from_bits(
                     words[entry_id::<A>(robj, k.1, top)],
                 );
-                if !e.is_table_spec(plevel(top)) {
+                if !e.is_table_spec(PageLevel::from_nat(top)) {
                     lemma_resting_level_top_if_not_table::<A>(
                         post.data,
                         post.frozen,

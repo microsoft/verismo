@@ -132,7 +132,7 @@ impl<A: ArchPagingMeta, P: OSPagingContract<A>, L: PagingLevel> GenericPageTable
         requires
             self.inv(),
         ensures
-            ret.level.spec_depth() <= self.root_level().spec_depth(),
+            ret.level.depth() as nat <= self.root_level().depth() as nat,
             ret.entry.is_table_spec(ret.level) ==> !ret.entry.escrows_spec(),
     {
         crate::structs::walk::walk::<A, P>(self.root, L::TOP_LEVEL, self.borrow_page(), vaddr)

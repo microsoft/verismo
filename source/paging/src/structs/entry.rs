@@ -295,7 +295,7 @@ impl<A: ArchPagingMeta> PTEntry<A> {
     /// entry there maps a page, while above the leaf that bit is PS and a
     /// present entry with it clear points at a table.
     pub open spec fn is_table_spec(&self, level: PageLevel) -> bool {
-        &&& !level.spec_is_leaf()
+        &&& !level.is_leaf()
         &&& self.present_spec()
         &&& !self.huge_spec()
     }
@@ -378,7 +378,7 @@ impl<A: ArchPagingMeta> PTEntry<A> {
         requires
             addr@ & !A::spec_address_mask() == 0,
         ensures
-            forall|level: PageLevel| !level.spec_is_leaf() ==> ret.is_table_spec(level),
+            forall|level: PageLevel| !level.is_leaf() ==> ret.is_table_spec(level),
             ret.escrows_spec(),
             ret.paddr_field_spec() == addr@,
     {

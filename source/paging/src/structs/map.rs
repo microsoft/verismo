@@ -49,7 +49,7 @@ pub fn map_at<A: ArchPagingMeta, P: OSPagingContract<A>>(
         page.wf(),
         page.base == page_ptr@.addr,
         !entry.escrows_spec(),
-    decreases level.spec_depth(), 1nat,
+    decreases level.depth() as nat, 1nat,
 {
     let index = entry_index::<A>(vaddr, level);
     let ghost i = index as int;
@@ -67,6 +67,9 @@ pub fn map_at<A: ArchPagingMeta, P: OSPagingContract<A>>(
         },
         Some(child_level) => child_level,
     };
+    proof {
+        PageLevel::lemma_child_decreases(level);
+    }
     let tracked slot = page.slots.tracked_borrow(i);
     let (current, Tracked(_observed), Tracked(ticket)) = PTEntry::<A>::read_published(
         ptr,
@@ -88,6 +91,7 @@ pub fn map_at<A: ArchPagingMeta, P: OSPagingContract<A>>(
     if current.present() {
         return Err(PagingError::EntryAlreadyPresent);
     }
+    assert(level.child() is Some);
     grow_and_map::<A, P>(page_ptr, index, level, Tracked(page), vaddr, target, entry)
 }
 
@@ -110,9 +114,9 @@ fn grow_and_map<A: ArchPagingMeta, P: OSPagingContract<A>>(
         page.wf(),
         page.base == page_ptr@.addr,
         index < PTPage::<A>::count(),
-        level.spec_child() is Some,
+        level.child() is Some,
         !entry.escrows_spec(),
-    decreases level.spec_depth(), 0nat,
+    decreases level.depth() as nat, 0nat,
 {
     let child_level = match level.child() {
         None => {
@@ -120,6 +124,9 @@ fn grow_and_map<A: ArchPagingMeta, P: OSPagingContract<A>>(
         },
         Some(child_level) => child_level,
     };
+    proof {
+        PageLevel::lemma_child_decreases(level);
+    }
     let (child_ptr, ticket) = match create_and_link_child::<A, P>(
         page_ptr,
         index,

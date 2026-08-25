@@ -93,7 +93,7 @@ pub fn range_at<A: ArchPagingMeta, P: OSPagingContract<A>>(
         page.base == page_ptr@.addr,
         op matches RangeOp::Map { paddr, .. } ==> paddr + (vend - vstart) <= usize::MAX,
         vstart <= vend,
-    decreases level.spec_depth(), 1nat,
+    decreases level.depth() as nat, 1nat,
 {
     if level.depth() == target.depth() {
         return leaf_range::<A, P>(page_ptr, level, Tracked(page), vstart, vend, op);
@@ -146,7 +146,7 @@ fn range_step<A: ArchPagingMeta, P: OSPagingContract<A>>(
         index < PTPage::<A>::count(),
         cur <= next,
         op matches RangeOp::Map { paddr, .. } ==> paddr + (next - cur) <= usize::MAX,
-    decreases level.spec_depth(), 0nat,
+    decreases level.depth() as nat, 0nat,
 {
     let child_level = match level.child() {
         None => {
@@ -154,6 +154,9 @@ fn range_step<A: ArchPagingMeta, P: OSPagingContract<A>>(
         },
         Some(child_level) => child_level,
     };
+    proof {
+        PageLevel::lemma_child_decreases(level);
+    }
     let ptr = entry_ptr::<A>(page_ptr, index, Tracked(page));
     let tracked slot = page.slots.tracked_borrow(index as int);
     let (current, Tracked(_observed), Tracked(ticket)) = PTEntry::<A>::read_published(

@@ -51,7 +51,7 @@ pub fn free_page_tree<A: ArchPagingMeta, P: OSPagingContract<A>>(
     ensures
         ret@.wf_owned(),
         ret@.base == page.base,
-    decreases level.spec_depth(), PTPage::<A>::count() + 1,
+    decreases level.depth() as nat, PTPage::<A>::count() + 1,
 {
     proof {
         lemma_ids_match::<A>(writers, page);
@@ -105,7 +105,7 @@ fn free_slots<A: ArchPagingMeta, P: OSPagingContract<A>>(
                 &&& ret@[i].ptr()@.provenance == provenance@
                 &&& ret@[i].is_init()
             },
-    decreases level.spec_depth(), count,
+    decreases level.depth() as nat, count,
 {
     if count == 0 {
         return Tracked(Seq::tracked_empty());
@@ -154,7 +154,7 @@ fn free_child<A: ArchPagingMeta, P: OSPagingContract<A>>(
     requires
         level_geometry_wf::<A>(),
         entry.wf_payload(payload),
-    decreases level.spec_depth(), 0nat,
+    decreases level.depth() as nat, 0nat,
 {
     if !entry.escrows() {
         return;
@@ -166,6 +166,7 @@ fn free_child<A: ArchPagingMeta, P: OSPagingContract<A>>(
         Some(child_level) => child_level,
     };
     proof {
+        PageLevel::lemma_child_decreases(level);
         lemma_phys_addr_from_bits(entry.page_frame_spec());
     }
     let paddr = PhysAddr::from(entry.page_frame());

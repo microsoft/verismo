@@ -162,7 +162,7 @@ pub open spec fn level_shift<A: ArchPagingMeta>(depth: nat) -> nat {
 /// Which entry of a level's table page an address selects: the address bits
 /// just above the region that level maps.
 pub open spec fn spec_entry_index<A: ArchPagingMeta>(vaddr: usize, level: PageLevel) -> nat {
-    ((vaddr >> level_shift::<A>(level.spec_depth())) as nat) % PTPage::<A>::count()
+    ((vaddr >> level_shift::<A>(level.depth() as nat)) as nat) % PTPage::<A>::count()
 }
 
 /// Address of a table page's entry `index`. Stated once here so that no
@@ -185,7 +185,7 @@ pub open spec fn level_geometry_wf<A: ArchPagingMeta>() -> bool {
         < 64
     // The deepest tree the level type can describe still shifts by less than a
     // word, so every index a walk computes is a legal shift.
-    &&& level_shift::<A>(PageLevel::Level4.spec_depth())
+    &&& level_shift::<A>(PageLevel::Level4.depth() as nat)
         < usize::BITS
     // The values exec code can read agree with the derived ones.
     &&& A::spec_entries_per_page() == PTPage::<A>::count()

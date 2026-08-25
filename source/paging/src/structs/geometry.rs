@@ -21,7 +21,7 @@ use crate::structs::sizes::PageOffset;
     requires
         level_geometry_wf::<A>(),
     ensures
-        ret == level_shift::<A>(level.spec_depth()),
+        ret == level_shift::<A>(level.depth() as nat),
         ret < usize::BITS,
 )]
 pub fn shift_at<A: ArchPagingMeta>(level: PageLevel) -> usize {
@@ -64,15 +64,16 @@ pub proof fn lemma_level_shift_monotone<A: ArchPagingMeta>(level: PageLevel)
     requires
         level_geometry_wf::<A>(),
     ensures
-        level_shift::<A>(level.spec_depth()) == page_offset_width::<A>() + level.spec_depth()
+        level_shift::<A>(level.depth() as nat) == page_offset_width::<A>() + level.depth() as nat
             * level_index_width::<A>(),
-        level_shift::<A>(level.spec_depth()) <= level_shift::<A>(PageLevel::Level4.spec_depth())
+        level_shift::<A>(level.depth() as nat) <= level_shift::<A>(PageLevel::Level4.depth() as nat)
             < usize::BITS,
 {
     PageLevel::lemma_depth_roundtrip(level);
+    PageLevel::lemma_depth_roundtrip(PageLevel::Level4);
     vstd::arithmetic::mul::lemma_mul_inequality(
-        level.spec_depth() as int,
-        PageLevel::Level4.spec_depth() as int,
+        level.depth() as nat as int,
+        PageLevel::Level4.depth() as nat as int,
         level_index_width::<A>() as int,
     );
 }

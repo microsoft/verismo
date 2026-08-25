@@ -56,7 +56,7 @@ pub fn update_leaf_at<A: ArchPagingMeta, P: OSPagingContract<A>>(
         page.base == page_ptr@.addr,
     ensures
         ret matches Ok(old) ==> !old.escrows_spec(),
-    decreases level.spec_depth(),
+    decreases level.depth() as nat,
 {
     let index = entry_index::<A>(vaddr, level);
     let ghost i = index as int;
@@ -74,6 +74,9 @@ pub fn update_leaf_at<A: ArchPagingMeta, P: OSPagingContract<A>>(
             },
             Some(child_level) => child_level,
         };
+        proof {
+            PageLevel::lemma_child_decreases(level);
+        }
         let tracked slot_ticket;
         let tracked child_page;
         proof {
