@@ -188,16 +188,20 @@ impl<A: ArchPagingMeta> PhyMemView<A> {
         }
     }
 
-    /// Id of the entry where a walk of `vpage` comes to rest. Total, because a walk always rests
-    /// somewhere: at worst on the entry the root page holds for `vpage`.
-    pub open spec fn resting_path_id(
+    /// Where a walk of `vpage` comes to rest: the entry it stops on, and the level it read that
+    /// entry at. Total, because a walk always rests somewhere -- at worst on the entry the root
+    /// page holds for `vpage`.
+    ///
+    /// The level belongs here for the same reason it belongs in [`walk_leaf_entry`]: it is what
+    /// the entry's bits mean, and what decides how much of `vpage` the entry maps.
+    pub open spec fn resting_slot(
         &self,
         cr3: FrameId,
         top: PageLevel,
         vpage: nat,
-    ) -> WordId {
+    ) -> (WordId, PageLevel) {
         let rest = self.walk_leaf_ptbl(cr3, top, vpage);
-        self.path_id(rest.0, vpage, rest.1)
+        (self.path_id(rest.0, vpage, rest.1), rest.1)
     }
 
     /// Whether a walk of `vpage` from `frame` at `level` runs over a bare table skeleton: it
@@ -710,7 +714,7 @@ pub proof fn lemma_translate_local<A: ArchPagingMeta>(
             v1.on_walk_path(cr3, top, vpage, c) ==> v1.word_at(c) == v2.word_at(c),
     ensures
         v1.translate(cr3, top, vpage) == v2.translate(cr3, top, vpage),
-        v1.resting_path_id(cr3, top, vpage) == v2.resting_path_id(cr3, top, vpage),
+        v1.resting_slot(cr3, top, vpage) == v2.resting_slot(cr3, top, vpage),
 {
     lemma_walk_leaf_entry_local(v1, v2, cr3, top, vpage);
     lemma_rest_on_walk_path(v1, cr3, top, vpage);
@@ -735,7 +739,7 @@ pub proof fn lemma_translate_frames<A: ArchPagingMeta>(
             v1.walk_visits(cr3, top, vpage, f) ==> live.contains(f),
     ensures
         v1.translate(cr3, top, vpage) == v2.translate(cr3, top, vpage),
-        v1.resting_path_id(cr3, top, vpage) == v2.resting_path_id(cr3, top, vpage),
+        v1.resting_slot(cr3, top, vpage) == v2.resting_slot(cr3, top, vpage),
 {
     lemma_walk_leaf_entry_frames(v1, v2, live, cr3, top, vpage);
     lemma_rest_on_walk_path(v1, cr3, top, vpage);
@@ -877,7 +881,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
         /// share these ids, so a kernel range reached from every root is remapped for every
         /// thread at once, while a range reached from one root is remapped for that thread alone.
         #[sharding(variable)]
-        pub leaf_id: Map<(nat, nat), Option<WordId>>,
+        pub leaf_id: Map<(nat, nat), Option<(WordId, PageLevel)>>,
 
         /// (address space, page) -> the object it maps. A ghost refinement of the entries in
         /// memory. Keyed on the address space because a page means nothing on its own: two
@@ -1036,7 +1040,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
     pub spec fn leaf_ids_agree(&self) -> bool {
         &&& self.leaf_id.dom() =~= self.vmap_dom
         &&& forall|k: (nat, nat)| #[trigger] self.vmap_dom.contains(k) ==> self.leaf_id[k] == Some(
-            self.phy_view().resting_path_id(self.cr3[k.0], self.top, k.1),
+            self.phy_view().resting_slot(self.cr3[k.0], self.top, k.1),
         )
     }
 
@@ -1169,7 +1173,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             init vmap_dom = space_keys(boot_asid, vpages);
             init leaf_id = Map::new(
                 space_keys(boot_asid, vpages),
-                |k: (nat, nat)| Some(view.resting_path_id(root, top, k.1)),
+                |k: (nat, nat)| Some(view.resting_slot(root, top, k.1)),
             );
             init vmem = Map::new(space_keys(boot_asid, vaddrs), |k: (nat, nat)| Option::<WordId>::None);
             init vmem_dom = space_keys(boot_asid, vaddrs);
@@ -1258,7 +1262,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
                 } else if !PTEntry::<A>::spec_from_bits(
                     words[entry_id::<A>(robj, k.1, pre.top)],
                 ).is_table_spec(pre.top) {
-                    Some(entry_id::<A>(nobj, k.1, pre.top))
+                    Some((entry_id::<A>(nobj, k.1, pre.top), pre.top))
                 } else {
                     pre.leaf_id[(src, k.1)]
                 },
@@ -1517,7 +1521,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
 
         assert(post.leaf_id.dom() =~= post.vmap_dom);
         assert forall|k: (nat, nat)| #[trigger] post.vmap_dom.contains(k) implies post.leaf_id[k]
-            == Some(post.phy_view().resting_path_id(post.cr3[k.0], top, k.1)) by {
+            == Some(post.phy_view().resting_slot(post.cr3[k.0], top, k.1)) by {
             let s = if k.0 == a {
                 src
             } else {
@@ -1533,12 +1537,12 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
                 ) == words[entry_id::<A>(robj, k.1, top)]);
                 assert(post.phy_view().resident(nroot) == nobj);
                 assert(mid2.leaf_id[(src, k.1)] == Some(
-                    post.phy_view().resting_path_id(pre.cr3[src], top, k.1),
+                    post.phy_view().resting_slot(pre.cr3[src], top, k.1),
                 ));
             } else {
                 assert(post.leaf_id[k] == pre.leaf_id[k]);
                 assert(mid2.leaf_id[k] == Some(
-                    post.phy_view().resting_path_id(post.cr3[k.0], top, k.1),
+                    post.phy_view().resting_slot(post.cr3[k.0], top, k.1),
                 ));
             }
         }
@@ -1987,7 +1991,7 @@ pub proof fn lemma_frames_local<A: ArchPagingMeta>(
         post.top,
         k.1,
     ) == walk_target(post.vmap, post.obj_to_frame, k.0, k.1) && post.leaf_id[k] == Some(
-        post.phy_view().resting_path_id(post.cr3[k.0], post.top, k.1),
+        post.phy_view().resting_slot(post.cr3[k.0], post.top, k.1),
     ) by {
         lemma_translate_frames(
             pre.phy_view(),
@@ -2107,7 +2111,7 @@ pub proof fn lemma_words_local<A: ArchPagingMeta>(
         post.top,
         k.1,
     ) == walk_target(post.vmap, post.obj_to_frame, k.0, k.1) && post.leaf_id[k] == Some(
-        post.phy_view().resting_path_id(post.cr3[k.0], post.top, k.1),
+        post.phy_view().resting_slot(post.cr3[k.0], post.top, k.1),
     ) by {
         lemma_path_words::<A>(pre, post, touched, k);
         lemma_translate_local(pre.phy_view(), post.phy_view(), pre.cr3[k.0], pre.top, k.1);
