@@ -341,7 +341,9 @@ impl VirtAddr {
         Self(sign_extend(addr))
     }
 
-    /// Returns the index into page-table pages of given levels.
+    /// The shift and mask encode x86-64's paging geometry; this belongs with
+    /// that architecture's code, but moving it is deferred to avoid rippling
+    /// through callers here.
     #[verus_spec(ret =>
         requires
             L <= 5,

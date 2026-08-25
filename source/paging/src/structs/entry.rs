@@ -23,6 +23,40 @@ use crate::structs::sizes::PageSize;
 
 verus! {
 
+/// The page-table slot selected by a virtual address at a given level, in the
+/// architecture-neutral arithmetic form used by tree-walk proofs.
+pub open spec fn pgtbl_idx<A: ArchPagingMeta>(vaddr: nat, level: nat) -> usize
+    decreases level,
+{
+    let page_size = <A::MinPageSize as PageSize>::SIZE as nat;
+    let entry_count = PTPage::<A>::count();
+    let vp = vaddr / page_size;
+    if level == 0 {
+        (vp % entry_count) as usize
+    } else {
+        pgtbl_idx::<A>(((vp / entry_count) * page_size) as nat, (level - 1) as nat)
+    }
+}
+
+pub proof fn lemma_pgtbl_idx_zero<A: ArchPagingMeta>(vaddr: nat)
+    ensures
+        pgtbl_idx::<A>(vaddr, 0nat) == ((vaddr / (<A::MinPageSize as PageSize>::SIZE as nat))
+            % PTPage::<A>::count()) as usize,
+{
+}
+
+pub proof fn lemma_pgtbl_idx_step<A: ArchPagingMeta>(vaddr: nat, level: nat)
+    requires
+        level > 0,
+    ensures
+        pgtbl_idx::<A>(vaddr, level) == pgtbl_idx::<A>(
+            (((vaddr / (<A::MinPageSize as PageSize>::SIZE as nat)) / PTPage::<A>::count())
+                * (<A::MinPageSize as PageSize>::SIZE as nat)) as nat,
+            (level - 1) as nat,
+        ),
+{
+}
+
 /// A single hardware page-table entry: a raw machine word, typed by the
 /// architecture whose bit layout it follows.
 ///

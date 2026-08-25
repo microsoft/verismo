@@ -3,14 +3,16 @@
 //! walks it.
 use core::marker::PhantomData;
 
-use vstd::arithmetic::div_mod::lemma_fundamental_div_mod;
+use vstd::arithmetic::div_mod::{lemma_div_by_multiple, lemma_fundamental_div_mod};
+use vstd::arithmetic::mul::lemma_mul_is_commutative;
 use vstd::arithmetic::power::pow;
 use vstd::prelude::*;
 
 use crate::structs::arch_contract::{ArchPagingMeta, GenericPageTableFlagsSpec};
-use crate::structs::entry::PTEntry;
+use crate::structs::entry::{lemma_pgtbl_idx_step, pgtbl_idx, PTEntry};
 use crate::structs::level::PageLevel;
 use crate::structs::ptpage::PTPage;
+use crate::structs::sizes::PageSize;
 use verus_state_machines_macros::tokenized_state_machine;
 
 verus! {
@@ -27,21 +29,14 @@ pub struct WordId(pub nat);
 #[derive(PartialEq, Eq, Structural)]
 pub struct FrameId(pub nat);
 
-/// Entry index a page number selects `level` levels above the leaf: its digits in base
-/// `PTPage::<A>::count()`.
-pub open spec fn vindex<A: ArchPagingMeta>(vp: nat, level: nat) -> nat
-    decreases level,
-{
-    if level == 0 {
-        vp % PTPage::<A>::count()
-    } else {
-        vindex::<A>(vp / PTPage::<A>::count(), (level - 1) as nat)
-    }
+/// The base virtual address of page number `vp`.
+pub open spec fn page_base<A: ArchPagingMeta>(vp: nat) -> nat {
+    vp * (<A::MinPageSize as PageSize>::SIZE as nat)
 }
 
 /// Id of the word an entry occupies.
 pub open spec fn entry_id<A: ArchPagingMeta>(table: ObjId, vp: nat, level: nat) -> WordId {
-    WordId((table.0 + vindex::<A>(vp, level)) as nat)
+    WordId((table.0 + pgtbl_idx::<A>(page_base::<A>(vp), level) as nat) as nat)
 }
 
 /// A word, wherever it lives. Content is writable or frozen, never both.
@@ -300,27 +295,52 @@ pub proof fn lemma_table_word<A: ArchPagingMeta>(frame: usize, level: nat)
         != 0 && w & hb == 0 && w & eb != 0 && w & am & !pm == frame)) by (bit_vector);
 }
 
+pub proof fn lemma_page_base_div<A: ArchPagingMeta>(vp: nat)
+    ensures
+        page_base::<A>(vp) / (<A::MinPageSize as PageSize>::SIZE as nat) == vp,
+{
+    <A::MinPageSize as PageSize>::lemma_size_wf();
+    let page_size = <A::MinPageSize as PageSize>::SIZE as nat;
+    lemma_mul_is_commutative(vp as int, page_size as int);
+    lemma_div_by_multiple(vp as int, page_size as int);
+}
+
+pub proof fn lemma_pgtbl_idx_page_base_step<A: ArchPagingMeta>(vp: nat, level: nat)
+    requires
+        PTPage::<A>::count() > 0,
+        level > 0,
+    ensures
+        pgtbl_idx::<A>(page_base::<A>(vp), level) == pgtbl_idx::<
+            A,
+        >(page_base::<A>(vp / PTPage::<A>::count()), (level - 1) as nat),
+{
+    lemma_pgtbl_idx_step::<A>(page_base::<A>(vp), level);
+    lemma_page_base_div::<A>(vp);
+}
+
 /// An entry always lies inside its table page.
-pub proof fn lemma_vindex_bounded<A: ArchPagingMeta>(vp: nat, level: nat)
+pub proof fn lemma_pgtbl_idx_bounded<A: ArchPagingMeta>(vp: nat, level: nat)
     requires
         PTPage::<A>::count() > 0,
     ensures
-        vindex::<A>(vp, level) < PTPage::<A>::count(),
+        (pgtbl_idx::<A>(page_base::<A>(vp), level) as nat) < PTPage::<A>::count(),
     decreases level,
 {
+    lemma_page_base_div::<A>(vp);
     if level > 0 {
-        lemma_vindex_bounded::<A>(vp / PTPage::<A>::count(), (level - 1) as nat);
+        lemma_pgtbl_idx_page_base_step::<A>(vp, level);
+        lemma_pgtbl_idx_bounded::<A>(vp / PTPage::<A>::count(), (level - 1) as nat);
     }
 }
 
 /// Two pages the walk cannot tell apart at any level are the same page, so an entry belongs to
 /// exactly one page.
-pub proof fn lemma_vindex_injective<A: ArchPagingMeta>(vp1: nat, vp2: nat, levels: nat)
+pub proof fn lemma_pgtbl_idx_injective<A: ArchPagingMeta>(vp1: nat, vp2: nat, levels: nat)
     requires
         PTPage::<A>::count() > 0,
         vp1 < pow(PTPage::<A>::count() as int, levels as nat),
         vp2 < pow(PTPage::<A>::count() as int, levels as nat),
-        forall|l: nat| l < levels ==> vindex::<A>(vp1, l) == vindex::<A>(vp2, l),
+        forall|l: nat| l < levels ==> (pgtbl_idx::<A>(page_base::<A>(vp1), l) as nat) == (pgtbl_idx::<A>(page_base::<A>(vp2), l) as nat),
     ensures
         vp1 == vp2,
     decreases levels,
@@ -329,6 +349,8 @@ pub proof fn lemma_vindex_injective<A: ArchPagingMeta>(vp1: nat, vp2: nat, level
     if levels == 0 {
         vstd::arithmetic::power::lemma_pow0(e as int);
     } else {
+        lemma_page_base_div::<A>(vp1);
+        lemma_page_base_div::<A>(vp2);
         vstd::arithmetic::power::lemma_pow_adds(e as int, 1, (levels - 1) as nat);
         vstd::arithmetic::power::lemma_pow1(e as int);
         vstd::arithmetic::power::lemma_pow_positive(e as int, (levels - 1) as nat);
@@ -342,12 +364,14 @@ pub proof fn lemma_vindex_injective<A: ArchPagingMeta>(vp1: nat, vp2: nat, level
             e as int,
             pow(e as int, (levels - 1) as nat),
         );
-        assert forall|l: nat| l + 1 < levels implies #[trigger] vindex::<A>(vp1 / e, l)
-            == vindex::<A>(vp2 / e, l) by {
-            assert(vindex::<A>(vp1, l + 1) == vindex::<A>(vp2, l + 1));
+        assert forall|l: nat| l + 1 < levels implies #[trigger] (pgtbl_idx::<A>(page_base::<A>(vp1 / e), l) as nat)
+            == (pgtbl_idx::<A>(page_base::<A>(vp2 / e), l) as nat) by {
+            lemma_pgtbl_idx_page_base_step::<A>(vp1, (l + 1) as nat);
+            lemma_pgtbl_idx_page_base_step::<A>(vp2, (l + 1) as nat);
+            assert((pgtbl_idx::<A>(page_base::<A>(vp1), l + 1) as nat) == (pgtbl_idx::<A>(page_base::<A>(vp2), l + 1) as nat));
         }
-        lemma_vindex_injective::<A>(vp1 / e, vp2 / e, (levels - 1) as nat);
-        assert(vindex::<A>(vp1, 0) == vindex::<A>(vp2, 0));
+        lemma_pgtbl_idx_injective::<A>(vp1 / e, vp2 / e, (levels - 1) as nat);
+        assert((pgtbl_idx::<A>(page_base::<A>(vp1), 0) as nat) == (pgtbl_idx::<A>(page_base::<A>(vp2), 0) as nat));
         lemma_fundamental_div_mod(vp1 as int, e as int);
         lemma_fundamental_div_mod(vp2 as int, e as int);
     }
@@ -697,7 +721,7 @@ pub proof fn lemma_walk_at_root_copy<A: ArchPagingMeta>(
             vp,
         );
     } else {
-        lemma_vindex_bounded::<A>(vp, top);
+        lemma_pgtbl_idx_bounded::<A>(vp, top);
         assert(walk_at::<A>(data, frozen, frame_to_objs, r1, top, (level + 1) as nat, vp) == Some(
             r1,
         ));
@@ -707,16 +731,16 @@ pub proof fn lemma_walk_at_root_copy<A: ArchPagingMeta>(
         assert(path_id::<A>(frame_to_objs, r1, vp, (level + 1) as nat) == WordId((resident(
             frame_to_objs,
             r1,
-        ).0 + vindex::<A>(vp, top)) as nat));
+        ).0 + pgtbl_idx::<A>(page_base::<A>(vp), top) as nat) as nat));
         assert(path_id::<A>(frame_to_objs, r2, vp, (level + 1) as nat) == WordId((resident(
             frame_to_objs,
             r2,
-        ).0 + vindex::<A>(vp, top)) as nat));
-        assert(word_at(data, frozen, WordId((resident(frame_to_objs, r1).0 + vindex::<A>(vp, top)) as nat))
+        ).0 + pgtbl_idx::<A>(page_base::<A>(vp), top) as nat) as nat));
+        assert(word_at(data, frozen, WordId((resident(frame_to_objs, r1).0 + pgtbl_idx::<A>(page_base::<A>(vp), top) as nat) as nat))
             == word_at(
             data,
             frozen,
-            WordId((resident(frame_to_objs, r2).0 + vindex::<A>(vp, top)) as nat),
+            WordId((resident(frame_to_objs, r2).0 + pgtbl_idx::<A>(page_base::<A>(vp), top) as nat) as nat),
         ));
     }
 }
@@ -856,7 +880,7 @@ pub proof fn lemma_translate_root_copy<A: ArchPagingMeta>(
     if l < top {
         lemma_walk_at_root_copy::<A>(data, frozen, frame_to_objs, r1, r2, top, l, vp);
     } else {
-        lemma_vindex_bounded::<A>(vp, top);
+        lemma_pgtbl_idx_bounded::<A>(vp, top);
     }
 }
 
@@ -1662,7 +1686,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
                     k.1,
                 ) == Some(c);
             if k.0 == a && l == top {
-                lemma_vindex_bounded::<A>(k.1, l);
+                lemma_pgtbl_idx_bounded::<A>(k.1, l);
             } else {
                 let s = if k.0 == a {
                     src
@@ -1723,9 +1747,9 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             };
             assert(pre.vmap_dom.contains((s, k.1)));
             if k.0 == a {
-                lemma_vindex_bounded::<A>(k.1, top);
-                assert(entry_id::<A>(robj, k.1, top) == WordId((robj.0 + vindex::<A>(k.1, top)) as nat));
-                assert(entry_id::<A>(nobj, k.1, top) == WordId((nobj.0 + vindex::<A>(k.1, top)) as nat));
+                lemma_pgtbl_idx_bounded::<A>(k.1, top);
+                assert(entry_id::<A>(robj, k.1, top) == WordId((robj.0 + pgtbl_idx::<A>(page_base::<A>(k.1), top) as nat) as nat));
+                assert(entry_id::<A>(nobj, k.1, top) == WordId((nobj.0 + pgtbl_idx::<A>(page_base::<A>(k.1), top) as nat) as nat));
                 assert(word_at(
                     post.data,
                     post.frozen,
@@ -1962,7 +1986,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             post.top(),
             k.1,
         ) == walk_target(post.vmap, post.obj_to_frame, k.0, k.1) by {
-            lemma_vindex_bounded::<A>(k.1, post.top());
+            lemma_pgtbl_idx_bounded::<A>(k.1, post.top());
             assert(obj_ids::<A>(ObjId(0)).contains(path_id::<A>(
                 post.frame_to_objs,
                 root,
@@ -2024,7 +2048,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
                     k.1,
                 ) == Some(c);
             assert(l == post.top());
-            lemma_vindex_bounded::<A>(k.1, l);
+            lemma_pgtbl_idx_bounded::<A>(k.1, l);
         }
         assert forall|k: (nat, nat)| #[trigger] post.vmap_dom.contains(k) implies post.leaf_id[k]
             == resting_path_id::<A>(
@@ -2035,7 +2059,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             post.top(),
             k.1,
         ) by {
-            lemma_vindex_bounded::<A>(k.1, post.top());
+            lemma_pgtbl_idx_bounded::<A>(k.1, post.top());
             assert(obj_ids::<A>(ObjId(0)).contains(path_id::<A>(
                 post.frame_to_objs,
                 root,
@@ -2086,7 +2110,7 @@ pub proof fn lemma_boot_walk_at<A: ArchPagingMeta>(
         let up = (level + 1) as nat;
         lemma_boot_walk_at::<A>(data, frozen, frame_to_objs, cr3, top, up, vp);
         if up == top {
-            lemma_vindex_bounded::<A>(vp, up);
+            lemma_pgtbl_idx_bounded::<A>(vp, up);
             assert(obj_ids::<A>(ObjId(0)).contains(path_id::<A>(frame_to_objs, cr3, vp, up)));
         }
     }

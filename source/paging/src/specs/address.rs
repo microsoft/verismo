@@ -9,6 +9,11 @@ use crate::specs::external::{exists_into, forall_into};
 use crate::util::{align_down_integer_ens, align_up_integer_ens, proof_align_down, proof_align_up};
 use vstd::raw_ptr::{ptr_from_data, ptr_mut_from_data, PtrData};
 use vstd::set_lib::set_int_range;
+use crate::arch::x86_64::paging::{X86Paging, X86PagingParams};
+use crate::structs::arch_contract::ArchPagingGeometry;
+use crate::structs::entry::{lemma_pgtbl_idx_step, lemma_pgtbl_idx_zero, pgtbl_idx};
+use crate::structs::ptpage::PTPage;
+use vstd::arithmetic::div_mod::lemma_div_by_multiple;
 use vstd::std_specs::cmp::PartialOrdSpec;
 use vstd::std_specs::convert::{FromSpec, IntoSpec};
 use vstd::std_specs::ops::AddSpec;
@@ -100,6 +105,111 @@ pub open spec fn pt_idx_spec(addr: InnerAddr, l: usize) -> usize
         _ => { 0 },
     };
     upper % 512
+}
+
+pub proof fn lemma_pt_idx_spec_is_pgtbl_idx_x86<P: X86PagingParams>(addr: InnerAddr, l: usize)
+    requires
+        l <= 5,
+    ensures
+        pt_idx_spec(addr, l) == pgtbl_idx::<X86Paging<P>>(addr as nat, l as nat),
+{
+    lemma_size_4k();
+    assert(<<X86Paging<P> as ArchPagingGeometry>::MinPageSize as PageSize>::SIZE == 4096usize);
+    assert(PTPage::<X86Paging<P>>::count() == 512);
+    let page_size = 4096usize;
+    let entry_count = 512usize;
+    let vp0 = addr / page_size;
+    let vp1 = vp0 / entry_count;
+    let vp2 = vp1 / entry_count;
+    let vp3 = vp2 / entry_count;
+    let vp4 = vp3 / entry_count;
+    let vp5 = vp4 / entry_count;
+    lemma_div_by_multiple(vp1 as int, page_size as int);
+    lemma_div_by_multiple(vp2 as int, page_size as int);
+    lemma_div_by_multiple(vp3 as int, page_size as int);
+    lemma_div_by_multiple(vp4 as int, page_size as int);
+    lemma_div_by_multiple(vp5 as int, page_size as int);
+    assert((vp1 as nat * 4096nat) / 4096nat == vp1 as nat);
+    assert((vp2 as nat * 4096nat) / 4096nat == vp2 as nat);
+    assert((vp3 as nat * 4096nat) / 4096nat == vp3 as nat);
+    assert((vp4 as nat * 4096nat) / 4096nat == vp4 as nat);
+    assert((vp5 as nat * 4096nat) / 4096nat == vp5 as nat);
+    assert(addr as nat / 4096nat == vp0 as nat);
+    assert((vp0 as nat) / 512nat == vp1 as nat);
+    assert((vp1 as nat) / 512nat == vp2 as nat);
+    assert((vp2 as nat) / 512nat == vp3 as nat);
+    assert((vp3 as nat) / 512nat == vp4 as nat);
+    assert((vp4 as nat) / 512nat == vp5 as nat);
+    vstd::arithmetic::div_mod::lemma_div_denominator(addr as int, page_size as int, entry_count as int);
+    vstd::arithmetic::div_mod::lemma_div_denominator(addr as int, (page_size * entry_count) as int, entry_count as int);
+    vstd::arithmetic::div_mod::lemma_div_denominator(addr as int, (page_size * entry_count * entry_count) as int, entry_count as int);
+    vstd::arithmetic::div_mod::lemma_div_denominator(addr as int, (page_size * entry_count * entry_count * entry_count) as int, entry_count as int);
+    vstd::arithmetic::div_mod::lemma_div_denominator(addr as int, (page_size * entry_count * entry_count * entry_count * entry_count) as int, entry_count as int);
+    assert((addr >> 12usize) == addr / 4096usize) by (bit_vector);
+    assert((addr >> 21usize) == addr / 2097152usize) by (bit_vector);
+    assert((addr >> 30usize) == addr / 1073741824usize) by (bit_vector);
+    assert((addr >> 39usize) == addr / 549755813888usize) by (bit_vector);
+    assert((addr >> 48usize) == addr / 281474976710656usize) by (bit_vector);
+    assert((addr >> 57usize) == addr / 144115188075855872usize) by (bit_vector);
+    assert(4096usize * 512usize == 2097152usize) by (compute);
+    assert(4096usize * 512usize * 512usize == 1073741824usize) by (compute);
+    assert(4096usize * 512usize * 512usize * 512usize == 549755813888usize) by (compute);
+    assert(4096usize * 512usize * 512usize * 512usize * 512usize == 281474976710656usize) by (compute);
+    assert(4096usize * 512usize * 512usize * 512usize * 512usize * 512usize == 144115188075855872usize) by (compute);
+    assert(page_size * entry_count == 2097152);
+    assert(page_size * entry_count * entry_count == 1073741824);
+    assert(page_size * entry_count * entry_count * entry_count == 549755813888);
+    assert(page_size * entry_count * entry_count * entry_count * entry_count == 281474976710656);
+    assert(page_size * entry_count * entry_count * entry_count * entry_count * entry_count == 144115188075855872);
+    assert((vp0 % entry_count) as nat == (vp0 as nat) % 512nat);
+    assert((vp1 % entry_count) as nat == (vp1 as nat) % 512nat);
+    assert((vp2 % entry_count) as nat == (vp2 as nat) % 512nat);
+    assert((vp3 % entry_count) as nat == (vp3 as nat) % 512nat);
+    assert((vp4 % entry_count) as nat == (vp4 as nat) % 512nat);
+    assert((vp5 % entry_count) as nat == (vp5 as nat) % 512nat);
+    lemma_pgtbl_idx_zero::<X86Paging<P>>(addr as nat);
+    assert(pgtbl_idx::<X86Paging<P>>(addr as nat, 0nat) == vp0 % entry_count);
+    lemma_pgtbl_idx_step::<X86Paging<P>>(addr as nat, 1nat);
+    lemma_pgtbl_idx_zero::<X86Paging<P>>((vp1 as nat * 4096nat) as nat);
+    assert((pgtbl_idx::<X86Paging<P>>(addr as nat, 1nat) as nat) == (vp1 as nat) % 512nat);
+    assert(pgtbl_idx::<X86Paging<P>>(addr as nat, 1nat) == vp1 % entry_count);
+    lemma_pgtbl_idx_step::<X86Paging<P>>(addr as nat, 2nat);
+    lemma_pgtbl_idx_step::<X86Paging<P>>((vp1 as nat * 4096nat) as nat, 1nat);
+    lemma_pgtbl_idx_zero::<X86Paging<P>>((vp2 as nat * 4096nat) as nat);
+    assert((pgtbl_idx::<X86Paging<P>>(addr as nat, 2nat) as nat) == (vp2 as nat) % 512nat);
+    assert(pgtbl_idx::<X86Paging<P>>(addr as nat, 2nat) == vp2 % entry_count);
+    lemma_pgtbl_idx_step::<X86Paging<P>>(addr as nat, 3nat);
+    lemma_pgtbl_idx_step::<X86Paging<P>>((vp1 as nat * 4096nat) as nat, 2nat);
+    lemma_pgtbl_idx_step::<X86Paging<P>>((vp2 as nat * 4096nat) as nat, 1nat);
+    lemma_pgtbl_idx_zero::<X86Paging<P>>((vp3 as nat * 4096nat) as nat);
+    assert(pgtbl_idx::<X86Paging<P>>(addr as nat, 3nat) == vp3 % entry_count);
+    lemma_pgtbl_idx_step::<X86Paging<P>>(addr as nat, 4nat);
+    lemma_pgtbl_idx_step::<X86Paging<P>>((vp1 as nat * 4096nat) as nat, 3nat);
+    lemma_pgtbl_idx_step::<X86Paging<P>>((vp2 as nat * 4096nat) as nat, 2nat);
+    lemma_pgtbl_idx_step::<X86Paging<P>>((vp3 as nat * 4096nat) as nat, 1nat);
+    lemma_pgtbl_idx_zero::<X86Paging<P>>((vp4 as nat * 4096nat) as nat);
+    assert(pgtbl_idx::<X86Paging<P>>(addr as nat, 4nat) == vp4 % entry_count);
+    lemma_pgtbl_idx_step::<X86Paging<P>>(addr as nat, 5nat);
+    lemma_pgtbl_idx_step::<X86Paging<P>>((vp1 as nat * 4096nat) as nat, 4nat);
+    lemma_pgtbl_idx_step::<X86Paging<P>>((vp2 as nat * 4096nat) as nat, 3nat);
+    lemma_pgtbl_idx_step::<X86Paging<P>>((vp3 as nat * 4096nat) as nat, 2nat);
+    lemma_pgtbl_idx_step::<X86Paging<P>>((vp4 as nat * 4096nat) as nat, 1nat);
+    lemma_pgtbl_idx_zero::<X86Paging<P>>((vp5 as nat * 4096nat) as nat);
+    assert(pgtbl_idx::<X86Paging<P>>(addr as nat, 5nat) == vp5 % entry_count);
+    if l == 0 {
+        assert(pt_idx_spec(addr, l) == vp0 % entry_count);
+    } else if l == 1 {
+        assert(pt_idx_spec(addr, l) == vp1 % entry_count);
+    } else if l == 2 {
+        assert(pt_idx_spec(addr, l) == vp2 % entry_count);
+    } else if l == 3 {
+        assert(pt_idx_spec(addr, l) == vp3 % entry_count);
+    } else if l == 4 {
+        assert(pt_idx_spec(addr, l) == vp4 % entry_count);
+    } else {
+        assert(l == 5);
+        assert(pt_idx_spec(addr, l) == vp5 % entry_count);
+    }
 }
 
 pub open spec fn crosses_page_ens<T: Into<InnerAddr>>(addr: T, size: InnerAddr, ret: bool) -> bool {
