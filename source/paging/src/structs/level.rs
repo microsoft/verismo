@@ -8,7 +8,7 @@
 //! The level of a page is *ghost*: it is carried by the page's tracked tokens
 //! (`PTPageSharedPerm`), not by its type. That is what lets one walk function
 //! serve every level instead of a macro-generated family of them.
-use builtin_macros::{verus, verus_spec, verus_verify};
+use builtin_macros::verus;
 use vstd::prelude::*;
 
 verus! {
@@ -47,12 +47,213 @@ impl PageLevel {
         }
     }
 
+    /// How many levels lie below this one. The leaf level is 0.
+    pub open spec fn spec_depth(&self) -> usize {
+        match self {
+            PageLevel::Level0 => 0,
+            PageLevel::Level1 => 1,
+            PageLevel::Level2 => 2,
+            PageLevel::Level3 => 3,
+            PageLevel::Level4 => 4,
+        }
+    }
+
+    /// The level one step down, or `None` at the leaf, where a walk must stop.
+    ///
+    /// Refusing to descend past level 0 is not a convenience: at the leaf the
+    /// hardware reads bit 7 as PAT rather than PS, so an entry that looks like
+    /// a table pointer there is a mapping.
+    pub open spec fn spec_child(&self) -> Option<PageLevel> {
+        match self {
+            PageLevel::Level0 => None,
+            PageLevel::Level1 => Some(PageLevel::Level0),
+            PageLevel::Level2 => Some(PageLevel::Level1),
+            PageLevel::Level3 => Some(PageLevel::Level2),
+            PageLevel::Level4 => Some(PageLevel::Level3),
+        }
+    }
+
+    pub open spec fn spec_is_leaf(&self) -> bool {
+        match self {
+            PageLevel::Level0 => true,
+            _ => false,
+        }
+    }
+
+    /// How many levels lie below this one. The leaf level is 0.
+    #[verifier::when_used_as_spec(spec_depth)]
+    pub fn depth(&self) -> (ret: usize)
+        returns
+            self.spec_depth(),
+    {
+        match self {
+            PageLevel::Level0 => 0,
+            PageLevel::Level1 => 1,
+            PageLevel::Level2 => 2,
+            PageLevel::Level3 => 3,
+            PageLevel::Level4 => 4,
+        }
+    }
+
+    /// The level one step down, or `None` at the leaf, where a walk must stop.
+    ///
+    /// Refusing to descend past level 0 is not a convenience: at the leaf the
+    /// hardware reads bit 7 as PAT rather than PS, so an entry that looks like
+    /// a table pointer there is a mapping.
+    #[verifier::when_used_as_spec(spec_child)]
+    pub fn child(&self) -> (ret: Option<PageLevel>)
+        returns
+            self.spec_child(),
+    {
+        match self {
+            PageLevel::Level0 => None,
+            PageLevel::Level1 => Some(PageLevel::Level0),
+            PageLevel::Level2 => Some(PageLevel::Level1),
+            PageLevel::Level3 => Some(PageLevel::Level2),
+            PageLevel::Level4 => Some(PageLevel::Level3),
+        }
+    }
+
+    #[verifier::when_used_as_spec(spec_is_leaf)]
+    pub fn is_leaf(&self) -> (ret: bool)
+        returns
+            self.spec_is_leaf(),
+    {
+        match self {
+            PageLevel::Level0 => true,
+            _ => false,
+        }
+    }
+
     /// Depth and level name each other, so a specification may use whichever
     /// reads better without the two drifting apart.
     pub proof fn lemma_depth_roundtrip(level: PageLevel)
         ensures
             PageLevel::from_nat(level.depth() as nat) == level,
-            level.depth() as nat <= 4,
+            level.depth() <= 4,
+    {
+        match level {
+            PageLevel::Level0 => {},
+            PageLevel::Level1 => {},
+            PageLevel::Level2 => {},
+            PageLevel::Level3 => {},
+            PageLevel::Level4 => {},
+        }
+    }
+
+    pub proof fn lemma_from_nat_depth(depth: nat)
+        requires
+            depth <= 4,
+        ensures
+            PageLevel::from_nat(depth).depth() == depth,
+    {
+        if depth == 0 {
+        } else if depth == 1 {
+        } else if depth == 2 {
+        } else if depth == 3 {
+        } else {
+            assert(depth == 4);
+        }
+    }
+
+    pub proof fn lemma_parent_depth(level: PageLevel)
+        requires
+            level.depth() < 4,
+        ensures
+            (match level {
+                PageLevel::Level0 => PageLevel::Level1,
+                PageLevel::Level1 => PageLevel::Level2,
+                PageLevel::Level2 => PageLevel::Level3,
+                PageLevel::Level3 => PageLevel::Level4,
+                PageLevel::Level4 => PageLevel::Level4,
+            }).depth() == level.depth() as nat + 1,
+    {
+        match level {
+            PageLevel::Level0 => {},
+            PageLevel::Level1 => {},
+            PageLevel::Level2 => {},
+            PageLevel::Level3 => {},
+            PageLevel::Level4 => {},
+        }
+    }
+
+    pub proof fn lemma_from_nat_parent(level: PageLevel)
+        requires
+            level.depth() < 4,
+        ensures
+            PageLevel::from_nat(level.depth() as nat + 1) == match level {
+                PageLevel::Level0 => PageLevel::Level1,
+                PageLevel::Level1 => PageLevel::Level2,
+                PageLevel::Level2 => PageLevel::Level3,
+                PageLevel::Level3 => PageLevel::Level4,
+                PageLevel::Level4 => PageLevel::Level4,
+            },
+    {
+        match level {
+            PageLevel::Level0 => {},
+            PageLevel::Level1 => {},
+            PageLevel::Level2 => {},
+            PageLevel::Level3 => {},
+            PageLevel::Level4 => {},
+        }
+    }
+
+    pub proof fn lemma_eq_by_depth(a: PageLevel, b: PageLevel)
+        requires
+            a.depth() == b.depth(),
+        ensures
+            a == b,
+    {
+        match a {
+            PageLevel::Level0 => {},
+            PageLevel::Level1 => {},
+            PageLevel::Level2 => {},
+            PageLevel::Level3 => {},
+            PageLevel::Level4 => {},
+        }
+        match b {
+            PageLevel::Level0 => {},
+            PageLevel::Level1 => {},
+            PageLevel::Level2 => {},
+            PageLevel::Level3 => {},
+            PageLevel::Level4 => {},
+        }
+    }
+
+    pub proof fn lemma_nonzero_not_leaf(level: PageLevel)
+        requires
+            level.depth() > 0,
+        ensures
+            !level.is_leaf(),
+    {
+        match level {
+            PageLevel::Level0 => {},
+            PageLevel::Level1 => {},
+            PageLevel::Level2 => {},
+            PageLevel::Level3 => {},
+            PageLevel::Level4 => {},
+        }
+    }
+
+    pub proof fn lemma_from_nat_child(level: PageLevel)
+        requires
+            level.depth() > 0,
+        ensures
+            PageLevel::from_nat((level.depth() as nat - 1) as nat).depth() + 1 == level.depth(),
+            PageLevel::from_nat((level.depth() as nat - 1) as nat).depth() < level.depth(),
+    {
+        match level {
+            PageLevel::Level0 => {},
+            PageLevel::Level1 => {},
+            PageLevel::Level2 => {},
+            PageLevel::Level3 => {},
+            PageLevel::Level4 => {},
+        }
+    }
+
+    pub proof fn lemma_zero_depth_le(level: PageLevel)
+        ensures
+            PageLevel::from_nat(0).depth() <= level.depth(),
     {
         match level {
             PageLevel::Level0 => {},
@@ -69,7 +270,7 @@ impl PageLevel {
         requires
             level.child() is Some,
         ensures
-            level.child().unwrap().depth() as nat == level.depth() as nat - 1,
+            level.child().unwrap().depth() == level.depth() as nat - 1,
     {
         match level {
             PageLevel::Level0 => {},
@@ -105,6 +306,7 @@ impl PageLevel {
             PageLevel::Level4 => {},
         }
     }
+
 }
 
 } // verus!
@@ -145,50 +347,4 @@ impl PagingLevel for PagingLevel1 {
 }
 
 } // verus!
-#[verus_verify]
-impl PageLevel {
-    /// How many levels lie below this one. The leaf level is 0.
-    #[verus_verify(dual_spec)]
-    #[verus_spec(ret =>
-        returns self.depth()
-    )]
-    pub fn depth(&self) -> usize {
-        match self {
-            PageLevel::Level0 => 0,
-            PageLevel::Level1 => 1,
-            PageLevel::Level2 => 2,
-            PageLevel::Level3 => 3,
-            PageLevel::Level4 => 4,
-        }
-    }
 
-    /// The level one step down, or `None` at the leaf, where a walk must stop.
-    ///
-    /// Refusing to descend past level 0 is not a convenience: at the leaf the
-    /// hardware reads bit 7 as PAT rather than PS, so an entry that looks like
-    /// a table pointer there is a mapping.
-    #[verus_verify(dual_spec)]
-    #[verus_spec(ret =>
-        returns self.child()
-    )]
-    pub fn child(&self) -> Option<PageLevel> {
-        match self {
-            PageLevel::Level0 => None,
-            PageLevel::Level1 => Some(PageLevel::Level0),
-            PageLevel::Level2 => Some(PageLevel::Level1),
-            PageLevel::Level3 => Some(PageLevel::Level2),
-            PageLevel::Level4 => Some(PageLevel::Level3),
-        }
-    }
-
-    #[verus_verify(dual_spec)]
-    #[verus_spec(ret =>
-        returns self.is_leaf()
-    )]
-    pub fn is_leaf(&self) -> bool {
-        match self {
-            PageLevel::Level0 => true,
-            _ => false,
-        }
-    }
-}

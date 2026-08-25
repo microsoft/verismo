@@ -1,6 +1,9 @@
 //! A model of content, physical frames, page tables, and virtual aliases, as a tokenized state
 //! machine -- with the page table modelled as a *tree*, walked from a frame, exactly as hardware
 //! walks it.
+// The state machine macro names its module after the machine, so the module inherits a type's
+// casing. vstd does the same for its own machines.
+#![allow(non_snake_case)]
 use core::marker::PhantomData;
 
 use vstd::arithmetic::div_mod::{lemma_div_by_multiple, lemma_fundamental_div_mod};
@@ -29,14 +32,14 @@ pub struct WordId(pub nat);
 #[derive(PartialEq, Eq, Structural)]
 pub struct FrameId(pub nat);
 
-/// The base virtual address of page number `vp`.
-pub open spec fn page_base<A: ArchPagingMeta>(vp: nat) -> nat {
-    vp * (<A::MinPageSize as PageSize>::SIZE as nat)
+/// The base virtual address of page number `vpage`.
+pub open spec fn page_base<A: ArchPagingMeta>(vpage: nat) -> nat {
+    vpage * (<A::MinPageSize as PageSize>::SIZE as nat)
 }
 
 /// Id of the word an entry occupies.
-pub open spec fn entry_id<A: ArchPagingMeta>(table: ObjId, vp: nat, level: nat) -> WordId {
-    WordId((table.0 + pgtbl_idx::<A>(page_base::<A>(vp), level) as nat) as nat)
+pub open spec fn entry_id<A: ArchPagingMeta>(table: ObjId, vpage: nat, level: PageLevel) -> WordId {
+    WordId((table.0 + pgtbl_idx::<A>(page_base::<A>(vpage), level.depth() as nat) as nat) as nat)
 }
 
 /// A word, wherever it lives. Content is writable or frozen, never both.
@@ -54,7 +57,41 @@ pub open spec fn resident(frame_to_objs: Map<FrameId, Set<ObjId>>, frame: FrameI
     frame_to_objs[frame].choose()
 }
 
-/// Where a walk of `vp` stands once it has descended from `cr3` to `level`, or `None` if the
+#[verifier(decreases_by)]
+proof fn walk_at_decreases<A: ArchPagingMeta>(
+    data: Map<WordId, usize>,
+    frozen: Map<WordId, usize>,
+    frame_to_objs: Map<FrameId, Set<ObjId>>,
+    cr3: FrameId,
+    top: PageLevel,
+    level: PageLevel,
+    vpage: nat,
+) {
+    let up = PageLevel::from_nat(level.depth() as nat + 1);
+    PageLevel::lemma_depth_roundtrip(top);
+    PageLevel::lemma_depth_roundtrip(level);
+    match level {
+        PageLevel::Level0 => {},
+        PageLevel::Level1 => {},
+        PageLevel::Level2 => {},
+        PageLevel::Level3 => {},
+        PageLevel::Level4 => {},
+    }
+    match top {
+        PageLevel::Level0 => {},
+        PageLevel::Level1 => {},
+        PageLevel::Level2 => {},
+        PageLevel::Level3 => {},
+        PageLevel::Level4 => {},
+    }
+    if level.depth() < top.depth() {
+        PageLevel::lemma_from_nat_depth(level.depth() as nat + 1);
+        assert(up.depth() <= top.depth());
+        assert(top.depth() - up.depth() < top.depth() - level.depth());
+    }
+}
+
+/// Where a walk of `vpage` stands once it has descended from `cr3` to `level`, or `None` if the
 /// walk stopped above it.
 ///
 /// A function of memory alone, and keyed on the level rather than on the page, so a frame that
@@ -64,22 +101,25 @@ pub open spec fn walk_at<A: ArchPagingMeta>(
     frozen: Map<WordId, usize>,
     frame_to_objs: Map<FrameId, Set<ObjId>>,
     cr3: FrameId,
-    top: nat,
-    level: nat,
-    vp: nat,
+    top: PageLevel,
+    level: PageLevel,
+    vpage: nat,
 ) -> Option<FrameId>
-    decreases top - level,
+    decreases top.depth() - level.depth(),
 {
-    if level >= top {
+    decreases_by(walk_at_decreases::<A>);
+
+    if level.depth() >= top.depth() {
         Some(cr3)
     } else {
-        match walk_at::<A>(data, frozen, frame_to_objs, cr3, top, (level + 1) as nat, vp) {
+        let up = PageLevel::from_nat(level.depth() as nat + 1);
+        match walk_at::<A>(data, frozen, frame_to_objs, cr3, top, up, vpage) {
             Option::None => Option::None,
             Option::Some(f) => {
                 let e = PTEntry::<A>::spec_from_bits(
-                    word_at(data, frozen, path_id::<A>(frame_to_objs, f, vp, (level + 1) as nat)),
+                    word_at(data, frozen, path_id::<A>(frame_to_objs, f, vpage, up)),
                 );
-                if e.is_table_spec(PageLevel::from_nat((level + 1) as nat)) {
+                if e.is_table_spec(up) {
                     Some(FrameId(e.page_frame_spec() as nat))
                 } else {
                     Option::None
@@ -89,14 +129,48 @@ pub open spec fn walk_at<A: ArchPagingMeta>(
     }
 }
 
-/// Id of the entry a walk of `vp` reads while standing in `frame` at `level`.
+/// Id of the entry a walk of `vpage` reads while standing in `frame` at `level`.
 pub open spec fn path_id<A: ArchPagingMeta>(
     frame_to_objs: Map<FrameId, Set<ObjId>>,
     frame: FrameId,
-    vp: nat,
-    level: nat,
+    vpage: nat,
+    level: PageLevel,
 ) -> WordId {
-    entry_id::<A>(resident(frame_to_objs, frame), vp, level)
+    entry_id::<A>(resident(frame_to_objs, frame), vpage, level)
+}
+
+#[verifier(decreases_by)]
+proof fn resting_level_decreases<A: ArchPagingMeta>(
+    data: Map<WordId, usize>,
+    frozen: Map<WordId, usize>,
+    frame_to_objs: Map<FrameId, Set<ObjId>>,
+    cr3: FrameId,
+    top: PageLevel,
+    level: PageLevel,
+    vpage: nat,
+) {
+    let up = PageLevel::from_nat(level.depth() as nat + 1);
+    PageLevel::lemma_depth_roundtrip(top);
+    PageLevel::lemma_depth_roundtrip(level);
+    match level {
+        PageLevel::Level0 => {},
+        PageLevel::Level1 => {},
+        PageLevel::Level2 => {},
+        PageLevel::Level3 => {},
+        PageLevel::Level4 => {},
+    }
+    match top {
+        PageLevel::Level0 => {},
+        PageLevel::Level1 => {},
+        PageLevel::Level2 => {},
+        PageLevel::Level3 => {},
+        PageLevel::Level4 => {},
+    }
+    if level.depth() < top.depth() {
+        PageLevel::lemma_from_nat_depth(level.depth() as nat + 1);
+        assert(up.depth() <= top.depth());
+        assert(top.depth() - up.depth() < top.depth() - level.depth());
+    }
 }
 
 /// The level where a walk has no lower table to enter.
@@ -105,15 +179,17 @@ pub open spec fn resting_level<A: ArchPagingMeta>(
     frozen: Map<WordId, usize>,
     frame_to_objs: Map<FrameId, Set<ObjId>>,
     cr3: FrameId,
-    top: nat,
-    level: nat,
-    vp: nat,
-) -> nat
-    decreases top - level,
+    top: PageLevel,
+    level: PageLevel,
+    vpage: nat,
+) -> PageLevel
+    decreases top.depth() - level.depth(),
 {
-    if level >= top {
+    decreases_by(resting_level_decreases::<A>);
+
+    if level.depth() >= top.depth() {
         top
-    } else if walk_at::<A>(data, frozen, frame_to_objs, cr3, top, level, vp) is Some {
+    } else if walk_at::<A>(data, frozen, frame_to_objs, cr3, top, level, vpage) is Some {
         level
     } else {
         resting_level::<A>(
@@ -122,40 +198,40 @@ pub open spec fn resting_level<A: ArchPagingMeta>(
             frame_to_objs,
             cr3,
             top,
-            (level + 1) as nat,
-            vp,
+            PageLevel::from_nat(level.depth() as nat + 1),
+            vpage,
         )
     }
 }
 
 /// Pages covered by a leaf at `level` are consecutive frames starting at the entry's frame.
-pub open spec fn leaf_offset<A: ArchPagingMeta>(vp: nat, level: nat) -> nat {
+pub open spec fn leaf_offset<A: ArchPagingMeta>(vpage: nat, level: PageLevel) -> nat {
     if PTPage::<A>::count() > 0 {
-        (vp % (pow(PTPage::<A>::count() as int, level) as nat)) as nat
+        (vpage % (pow(PTPage::<A>::count() as int, level.depth() as nat) as nat)) as nat
     } else {
         0
     }
 }
 
-/// The frame `vp` translates to: the whole walk, from `cr3` down to the first leaf. Consults
+/// The frame `vpage` translates to: the whole walk, from `cr3` down to the first leaf. Consults
 /// nothing but memory, so agreeing with it is a real obligation on the words stored.
 pub open spec fn translate<A: ArchPagingMeta>(
     data: Map<WordId, usize>,
     frozen: Map<WordId, usize>,
     frame_to_objs: Map<FrameId, Set<ObjId>>,
     cr3: FrameId,
-    top: nat,
-    vp: nat,
+    top: PageLevel,
+    vpage: nat,
 ) -> Option<FrameId> {
-    let level = resting_level::<A>(data, frozen, frame_to_objs, cr3, top, 0, vp);
-    match walk_at::<A>(data, frozen, frame_to_objs, cr3, top, level, vp) {
+    let level = resting_level::<A>(data, frozen, frame_to_objs, cr3, top, PageLevel::from_nat(0), vpage);
+    match walk_at::<A>(data, frozen, frame_to_objs, cr3, top, level, vpage) {
         Option::None => Option::None,
         Option::Some(f) => {
             let e = PTEntry::<A>::spec_from_bits(
-                word_at(data, frozen, path_id::<A>(frame_to_objs, f, vp, level)),
+                word_at(data, frozen, path_id::<A>(frame_to_objs, f, vpage, level)),
             );
-            if e.is_leaf_spec(PageLevel::from_nat(level)) {
-                Some(FrameId((e.page_frame_spec() as nat + leaf_offset::<A>(vp, level)) as nat))
+            if e.is_leaf_spec(level) {
+                Some(FrameId((e.page_frame_spec() as nat + leaf_offset::<A>(vpage, level)) as nat))
             } else {
                 Option::None
             }
@@ -163,30 +239,30 @@ pub open spec fn translate<A: ArchPagingMeta>(
     }
 }
 
-/// Id of the entry a walk of `vp` reads at `level`, if the walk gets that far.
+/// Id of the entry a walk of `vpage` reads at `level`, if the walk gets that far.
 pub open spec fn path_id_at<A: ArchPagingMeta>(
     data: Map<WordId, usize>,
     frozen: Map<WordId, usize>,
     frame_to_objs: Map<FrameId, Set<ObjId>>,
     cr3: FrameId,
-    top: nat,
-    level: nat,
-    vp: nat,
+    top: PageLevel,
+    level: PageLevel,
+    vpage: nat,
 ) -> Option<WordId> {
-    match walk_at::<A>(data, frozen, frame_to_objs, cr3, top, level, vp) {
+    match walk_at::<A>(data, frozen, frame_to_objs, cr3, top, level, vpage) {
         Option::None => Option::None,
-        Option::Some(f) => Some(path_id::<A>(frame_to_objs, f, vp, level)),
+        Option::Some(f) => Some(path_id::<A>(frame_to_objs, f, vpage, level)),
     }
 }
 
-/// Id of the entry where a walk of `vp` comes to rest.
+/// Id of the entry where a walk of `vpage` comes to rest.
 pub open spec fn resting_path_id<A: ArchPagingMeta>(
     data: Map<WordId, usize>,
     frozen: Map<WordId, usize>,
     frame_to_objs: Map<FrameId, Set<ObjId>>,
     cr3: FrameId,
-    top: nat,
-    vp: nat,
+    top: PageLevel,
+    vpage: nat,
 ) -> Option<WordId> {
     path_id_at::<A>(
         data,
@@ -194,24 +270,24 @@ pub open spec fn resting_path_id<A: ArchPagingMeta>(
         frame_to_objs,
         cr3,
         top,
-        resting_level::<A>(data, frozen, frame_to_objs, cr3, top, 0, vp),
-        vp,
+        resting_level::<A>(data, frozen, frame_to_objs, cr3, top, PageLevel::from_nat(0), vpage),
+        vpage,
     )
 }
 
-/// Whether `c` is one of the entries a walk of `vp` reads. Changing anything else cannot change
-/// where `vp` leads, which is what [`lemma_translate_local`] states and every transition leans on.
+/// Whether `c` is one of the entries a walk of `vpage` reads. Changing anything else cannot change
+/// where `vpage` leads, which is what [`lemma_translate_local`] states and every transition leans on.
 pub open spec fn on_path<A: ArchPagingMeta>(
     data: Map<WordId, usize>,
     frozen: Map<WordId, usize>,
     frame_to_objs: Map<FrameId, Set<ObjId>>,
     cr3: FrameId,
-    top: nat,
-    vp: nat,
+    top: PageLevel,
+    vpage: nat,
     c: WordId,
 ) -> bool {
-    exists|l: nat|
-        l <= top && #[trigger] path_id_at::<A>(data, frozen, frame_to_objs, cr3, top, l, vp) == Some(
+    exists|l: PageLevel|
+        l.depth() <= top.depth() && #[trigger] path_id_at::<A>(data, frozen, frame_to_objs, cr3, top, l, vpage) == Some(
             c,
         )
 }
@@ -269,22 +345,17 @@ pub proof fn lemma_leaf_word<A: ArchPagingMeta>(frame: usize)
         == frame)) by (bit_vector);
 }
 
-pub proof fn lemma_table_word<A: ArchPagingMeta>(frame: usize, level: nat)
+pub proof fn lemma_table_word<A: ArchPagingMeta>(frame: usize, level: PageLevel)
     requires
         encodable::<A>(frame),
-        level > 0,
+        level.depth() > 0,
     ensures
-        PTEntry::<A>::spec_from_bits(table_word::<A>(frame)).is_table_spec(PageLevel::from_nat(level)),
+        PTEntry::<A>::spec_from_bits(table_word::<A>(frame)).is_table_spec(level),
         PTEntry::<A>::spec_from_bits(table_word::<A>(frame)).page_frame_spec() == frame,
 {
-    if level == 1 {
-    } else if level == 2 {
-    } else if level == 3 {
-    } else {
-        assert(level >= 4);
-    }
-    PageLevel::lemma_leaf_cases(PageLevel::from_nat(level));
-    assert(!PageLevel::from_nat(level).is_leaf());
+    PageLevel::lemma_nonzero_not_leaf(level);
+    PageLevel::lemma_leaf_cases(level);
+    assert(!level.is_leaf());
     A::lemma_pte_masks_wf();
     A::PTFlags::lemma_flag_bits_wf();
     let am = A::spec_address_mask();
@@ -299,90 +370,122 @@ pub proof fn lemma_table_word<A: ArchPagingMeta>(frame: usize, level: nat)
         != 0 && w & hb == 0 && w & eb != 0 && w & am & !pm == frame)) by (bit_vector);
 }
 
-pub proof fn lemma_page_base_div<A: ArchPagingMeta>(vp: nat)
+pub proof fn lemma_page_base_div<A: ArchPagingMeta>(vpage: nat)
     ensures
-        page_base::<A>(vp) / (<A::MinPageSize as PageSize>::SIZE as nat) == vp,
+        page_base::<A>(vpage) / (<A::MinPageSize as PageSize>::SIZE as nat) == vpage,
 {
     <A::MinPageSize as PageSize>::lemma_size_wf();
     let page_size = <A::MinPageSize as PageSize>::SIZE as nat;
-    lemma_mul_is_commutative(vp as int, page_size as int);
-    lemma_div_by_multiple(vp as int, page_size as int);
+    lemma_mul_is_commutative(vpage as int, page_size as int);
+    lemma_div_by_multiple(vpage as int, page_size as int);
 }
 
-pub proof fn lemma_pgtbl_idx_page_base_step<A: ArchPagingMeta>(vp: nat, level: nat)
+pub proof fn lemma_pgtbl_idx_page_base_step<A: ArchPagingMeta>(vpage: nat, level: nat)
     requires
         PTPage::<A>::count() > 0,
         level > 0,
     ensures
-        pgtbl_idx::<A>(page_base::<A>(vp), level) == pgtbl_idx::<
+        pgtbl_idx::<A>(page_base::<A>(vpage), level) == pgtbl_idx::<
             A,
-        >(page_base::<A>(vp / PTPage::<A>::count()), (level - 1) as nat),
+        >(page_base::<A>(vpage / PTPage::<A>::count()), (level - 1) as nat),
 {
-    lemma_pgtbl_idx_step::<A>(page_base::<A>(vp), level);
-    lemma_page_base_div::<A>(vp);
+    lemma_pgtbl_idx_step::<A>(page_base::<A>(vpage), level);
+    lemma_page_base_div::<A>(vpage);
 }
 
 /// An entry always lies inside its table page.
-pub proof fn lemma_pgtbl_idx_bounded<A: ArchPagingMeta>(vp: nat, level: nat)
+pub proof fn lemma_pgtbl_idx_bounded_nat<A: ArchPagingMeta>(vpage: nat, level: nat)
     requires
         PTPage::<A>::count() > 0,
     ensures
-        (pgtbl_idx::<A>(page_base::<A>(vp), level) as nat) < PTPage::<A>::count(),
+        (pgtbl_idx::<A>(page_base::<A>(vpage), level) as nat) < PTPage::<A>::count(),
     decreases level,
 {
-    lemma_page_base_div::<A>(vp);
+    lemma_page_base_div::<A>(vpage);
     if level > 0 {
-        lemma_pgtbl_idx_page_base_step::<A>(vp, level);
-        lemma_pgtbl_idx_bounded::<A>(vp / PTPage::<A>::count(), (level - 1) as nat);
+        lemma_pgtbl_idx_page_base_step::<A>(vpage, level);
+        lemma_pgtbl_idx_bounded_nat::<A>(vpage / PTPage::<A>::count(), (level - 1) as nat);
     }
+}
+
+/// An entry always lies inside its table page.
+pub proof fn lemma_pgtbl_idx_bounded<A: ArchPagingMeta>(vpage: nat, level: PageLevel)
+    requires
+        PTPage::<A>::count() > 0,
+    ensures
+        (pgtbl_idx::<A>(page_base::<A>(vpage), level.depth() as nat) as nat) < PTPage::<A>::count(),
+{
+    lemma_pgtbl_idx_bounded_nat::<A>(vpage, level.depth() as nat);
 }
 
 /// Two pages the walk cannot tell apart at any level are the same page, so an entry belongs to
 /// exactly one page.
-pub proof fn lemma_pgtbl_idx_injective<A: ArchPagingMeta>(vp1: nat, vp2: nat, levels: nat)
+pub proof fn lemma_pgtbl_idx_injective<A: ArchPagingMeta>(vpage1: nat, vpage2: nat, levels: nat)
     requires
         PTPage::<A>::count() > 0,
-        vp1 < pow(PTPage::<A>::count() as int, levels as nat),
-        vp2 < pow(PTPage::<A>::count() as int, levels as nat),
-        forall|l: nat| l < levels ==> (pgtbl_idx::<A>(page_base::<A>(vp1), l) as nat) == (pgtbl_idx::<A>(page_base::<A>(vp2), l) as nat),
+        vpage1 < pow(PTPage::<A>::count() as int, levels as nat),
+        vpage2 < pow(PTPage::<A>::count() as int, levels as nat),
+        forall|l: nat| l < levels ==> (pgtbl_idx::<A>(page_base::<A>(vpage1), l) as nat) == (pgtbl_idx::<A>(page_base::<A>(vpage2), l) as nat),
     ensures
-        vp1 == vp2,
+        vpage1 == vpage2,
     decreases levels,
 {
     let e = PTPage::<A>::count();
     if levels == 0 {
         vstd::arithmetic::power::lemma_pow0(e as int);
     } else {
-        lemma_page_base_div::<A>(vp1);
-        lemma_page_base_div::<A>(vp2);
+        lemma_page_base_div::<A>(vpage1);
+        lemma_page_base_div::<A>(vpage2);
         vstd::arithmetic::power::lemma_pow_adds(e as int, 1, (levels - 1) as nat);
         vstd::arithmetic::power::lemma_pow1(e as int);
         vstd::arithmetic::power::lemma_pow_positive(e as int, (levels - 1) as nat);
         vstd::arithmetic::div_mod::lemma_multiply_divide_lt(
-            vp1 as int,
+            vpage1 as int,
             e as int,
             pow(e as int, (levels - 1) as nat),
         );
         vstd::arithmetic::div_mod::lemma_multiply_divide_lt(
-            vp2 as int,
+            vpage2 as int,
             e as int,
             pow(e as int, (levels - 1) as nat),
         );
-        assert forall|l: nat| l + 1 < levels implies #[trigger] (pgtbl_idx::<A>(page_base::<A>(vp1 / e), l) as nat)
-            == (pgtbl_idx::<A>(page_base::<A>(vp2 / e), l) as nat) by {
-            lemma_pgtbl_idx_page_base_step::<A>(vp1, (l + 1) as nat);
-            lemma_pgtbl_idx_page_base_step::<A>(vp2, (l + 1) as nat);
-            assert((pgtbl_idx::<A>(page_base::<A>(vp1), l + 1) as nat) == (pgtbl_idx::<A>(page_base::<A>(vp2), l + 1) as nat));
+        assert forall|l: nat| l + 1 < levels implies #[trigger] (pgtbl_idx::<A>(page_base::<A>(vpage1 / e), l) as nat)
+            == (pgtbl_idx::<A>(page_base::<A>(vpage2 / e), l) as nat) by {
+            lemma_pgtbl_idx_page_base_step::<A>(vpage1, (l + 1) as nat);
+            lemma_pgtbl_idx_page_base_step::<A>(vpage2, (l + 1) as nat);
+            assert((pgtbl_idx::<A>(page_base::<A>(vpage1), l + 1) as nat) == (pgtbl_idx::<A>(page_base::<A>(vpage2), l + 1) as nat));
         }
-        lemma_pgtbl_idx_injective::<A>(vp1 / e, vp2 / e, (levels - 1) as nat);
-        assert((pgtbl_idx::<A>(page_base::<A>(vp1), 0) as nat) == (pgtbl_idx::<A>(page_base::<A>(vp2), 0) as nat));
-        lemma_fundamental_div_mod(vp1 as int, e as int);
-        lemma_fundamental_div_mod(vp2 as int, e as int);
+        lemma_pgtbl_idx_injective::<A>(vpage1 / e, vpage2 / e, (levels - 1) as nat);
+        assert((pgtbl_idx::<A>(page_base::<A>(vpage1), 0) as nat) == (pgtbl_idx::<A>(page_base::<A>(vpage2), 0) as nat));
+        lemma_fundamental_div_mod(vpage1 as int, e as int);
+        lemma_fundamental_div_mod(vpage2 as int, e as int);
     }
 }
 
+pub proof fn lemma_up_level(level: PageLevel, top: PageLevel)
+    requires
+        level.depth() < top.depth(),
+    ensures
+        PageLevel::from_nat(level.depth() as nat + 1).depth()
+            == level.depth() as nat + 1,
+        PageLevel::from_nat(level.depth() as nat + 1).depth() <= top.depth(),
+        PageLevel::from_nat(level.depth() as nat + 1) == match level {
+            PageLevel::Level0 => PageLevel::Level1,
+            PageLevel::Level1 => PageLevel::Level2,
+            PageLevel::Level2 => PageLevel::Level3,
+            PageLevel::Level3 => PageLevel::Level4,
+            PageLevel::Level4 => PageLevel::Level4,
+        },
+{
+    PageLevel::lemma_depth_roundtrip(top);
+    PageLevel::lemma_depth_roundtrip(level);
+    assert(level.depth() as nat + 1 <= top.depth());
+    PageLevel::lemma_from_nat_depth(level.depth() as nat + 1);
+    PageLevel::lemma_from_nat_parent(level);
+}
 
-/// A walk of `vp` sees only the entries it reads, so anything else may change under it.
+
+/// A walk of `vpage` sees only the entries it reads, so anything else may change under it.
 pub proof fn lemma_walk_at_local<A: ArchPagingMeta>(
     d1: Map<WordId, usize>,
     f1: Map<WordId, usize>,
@@ -390,36 +493,37 @@ pub proof fn lemma_walk_at_local<A: ArchPagingMeta>(
     f2: Map<WordId, usize>,
     frame_to_objs: Map<FrameId, Set<ObjId>>,
     cr3: FrameId,
-    top: nat,
-    level: nat,
-    vp: nat,
+    top: PageLevel,
+    level: PageLevel,
+    vpage: nat,
 )
     requires
-        level <= top,
+        level.depth() <= top.depth(),
         forall|c: WordId| #[trigger]
-            on_path::<A>(d1, f1, frame_to_objs, cr3, top, vp, c) ==> word_at(d1, f1, c) == word_at(
+            on_path::<A>(d1, f1, frame_to_objs, cr3, top, vpage, c) ==> word_at(d1, f1, c) == word_at(
                 d2,
                 f2,
                 c,
             ),
     ensures
-        walk_at::<A>(d1, f1, frame_to_objs, cr3, top, level, vp) == walk_at::<A>(
+        walk_at::<A>(d1, f1, frame_to_objs, cr3, top, level, vpage) == walk_at::<A>(
             d2,
             f2,
             frame_to_objs,
             cr3,
             top,
             level,
-            vp,
+            vpage,
         ),
-    decreases top - level,
+    decreases top.depth() - level.depth(),
 {
-    if level < top {
-        let up = (level + 1) as nat;
-        lemma_walk_at_local::<A>(d1, f1, d2, f2, frame_to_objs, cr3, top, up, vp);
-        if let Option::Some(c) = path_id_at::<A>(d1, f1, frame_to_objs, cr3, top, up, vp) {
-            assert(on_path::<A>(d1, f1, frame_to_objs, cr3, top, vp, c)) by {
-                assert(path_id_at::<A>(d1, f1, frame_to_objs, cr3, top, up, vp) == Some(c));
+    if level.depth() < top.depth() {
+        let up = PageLevel::from_nat(level.depth() as nat + 1);
+        lemma_up_level(level, top);
+        lemma_walk_at_local::<A>(d1, f1, d2, f2, frame_to_objs, cr3, top, up, vpage);
+        if let Option::Some(c) = path_id_at::<A>(d1, f1, frame_to_objs, cr3, top, up, vpage) {
+            assert(on_path::<A>(d1, f1, frame_to_objs, cr3, top, vpage, c)) by {
+                assert(path_id_at::<A>(d1, f1, frame_to_objs, cr3, top, up, vpage) == Some(c));
             }
         }
     }
@@ -430,35 +534,44 @@ pub proof fn lemma_resting_level_bounds<A: ArchPagingMeta>(
     frozen: Map<WordId, usize>,
     frame_to_objs: Map<FrameId, Set<ObjId>>,
     cr3: FrameId,
-    top: nat,
-    level: nat,
-    vp: nat,
+    top: PageLevel,
+    level: PageLevel,
+    vpage: nat,
 )
     requires
-        level <= top,
+        level.depth() <= top.depth(),
     ensures
-        level <= resting_level::<A>(data, frozen, frame_to_objs, cr3, top, level, vp) <= top,
+        level.depth() <= resting_level::<A>(
+            data,
+            frozen,
+            frame_to_objs,
+            cr3,
+            top,
+            level,
+            vpage,
+        ).depth() <= top.depth(),
         walk_at::<A>(
             data,
             frozen,
             frame_to_objs,
             cr3,
             top,
-            resting_level::<A>(data, frozen, frame_to_objs, cr3, top, level, vp),
-            vp,
+            resting_level::<A>(data, frozen, frame_to_objs, cr3, top, level, vpage),
+            vpage,
         ) is Some,
-    decreases top - level,
+    decreases top.depth() - level.depth(),
 {
-    if level < top {
-        if walk_at::<A>(data, frozen, frame_to_objs, cr3, top, level, vp) is None {
+    if level.depth() < top.depth() {
+        if walk_at::<A>(data, frozen, frame_to_objs, cr3, top, level, vpage) is None {
+            lemma_up_level(level, top);
             lemma_resting_level_bounds::<A>(
                 data,
                 frozen,
                 frame_to_objs,
                 cr3,
                 top,
-                (level + 1) as nat,
-                vp,
+                PageLevel::from_nat(level.depth() as nat + 1),
+                vpage,
             );
         }
     }
@@ -469,31 +582,34 @@ pub proof fn lemma_resting_level_at_most_some<A: ArchPagingMeta>(
     frozen: Map<WordId, usize>,
     frame_to_objs: Map<FrameId, Set<ObjId>>,
     cr3: FrameId,
-    top: nat,
-    level: nat,
-    seen: nat,
-    vp: nat,
+    top: PageLevel,
+    level: PageLevel,
+    seen: PageLevel,
+    vpage: nat,
 )
     requires
-        level <= seen <= top,
-        walk_at::<A>(data, frozen, frame_to_objs, cr3, top, seen, vp) is Some,
+        level.depth() <= seen.depth() <= top.depth(),
+        walk_at::<A>(data, frozen, frame_to_objs, cr3, top, seen, vpage) is Some,
     ensures
-        resting_level::<A>(data, frozen, frame_to_objs, cr3, top, level, vp) <= seen,
-    decreases top - level,
+        resting_level::<A>(data, frozen, frame_to_objs, cr3, top, level, vpage).depth()
+            <= seen.depth(),
+    decreases top.depth() - level.depth(),
 {
-    if level < top && walk_at::<A>(data, frozen, frame_to_objs, cr3, top, level, vp) is None {
-        if level < seen {
+    if level.depth() < top.depth() && walk_at::<A>(data, frozen, frame_to_objs, cr3, top, level, vpage) is None {
+        if level.depth() < seen.depth() {
+            lemma_up_level(level, top);
             lemma_resting_level_at_most_some::<A>(
                 data,
                 frozen,
                 frame_to_objs,
                 cr3,
                 top,
-                (level + 1) as nat,
+                PageLevel::from_nat(level.depth() as nat + 1),
                 seen,
-                vp,
+                vpage,
             );
         } else {
+            PageLevel::lemma_eq_by_depth(level, seen);
             assert(level == seen);
         }
     }
@@ -504,24 +620,25 @@ pub proof fn lemma_resting_level_top_if_not_table<A: ArchPagingMeta>(
     frozen: Map<WordId, usize>,
     frame_to_objs: Map<FrameId, Set<ObjId>>,
     cr3: FrameId,
-    top: nat,
-    level: nat,
-    vp: nat,
+    top: PageLevel,
+    level: PageLevel,
+    vpage: nat,
 )
     requires
-        level <= top,
+        level.depth() <= top.depth(),
         !PTEntry::<A>::spec_from_bits(
-            word_at(data, frozen, path_id::<A>(frame_to_objs, cr3, vp, top)),
-        ).is_table_spec(PageLevel::from_nat(top)),
+            word_at(data, frozen, path_id::<A>(frame_to_objs, cr3, vpage, top)),
+        ).is_table_spec(top),
     ensures
-        resting_level::<A>(data, frozen, frame_to_objs, cr3, top, level, vp) == top,
-        level < top ==> walk_at::<A>(data, frozen, frame_to_objs, cr3, top, level, vp) is None,
-    decreases top - level,
+        resting_level::<A>(data, frozen, frame_to_objs, cr3, top, level, vpage) == top,
+        level.depth() < top.depth() ==> walk_at::<A>(data, frozen, frame_to_objs, cr3, top, level, vpage) is None,
+    decreases top.depth() - level.depth(),
 {
-    assert(walk_at::<A>(data, frozen, frame_to_objs, cr3, top, top, vp) == Some(cr3));
-    if level < top {
-        let up = (level + 1) as nat;
-        if up < top {
+    assert(walk_at::<A>(data, frozen, frame_to_objs, cr3, top, top, vpage) == Some(cr3));
+    if level.depth() < top.depth() {
+        let up = PageLevel::from_nat(level.depth() as nat + 1);
+        lemma_up_level(level, top);
+        if up.depth() < top.depth() {
             lemma_resting_level_top_if_not_table::<A>(
                 data,
                 frozen,
@@ -529,21 +646,23 @@ pub proof fn lemma_resting_level_top_if_not_table<A: ArchPagingMeta>(
                 cr3,
                 top,
                 up,
-                vp,
+                vpage,
             );
-            assert(walk_at::<A>(data, frozen, frame_to_objs, cr3, top, up, vp) is None);
-            assert(resting_level::<A>(data, frozen, frame_to_objs, cr3, top, up, vp) == top);
+            assert(walk_at::<A>(data, frozen, frame_to_objs, cr3, top, up, vpage) is None);
+            assert(resting_level::<A>(data, frozen, frame_to_objs, cr3, top, up, vpage) == top);
         } else {
-            assert(walk_at::<A>(data, frozen, frame_to_objs, cr3, top, up, vp) == Some(cr3));
-            assert(path_id::<A>(frame_to_objs, cr3, vp, up) == path_id::<A>(
+            PageLevel::lemma_eq_by_depth(up, top);
+            assert(up == top);
+            assert(walk_at::<A>(data, frozen, frame_to_objs, cr3, top, up, vpage) == Some(cr3));
+            assert(path_id::<A>(frame_to_objs, cr3, vpage, up) == path_id::<A>(
                 frame_to_objs,
                 cr3,
-                vp,
+                vpage,
                 top,
             ));
-            assert(resting_level::<A>(data, frozen, frame_to_objs, cr3, top, up, vp) == top);
+            assert(resting_level::<A>(data, frozen, frame_to_objs, cr3, top, up, vpage) == top);
         }
-        assert(walk_at::<A>(data, frozen, frame_to_objs, cr3, top, level, vp) is None);
+        assert(walk_at::<A>(data, frozen, frame_to_objs, cr3, top, level, vpage) is None);
     }
 }
 
@@ -554,33 +673,34 @@ pub proof fn lemma_resting_level_local<A: ArchPagingMeta>(
     f2: Map<WordId, usize>,
     frame_to_objs: Map<FrameId, Set<ObjId>>,
     cr3: FrameId,
-    top: nat,
-    level: nat,
-    vp: nat,
+    top: PageLevel,
+    level: PageLevel,
+    vpage: nat,
 )
     requires
-        level <= top,
+        level.depth() <= top.depth(),
         forall|c: WordId| #[trigger]
-            on_path::<A>(d1, f1, frame_to_objs, cr3, top, vp, c) ==> word_at(d1, f1, c) == word_at(
+            on_path::<A>(d1, f1, frame_to_objs, cr3, top, vpage, c) ==> word_at(d1, f1, c) == word_at(
                 d2,
                 f2,
                 c,
             ),
     ensures
-        resting_level::<A>(d1, f1, frame_to_objs, cr3, top, level, vp) == resting_level::<A>(
+        resting_level::<A>(d1, f1, frame_to_objs, cr3, top, level, vpage) == resting_level::<A>(
             d2,
             f2,
             frame_to_objs,
             cr3,
             top,
             level,
-            vp,
+            vpage,
         ),
-    decreases top - level,
+    decreases top.depth() - level.depth(),
 {
-    if level < top {
-        lemma_walk_at_local::<A>(d1, f1, d2, f2, frame_to_objs, cr3, top, level, vp);
-        if walk_at::<A>(d1, f1, frame_to_objs, cr3, top, level, vp) is None {
+    if level.depth() < top.depth() {
+        lemma_walk_at_local::<A>(d1, f1, d2, f2, frame_to_objs, cr3, top, level, vpage);
+        if walk_at::<A>(d1, f1, frame_to_objs, cr3, top, level, vpage) is None {
+            lemma_up_level(level, top);
             lemma_resting_level_local::<A>(
                 d1,
                 f1,
@@ -589,14 +709,14 @@ pub proof fn lemma_resting_level_local<A: ArchPagingMeta>(
                 frame_to_objs,
                 cr3,
                 top,
-                (level + 1) as nat,
-                vp,
+                PageLevel::from_nat(level.depth() as nat + 1),
+                vpage,
             );
         }
     }
 }
 
-/// Where `vp` leads depends only on the entries its own walk reads. This is what lets a
+/// Where `vpage` leads depends only on the entries its own walk reads. This is what lets a
 /// transition that rewrites entries elsewhere leave every other translation alone.
 /// Where a walk goes depends only on the residents of the frames it lands on, so changing the
 /// placement of a frame no walk lands on moves nothing. `live` names the frames the walks in
@@ -608,29 +728,30 @@ pub proof fn lemma_walk_at_frames<A: ArchPagingMeta>(
     m2: Map<FrameId, Set<ObjId>>,
     live: Set<FrameId>,
     cr3: FrameId,
-    top: nat,
-    level: nat,
-    vp: nat,
+    top: PageLevel,
+    level: PageLevel,
+    vpage: nat,
 )
     requires
         forall|f: FrameId| #[trigger] live.contains(f) ==> m1[f] == m2[f],
-        forall|l: nat|
-            l <= top && #[trigger] walk_at::<A>(data, frozen, m1, cr3, top, l, vp) is Some
-                ==> live.contains(walk_at::<A>(data, frozen, m1, cr3, top, l, vp)->Some_0),
+        forall|l: PageLevel|
+            l.depth() <= top.depth() && #[trigger] walk_at::<A>(data, frozen, m1, cr3, top, l, vpage) is Some
+                ==> live.contains(walk_at::<A>(data, frozen, m1, cr3, top, l, vpage)->Some_0),
     ensures
-        walk_at::<A>(data, frozen, m1, cr3, top, level, vp) == walk_at::<A>(
+        walk_at::<A>(data, frozen, m1, cr3, top, level, vpage) == walk_at::<A>(
             data,
             frozen,
             m2,
             cr3,
             top,
             level,
-            vp,
+            vpage,
         ),
-    decreases top - level,
+    decreases top.depth() - level.depth(),
 {
-    if level < top {
-        lemma_walk_at_frames::<A>(data, frozen, m1, m2, live, cr3, top, (level + 1) as nat, vp);
+    if level.depth() < top.depth() {
+        lemma_up_level(level, top);
+        lemma_walk_at_frames::<A>(data, frozen, m1, m2, live, cr3, top, PageLevel::from_nat(level.depth() as nat + 1), vpage);
     }
 }
 
@@ -641,31 +762,32 @@ pub proof fn lemma_resting_level_frames<A: ArchPagingMeta>(
     m2: Map<FrameId, Set<ObjId>>,
     live: Set<FrameId>,
     cr3: FrameId,
-    top: nat,
-    level: nat,
-    vp: nat,
+    top: PageLevel,
+    level: PageLevel,
+    vpage: nat,
 )
     requires
-        level <= top,
+        level.depth() <= top.depth(),
         forall|f: FrameId| #[trigger] live.contains(f) ==> m1[f] == m2[f],
-        forall|l: nat|
-            l <= top && #[trigger] walk_at::<A>(data, frozen, m1, cr3, top, l, vp) is Some
-                ==> live.contains(walk_at::<A>(data, frozen, m1, cr3, top, l, vp)->Some_0),
+        forall|l: PageLevel|
+            l.depth() <= top.depth() && #[trigger] walk_at::<A>(data, frozen, m1, cr3, top, l, vpage) is Some
+                ==> live.contains(walk_at::<A>(data, frozen, m1, cr3, top, l, vpage)->Some_0),
     ensures
-        resting_level::<A>(data, frozen, m1, cr3, top, level, vp) == resting_level::<A>(
+        resting_level::<A>(data, frozen, m1, cr3, top, level, vpage) == resting_level::<A>(
             data,
             frozen,
             m2,
             cr3,
             top,
             level,
-            vp,
+            vpage,
         ),
-    decreases top - level,
+    decreases top.depth() - level.depth(),
 {
-    if level < top {
-        lemma_walk_at_frames::<A>(data, frozen, m1, m2, live, cr3, top, level, vp);
-        if walk_at::<A>(data, frozen, m1, cr3, top, level, vp) is None {
+    if level.depth() < top.depth() {
+        lemma_walk_at_frames::<A>(data, frozen, m1, m2, live, cr3, top, level, vpage);
+        if walk_at::<A>(data, frozen, m1, cr3, top, level, vpage) is None {
+            lemma_up_level(level, top);
             lemma_resting_level_frames::<A>(
                 data,
                 frozen,
@@ -674,8 +796,8 @@ pub proof fn lemma_resting_level_frames<A: ArchPagingMeta>(
                 live,
                 cr3,
                 top,
-                (level + 1) as nat,
-                vp,
+                PageLevel::from_nat(level.depth() as nat + 1),
+                vpage,
             );
         }
     }
@@ -689,31 +811,32 @@ pub proof fn lemma_walk_at_root_copy<A: ArchPagingMeta>(
     frame_to_objs: Map<FrameId, Set<ObjId>>,
     r1: FrameId,
     r2: FrameId,
-    top: nat,
-    level: nat,
-    vp: nat,
+    top: PageLevel,
+    level: PageLevel,
+    vpage: nat,
 )
     requires
         PTPage::<A>::count() > 0,
-        level < top,
+        level.depth() < top.depth(),
         forall|i: nat| i < PTPage::<A>::count() ==> #[trigger] word_at(
             data,
             frozen,
             WordId((resident(frame_to_objs, r1).0 + i) as nat),
         ) == word_at(data, frozen, WordId((resident(frame_to_objs, r2).0 + i) as nat)),
     ensures
-        walk_at::<A>(data, frozen, frame_to_objs, r1, top, level, vp) == walk_at::<A>(
+        walk_at::<A>(data, frozen, frame_to_objs, r1, top, level, vpage) == walk_at::<A>(
             data,
             frozen,
             frame_to_objs,
             r2,
             top,
             level,
-            vp,
+            vpage,
         ),
-    decreases top - level,
+    decreases top.depth() - level.depth(),
 {
-    if level + 1 < top {
+    if level.depth() as nat + 1 < top.depth() {
+        lemma_up_level(level, top);
         lemma_walk_at_root_copy::<A>(
             data,
             frozen,
@@ -721,30 +844,31 @@ pub proof fn lemma_walk_at_root_copy<A: ArchPagingMeta>(
             r1,
             r2,
             top,
-            (level + 1) as nat,
-            vp,
+            PageLevel::from_nat(level.depth() as nat + 1),
+            vpage,
         );
     } else {
-        lemma_pgtbl_idx_bounded::<A>(vp, top);
-        assert(walk_at::<A>(data, frozen, frame_to_objs, r1, top, (level + 1) as nat, vp) == Some(
+        lemma_up_level(level, top);
+        lemma_pgtbl_idx_bounded::<A>(vpage, top);
+        assert(walk_at::<A>(data, frozen, frame_to_objs, r1, top, PageLevel::from_nat(level.depth() as nat + 1), vpage) == Some(
             r1,
         ));
-        assert(walk_at::<A>(data, frozen, frame_to_objs, r2, top, (level + 1) as nat, vp) == Some(
+        assert(walk_at::<A>(data, frozen, frame_to_objs, r2, top, PageLevel::from_nat(level.depth() as nat + 1), vpage) == Some(
             r2,
         ));
-        assert(path_id::<A>(frame_to_objs, r1, vp, (level + 1) as nat) == WordId((resident(
+        assert(path_id::<A>(frame_to_objs, r1, vpage, PageLevel::from_nat(level.depth() as nat + 1)) == WordId((resident(
             frame_to_objs,
             r1,
-        ).0 + pgtbl_idx::<A>(page_base::<A>(vp), top) as nat) as nat));
-        assert(path_id::<A>(frame_to_objs, r2, vp, (level + 1) as nat) == WordId((resident(
+        ).0 + pgtbl_idx::<A>(page_base::<A>(vpage), top.depth() as nat) as nat) as nat));
+        assert(path_id::<A>(frame_to_objs, r2, vpage, PageLevel::from_nat(level.depth() as nat + 1)) == WordId((resident(
             frame_to_objs,
             r2,
-        ).0 + pgtbl_idx::<A>(page_base::<A>(vp), top) as nat) as nat));
-        assert(word_at(data, frozen, WordId((resident(frame_to_objs, r1).0 + pgtbl_idx::<A>(page_base::<A>(vp), top) as nat) as nat))
+        ).0 + pgtbl_idx::<A>(page_base::<A>(vpage), top.depth() as nat) as nat) as nat));
+        assert(word_at(data, frozen, WordId((resident(frame_to_objs, r1).0 + pgtbl_idx::<A>(page_base::<A>(vpage), top.depth() as nat) as nat) as nat))
             == word_at(
             data,
             frozen,
-            WordId((resident(frame_to_objs, r2).0 + pgtbl_idx::<A>(page_base::<A>(vp), top) as nat) as nat),
+            WordId((resident(frame_to_objs, r2).0 + pgtbl_idx::<A>(page_base::<A>(vpage), top.depth() as nat) as nat) as nat),
         ));
     }
 }
@@ -755,33 +879,34 @@ pub proof fn lemma_resting_level_root_copy<A: ArchPagingMeta>(
     frame_to_objs: Map<FrameId, Set<ObjId>>,
     r1: FrameId,
     r2: FrameId,
-    top: nat,
-    level: nat,
-    vp: nat,
+    top: PageLevel,
+    level: PageLevel,
+    vpage: nat,
 )
     requires
         PTPage::<A>::count() > 0,
-        level <= top,
+        level.depth() <= top.depth(),
         forall|i: nat| i < PTPage::<A>::count() ==> #[trigger] word_at(
             data,
             frozen,
             WordId((resident(frame_to_objs, r1).0 + i) as nat),
         ) == word_at(data, frozen, WordId((resident(frame_to_objs, r2).0 + i) as nat)),
     ensures
-        resting_level::<A>(data, frozen, frame_to_objs, r1, top, level, vp) == resting_level::<A>(
+        resting_level::<A>(data, frozen, frame_to_objs, r1, top, level, vpage) == resting_level::<A>(
             data,
             frozen,
             frame_to_objs,
             r2,
             top,
             level,
-            vp,
+            vpage,
         ),
-    decreases top - level,
+    decreases top.depth() - level.depth(),
 {
-    if level < top {
-        lemma_walk_at_root_copy::<A>(data, frozen, frame_to_objs, r1, r2, top, level, vp);
-        if walk_at::<A>(data, frozen, frame_to_objs, r1, top, level, vp) is None {
+    if level.depth() < top.depth() {
+        lemma_walk_at_root_copy::<A>(data, frozen, frame_to_objs, r1, r2, top, level, vpage);
+        if walk_at::<A>(data, frozen, frame_to_objs, r1, top, level, vpage) is None {
+            lemma_up_level(level, top);
             lemma_resting_level_root_copy::<A>(
                 data,
                 frozen,
@@ -789,8 +914,8 @@ pub proof fn lemma_resting_level_root_copy<A: ArchPagingMeta>(
                 r1,
                 r2,
                 top,
-                (level + 1) as nat,
-                vp,
+                PageLevel::from_nat(level.depth() as nat + 1),
+                vpage,
             );
         }
     }
@@ -802,54 +927,76 @@ pub proof fn lemma_resting_path_root_copy_if_table<A: ArchPagingMeta>(
     frame_to_objs: Map<FrameId, Set<ObjId>>,
     r1: FrameId,
     r2: FrameId,
-    top: nat,
-    vp: nat,
+    top: PageLevel,
+    vpage: nat,
 )
     requires
         PTPage::<A>::count() > 0,
         PTEntry::<A>::spec_from_bits(
-            word_at(data, frozen, path_id::<A>(frame_to_objs, r1, vp, top)),
-        ).is_table_spec(PageLevel::from_nat(top)),
+            word_at(data, frozen, path_id::<A>(frame_to_objs, r1, vpage, top)),
+        ).is_table_spec(top),
         forall|i: nat| i < PTPage::<A>::count() ==> #[trigger] word_at(
             data,
             frozen,
             WordId((resident(frame_to_objs, r1).0 + i) as nat),
         ) == word_at(data, frozen, WordId((resident(frame_to_objs, r2).0 + i) as nat)),
     ensures
-        resting_path_id::<A>(data, frozen, frame_to_objs, r1, top, vp) == resting_path_id::<A>(
+        resting_path_id::<A>(data, frozen, frame_to_objs, r1, top, vpage) == resting_path_id::<A>(
             data,
             frozen,
             frame_to_objs,
             r2,
             top,
-            vp,
+            vpage,
         ),
 {
-    lemma_resting_level_root_copy::<A>(data, frozen, frame_to_objs, r1, r2, top, 0, vp);
-    lemma_resting_level_bounds::<A>(data, frozen, frame_to_objs, r1, top, 0, vp);
-    let l = resting_level::<A>(data, frozen, frame_to_objs, r1, top, 0, vp);
-    assert(l < top) by {
+    PageLevel::lemma_zero_depth_le(top);
+    lemma_resting_level_root_copy::<A>(data, frozen, frame_to_objs, r1, r2, top, PageLevel::from_nat(0), vpage);
+    lemma_resting_level_bounds::<A>(data, frozen, frame_to_objs, r1, top, PageLevel::from_nat(0), vpage);
+    let l = resting_level::<A>(data, frozen, frame_to_objs, r1, top, PageLevel::from_nat(0), vpage);
+    if !(l.depth() < top.depth()) {
+        PageLevel::lemma_eq_by_depth(l, top);
+        assert(l == top);
         if l == top {
-            if top == 0 {
-                PageLevel::lemma_leaf_cases(PageLevel::from_nat(top));
-                assert(PageLevel::from_nat(top).is_leaf());
+            if top == PageLevel::from_nat(0) {
+                PageLevel::lemma_leaf_cases(top);
+                assert(top.is_leaf());
+                assert(!PTEntry::<A>::spec_from_bits(
+                    word_at(data, frozen, path_id::<A>(frame_to_objs, r1, vpage, top)),
+                ).is_table_spec(top));
+                assert(false);
             } else {
-                let down = (top - 1) as nat;
-                assert(walk_at::<A>(data, frozen, frame_to_objs, r1, top, down, vp) is Some);
+                if top.depth() == 0 {
+                    PageLevel::lemma_eq_by_depth(top, PageLevel::from_nat(0));
+                }
+                assert(top.depth() > 0);
+                let down = PageLevel::from_nat((top.depth() as nat - 1) as nat);
+                PageLevel::lemma_from_nat_child(top);
+                lemma_up_level(down, top);
+                PageLevel::lemma_eq_by_depth(
+                    PageLevel::from_nat(down.depth() as nat + 1),
+                    top,
+                );
+                assert(walk_at::<A>(data, frozen, frame_to_objs, r1, top, down, vpage) is Some);
+                PageLevel::lemma_zero_depth_le(down);
                 lemma_resting_level_at_most_some::<A>(
                     data,
                     frozen,
                     frame_to_objs,
                     r1,
                     top,
-                    0,
+                    PageLevel::from_nat(0),
                     down,
-                    vp,
+                    vpage,
                 );
+                assert(l.depth() <= down.depth());
+                assert(down.depth() < top.depth());
+                assert(l.depth() < top.depth());
             }
         }
     }
-    lemma_walk_at_root_copy::<A>(data, frozen, frame_to_objs, r1, r2, top, l, vp);
+    assert(l.depth() < top.depth());
+    lemma_walk_at_root_copy::<A>(data, frozen, frame_to_objs, r1, r2, top, l, vpage);
 }
 
 /// A copied root translates every page exactly as the root it was copied from.
@@ -859,8 +1006,8 @@ pub proof fn lemma_translate_root_copy<A: ArchPagingMeta>(
     frame_to_objs: Map<FrameId, Set<ObjId>>,
     r1: FrameId,
     r2: FrameId,
-    top: nat,
-    vp: nat,
+    top: PageLevel,
+    vpage: nat,
 )
     requires
         PTPage::<A>::count() > 0,
@@ -870,22 +1017,23 @@ pub proof fn lemma_translate_root_copy<A: ArchPagingMeta>(
             WordId((resident(frame_to_objs, r1).0 + i) as nat),
         ) == word_at(data, frozen, WordId((resident(frame_to_objs, r2).0 + i) as nat)),
     ensures
-        translate::<A>(data, frozen, frame_to_objs, r1, top, vp) == translate::<A>(
+        translate::<A>(data, frozen, frame_to_objs, r1, top, vpage) == translate::<A>(
             data,
             frozen,
             frame_to_objs,
             r2,
             top,
-            vp,
+            vpage,
         ),
 {
-    lemma_resting_level_root_copy::<A>(data, frozen, frame_to_objs, r1, r2, top, 0, vp);
-    lemma_resting_level_bounds::<A>(data, frozen, frame_to_objs, r1, top, 0, vp);
-    let l = resting_level::<A>(data, frozen, frame_to_objs, r1, top, 0, vp);
-    if l < top {
-        lemma_walk_at_root_copy::<A>(data, frozen, frame_to_objs, r1, r2, top, l, vp);
+    PageLevel::lemma_zero_depth_le(top);
+    lemma_resting_level_root_copy::<A>(data, frozen, frame_to_objs, r1, r2, top, PageLevel::from_nat(0), vpage);
+    lemma_resting_level_bounds::<A>(data, frozen, frame_to_objs, r1, top, PageLevel::from_nat(0), vpage);
+    let l = resting_level::<A>(data, frozen, frame_to_objs, r1, top, PageLevel::from_nat(0), vpage);
+    if l.depth() < top.depth() {
+        lemma_walk_at_root_copy::<A>(data, frozen, frame_to_objs, r1, r2, top, l, vpage);
     } else {
-        lemma_pgtbl_idx_bounded::<A>(vp, top);
+        lemma_pgtbl_idx_bounded::<A>(vpage, top);
     }
 }
 
@@ -896,33 +1044,34 @@ pub proof fn lemma_translate_local<A: ArchPagingMeta>(
     f2: Map<WordId, usize>,
     frame_to_objs: Map<FrameId, Set<ObjId>>,
     cr3: FrameId,
-    top: nat,
-    vp: nat,
+    top: PageLevel,
+    vpage: nat,
 )
     requires
         forall|c: WordId| #[trigger]
-            on_path::<A>(d1, f1, frame_to_objs, cr3, top, vp, c) ==> word_at(d1, f1, c) == word_at(
+            on_path::<A>(d1, f1, frame_to_objs, cr3, top, vpage, c) ==> word_at(d1, f1, c) == word_at(
                 d2,
                 f2,
                 c,
             ),
     ensures
-        translate::<A>(d1, f1, frame_to_objs, cr3, top, vp) == translate::<A>(
+        translate::<A>(d1, f1, frame_to_objs, cr3, top, vpage) == translate::<A>(
             d2,
             f2,
             frame_to_objs,
             cr3,
             top,
-            vp,
+            vpage,
         ),
 {
-    lemma_resting_level_local::<A>(d1, f1, d2, f2, frame_to_objs, cr3, top, 0, vp);
-    lemma_resting_level_bounds::<A>(d1, f1, frame_to_objs, cr3, top, 0, vp);
-    let l = resting_level::<A>(d1, f1, frame_to_objs, cr3, top, 0, vp);
-    lemma_walk_at_local::<A>(d1, f1, d2, f2, frame_to_objs, cr3, top, l, vp);
-    if let Option::Some(c) = path_id_at::<A>(d1, f1, frame_to_objs, cr3, top, l, vp) {
-        assert(on_path::<A>(d1, f1, frame_to_objs, cr3, top, vp, c)) by {
-            assert(path_id_at::<A>(d1, f1, frame_to_objs, cr3, top, l, vp) == Some(c));
+    PageLevel::lemma_zero_depth_le(top);
+    lemma_resting_level_local::<A>(d1, f1, d2, f2, frame_to_objs, cr3, top, PageLevel::from_nat(0), vpage);
+    lemma_resting_level_bounds::<A>(d1, f1, frame_to_objs, cr3, top, PageLevel::from_nat(0), vpage);
+    let l = resting_level::<A>(d1, f1, frame_to_objs, cr3, top, PageLevel::from_nat(0), vpage);
+    lemma_walk_at_local::<A>(d1, f1, d2, f2, frame_to_objs, cr3, top, l, vpage);
+    if let Option::Some(c) = path_id_at::<A>(d1, f1, frame_to_objs, cr3, top, l, vpage) {
+        assert(on_path::<A>(d1, f1, frame_to_objs, cr3, top, vpage, c)) by {
+            assert(path_id_at::<A>(d1, f1, frame_to_objs, cr3, top, l, vpage) == Some(c));
         }
     }
 }
@@ -932,8 +1081,8 @@ pub proof fn lemma_translate_local<A: ArchPagingMeta>(
 verus! {
 
 /// The page a virtual address falls in.
-pub open spec fn vpage<A: ArchPagingMeta>(v: nat) -> nat {
-    v / PTPage::<A>::count()
+pub open spec fn addr_to_vpage<A: ArchPagingMeta>(addr: nat) -> nat {
+    addr / PTPage::<A>::count()
 }
 
 /// How far into its page a virtual address sits.
@@ -957,40 +1106,40 @@ pub open spec fn obj_of<A: ArchPagingMeta>(oid: WordId, v: nat) -> ObjId {
 }
 
 /// The governed addresses of one page of one address space.
-pub open spec fn page_addrs<A: ArchPagingMeta>(dom: Set<(nat, nat)>, a: nat, vp: nat) -> Set<
+pub open spec fn page_addrs<A: ArchPagingMeta>(dom: Set<(nat, nat)>, a: nat, vpage: nat) -> Set<
     (nat, nat),
 > {
-    dom.filter(|k: (nat, nat)| k.0 == a && vpage::<A>(k.1) == vp)
+    dom.filter(|k: (nat, nat)| k.0 == a && addr_to_vpage::<A>(k.1) == vpage)
 }
 
 /// The certificates of one page, all reading `oid`.
 pub open spec fn page_view<A: ArchPagingMeta>(
     dom: Set<(nat, nat)>,
     a: nat,
-    vp: nat,
+    vpage: nat,
     oid: Option<WordId>,
 ) -> Map<(nat, nat), Option<WordId>> {
-    Map::new(page_addrs::<A>(dom, a, vp), |k: (nat, nat)| oid)
+    Map::new(page_addrs::<A>(dom, a, vpage), |k: (nat, nat)| oid)
 }
 
 /// The certificates a page gains from `obj`.
 pub open spec fn mapped_view<A: ArchPagingMeta>(
     dom: Set<(nat, nat)>,
     a: nat,
-    vp: nat,
+    vpage: nat,
     obj: ObjId,
 ) -> Map<(nat, nat), Option<WordId>> {
-    Map::new(page_addrs::<A>(dom, a, vp), |k: (nat, nat)| Some(oid_of::<A>(obj, k.1)))
+    Map::new(page_addrs::<A>(dom, a, vpage), |k: (nat, nat)| Some(oid_of::<A>(obj, k.1)))
 }
 
 /// The pages one address space governs.
 pub open spec fn space_pages(dom: Set<(nat, nat)>, a: nat) -> Set<nat> {
-    dom.filter(|k: (nat, nat)| k.0 == a).map_by(|k: (nat, nat)| k.1, |vp: nat| (a, vp))
+    dom.filter(|k: (nat, nat)| k.0 == a).map_by(|k: (nat, nat)| k.1, |vpage: nat| (a, vpage))
 }
 
 /// The keys one address space contributes over a set of pages or addresses.
 pub open spec fn space_keys(a: nat, ks: Set<nat>) -> Set<(nat, nat)> {
-    ks.map_by(|vp: nat| (a, vp), |k: (nat, nat)| k.1)
+    ks.map_by(|vpage: nat| (a, vpage), |k: (nat, nat)| k.1)
 }
 
 pub broadcast proof fn lemma_space_keys(a: nat, ks: Set<nat>, k: (nat, nat))
@@ -1001,22 +1150,22 @@ pub broadcast proof fn lemma_space_keys(a: nat, ks: Set<nat>, k: (nat, nat))
 
 }
 
-pub broadcast proof fn lemma_space_pages(dom: Set<(nat, nat)>, a: nat, vp: nat)
+pub broadcast proof fn lemma_space_pages(dom: Set<(nat, nat)>, a: nat, vpage: nat)
     ensures
-        #[trigger] space_pages(dom, a).contains(vp) <==> dom.contains((a, vp)),
+        #[trigger] space_pages(dom, a).contains(vpage) <==> dom.contains((a, vpage)),
 {
     broadcast use Set::lemma_map_by_contains;
 
 }
 
-/// The frame a leaf entry for `vp` must name: the frame holding the object the page maps.
+/// The frame a leaf entry for `vpage` must name: the frame holding the object the page maps.
 pub open spec fn walk_target(
     vmap: Map<(nat, nat), Option<ObjId>>,
     obj_to_frame: Map<ObjId, Option<FrameId>>,
     a: nat,
-    vp: nat,
+    vpage: nat,
 ) -> Option<FrameId> {
-    match vmap[(a, vp)] {
+    match vmap[(a, vpage)] {
         Option::None => Option::None,
         Option::Some(o) => obj_to_frame[o],
     }
@@ -1132,7 +1281,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
     #[invariant]
     pub spec fn pages_governed(&self) -> bool {
         forall|k: (nat, nat)| #[trigger] self.vmem_dom.contains(k)
-            ==> self.vmap_dom.contains((k.0, vpage::<A>(k.1)))
+            ==> self.vmap_dom.contains((k.0, addr_to_vpage::<A>(k.1)))
     }
 
     /// Every page is describable by `levels` entry indices, so distinct pages differ somewhere a
@@ -1153,8 +1302,8 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
     #[invariant]
     pub spec fn certificates_backed(&self) -> bool {
         forall|k: (nat, nat)| #[trigger] self.vmem_dom.contains(k) && self.vmem[k] is Some ==> {
-            &&& self.vmap[(k.0, vpage::<A>(k.1))] is Some
-            &&& self.vmem[k]->Some_0 == oid_of::<A>(self.vmap[(k.0, vpage::<A>(k.1))]->Some_0, k.1)
+            &&& self.vmap[(k.0, addr_to_vpage::<A>(k.1))] is Some
+            &&& self.vmem[k]->Some_0 == oid_of::<A>(self.vmap[(k.0, addr_to_vpage::<A>(k.1))]->Some_0, k.1)
         }
     }
 
@@ -1214,8 +1363,8 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
     }
 
     /// The level a walk starts at.
-    pub open spec fn top(&self) -> nat {
-        (self.levels - 1) as nat
+    pub open spec fn top(&self) -> PageLevel {
+        PageLevel::from_nat((self.levels - 1) as nat)
     }
 
     /// The recorded remap target is the entry where the walk really stops.
@@ -1256,8 +1405,8 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
     /// an object whose words can be read; frames holding data may be shared freely.
     #[invariant]
     pub spec fn path_frames_solo(&self) -> bool {
-        forall|k: (nat, nat), l: nat|
-            self.vmap_dom.contains(k) && l <= self.top() && #[trigger] walk_at::<A>(
+        forall|k: (nat, nat), l: PageLevel|
+            self.vmap_dom.contains(k) && l.depth() <= self.top().depth() && #[trigger] walk_at::<A>(
                 self.data,
                 self.frozen,
                 self.frame_to_objs,
@@ -1328,9 +1477,9 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             require frames.contains(root);
             require forall|f: FrameId| #[trigger] frames.contains(f)
                 ==> f.0 <= usize::MAX && encodable::<A>(f.0 as usize);
-            require forall|v: nat| #[trigger] vaddrs.contains(v) ==> vpages.contains(vpage::<A>(v));
-            require forall|vp: nat| #[trigger] vpages.contains(vp)
-                ==> vp < pow(PTPage::<A>::count() as int, levels);
+            require forall|v: nat| #[trigger] vaddrs.contains(v) ==> vpages.contains(addr_to_vpage::<A>(v));
+            require forall|vpage: nat| #[trigger] vpages.contains(vpage)
+                ==> vpage < pow(PTPage::<A>::count() as int, levels);
             init data = Map::new(obj_ids::<A>(ObjId(0)), |c: WordId| absent_word());
             init frozen = Map::empty();
             init obj_to_frame = Map::empty().insert(ObjId(0), Some(root));
@@ -1351,7 +1500,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             init vmap_dom = space_keys(boot_asid, vpages);
             init leaf_id = Map::new(
                 space_keys(boot_asid, vpages),
-                |k: (nat, nat)| Some(entry_id::<A>(ObjId(0), k.1, (levels - 1) as nat)),
+                |k: (nat, nat)| Some(entry_id::<A>(ObjId(0), k.1, PageLevel::from_nat((levels - 1) as nat))),
             );
             init vmem = Map::new(space_keys(boot_asid, vaddrs), |k: (nat, nat)| Option::<WordId>::None);
             init vmem_dom = space_keys(boot_asid, vaddrs);
@@ -1435,9 +1584,9 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
                 |k: (nat, nat)| if k.0 != a {
                     pre.leaf_id[k]
                 } else if !PTEntry::<A>::spec_from_bits(
-                    words[entry_id::<A>(robj, k.1, (pre.levels - 1) as nat)],
+                    words[entry_id::<A>(robj, k.1, PageLevel::from_nat((pre.levels - 1) as nat))],
                 ).is_table_spec(PageLevel::from_nat((pre.levels - 1) as nat)) {
-                    Some(entry_id::<A>(nobj, k.1, (pre.levels - 1) as nat))
+                    Some(entry_id::<A>(nobj, k.1, PageLevel::from_nat((pre.levels - 1) as nat)))
                 } else {
                     pre.leaf_id[(src, k.1)]
                 },
@@ -1606,7 +1755,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             assert(obj_ids::<A>(robj).contains(WordId((robj.0 + i) as nat)));
         }
 
-        assert forall|k: (nat, nat), l: nat| post.vmap_dom.contains(k) && l <= top implies
+        assert forall|k: (nat, nat), l: PageLevel| post.vmap_dom.contains(k) && l.depth() <= top.depth() implies
             #[trigger] walk_at::<A>(
             post.data,
             post.frozen,
@@ -1626,7 +1775,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
         ) || (k.0 == a && l == top) by {
             if k.0 == a {
                 assert(pre.vmap_dom.contains((src, k.1)));
-                if l < top {
+                if l.depth() < top.depth() {
                     lemma_walk_at_root_copy::<A>(
                         post.data,
                         post.frozen,
@@ -1637,6 +1786,9 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
                         l,
                         k.1,
                     );
+                } else {
+                    PageLevel::lemma_eq_by_depth(l, top);
+                    assert(l == top);
                 }
             }
         }
@@ -1684,8 +1836,8 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
                 k.1,
                 c,
             ) implies post.pt_words.contains(c) by {
-            let l = choose|l: nat|
-                l <= top && #[trigger] path_id_at::<A>(
+            let l = choose|l: PageLevel|
+                l.depth() <= top.depth() && #[trigger] path_id_at::<A>(
                     post.data,
                     post.frozen,
                     post.frame_to_objs,
@@ -1757,14 +1909,15 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             assert(pre.vmap_dom.contains((s, k.1)));
             if k.0 == a {
                 lemma_pgtbl_idx_bounded::<A>(k.1, top);
-                assert(entry_id::<A>(robj, k.1, top) == WordId((robj.0 + pgtbl_idx::<A>(page_base::<A>(k.1), top) as nat) as nat));
-                assert(entry_id::<A>(nobj, k.1, top) == WordId((nobj.0 + pgtbl_idx::<A>(page_base::<A>(k.1), top) as nat) as nat));
+                assert(entry_id::<A>(robj, k.1, top) == WordId((robj.0 + pgtbl_idx::<A>(page_base::<A>(k.1), top.depth() as nat) as nat) as nat));
+                assert(entry_id::<A>(nobj, k.1, top) == WordId((nobj.0 + pgtbl_idx::<A>(page_base::<A>(k.1), top.depth() as nat) as nat) as nat));
                 assert(word_at(
                     post.data,
                     post.frozen,
                     entry_id::<A>(nobj, k.1, top),
                 ) == words[entry_id::<A>(robj, k.1, top)]);
                 assert(resident(post.frame_to_objs, nroot) == nobj);
+                PageLevel::lemma_zero_depth_le(top);
                 lemma_resting_level_root_copy::<A>(
                     post.data,
                     post.frozen,
@@ -1772,20 +1925,20 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
                     nroot,
                     pre.cr3[src],
                     top,
-                    0,
+                    PageLevel::from_nat(0),
                     k.1,
                 );
                 let e = PTEntry::<A>::spec_from_bits(
                     words[entry_id::<A>(robj, k.1, top)],
                 );
-                if !e.is_table_spec(PageLevel::from_nat(top)) {
+                if !e.is_table_spec(top) {
                     lemma_resting_level_top_if_not_table::<A>(
                         post.data,
                         post.frozen,
                         post.frame_to_objs,
                         nroot,
                         top,
-                        0,
+                        PageLevel::from_nat(0),
                         k.1,
                     );
                 } else {
@@ -1864,8 +2017,8 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
                 assert(view.submap_of(pre.vmap));
             }
         }
-        assert forall|k: (nat, nat), l: nat|
-            post.vmap_dom.contains(k) && l <= top && #[trigger] walk_at::<A>(
+        assert forall|k: (nat, nat), l: PageLevel|
+            post.vmap_dom.contains(k) && l.depth() <= top.depth() && #[trigger] walk_at::<A>(
                 post.data,
                 post.frozen,
                 post.frame_to_objs,
@@ -1964,14 +2117,14 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             assert(post.frame_to_objs[root].contains(post.frame_to_objs[root].choose()));
         }
         lemma_absent_word::<A>();
-        assert forall|vp: nat, l: nat| l <= post.top() implies #[trigger] walk_at::<A>(
+        assert forall|vpage: nat, l: PageLevel| l.depth() <= post.top().depth() implies #[trigger] walk_at::<A>(
             post.data,
             post.frozen,
             post.frame_to_objs,
             root,
             post.top(),
             l,
-            vp,
+            vpage,
         ) == if l == post.top() {
             Some(root)
         } else {
@@ -1984,7 +2137,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
                 root,
                 post.top(),
                 l,
-                vp,
+                vpage,
             );
         }
         assert forall|k: (nat, nat)| #[trigger] post.vmap_dom.contains(k) implies translate::<A>(
@@ -1995,6 +2148,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             post.top(),
             k.1,
         ) == walk_target(post.vmap, post.obj_to_frame, k.0, k.1) by {
+            PageLevel::lemma_zero_depth_le(post.top());
             lemma_pgtbl_idx_bounded::<A>(k.1, post.top());
             assert(obj_ids::<A>(ObjId(0)).contains(path_id::<A>(
                 post.frame_to_objs,
@@ -2008,12 +2162,12 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
                 post.frame_to_objs,
                 root,
                 post.top(),
-                0,
+                PageLevel::from_nat(0),
                 k.1,
             );
         }
-        assert forall|k: (nat, nat), l: nat|
-            post.vmap_dom.contains(k) && l <= post.top() && #[trigger] walk_at::<A>(
+        assert forall|k: (nat, nat), l: PageLevel|
+            post.vmap_dom.contains(k) && l.depth() <= post.top().depth() && #[trigger] walk_at::<A>(
                 post.data,
                 post.frozen,
                 post.frame_to_objs,
@@ -2046,8 +2200,8 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
                 k.1,
                 c,
             ) implies post.pt_words.contains(c) by {
-            let l = choose|l: nat|
-                l <= post.top() && #[trigger] path_id_at::<A>(
+            let l = choose|l: PageLevel|
+                l.depth() <= post.top().depth() && #[trigger] path_id_at::<A>(
                     post.data,
                     post.frozen,
                     post.frame_to_objs,
@@ -2068,6 +2222,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             post.top(),
             k.1,
         ) by {
+            PageLevel::lemma_zero_depth_le(post.top());
             lemma_pgtbl_idx_bounded::<A>(k.1, post.top());
             assert(obj_ids::<A>(ObjId(0)).contains(path_id::<A>(
                 post.frame_to_objs,
@@ -2081,7 +2236,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
                 post.frame_to_objs,
                 root,
                 post.top(),
-                0,
+                PageLevel::from_nat(0),
                 k.1,
             );
         }
@@ -2096,37 +2251,44 @@ pub proof fn lemma_boot_walk_at<A: ArchPagingMeta>(
     frozen: Map<WordId, usize>,
     frame_to_objs: Map<FrameId, Set<ObjId>>,
     cr3: FrameId,
-    top: nat,
-    level: nat,
-    vp: nat,
+    top: PageLevel,
+    level: PageLevel,
+    vpage: nat,
 )
     requires
-        level <= top,
+        level.depth() <= top.depth(),
         resident(frame_to_objs, cr3) == ObjId(0),
         PTPage::<A>::count() > 0,
         forall|c: WordId| #[trigger] obj_ids::<A>(ObjId(0)).contains(c) ==> word_at(data, frozen, c)
             == absent_word(),
     ensures
-        walk_at::<A>(data, frozen, frame_to_objs, cr3, top, level, vp) == if level == top {
+        walk_at::<A>(data, frozen, frame_to_objs, cr3, top, level, vpage) == if level == top {
             Some(cr3)
         } else {
             Option::<FrameId>::None
         },
-    decreases top - level,
+    decreases top.depth() - level.depth(),
 {
     lemma_absent_word::<A>();
-    if level < top {
-        let up = (level + 1) as nat;
-        lemma_boot_walk_at::<A>(data, frozen, frame_to_objs, cr3, top, up, vp);
+    if level.depth() < top.depth() {
+        assert(level != top);
+        let up = PageLevel::from_nat(level.depth() as nat + 1);
+        lemma_up_level(level, top);
+        lemma_boot_walk_at::<A>(data, frozen, frame_to_objs, cr3, top, up, vpage);
         if up == top {
-            lemma_pgtbl_idx_bounded::<A>(vp, up);
-            assert(obj_ids::<A>(ObjId(0)).contains(path_id::<A>(frame_to_objs, cr3, vp, up)));
+            lemma_pgtbl_idx_bounded::<A>(vpage, up);
+            assert(obj_ids::<A>(ObjId(0)).contains(path_id::<A>(frame_to_objs, cr3, vpage, up)));
+            assert(word_at(data, frozen, path_id::<A>(frame_to_objs, cr3, vpage, up)) == absent_word());
         }
+        assert(walk_at::<A>(data, frozen, frame_to_objs, cr3, top, level, vpage) is None);
+    } else {
+        PageLevel::lemma_eq_by_depth(level, top);
+        assert(level == top);
     }
 }
 
 
-/// The words a walk of `vp` reads are untouched by a step that changes only `oid`, a word no
+/// The words a walk of `vpage` reads are untouched by a step that changes only `oid`, a word no
 /// table holds.
 pub proof fn lemma_path_words<A: ArchPagingMeta>(
     pre: Mem::State<A>,
@@ -2197,7 +2359,7 @@ pub proof fn lemma_frames_local<A: ArchPagingMeta>(
         post.walk_agrees(),
         post.paths_in_tables(),
         post.leaf_ids_agree(),
-        forall|k: (nat, nat), l: nat| #[trigger]
+        forall|k: (nat, nat), l: PageLevel| #[trigger]
             walk_at::<A>(
                 post.data,
                 post.frozen,
@@ -2216,7 +2378,7 @@ pub proof fn lemma_frames_local<A: ArchPagingMeta>(
                 k.1,
             ) || !pre.vmap_dom.contains(k),
 {
-    assert forall|k: (nat, nat), l: nat| pre.vmap_dom.contains(k) implies #[trigger] walk_at::<A>(
+    assert forall|k: (nat, nat), l: PageLevel| pre.vmap_dom.contains(k) implies #[trigger] walk_at::<A>(
         post.data,
         post.frozen,
         post.frame_to_objs,
@@ -2260,6 +2422,7 @@ pub proof fn lemma_frames_local<A: ArchPagingMeta>(
         pre.top(),
         k.1,
     ) by {
+        PageLevel::lemma_zero_depth_le(pre.top());
         lemma_resting_level_frames::<A>(
             pre.data,
             pre.frozen,
@@ -2268,7 +2431,7 @@ pub proof fn lemma_frames_local<A: ArchPagingMeta>(
             live,
             pre.cr3[k.0],
             pre.top(),
-            0,
+            PageLevel::from_nat(0),
             k.1,
         );
         lemma_resting_level_bounds::<A>(
@@ -2277,7 +2440,7 @@ pub proof fn lemma_frames_local<A: ArchPagingMeta>(
             pre.frame_to_objs,
             pre.cr3[k.0],
             pre.top(),
-            0,
+            PageLevel::from_nat(0),
             k.1,
         );
         let l = resting_level::<A>(
@@ -2286,7 +2449,7 @@ pub proof fn lemma_frames_local<A: ArchPagingMeta>(
             pre.frame_to_objs,
             pre.cr3[k.0],
             pre.top(),
-            0,
+            PageLevel::from_nat(0),
             k.1,
         );
         let f = walk_at::<A>(
@@ -2310,6 +2473,7 @@ pub proof fn lemma_frames_local<A: ArchPagingMeta>(
         post.top(),
         k.1,
     ) by {
+        PageLevel::lemma_zero_depth_le(pre.top());
         lemma_resting_level_frames::<A>(
             pre.data,
             pre.frozen,
@@ -2318,7 +2482,7 @@ pub proof fn lemma_frames_local<A: ArchPagingMeta>(
             live,
             pre.cr3[k.0],
             pre.top(),
-            0,
+            PageLevel::from_nat(0),
             k.1,
         );
         lemma_resting_level_bounds::<A>(
@@ -2327,7 +2491,7 @@ pub proof fn lemma_frames_local<A: ArchPagingMeta>(
             pre.frame_to_objs,
             pre.cr3[k.0],
             pre.top(),
-            0,
+            PageLevel::from_nat(0),
             k.1,
         );
         let l = resting_level::<A>(
@@ -2336,7 +2500,7 @@ pub proof fn lemma_frames_local<A: ArchPagingMeta>(
             pre.frame_to_objs,
             pre.cr3[k.0],
             pre.top(),
-            0,
+            PageLevel::from_nat(0),
             k.1,
         );
         let f = walk_at::<A>(
@@ -2361,8 +2525,8 @@ pub proof fn lemma_frames_local<A: ArchPagingMeta>(
             k.1,
             c,
         ) implies post.pt_words.contains(c) by {
-        let l = choose|l: nat|
-            l <= post.top() && #[trigger] path_id_at::<A>(
+        let l = choose|l: PageLevel|
+            l.depth() <= post.top().depth() && #[trigger] path_id_at::<A>(
                 post.data,
                 post.frozen,
                 post.frame_to_objs,
@@ -2445,7 +2609,7 @@ pub proof fn lemma_words_local<A: ArchPagingMeta>(
         post.path_frames_solo(),
         post.paths_in_tables(),
         post.leaf_ids_agree(),
-        forall|k: (nat, nat), l: nat| pre.vmap_dom.contains(k) && l <= pre.top() ==> #[trigger]
+        forall|k: (nat, nat), l: PageLevel| pre.vmap_dom.contains(k) && l.depth() <= pre.top().depth() ==> #[trigger]
             walk_at::<A>(
                 post.data,
                 post.frozen,
@@ -2464,7 +2628,7 @@ pub proof fn lemma_words_local<A: ArchPagingMeta>(
                 k.1,
             ),
 {
-    assert forall|k: (nat, nat), l: nat| post.vmap_dom.contains(k) && l <= post.top() implies
+    assert forall|k: (nat, nat), l: PageLevel| post.vmap_dom.contains(k) && l.depth() <= post.top().depth() implies
         #[trigger] walk_at::<A>(
         post.data,
         post.frozen,
@@ -2524,6 +2688,7 @@ pub proof fn lemma_words_local<A: ArchPagingMeta>(
         post.top(),
         k.1,
     ) by {
+        PageLevel::lemma_zero_depth_le(pre.top());
         assert(pre.vmap_dom.contains(k));
         assert(pre.cr3.dom().contains(k.0));
         assert(post.cr3.dom().contains(k.0));
@@ -2544,7 +2709,7 @@ pub proof fn lemma_words_local<A: ArchPagingMeta>(
             pre.frame_to_objs,
             pre.cr3[k.0],
             pre.top(),
-            0,
+            PageLevel::from_nat(0),
             k.1,
         );
         assert(resting_level::<A>(
@@ -2553,7 +2718,7 @@ pub proof fn lemma_words_local<A: ArchPagingMeta>(
             pre.frame_to_objs,
             pre.cr3[k.0],
             pre.top(),
-            0,
+            PageLevel::from_nat(0),
             k.1,
         ) == resting_level::<A>(
             post.data,
@@ -2561,7 +2726,7 @@ pub proof fn lemma_words_local<A: ArchPagingMeta>(
             post.frame_to_objs,
             post.cr3[k.0],
             post.top(),
-            0,
+            PageLevel::from_nat(0),
             k.1,
         ));
         lemma_resting_level_bounds::<A>(
@@ -2570,7 +2735,7 @@ pub proof fn lemma_words_local<A: ArchPagingMeta>(
             pre.frame_to_objs,
             pre.cr3[k.0],
             pre.top(),
-            0,
+            PageLevel::from_nat(0),
             k.1,
         );
         let l = resting_level::<A>(
@@ -2579,7 +2744,7 @@ pub proof fn lemma_words_local<A: ArchPagingMeta>(
             pre.frame_to_objs,
             pre.cr3[k.0],
             pre.top(),
-            0,
+            PageLevel::from_nat(0),
             k.1,
         );
         lemma_walk_at_local::<A>(
@@ -2619,8 +2784,8 @@ pub proof fn lemma_words_local<A: ArchPagingMeta>(
             k.1,
             c,
         ) implies post.pt_words.contains(c) by {
-        let l = choose|l: nat|
-            l <= post.top() && #[trigger] path_id_at::<A>(
+        let l = choose|l: PageLevel|
+            l.depth() <= post.top().depth() && #[trigger] path_id_at::<A>(
                 post.data,
                 post.frozen,
                 post.frame_to_objs,
