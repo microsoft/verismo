@@ -199,6 +199,32 @@ impl<A: ArchPagingMeta> PhyMemView<A> {
         let rest = self.walk_leaf_ptbl(cr3, top, vpage);
         self.path_id(rest.0, vpage, rest.1)
     }
+
+    /// Whether a walk of `vpage` from `frame` at `level` runs over a bare table skeleton: it
+    /// stays inside `frames` and maps nothing.
+    ///
+    /// Keyed on the walk rather than stated entry by entry, because whether an entry maps a page
+    /// is not a property of the entry alone -- the same word is a table pointer at one level and
+    /// a mapping at another, so only the level a walk reads it at decides.
+    pub open spec fn skeleton_walk(
+        &self,
+        frames: Set<FrameId>,
+        frame: FrameId,
+        level: PageLevel,
+        vpage: nat,
+    ) -> bool
+        decreases level.depth(),
+    {
+        let e = PTEntry::<A>::spec_from_bits(self.word_at(self.path_id(frame, vpage, level)));
+        &&& !e.is_leaf_spec(level)
+        &&& match level.spec_child() {
+            Option::None => true,
+            Option::Some(child) => e.is_table_spec(level) ==> {
+                &&& frames.contains(FrameId(e.page_frame_spec() as nat))
+                &&& self.skeleton_walk(frames, FrameId(e.page_frame_spec() as nat), child, vpage)
+            },
+        }
+    }
 }
 
 /// Pages covered by a leaf at `level` are consecutive frames starting at the entry's frame.
@@ -1073,11 +1099,16 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
         ) == walk_target(self.vmap, self.obj_to_frame, k.0, k.1)
     }
 
-    /// Boot brings up one CPU running one kernel thread, so there is a single address space on
-    /// an all-absent root. It governs the whole available address range, and further threads
-    /// join later through [`spawn`](Self::spawn).
+    /// Boot brings up one CPU running one kernel thread on page tables the platform has already
+    /// built. What it accepts is a *skeleton*: any number of table pages, wired to each other
+    /// however the builder liked, but mapping nothing -- so the address space starts out empty
+    /// and every page is claimed through the mapping transitions. Further threads join later
+    /// through [`spawn`](Self::spawn).
     init!{
         boot(
+            view: PhyMemView<A>,
+            obj_to_frame: Map<ObjId, Option<FrameId>>,
+            next_oid: nat,
             frames: Set<FrameId>,
             vpages: Set<nat>,
             vaddrs: Set<nat>,
@@ -1085,33 +1116,60 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             root: FrameId,
             top: PageLevel,
         ) {
-            require frames.contains(root);
+            require view.frozen =~= Map::empty();
+            require view.frame_to_objs.dom().subset_of(frames);
+            require view.frame_to_objs.dom().contains(root);
             require forall|f: FrameId| #[trigger] frames.contains(f)
                 ==> f.0 <= usize::MAX && encodable::<A>(f.0 as usize);
             require forall|v: nat| #[trigger] vaddrs.contains(v) ==> vpages.contains(addr_to_vpage::<A>(v));
             require forall|vpage: nat| #[trigger] vpages.contains(vpage)
                 ==> vpage < pow(PTPage::<A>::count() as int, (top.depth() + 1) as nat);
-            init data = Map::new(obj_ids::<A>(ObjId(0)), |c: WordId| absent_word());
+
+            // Every page handed over is a table page, so it is the sole resident of its frame.
+            require forall|f: FrameId| #[trigger] view.frame_to_objs.dom().contains(f)
+                ==> view.frame_to_objs[f] =~= Set::<ObjId>::empty().insert(view.resident(f));
+            require forall|f: FrameId| #[trigger] view.frame_to_objs.dom().contains(f) ==> {
+                &&& obj_to_frame.dom().contains(view.resident(f))
+                &&& obj_to_frame[view.resident(f)] == Some(f)
+            };
+            require forall|b: ObjId| #[trigger] obj_to_frame.dom().contains(b) ==> {
+                &&& obj_to_frame[b] is Some
+                &&& view.frame_to_objs.dom().contains(obj_to_frame[b]->Some_0)
+                &&& view.resident(obj_to_frame[b]->Some_0) == b
+                &&& obj_ids::<A>(b).subset_of(view.data.dom())
+            };
+            require forall|b1: ObjId, b2: ObjId, c: WordId|
+                obj_to_frame.dom().contains(b1) && #[trigger] obj_to_frame.dom().contains(b2)
+                    && #[trigger] obj_ids::<A>(b1).contains(c) && obj_ids::<A>(b2).contains(c)
+                    ==> b1 == b2;
+
+            // Ids already handed out stay below the watermark, so freshly minted ones are fresh.
+            require forall|c: WordId| #[trigger] view.data.dom().contains(c) ==> c.0 < next_oid;
+            require forall|b: ObjId| #[trigger] obj_to_frame.dom().contains(b)
+                ==> b.0 + PTPage::<A>::count() <= next_oid;
+
+            // The tables map nothing and point nowhere else.
+            require forall|vpage: nat| #[trigger] vpages.contains(vpage)
+                ==> view.skeleton_walk(view.frame_to_objs.dom(), root, top, vpage);
+
+            init data = view.data;
             init frozen = Map::empty();
-            init obj_to_frame = Map::empty().insert(ObjId(0), Some(root));
-            init frame_to_objs = Map::<FrameId, Set<ObjId>>::empty().insert(
-                root,
-                Set::<ObjId>::empty().insert(ObjId(0)),
-            );
-            init allocated = Set::<FrameId>::empty().insert(root);
+            init obj_to_frame = obj_to_frame;
+            init frame_to_objs = view.frame_to_objs;
+            init allocated = view.frame_to_objs.dom();
             init frames_dom = frames;
             init asids = Set::<nat>::empty().insert(boot_asid);
             init cpus = Map::<nat, nat>::empty().insert(0, boot_asid);
             init next_asid = boot_asid + 1;
             init cr3 = Map::<nat, FrameId>::empty().insert(boot_asid, root);
             init top = top;
-            init next_oid = PTPage::<A>::count();
-            init pt_words = obj_ids::<A>(ObjId(0));
+            init next_oid = next_oid;
+            init pt_words = view.data.dom();
             init vmap = Map::new(space_keys(boot_asid, vpages), |k: (nat, nat)| Option::<ObjId>::None);
             init vmap_dom = space_keys(boot_asid, vpages);
             init leaf_id = Map::new(
                 space_keys(boot_asid, vpages),
-                |k: (nat, nat)| Some(entry_id::<A>(ObjId(0), k.1, top)),
+                |k: (nat, nat)| Some(view.resting_path_id(root, top, k.1)),
             );
             init vmem = Map::new(space_keys(boot_asid, vaddrs), |k: (nat, nat)| Option::<WordId>::None);
             init vmem_dom = space_keys(boot_asid, vaddrs);
@@ -1589,6 +1647,9 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
     #[inductive(boot)]
     fn boot_inductive(
         post: Self,
+        view: PhyMemView<A>,
+        obj_to_frame: Map<ObjId, Option<FrameId>>,
+        next_oid: nat,
         frames: Set<FrameId>,
         vpages: Set<nat>,
         vaddrs: Set<nat>,
@@ -1601,18 +1662,23 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
         assert(post.cr3.dom() =~= post.asids);
         assert(post.vmap.dom() =~= post.vmap_dom);
         assert(post.vmem.dom() =~= post.vmem_dom);
-        assert(post.frame_to_objs[root] =~= Set::<ObjId>::empty().insert(ObjId(0)));
-        assert(post.phy_view().resident(root) == ObjId(0)) by {
-            assert(post.frame_to_objs[root].contains(ObjId(0)));
-            assert(post.frame_to_objs[root].contains(post.frame_to_objs[root].choose()));
+        assert(post.phy_view() =~= view) by {
+            assert(post.frozen =~= view.frozen);
         }
-        lemma_absent_word::<A>();
+        assert forall|b1: ObjId, b2: ObjId, off: nat|
+            post.obj_to_frame.dom().contains(b1) && #[trigger] post.obj_to_frame.dom().contains(b2)
+                && post.obj_to_frame[b1] is Some && post.obj_to_frame[b1] == post.obj_to_frame[b2]
+                && off < PTPage::<A>::count()
+            implies #[trigger] post.phy_view().word_at(WordId((b1.0 + off) as nat))
+                == post.phy_view().word_at(WordId((b2.0 + off) as nat)) by {
+            assert(b1 == view.resident(post.obj_to_frame[b1]->Some_0));
+        }
         assert forall|k: (nat, nat)| #[trigger] post.vmap_dom.contains(k) implies post.phy_view().translate(
             post.cr3[k.0],
             post.top,
             k.1,
         ) == walk_target(post.vmap, post.obj_to_frame, k.0, k.1) by {
-            lemma_boot_walk_leaf_entry(post.phy_view(), root, post.top, k.1);
+            lemma_skeleton_translate(view, post.allocated, root, post.top, k.1);
         }
         assert forall|k: (nat, nat), f: FrameId|
             post.vmap_dom.contains(k) && #[trigger] post.phy_view().walk_visits(
@@ -1624,9 +1690,8 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
                 &&& post.allocated.contains(f)
                 &&& exists|o: ObjId| post.frame_to_objs[f] =~= Set::<ObjId>::empty().insert(o)
             } by {
-            assert(post.cr3[k.0] == root);
-            lemma_boot_walk_leaf_entry(post.phy_view(), root, post.top, k.1);
-            assert(post.frame_to_objs[root] =~= Set::<ObjId>::empty().insert(ObjId(0)));
+            lemma_skeleton_visits(view, post.allocated, root, post.top, k.1, f);
+            assert(post.frame_to_objs[f] =~= Set::<ObjId>::empty().insert(view.resident(f)));
         }
         assert forall|k: (nat, nat), c: WordId|
             post.vmap_dom.contains(k) && #[trigger] post.phy_view().on_walk_path(
@@ -1635,44 +1700,188 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
                 k.1,
                 c,
             ) implies post.pt_words.contains(c) by {
-            lemma_boot_walk_leaf_entry(post.phy_view(), root, post.top, k.1);
-        }
-        assert forall|k: (nat, nat)| #[trigger] post.vmap_dom.contains(k) implies post.leaf_id[k]
-            == Some(post.phy_view().resting_path_id(post.cr3[k.0], post.top, k.1)) by {
-            lemma_boot_walk_leaf_entry(post.phy_view(), root, post.top, k.1);
+            assert forall|g: FrameId| #[trigger] post.allocated.contains(g) implies obj_ids::<A>(
+                view.resident(g),
+            ).subset_of(post.pt_words) by {
+                assert(obj_to_frame.dom().contains(view.resident(g)));
+            }
+            lemma_skeleton_on_path(view, post.allocated, post.pt_words, root, post.top, k.1, c);
         }
     }
 });
 
 verus! {
 
-/// A tree whose entries are all absent stops the walk at the root.
-pub proof fn lemma_boot_walk_leaf_entry<A: ArchPagingMeta>(
+/// A walk over a skeleton stands only in the skeleton's own pages.
+pub proof fn lemma_skeleton_visits<A: ArchPagingMeta>(
     view: PhyMemView<A>,
-    cr3: FrameId,
+    frames: Set<FrameId>,
+    frame: FrameId,
+    level: PageLevel,
+    vpage: nat,
+    f: FrameId,
+)
+    requires
+        view.skeleton_walk(frames, frame, level, vpage),
+        frames.contains(frame),
+        view.walk_visits(frame, level, vpage, f),
+    ensures
+        frames.contains(f),
+    decreases level.depth(),
+{
+    let e = PTEntry::<A>::spec_from_bits(view.word_at(view.path_id(frame, vpage, level)));
+    if e.is_table_spec(level) {
+        lemma_walk_step(view, frame, level, vpage);
+        let next = FrameId(e.page_frame_spec() as nat);
+        let child = level.spec_child()->Some_0;
+        if f != frame {
+            lemma_skeleton_visits(view, frames, next, child, vpage, f);
+        }
+    } else {
+        lemma_walk_leaf_ptbl_stops(view, frame, level, vpage);
+    }
+}
+
+/// A walk over a skeleton reads only words the skeleton's own pages hold.
+pub proof fn lemma_skeleton_on_path<A: ArchPagingMeta>(
+    view: PhyMemView<A>,
+    frames: Set<FrameId>,
+    words: Set<WordId>,
+    frame: FrameId,
+    level: PageLevel,
+    vpage: nat,
+    c: WordId,
+)
+    requires
+        view.skeleton_walk(frames, frame, level, vpage),
+        frames.contains(frame),
+        forall|g: FrameId| #[trigger]
+            frames.contains(g) ==> obj_ids::<A>(view.resident(g)).subset_of(words),
+        view.on_walk_path(frame, level, vpage, c),
+    ensures
+        words.contains(c),
+    decreases level.depth(),
+{
+    lemma_pgtbl_idx_bounded::<A>(vpage, level);
+    assert(obj_ids::<A>(view.resident(frame)).contains(view.path_id(frame, vpage, level)));
+    let e = PTEntry::<A>::spec_from_bits(view.word_at(view.path_id(frame, vpage, level)));
+    if e.is_table_spec(level) {
+        lemma_walk_step(view, frame, level, vpage);
+        let next = FrameId(e.page_frame_spec() as nat);
+        let child = level.spec_child()->Some_0;
+        if c != view.path_id(frame, vpage, level) {
+            lemma_skeleton_on_path(view, frames, words, next, child, vpage, c);
+        }
+    } else {
+        lemma_walk_leaf_ptbl_stops(view, frame, level, vpage);
+    }
+}
+
+/// A skeleton maps nothing: every walk over it comes to rest on an entry that is not a mapping.
+pub proof fn lemma_skeleton_translate<A: ArchPagingMeta>(
+    view: PhyMemView<A>,
+    frames: Set<FrameId>,
+    frame: FrameId,
+    level: PageLevel,
+    vpage: nat,
+)
+    requires
+        view.skeleton_walk(frames, frame, level, vpage),
+        frames.contains(frame),
+    ensures
+        view.translate(frame, level, vpage) is None,
+    decreases level.depth(),
+{
+    let e = PTEntry::<A>::spec_from_bits(view.word_at(view.path_id(frame, vpage, level)));
+    if e.is_table_spec(level) {
+        lemma_walk_step(view, frame, level, vpage);
+        let next = FrameId(e.page_frame_spec() as nat);
+        let child = level.spec_child()->Some_0;
+        lemma_skeleton_translate(view, frames, next, child, vpage);
+    } else {
+        lemma_walk_leaf_ptbl_stops(view, frame, level, vpage);
+    }
+}
+
+/// A tree whose entries are all absent stops the walk at the root, and so is the simplest
+/// skeleton [`boot`](Mem::State::boot) accepts.
+pub proof fn lemma_absent_root_skeleton<A: ArchPagingMeta>(
+    view: PhyMemView<A>,
+    frames: Set<FrameId>,
+    root: FrameId,
     top: PageLevel,
     vpage: nat,
 )
     requires
-        view.resident(cr3) == ObjId(0),
-        forall|c: WordId| #[trigger] obj_ids::<A>(ObjId(0)).contains(c) ==> view.word_at(c)
-            == absent_word(),
+        forall|c: WordId| #[trigger] obj_ids::<A>(view.resident(root)).contains(c)
+            ==> view.word_at(c) == absent_word(),
     ensures
-        view.walk_leaf_ptbl(cr3, top, vpage) == (cr3, top),
-        !PTEntry::<A>::spec_from_bits(
-            view.word_at(view.path_id(cr3, vpage, top)),
-        ).present_spec(),
-        obj_ids::<A>(ObjId(0)).contains(view.path_id(cr3, vpage, top)),
-        forall|c: WordId| #[trigger]
-            view.on_walk_path(cr3, top, vpage, c) == (c == view.path_id(cr3, vpage, top)),
-        forall|f: FrameId| #[trigger] view.walk_visits(cr3, top, vpage, f) == (f == cr3),
+        view.walk_leaf_ptbl(root, top, vpage) == (root, top),
+        view.skeleton_walk(frames, root, top, vpage),
 {
     lemma_absent_word::<A>();
     lemma_pgtbl_idx_bounded::<A>(vpage, top);
-    assert(obj_ids::<A>(ObjId(0)).contains(view.path_id(cr3, vpage, top)));
-    lemma_walk_leaf_ptbl_stops(view, cr3, top, vpage);
+    assert(obj_ids::<A>(view.resident(root)).contains(view.path_id(root, vpage, top)));
+    lemma_walk_leaf_ptbl_stops(view, root, top, vpage);
 }
 
+/// A lone root of absent entries meets every condition [`boot`](Mem::State::boot) imposes, so the
+/// state machine is startable: the preconditions that let it accept richer tables rule nothing in
+/// that the empty address space needed.
+pub proof fn lemma_boot_absent_root<A: ArchPagingMeta>(root: FrameId, top: PageLevel, vpage: nat)
+    ensures
+        ({
+            let view = PhyMemView::<A> {
+                data: Map::new(obj_ids::<A>(ObjId(0)), |c: WordId| absent_word()),
+                frozen: Map::empty(),
+                frame_to_objs: Map::<FrameId, Set<ObjId>>::empty().insert(
+                    root,
+                    Set::<ObjId>::empty().insert(ObjId(0)),
+                ),
+                marker: PhantomData,
+            };
+            let obj_to_frame = Map::<ObjId, Option<FrameId>>::empty().insert(ObjId(0), Some(root));
+            let next_oid = PTPage::<A>::count();
+            &&& view.frozen =~= Map::<WordId, usize>::empty()
+            &&& view.frame_to_objs.dom().contains(root)
+            &&& forall|f: FrameId| #[trigger] view.frame_to_objs.dom().contains(f)
+                ==> view.frame_to_objs[f] =~= Set::<ObjId>::empty().insert(view.resident(f))
+            &&& forall|f: FrameId| #[trigger] view.frame_to_objs.dom().contains(f) ==> {
+                &&& obj_to_frame.dom().contains(view.resident(f))
+                &&& obj_to_frame[view.resident(f)] == Some(f)
+            }
+            &&& forall|b: ObjId| #[trigger] obj_to_frame.dom().contains(b) ==> {
+                &&& obj_to_frame[b] is Some
+                &&& view.frame_to_objs.dom().contains(obj_to_frame[b]->Some_0)
+                &&& view.resident(obj_to_frame[b]->Some_0) == b
+                &&& obj_ids::<A>(b).subset_of(view.data.dom())
+            }
+            &&& forall|b1: ObjId, b2: ObjId, c: WordId|
+                obj_to_frame.dom().contains(b1) && #[trigger] obj_to_frame.dom().contains(b2)
+                    && #[trigger] obj_ids::<A>(b1).contains(c) && obj_ids::<A>(b2).contains(c)
+                    ==> b1 == b2
+            &&& forall|c: WordId| #[trigger] view.data.dom().contains(c) ==> c.0 < next_oid
+            &&& forall|b: ObjId| #[trigger] obj_to_frame.dom().contains(b)
+                ==> b.0 + PTPage::<A>::count() <= next_oid
+            &&& view.skeleton_walk(view.frame_to_objs.dom(), root, top, vpage)
+        }),
+{
+    let view = PhyMemView::<A> {
+        data: Map::new(obj_ids::<A>(ObjId(0)), |c: WordId| absent_word()),
+        frozen: Map::empty(),
+        frame_to_objs: Map::<FrameId, Set<ObjId>>::empty().insert(
+            root,
+            Set::<ObjId>::empty().insert(ObjId(0)),
+        ),
+        marker: PhantomData,
+    };
+    PTPage::<A>::lemma_count_positive();
+    broadcast use vstd::set_lib::group_set_lib_default;
+
+    assert(view.frame_to_objs[root].contains(ObjId(0)));
+    assert(view.resident(root) == ObjId(0));
+    lemma_absent_root_skeleton::<A>(view, view.frame_to_objs.dom(), root, top, vpage);
+}
 
 /// The words a walk of `vpage` reads are untouched by a step that changes only `oid`, a word no
 /// table holds.
