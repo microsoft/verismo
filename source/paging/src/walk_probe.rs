@@ -39,7 +39,7 @@ pub open spec fn page_base<A: ArchPagingMeta>(vpage: nat) -> nat {
 
 /// Id of the word an entry occupies.
 pub open spec fn entry_id<A: ArchPagingMeta>(table: ObjId, vpage: nat, level: PageLevel) -> WordId {
-    WordId((table.0 + pgtbl_idx::<A>(page_base::<A>(vpage), level.depth() as nat) as nat) as nat)
+    WordId((table.0 + pgtbl_idx::<A>(page_base::<A>(vpage), level) as nat) as nat)
 }
 
 /// A word, wherever it lives. Content is writable or frozen, never both.
@@ -380,32 +380,18 @@ pub proof fn lemma_page_base_div<A: ArchPagingMeta>(vpage: nat)
     lemma_div_by_multiple(vpage as int, page_size as int);
 }
 
-pub proof fn lemma_pgtbl_idx_page_base_step<A: ArchPagingMeta>(vpage: nat, level: nat)
+pub proof fn lemma_pgtbl_idx_page_base_step<A: ArchPagingMeta>(vpage: nat, level: PageLevel)
     requires
         PTPage::<A>::count() > 0,
-        level > 0,
+        level.spec_child() is Some,
     ensures
-        pgtbl_idx::<A>(page_base::<A>(vpage), level) == pgtbl_idx::<
-            A,
-        >(page_base::<A>(vpage / PTPage::<A>::count()), (level - 1) as nat),
+        pgtbl_idx::<A>(page_base::<A>(vpage), level) == pgtbl_idx::<A>(
+            page_base::<A>(vpage / PTPage::<A>::count()),
+            level.spec_child().unwrap(),
+        ),
 {
     lemma_pgtbl_idx_step::<A>(page_base::<A>(vpage), level);
     lemma_page_base_div::<A>(vpage);
-}
-
-/// An entry always lies inside its table page.
-pub proof fn lemma_pgtbl_idx_bounded_nat<A: ArchPagingMeta>(vpage: nat, level: nat)
-    requires
-        PTPage::<A>::count() > 0,
-    ensures
-        (pgtbl_idx::<A>(page_base::<A>(vpage), level) as nat) < PTPage::<A>::count(),
-    decreases level,
-{
-    lemma_page_base_div::<A>(vpage);
-    if level > 0 {
-        lemma_pgtbl_idx_page_base_step::<A>(vpage, level);
-        lemma_pgtbl_idx_bounded_nat::<A>(vpage / PTPage::<A>::count(), (level - 1) as nat);
-    }
 }
 
 /// An entry always lies inside its table page.
@@ -413,9 +399,15 @@ pub proof fn lemma_pgtbl_idx_bounded<A: ArchPagingMeta>(vpage: nat, level: PageL
     requires
         PTPage::<A>::count() > 0,
     ensures
-        (pgtbl_idx::<A>(page_base::<A>(vpage), level.depth() as nat) as nat) < PTPage::<A>::count(),
+        (pgtbl_idx::<A>(page_base::<A>(vpage), level) as nat) < PTPage::<A>::count(),
+    decreases level.depth(),
 {
-    lemma_pgtbl_idx_bounded_nat::<A>(vpage, level.depth() as nat);
+    lemma_page_base_div::<A>(vpage);
+    if let Some(child) = level.spec_child() {
+        PageLevel::lemma_child_decreases(level);
+        lemma_pgtbl_idx_page_base_step::<A>(vpage, level);
+        lemma_pgtbl_idx_bounded::<A>(vpage / PTPage::<A>::count(), child);
+    }
 }
 
 /// Two pages the walk cannot tell apart at any level are the same page, so an entry belongs to
@@ -423,9 +415,10 @@ pub proof fn lemma_pgtbl_idx_bounded<A: ArchPagingMeta>(vpage: nat, level: PageL
 pub proof fn lemma_pgtbl_idx_injective<A: ArchPagingMeta>(vpage1: nat, vpage2: nat, levels: nat)
     requires
         PTPage::<A>::count() > 0,
+        levels <= 5,
         vpage1 < pow(PTPage::<A>::count() as int, levels as nat),
         vpage2 < pow(PTPage::<A>::count() as int, levels as nat),
-        forall|l: nat| l < levels ==> (pgtbl_idx::<A>(page_base::<A>(vpage1), l) as nat) == (pgtbl_idx::<A>(page_base::<A>(vpage2), l) as nat),
+        forall|l: PageLevel| #![trigger pgtbl_idx::<A>(page_base::<A>(vpage1), l)] #![trigger pgtbl_idx::<A>(page_base::<A>(vpage2), l)] (l.depth() as nat) < levels ==> (pgtbl_idx::<A>(page_base::<A>(vpage1), l) as nat) == (pgtbl_idx::<A>(page_base::<A>(vpage2), l) as nat),
     ensures
         vpage1 == vpage2,
     decreases levels,
@@ -449,14 +442,15 @@ pub proof fn lemma_pgtbl_idx_injective<A: ArchPagingMeta>(vpage1: nat, vpage2: n
             e as int,
             pow(e as int, (levels - 1) as nat),
         );
-        assert forall|l: nat| l + 1 < levels implies #[trigger] (pgtbl_idx::<A>(page_base::<A>(vpage1 / e), l) as nat)
+        assert forall|l: PageLevel| (l.depth() as nat) + 1 < levels implies #[trigger] (pgtbl_idx::<A>(page_base::<A>(vpage1 / e), l) as nat)
             == (pgtbl_idx::<A>(page_base::<A>(vpage2 / e), l) as nat) by {
-            lemma_pgtbl_idx_page_base_step::<A>(vpage1, (l + 1) as nat);
-            lemma_pgtbl_idx_page_base_step::<A>(vpage2, (l + 1) as nat);
-            assert((pgtbl_idx::<A>(page_base::<A>(vpage1), l + 1) as nat) == (pgtbl_idx::<A>(page_base::<A>(vpage2), l + 1) as nat));
+            PageLevel::lemma_parent_depth(l);
+            lemma_pgtbl_idx_page_base_step::<A>(vpage1, l.spec_parent());
+            lemma_pgtbl_idx_page_base_step::<A>(vpage2, l.spec_parent());
+            assert((pgtbl_idx::<A>(page_base::<A>(vpage1), l.spec_parent()) as nat) == (pgtbl_idx::<A>(page_base::<A>(vpage2), l.spec_parent()) as nat));
         }
         lemma_pgtbl_idx_injective::<A>(vpage1 / e, vpage2 / e, (levels - 1) as nat);
-        assert((pgtbl_idx::<A>(page_base::<A>(vpage1), 0) as nat) == (pgtbl_idx::<A>(page_base::<A>(vpage2), 0) as nat));
+        assert((pgtbl_idx::<A>(page_base::<A>(vpage1), PageLevel::Level0) as nat) == (pgtbl_idx::<A>(page_base::<A>(vpage2), PageLevel::Level0) as nat));
         lemma_fundamental_div_mod(vpage1 as int, e as int);
         lemma_fundamental_div_mod(vpage2 as int, e as int);
     }
@@ -859,16 +853,16 @@ pub proof fn lemma_walk_at_root_copy<A: ArchPagingMeta>(
         assert(path_id::<A>(frame_to_objs, r1, vpage, PageLevel::from_nat(level.depth() as nat + 1)) == WordId((resident(
             frame_to_objs,
             r1,
-        ).0 + pgtbl_idx::<A>(page_base::<A>(vpage), top.depth() as nat) as nat) as nat));
+        ).0 + pgtbl_idx::<A>(page_base::<A>(vpage), top) as nat) as nat));
         assert(path_id::<A>(frame_to_objs, r2, vpage, PageLevel::from_nat(level.depth() as nat + 1)) == WordId((resident(
             frame_to_objs,
             r2,
-        ).0 + pgtbl_idx::<A>(page_base::<A>(vpage), top.depth() as nat) as nat) as nat));
-        assert(word_at(data, frozen, WordId((resident(frame_to_objs, r1).0 + pgtbl_idx::<A>(page_base::<A>(vpage), top.depth() as nat) as nat) as nat))
+        ).0 + pgtbl_idx::<A>(page_base::<A>(vpage), top) as nat) as nat));
+        assert(word_at(data, frozen, WordId((resident(frame_to_objs, r1).0 + pgtbl_idx::<A>(page_base::<A>(vpage), top) as nat) as nat))
             == word_at(
             data,
             frozen,
-            WordId((resident(frame_to_objs, r2).0 + pgtbl_idx::<A>(page_base::<A>(vpage), top.depth() as nat) as nat) as nat),
+            WordId((resident(frame_to_objs, r2).0 + pgtbl_idx::<A>(page_base::<A>(vpage), top) as nat) as nat),
         ));
     }
 }
@@ -1909,8 +1903,8 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             assert(pre.vmap_dom.contains((s, k.1)));
             if k.0 == a {
                 lemma_pgtbl_idx_bounded::<A>(k.1, top);
-                assert(entry_id::<A>(robj, k.1, top) == WordId((robj.0 + pgtbl_idx::<A>(page_base::<A>(k.1), top.depth() as nat) as nat) as nat));
-                assert(entry_id::<A>(nobj, k.1, top) == WordId((nobj.0 + pgtbl_idx::<A>(page_base::<A>(k.1), top.depth() as nat) as nat) as nat));
+                assert(entry_id::<A>(robj, k.1, top) == WordId((robj.0 + pgtbl_idx::<A>(page_base::<A>(k.1), top) as nat) as nat));
+                assert(entry_id::<A>(nobj, k.1, top) == WordId((nobj.0 + pgtbl_idx::<A>(page_base::<A>(k.1), top) as nat) as nat));
                 assert(word_at(
                     post.data,
                     post.frozen,

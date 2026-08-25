@@ -73,6 +73,18 @@ impl PageLevel {
         }
     }
 
+    /// The level one step up, saturating at level 4. Below level 4 it is the
+    /// inverse of `spec_child`.
+    pub open spec fn spec_parent(&self) -> PageLevel {
+        match self {
+            PageLevel::Level0 => PageLevel::Level1,
+            PageLevel::Level1 => PageLevel::Level2,
+            PageLevel::Level2 => PageLevel::Level3,
+            PageLevel::Level3 => PageLevel::Level4,
+            PageLevel::Level4 => PageLevel::Level4,
+        }
+    }
+
     pub open spec fn spec_is_leaf(&self) -> bool {
         match self {
             PageLevel::Level0 => true,
@@ -160,13 +172,8 @@ impl PageLevel {
         requires
             level.depth() < 4,
         ensures
-            (match level {
-                PageLevel::Level0 => PageLevel::Level1,
-                PageLevel::Level1 => PageLevel::Level2,
-                PageLevel::Level2 => PageLevel::Level3,
-                PageLevel::Level3 => PageLevel::Level4,
-                PageLevel::Level4 => PageLevel::Level4,
-            }).depth() == level.depth() as nat + 1,
+            level.spec_parent().depth() == level.depth() as nat + 1,
+            level.spec_parent().spec_child() == Some(level),
     {
         match level {
             PageLevel::Level0 => {},
@@ -181,13 +188,7 @@ impl PageLevel {
         requires
             level.depth() < 4,
         ensures
-            PageLevel::from_nat(level.depth() as nat + 1) == match level {
-                PageLevel::Level0 => PageLevel::Level1,
-                PageLevel::Level1 => PageLevel::Level2,
-                PageLevel::Level2 => PageLevel::Level3,
-                PageLevel::Level3 => PageLevel::Level4,
-                PageLevel::Level4 => PageLevel::Level4,
-            },
+            PageLevel::from_nat(level.depth() as nat + 1) == level.spec_parent(),
     {
         match level {
             PageLevel::Level0 => {},
