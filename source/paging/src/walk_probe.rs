@@ -66,110 +66,138 @@ impl<A: ArchPagingMeta> PhyMemView<A> {
     pub open spec fn resident(&self, frame: FrameId) -> ObjId {
         self.frame_to_objs[frame].choose()
     }
-}
 
-/// Id of the entry a walk of `vpage` reads while standing in `frame` at `level`.
-pub open spec fn path_id<A: ArchPagingMeta>(
-    view: PhyMemView<A>,
-    frame: FrameId,
-    vpage: nat,
-    level: PageLevel,
-) -> WordId {
-    entry_id::<A>(view.resident(frame), vpage, level)
-}
+    /// Id of the entry a walk of `vpage` reads while standing in `frame` at `level`.
+    pub open spec fn path_id(
+        &self,
+        frame: FrameId,
+        vpage: nat,
+        level: PageLevel,
+    ) -> WordId {
+        entry_id::<A>(self.resident(frame), vpage, level)
+    }
 
-/// Where a walk of `vpage` comes to rest, starting from the page `frame` at `level`: the page it
-/// ends up standing in, and the level that page sits at.
-///
-/// A function of memory alone, and keyed on the level rather than on the page, so a frame that
-/// is reached at two levels -- a self-mapped table -- gets a separate answer at each. The walk
-/// stops where `spec_child` runs out, because below the leaf there is nothing to descend into:
-/// the hardware reads bit 7 of a level 0 entry as PAT rather than PS, so an entry that looks
-/// like a table pointer there is a mapping.
-pub open spec fn walk_rest<A: ArchPagingMeta>(
-    view: PhyMemView<A>,
-    frame: FrameId,
-    level: PageLevel,
-    vpage: nat,
-) -> (FrameId, PageLevel)
-    decreases level.depth(),
-{
-    let e = PTEntry::<A>::spec_from_bits(view.word_at(path_id(view, frame, vpage, level)));
-    match level.spec_child() {
-        Option::None => (frame, level),
-        Option::Some(child) => if e.is_table_spec(level) {
-            walk_rest(view, FrameId(e.page_frame_spec() as nat), child, vpage)
+    /// Where a walk of `vpage` comes to rest, starting from the page `frame` at `level`: the page it
+    /// ends up standing in, and the level that page sits at.
+    ///
+    /// A function of memory alone, and keyed on the level rather than on the page, so a frame that
+    /// is reached at two levels -- a self-mapped table -- gets a separate answer at each. The walk
+    /// stops where `spec_child` runs out, because below the leaf there is nothing to descend into:
+    /// the hardware reads bit 7 of a level 0 entry as PAT rather than PS, so an entry that looks
+    /// like a table pointer there is a mapping.
+    pub open spec fn walk_leaf_ptbl(
+        &self,
+        frame: FrameId,
+        level: PageLevel,
+        vpage: nat,
+    ) -> (FrameId, PageLevel)
+        decreases level.depth(),
+    {
+        let e = PTEntry::<A>::spec_from_bits(self.word_at(self.path_id(frame, vpage, level)));
+        match level.spec_child() {
+            Option::None => (frame, level),
+            Option::Some(child) => if e.is_table_spec(level) {
+                self.walk_leaf_ptbl(FrameId(e.page_frame_spec() as nat), child, vpage)
+            } else {
+                (frame, level)
+            },
+        }
+    }
+
+    /// The entry a walk of `vpage` comes to rest on, and the level it rested at.
+    ///
+    /// The level is part of the answer because it is what the entry's bits mean: the same word is a
+    /// huge page at one level and a table pointer at another.
+    pub open spec fn walk_leaf_entry(
+        &self,
+        frame: FrameId,
+        level: PageLevel,
+        vpage: nat,
+    ) -> (PTEntry<A>, PageLevel) {
+        let rest = self.walk_leaf_ptbl(frame, level, vpage);
+        (
+            PTEntry::<A>::spec_from_bits(self.word_at(self.path_id(rest.0, vpage, rest.1))),
+            rest.1,
+        )
+    }
+
+    /// Whether `c` is one of the entries a walk of `vpage` reads, starting from `frame` at `level`.
+    /// Changing anything else cannot change where `vpage` leads, which is what [`lemma_translate_local`]
+    /// states and every transition leans on.
+    pub open spec fn on_walk_path(
+        &self,
+        frame: FrameId,
+        level: PageLevel,
+        vpage: nat,
+        c: WordId,
+    ) -> bool
+        decreases level.depth(),
+    {
+        let id = self.path_id(frame, vpage, level);
+        let e = PTEntry::<A>::spec_from_bits(self.word_at(id));
+        ||| c == id
+        ||| match level.spec_child() {
+            Option::None => false,
+            Option::Some(child) => e.is_table_spec(level) && self.on_walk_path(
+                FrameId(e.page_frame_spec() as nat),
+                child,
+                vpage,
+                c,
+            ),
+        }
+    }
+
+    /// Whether the walk stands in `f` at some point on its way down from `frame` at `level`.
+    pub open spec fn walk_visits(
+        &self,
+        frame: FrameId,
+        level: PageLevel,
+        vpage: nat,
+        f: FrameId,
+    ) -> bool
+        decreases level.depth(),
+    {
+        let e = PTEntry::<A>::spec_from_bits(self.word_at(self.path_id(frame, vpage, level)));
+        ||| f == frame
+        ||| match level.spec_child() {
+            Option::None => false,
+            Option::Some(child) => e.is_table_spec(level) && self.walk_visits(
+                FrameId(e.page_frame_spec() as nat),
+                child,
+                vpage,
+                f,
+            ),
+        }
+    }
+
+    /// The frame `vpage` translates to: the whole walk, from `cr3` down to where it comes to rest.
+    /// Consults nothing but memory, so agreeing with it is a real obligation on the words stored.
+    pub open spec fn translate(
+        &self,
+        cr3: FrameId,
+        top: PageLevel,
+        vpage: nat,
+    ) -> Option<FrameId> {
+        let rest = self.walk_leaf_entry(cr3, top, vpage);
+        let e = rest.0;
+        let l = rest.1;
+        if e.is_leaf_spec(l) {
+            Some(FrameId((e.page_frame_spec() as nat + leaf_offset::<A>(vpage, l)) as nat))
         } else {
-            (frame, level)
-        },
+            Option::None
+        }
     }
-}
 
-/// The entry a walk of `vpage` comes to rest on, and the level it rested at.
-///
-/// The level is part of the answer because it is what the entry's bits mean: the same word is a
-/// huge page at one level and a table pointer at another.
-pub open spec fn walk_at<A: ArchPagingMeta>(
-    view: PhyMemView<A>,
-    frame: FrameId,
-    level: PageLevel,
-    vpage: nat,
-) -> (PTEntry<A>, PageLevel) {
-    let rest = walk_rest(view, frame, level, vpage);
-    (
-        PTEntry::<A>::spec_from_bits(view.word_at(path_id(view, rest.0, vpage, rest.1))),
-        rest.1,
-    )
-}
-
-/// Whether `c` is one of the entries a walk of `vpage` reads, starting from `frame` at `level`.
-/// Changing anything else cannot change where `vpage` leads, which is what [`lemma_translate_local`]
-/// states and every transition leans on.
-pub open spec fn on_path<A: ArchPagingMeta>(
-    view: PhyMemView<A>,
-    frame: FrameId,
-    level: PageLevel,
-    vpage: nat,
-    c: WordId,
-) -> bool
-    decreases level.depth(),
-{
-    let id = path_id(view, frame, vpage, level);
-    let e = PTEntry::<A>::spec_from_bits(view.word_at(id));
-    ||| c == id
-    ||| match level.spec_child() {
-        Option::None => false,
-        Option::Some(child) => e.is_table_spec(level) && on_path(
-            view,
-            FrameId(e.page_frame_spec() as nat),
-            child,
-            vpage,
-            c,
-        ),
-    }
-}
-
-/// Whether the walk stands in `f` at some point on its way down from `frame` at `level`.
-pub open spec fn walk_visits<A: ArchPagingMeta>(
-    view: PhyMemView<A>,
-    frame: FrameId,
-    level: PageLevel,
-    vpage: nat,
-    f: FrameId,
-) -> bool
-    decreases level.depth(),
-{
-    let e = PTEntry::<A>::spec_from_bits(view.word_at(path_id(view, frame, vpage, level)));
-    ||| f == frame
-    ||| match level.spec_child() {
-        Option::None => false,
-        Option::Some(child) => e.is_table_spec(level) && walk_visits(
-            view,
-            FrameId(e.page_frame_spec() as nat),
-            child,
-            vpage,
-            f,
-        ),
+    /// Id of the entry where a walk of `vpage` comes to rest. Total, because a walk always rests
+    /// somewhere: at worst on the entry the root page holds for `vpage`.
+    pub open spec fn resting_path_id(
+        &self,
+        cr3: FrameId,
+        top: PageLevel,
+        vpage: nat,
+    ) -> WordId {
+        let rest = self.walk_leaf_ptbl(cr3, top, vpage);
+        self.path_id(rest.0, vpage, rest.1)
     }
 }
 
@@ -180,36 +208,6 @@ pub open spec fn leaf_offset<A: ArchPagingMeta>(vpage: nat, level: PageLevel) ->
     } else {
         0
     }
-}
-
-/// The frame `vpage` translates to: the whole walk, from `cr3` down to where it comes to rest.
-/// Consults nothing but memory, so agreeing with it is a real obligation on the words stored.
-pub open spec fn translate<A: ArchPagingMeta>(
-    view: PhyMemView<A>,
-    cr3: FrameId,
-    top: PageLevel,
-    vpage: nat,
-) -> Option<FrameId> {
-    let rest = walk_at(view, cr3, top, vpage);
-    let e = rest.0;
-    let l = rest.1;
-    if e.is_leaf_spec(l) {
-        Some(FrameId((e.page_frame_spec() as nat + leaf_offset::<A>(vpage, l)) as nat))
-    } else {
-        Option::None
-    }
-}
-
-/// Id of the entry where a walk of `vpage` comes to rest. Total, because a walk always rests
-/// somewhere: at worst on the entry the root page holds for `vpage`.
-pub open spec fn resting_path_id<A: ArchPagingMeta>(
-    view: PhyMemView<A>,
-    cr3: FrameId,
-    top: PageLevel,
-    vpage: nat,
-) -> WordId {
-    let rest = walk_rest(view, cr3, top, vpage);
-    path_id(view, rest.0, vpage, rest.1)
 }
 
 /// Word an absent entry holds.
@@ -386,37 +384,34 @@ pub proof fn lemma_walk_step<A: ArchPagingMeta>(
 )
     requires
         PTEntry::<A>::spec_from_bits(
-            view.word_at(path_id(view, frame, vpage, level)),
+            view.word_at(view.path_id(frame, vpage, level)),
         ).is_table_spec(level),
     ensures
         level.spec_child() is Some,
         ({
-            let id = path_id(view, frame, vpage, level);
+            let id = view.path_id(frame, vpage, level);
             let next = FrameId(
                 PTEntry::<A>::spec_from_bits(view.word_at(id)).page_frame_spec() as nat,
             );
             let child = level.spec_child()->Some_0;
-            &&& walk_rest(view, frame, level, vpage) == walk_rest(
-                view,
+            &&& view.walk_leaf_ptbl(frame, level, vpage) == view.walk_leaf_ptbl(
                 next,
                 child,
                 vpage,
             )
             &&& forall|c: WordId|
-                #![trigger on_path(view, frame, level, vpage, c)]
-                #![trigger on_path(view, next, child, vpage, c)]
-                on_path(view, frame, level, vpage, c) == (c == id || on_path(
-                    view,
+                #![trigger view.on_walk_path(frame, level, vpage, c)]
+                #![trigger view.on_walk_path(next, child, vpage, c)]
+                view.on_walk_path(frame, level, vpage, c) == (c == id || view.on_walk_path(
                     next,
                     child,
                     vpage,
                     c,
                 ))
             &&& forall|f: FrameId|
-                #![trigger walk_visits(view, frame, level, vpage, f)]
-                #![trigger walk_visits(view, next, child, vpage, f)]
-                walk_visits(view, frame, level, vpage, f) == (f == frame || walk_visits(
-                    view,
+                #![trigger view.walk_visits(frame, level, vpage, f)]
+                #![trigger view.walk_visits(next, child, vpage, f)]
+                view.walk_visits(frame, level, vpage, f) == (f == frame || view.walk_visits(
                     next,
                     child,
                     vpage,
@@ -429,7 +424,7 @@ pub proof fn lemma_walk_step<A: ArchPagingMeta>(
 
 /// A walk stops where it stands when the entry it reads there does not decode as a table --
 /// either because that entry maps a page, or because level 0 has nothing below it.
-pub proof fn lemma_walk_rest_stops<A: ArchPagingMeta>(
+pub proof fn lemma_walk_leaf_ptbl_stops<A: ArchPagingMeta>(
     view: PhyMemView<A>,
     frame: FrameId,
     level: PageLevel,
@@ -437,53 +432,50 @@ pub proof fn lemma_walk_rest_stops<A: ArchPagingMeta>(
 )
     requires
         !PTEntry::<A>::spec_from_bits(
-            view.word_at(path_id(view, frame, vpage, level)),
+            view.word_at(view.path_id(frame, vpage, level)),
         ).is_table_spec(level),
     ensures
-        walk_rest(view, frame, level, vpage) == (frame, level),
+        view.walk_leaf_ptbl(frame, level, vpage) == (frame, level),
         forall|c: WordId| #[trigger]
-            on_path(view, frame, level, vpage, c) == (c == path_id(
-                view,
+            view.on_walk_path(frame, level, vpage, c) == (c == view.path_id(
                 frame,
                 vpage,
                 level,
             )),
         forall|f: FrameId| #[trigger]
-            walk_visits(view, frame, level, vpage, f) == (f == frame),
+            view.walk_visits(frame, level, vpage, f) == (f == frame),
 {
 }
 
 /// A walk rests on an entry it reads, in a frame it visits, at or below the level it started at.
-pub proof fn lemma_rest_on_path<A: ArchPagingMeta>(
+pub proof fn lemma_rest_on_walk_path<A: ArchPagingMeta>(
     view: PhyMemView<A>,
     frame: FrameId,
     level: PageLevel,
     vpage: nat,
 )
     ensures
-        on_path(
-            view,
+        view.on_walk_path(
             frame,
             level,
             vpage,
-            path_id(
-                view,
-                walk_rest(view, frame, level, vpage).0,
+            view.path_id(
+                view.walk_leaf_ptbl(frame, level, vpage).0,
                 vpage,
-                walk_rest(view, frame, level, vpage).1,
+                view.walk_leaf_ptbl(frame, level, vpage).1,
             ),
         ),
-        walk_visits(view, frame, level, vpage, walk_rest(view, frame, level, vpage).0),
-        walk_rest(view, frame, level, vpage).1.depth() <= level.depth(),
+        view.walk_visits(frame, level, vpage, view.walk_leaf_ptbl(frame, level, vpage).0),
+        view.walk_leaf_ptbl(frame, level, vpage).1.depth() <= level.depth(),
     decreases level.depth(),
 {
-    let e = PTEntry::<A>::spec_from_bits(view.word_at(path_id(view, frame, vpage, level)));
+    let e = PTEntry::<A>::spec_from_bits(view.word_at(view.path_id(frame, vpage, level)));
     if e.is_table_spec(level) {
         lemma_walk_step(view, frame, level, vpage);
         PageLevel::lemma_child_decreases(level);
-        lemma_rest_on_path(view, FrameId(e.page_frame_spec() as nat), level.spec_child()->Some_0, vpage);
+        lemma_rest_on_walk_path(view, FrameId(e.page_frame_spec() as nat), level.spec_child()->Some_0, vpage);
     } else {
-        lemma_walk_rest_stops(view, frame, level, vpage);
+        lemma_walk_leaf_ptbl_stops(view, frame, level, vpage);
     }
 }
 
@@ -491,7 +483,7 @@ pub proof fn lemma_rest_on_path<A: ArchPagingMeta>(
 ///
 /// Where the walk rests, which entries it reads and which frames it visits are settled together,
 /// because the induction step needs all three facts about the table one level down.
-pub proof fn lemma_walk_at_local<A: ArchPagingMeta>(
+pub proof fn lemma_walk_leaf_entry_local<A: ArchPagingMeta>(
     v1: PhyMemView<A>,
     v2: PhyMemView<A>,
     frame: FrameId,
@@ -501,18 +493,17 @@ pub proof fn lemma_walk_at_local<A: ArchPagingMeta>(
     requires
         v1.frame_to_objs == v2.frame_to_objs,
         forall|c: WordId| #[trigger]
-            on_path(v1, frame, level, vpage, c) ==> v1.word_at(c) == v2.word_at(c),
+            v1.on_walk_path(frame, level, vpage, c) ==> v1.word_at(c) == v2.word_at(c),
     ensures
-        walk_rest(v1, frame, level, vpage) == walk_rest(v2, frame, level, vpage),
+        v1.walk_leaf_ptbl(frame, level, vpage) == v2.walk_leaf_ptbl(frame, level, vpage),
         forall|c: WordId|
-            #![trigger on_path(v1, frame, level, vpage, c)]
-            #![trigger on_path(v2, frame, level, vpage, c)]
-            on_path(v1, frame, level, vpage, c) == on_path(v2, frame, level, vpage, c),
+            #![trigger v1.on_walk_path(frame, level, vpage, c)]
+            #![trigger v2.on_walk_path(frame, level, vpage, c)]
+            v1.on_walk_path(frame, level, vpage, c) == v2.on_walk_path(frame, level, vpage, c),
         forall|f: FrameId|
-            #![trigger walk_visits(v1, frame, level, vpage, f)]
-            #![trigger walk_visits(v2, frame, level, vpage, f)]
-            walk_visits(v1, frame, level, vpage, f) == walk_visits(
-                v2,
+            #![trigger v1.walk_visits(frame, level, vpage, f)]
+            #![trigger v2.walk_visits(frame, level, vpage, f)]
+            v1.walk_visits(frame, level, vpage, f) == v2.walk_visits(
                 frame,
                 level,
                 vpage,
@@ -520,8 +511,8 @@ pub proof fn lemma_walk_at_local<A: ArchPagingMeta>(
             ),
     decreases level.depth(),
 {
-    let id = path_id(v1, frame, vpage, level);
-    assert(on_path(v1, frame, level, vpage, id));
+    let id = v1.path_id(frame, vpage, level);
+    assert(v1.on_walk_path(frame, level, vpage, id));
     let e = PTEntry::<A>::spec_from_bits(v1.word_at(id));
     if e.is_table_spec(level) {
         let child = level.spec_child()->Some_0;
@@ -529,20 +520,20 @@ pub proof fn lemma_walk_at_local<A: ArchPagingMeta>(
         lemma_walk_step(v1, frame, level, vpage);
         lemma_walk_step(v2, frame, level, vpage);
         assert forall|c: WordId| #[trigger]
-            on_path(v1, next, child, vpage, c) implies v1.word_at(c) == v2.word_at(c) by {
-            assert(on_path(v1, frame, level, vpage, c));
+            v1.on_walk_path(next, child, vpage, c) implies v1.word_at(c) == v2.word_at(c) by {
+            assert(v1.on_walk_path(frame, level, vpage, c));
         }
         PageLevel::lemma_child_decreases(level);
-        lemma_walk_at_local(v1, v2, next, child, vpage);
+        lemma_walk_leaf_entry_local(v1, v2, next, child, vpage);
     } else {
-        lemma_walk_rest_stops(v1, frame, level, vpage);
-        lemma_walk_rest_stops(v2, frame, level, vpage);
+        lemma_walk_leaf_ptbl_stops(v1, frame, level, vpage);
+        lemma_walk_leaf_ptbl_stops(v2, frame, level, vpage);
     }
 }
 
 /// Where a walk goes depends only on the residents of the frames it visits, so moving a frame no
 /// walk visits moves nothing. `live` names the frames the walk in question stays within.
-pub proof fn lemma_walk_at_frames<A: ArchPagingMeta>(
+pub proof fn lemma_walk_leaf_entry_frames<A: ArchPagingMeta>(
     v1: PhyMemView<A>,
     v2: PhyMemView<A>,
     live: Set<FrameId>,
@@ -556,18 +547,17 @@ pub proof fn lemma_walk_at_frames<A: ArchPagingMeta>(
         forall|f: FrameId| #[trigger]
             live.contains(f) ==> v1.frame_to_objs[f] == v2.frame_to_objs[f],
         forall|f: FrameId| #[trigger]
-            walk_visits(v1, frame, level, vpage, f) ==> live.contains(f),
+            v1.walk_visits(frame, level, vpage, f) ==> live.contains(f),
     ensures
-        walk_rest(v1, frame, level, vpage) == walk_rest(v2, frame, level, vpage),
+        v1.walk_leaf_ptbl(frame, level, vpage) == v2.walk_leaf_ptbl(frame, level, vpage),
         forall|c: WordId|
-            #![trigger on_path(v1, frame, level, vpage, c)]
-            #![trigger on_path(v2, frame, level, vpage, c)]
-            on_path(v1, frame, level, vpage, c) == on_path(v2, frame, level, vpage, c),
+            #![trigger v1.on_walk_path(frame, level, vpage, c)]
+            #![trigger v2.on_walk_path(frame, level, vpage, c)]
+            v1.on_walk_path(frame, level, vpage, c) == v2.on_walk_path(frame, level, vpage, c),
         forall|f: FrameId|
-            #![trigger walk_visits(v1, frame, level, vpage, f)]
-            #![trigger walk_visits(v2, frame, level, vpage, f)]
-            walk_visits(v1, frame, level, vpage, f) == walk_visits(
-                v2,
+            #![trigger v1.walk_visits(frame, level, vpage, f)]
+            #![trigger v2.walk_visits(frame, level, vpage, f)]
+            v1.walk_visits(frame, level, vpage, f) == v2.walk_visits(
                 frame,
                 level,
                 vpage,
@@ -575,23 +565,23 @@ pub proof fn lemma_walk_at_frames<A: ArchPagingMeta>(
             ),
     decreases level.depth(),
 {
-    assert(walk_visits(v1, frame, level, vpage, frame));
+    assert(v1.walk_visits(frame, level, vpage, frame));
     assert(live.contains(frame));
-    let e = PTEntry::<A>::spec_from_bits(v1.word_at(path_id(v1, frame, vpage, level)));
+    let e = PTEntry::<A>::spec_from_bits(v1.word_at(v1.path_id(frame, vpage, level)));
     if e.is_table_spec(level) {
         let child = level.spec_child()->Some_0;
         let next = FrameId(e.page_frame_spec() as nat);
         lemma_walk_step(v1, frame, level, vpage);
         lemma_walk_step(v2, frame, level, vpage);
         assert forall|f: FrameId| #[trigger]
-            walk_visits(v1, next, child, vpage, f) implies live.contains(f) by {
-            assert(walk_visits(v1, frame, level, vpage, f));
+            v1.walk_visits(next, child, vpage, f) implies live.contains(f) by {
+            assert(v1.walk_visits(frame, level, vpage, f));
         }
         PageLevel::lemma_child_decreases(level);
-        lemma_walk_at_frames(v1, v2, live, next, child, vpage);
+        lemma_walk_leaf_entry_frames(v1, v2, live, next, child, vpage);
     } else {
-        lemma_walk_rest_stops(v1, frame, level, vpage);
-        lemma_walk_rest_stops(v2, frame, level, vpage);
+        lemma_walk_leaf_ptbl_stops(v1, frame, level, vpage);
+        lemma_walk_leaf_ptbl_stops(v2, frame, level, vpage);
     }
 }
 
@@ -610,15 +600,15 @@ pub proof fn lemma_root_copy_entry<A: ArchPagingMeta>(
             WordId((view.resident(r1).0 + i) as nat),
         ) == view.word_at(WordId((view.resident(r2).0 + i) as nat)),
     ensures
-        view.word_at(path_id(view, r1, vpage, level)) == view.word_at(
-            path_id(view, r2, vpage, level),
+        view.word_at(view.path_id(r1, vpage, level)) == view.word_at(
+            view.path_id(r2, vpage, level),
         ),
 {
     lemma_pgtbl_idx_bounded::<A>(vpage, level);
-    assert(path_id(view, r1, vpage, level) == WordId(
+    assert(view.path_id(r1, vpage, level) == WordId(
         (view.resident(r1).0 + pgtbl_idx::<A>(page_base::<A>(vpage), level) as nat) as nat,
     ));
-    assert(path_id(view, r2, vpage, level) == WordId(
+    assert(view.path_id(r2, vpage, level) == WordId(
         (view.resident(r2).0 + pgtbl_idx::<A>(page_base::<A>(vpage), level) as nat) as nat,
     ));
 }
@@ -626,7 +616,7 @@ pub proof fn lemma_root_copy_entry<A: ArchPagingMeta>(
 /// Two roots holding equal entries lead a walk to the same place from the level below, which is
 /// what makes a copied root page a faithful clone of an address space. Only the entry read in the
 /// root itself differs between the two, because it lives in a different page.
-pub proof fn lemma_walk_at_root_copy<A: ArchPagingMeta>(
+pub proof fn lemma_walk_leaf_entry_root_copy<A: ArchPagingMeta>(
     view: PhyMemView<A>,
     r1: FrameId,
     r2: FrameId,
@@ -636,19 +626,18 @@ pub proof fn lemma_walk_at_root_copy<A: ArchPagingMeta>(
     requires
         PTPage::<A>::count() > 0,
         PTEntry::<A>::spec_from_bits(
-            view.word_at(path_id(view, r1, vpage, level)),
+            view.word_at(view.path_id(r1, vpage, level)),
         ).is_table_spec(level),
         forall|i: nat| i < PTPage::<A>::count() ==> #[trigger] view.word_at(
             WordId((view.resident(r1).0 + i) as nat),
         ) == view.word_at(WordId((view.resident(r2).0 + i) as nat)),
     ensures
-        walk_rest(view, r1, level, vpage) == walk_rest(view, r2, level, vpage),
+        view.walk_leaf_ptbl(r1, level, vpage) == view.walk_leaf_ptbl(r2, level, vpage),
         forall|c: WordId| #[trigger]
-            on_path(view, r1, level, vpage, c) ==> c == path_id(view, r1, vpage, level)
-                || on_path(view, r2, level, vpage, c),
+            view.on_walk_path(r1, level, vpage, c) ==> c == view.path_id(r1, vpage, level)
+                || view.on_walk_path(r2, level, vpage, c),
         forall|f: FrameId| #[trigger]
-            walk_visits(view, r1, level, vpage, f) ==> f == r1 || walk_visits(
-                view,
+            view.walk_visits(r1, level, vpage, f) ==> f == r1 || view.walk_visits(
                 r2,
                 level,
                 vpage,
@@ -674,15 +663,15 @@ pub proof fn lemma_translate_root_copy<A: ArchPagingMeta>(
             WordId((view.resident(r1).0 + i) as nat),
         ) == view.word_at(WordId((view.resident(r2).0 + i) as nat)),
     ensures
-        translate(view, r1, top, vpage) == translate(view, r2, top, vpage),
+        view.translate(r1, top, vpage) == view.translate(r2, top, vpage),
 {
     lemma_root_copy_entry(view, r1, r2, top, vpage);
-    let e = PTEntry::<A>::spec_from_bits(view.word_at(path_id(view, r1, vpage, top)));
+    let e = PTEntry::<A>::spec_from_bits(view.word_at(view.path_id(r1, vpage, top)));
     if e.is_table_spec(top) {
-        lemma_walk_at_root_copy(view, r1, r2, top, vpage);
+        lemma_walk_leaf_entry_root_copy(view, r1, r2, top, vpage);
     } else {
-        lemma_walk_rest_stops(view, r1, top, vpage);
-        lemma_walk_rest_stops(view, r2, top, vpage);
+        lemma_walk_leaf_ptbl_stops(view, r1, top, vpage);
+        lemma_walk_leaf_ptbl_stops(view, r2, top, vpage);
     }
 }
 
@@ -698,13 +687,13 @@ pub proof fn lemma_translate_local<A: ArchPagingMeta>(
     requires
         v1.frame_to_objs == v2.frame_to_objs,
         forall|c: WordId| #[trigger]
-            on_path(v1, cr3, top, vpage, c) ==> v1.word_at(c) == v2.word_at(c),
+            v1.on_walk_path(cr3, top, vpage, c) ==> v1.word_at(c) == v2.word_at(c),
     ensures
-        translate(v1, cr3, top, vpage) == translate(v2, cr3, top, vpage),
-        resting_path_id(v1, cr3, top, vpage) == resting_path_id(v2, cr3, top, vpage),
+        v1.translate(cr3, top, vpage) == v2.translate(cr3, top, vpage),
+        v1.resting_path_id(cr3, top, vpage) == v2.resting_path_id(cr3, top, vpage),
 {
-    lemma_walk_at_local(v1, v2, cr3, top, vpage);
-    lemma_rest_on_path(v1, cr3, top, vpage);
+    lemma_walk_leaf_entry_local(v1, v2, cr3, top, vpage);
+    lemma_rest_on_walk_path(v1, cr3, top, vpage);
 }
 
 /// Where `vpage` leads depends only on the residents of the frames its own walk visits, so a
@@ -723,13 +712,13 @@ pub proof fn lemma_translate_frames<A: ArchPagingMeta>(
         forall|f: FrameId| #[trigger]
             live.contains(f) ==> v1.frame_to_objs[f] == v2.frame_to_objs[f],
         forall|f: FrameId| #[trigger]
-            walk_visits(v1, cr3, top, vpage, f) ==> live.contains(f),
+            v1.walk_visits(cr3, top, vpage, f) ==> live.contains(f),
     ensures
-        translate(v1, cr3, top, vpage) == translate(v2, cr3, top, vpage),
-        resting_path_id(v1, cr3, top, vpage) == resting_path_id(v2, cr3, top, vpage),
+        v1.translate(cr3, top, vpage) == v2.translate(cr3, top, vpage),
+        v1.resting_path_id(cr3, top, vpage) == v2.resting_path_id(cr3, top, vpage),
 {
-    lemma_walk_at_frames(v1, v2, live, cr3, top, vpage);
-    lemma_rest_on_path(v1, cr3, top, vpage);
+    lemma_walk_leaf_entry_frames(v1, v2, live, cr3, top, vpage);
+    lemma_rest_on_walk_path(v1, cr3, top, vpage);
 }
 
 } // verus!
@@ -1038,7 +1027,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
     pub spec fn leaf_ids_agree(&self) -> bool {
         &&& self.leaf_id.dom() =~= self.vmap_dom
         &&& forall|k: (nat, nat)| #[trigger] self.vmap_dom.contains(k) ==> self.leaf_id[k] == Some(
-            resting_path_id(self.phy_view(), self.cr3[k.0], self.top(), k.1),
+            self.phy_view().resting_path_id(self.cr3[k.0], self.top(), k.1),
         )
     }
 
@@ -1066,8 +1055,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
     #[invariant]
     pub spec fn path_frames_solo(&self) -> bool {
         forall|k: (nat, nat), f: FrameId|
-            self.vmap_dom.contains(k) && #[trigger] walk_visits(
-                self.phy_view(),
+            self.vmap_dom.contains(k) && #[trigger] self.phy_view().walk_visits(
                 self.cr3[k.0],
                 self.top(),
                 k.1,
@@ -1082,8 +1070,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
     #[invariant]
     pub spec fn paths_in_tables(&self) -> bool {
         forall|k: (nat, nat), c: WordId|
-            self.vmap_dom.contains(k) && #[trigger] on_path(
-                self.phy_view(),
+            self.vmap_dom.contains(k) && #[trigger] self.phy_view().on_walk_path(
                 self.cr3[k.0],
                 self.top(),
                 k.1,
@@ -1096,8 +1083,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
     /// self-mapped page is reached at every level -- so there is no per-table level to key on.
     #[invariant]
     pub spec fn walk_agrees(&self) -> bool {
-        forall|k: (nat, nat)| #[trigger] self.vmap_dom.contains(k) ==> translate(
-            self.phy_view(),
+        forall|k: (nat, nat)| #[trigger] self.vmap_dom.contains(k) ==> self.phy_view().translate(
             self.cr3[k.0],
             self.top(),
             k.1,
@@ -1406,47 +1392,43 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
         // hold the same entries; only the root entry itself is read from a different page.
         assert forall|vpage: nat|
             PTEntry::<A>::spec_from_bits(
-                #[trigger] post.phy_view().word_at(path_id(post.phy_view(), nroot, vpage, top)),
+                #[trigger] post.phy_view().word_at(post.phy_view().path_id(nroot, vpage, top)),
             ).is_table_spec(top) implies {
-            &&& walk_rest(post.phy_view(), nroot, top, vpage) == walk_rest(
-                post.phy_view(),
+            &&& post.phy_view().walk_leaf_ptbl(nroot, top, vpage) == post.phy_view().walk_leaf_ptbl(
                 pre.cr3[src],
                 top,
                 vpage,
             )
             &&& forall|c: WordId| #[trigger]
-                on_path(post.phy_view(), nroot, top, vpage, c) ==> c == path_id(
-                    post.phy_view(),
+                post.phy_view().on_walk_path(nroot, top, vpage, c) ==> c == post.phy_view().path_id(
                     nroot,
                     vpage,
                     top,
-                ) || on_path(post.phy_view(), pre.cr3[src], top, vpage, c)
+                ) || post.phy_view().on_walk_path(pre.cr3[src], top, vpage, c)
             &&& forall|f: FrameId| #[trigger]
-                walk_visits(post.phy_view(), nroot, top, vpage, f) ==> f == nroot
-                    || walk_visits(post.phy_view(), pre.cr3[src], top, vpage, f)
+                post.phy_view().walk_visits(nroot, top, vpage, f) ==> f == nroot
+                    || post.phy_view().walk_visits(pre.cr3[src], top, vpage, f)
         } by {
-            lemma_walk_at_root_copy(post.phy_view(), nroot, pre.cr3[src], top, vpage);
+            lemma_walk_leaf_entry_root_copy(post.phy_view(), nroot, pre.cr3[src], top, vpage);
         }
         assert forall|vpage: nat|
             !PTEntry::<A>::spec_from_bits(
-                #[trigger] post.phy_view().word_at(path_id(post.phy_view(), nroot, vpage, top)),
+                #[trigger] post.phy_view().word_at(post.phy_view().path_id(nroot, vpage, top)),
             ).is_table_spec(top) implies {
-            &&& walk_rest(post.phy_view(), nroot, top, vpage) == (nroot, top)
+            &&& post.phy_view().walk_leaf_ptbl(nroot, top, vpage) == (nroot, top)
             &&& forall|c: WordId| #[trigger]
-                on_path(post.phy_view(), nroot, top, vpage, c) ==> c == path_id(
-                    post.phy_view(),
+                post.phy_view().on_walk_path(nroot, top, vpage, c) ==> c == post.phy_view().path_id(
                     nroot,
                     vpage,
                     top,
                 )
             &&& forall|f: FrameId| #[trigger]
-                walk_visits(post.phy_view(), nroot, top, vpage, f) ==> f == nroot
+                post.phy_view().walk_visits(nroot, top, vpage, f) ==> f == nroot
         } by {
-            lemma_walk_rest_stops(post.phy_view(), nroot, top, vpage);
+            lemma_walk_leaf_ptbl_stops(post.phy_view(), nroot, top, vpage);
         }
 
-        assert forall|k: (nat, nat)| #[trigger] post.vmap_dom.contains(k) implies translate(
-            post.phy_view(),
+        assert forall|k: (nat, nat)| #[trigger] post.vmap_dom.contains(k) implies post.phy_view().translate(
             post.cr3[k.0],
             top,
             k.1,
@@ -1475,8 +1457,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
         }
 
         assert forall|k: (nat, nat), c: WordId|
-            post.vmap_dom.contains(k) && #[trigger] on_path(
-                post.phy_view(),
+            post.vmap_dom.contains(k) && #[trigger] post.phy_view().on_walk_path(
                 post.cr3[k.0],
                 top,
                 k.1,
@@ -1484,18 +1465,18 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             ) implies post.pt_words.contains(c) by {
             if k.0 == a {
                 assert(pre.vmap_dom.contains((src, k.1)));
-                if c == path_id(post.phy_view(), nroot, k.1, top) {
+                if c == post.phy_view().path_id(nroot, k.1, top) {
                     lemma_pgtbl_idx_bounded::<A>(k.1, top);
                     assert(obj_ids::<A>(nobj).contains(c));
                 } else {
-                    assert(on_path(post.phy_view(), pre.cr3[src], top, k.1, c));
+                    assert(post.phy_view().on_walk_path(pre.cr3[src], top, k.1, c));
                 }
             }
         }
 
         assert(post.leaf_id.dom() =~= post.vmap_dom);
         assert forall|k: (nat, nat)| #[trigger] post.vmap_dom.contains(k) implies post.leaf_id[k]
-            == Some(resting_path_id(post.phy_view(), post.cr3[k.0], top, k.1)) by {
+            == Some(post.phy_view().resting_path_id(post.cr3[k.0], top, k.1)) by {
             let s = if k.0 == a {
                 src
             } else {
@@ -1511,12 +1492,12 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
                 ) == words[entry_id::<A>(robj, k.1, top)]);
                 assert(post.phy_view().resident(nroot) == nobj);
                 assert(mid2.leaf_id[(src, k.1)] == Some(
-                    resting_path_id(post.phy_view(), pre.cr3[src], top, k.1),
+                    post.phy_view().resting_path_id(pre.cr3[src], top, k.1),
                 ));
             } else {
                 assert(post.leaf_id[k] == pre.leaf_id[k]);
                 assert(mid2.leaf_id[k] == Some(
-                    resting_path_id(post.phy_view(), post.cr3[k.0], top, k.1),
+                    post.phy_view().resting_path_id(post.cr3[k.0], top, k.1),
                 ));
             }
         }
@@ -1562,8 +1543,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             }
         }
         assert forall|k: (nat, nat), f: FrameId|
-            post.vmap_dom.contains(k) && #[trigger] walk_visits(
-                post.phy_view(),
+            post.vmap_dom.contains(k) && #[trigger] post.phy_view().walk_visits(
                 post.cr3[k.0],
                 top,
                 k.1,
@@ -1577,7 +1557,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
                 if f == nroot {
                     assert(post.frame_to_objs[nroot] =~= Set::<ObjId>::empty().insert(nobj));
                 } else {
-                    assert(walk_visits(post.phy_view(), pre.cr3[src], top, k.1, f));
+                    assert(post.phy_view().walk_visits(pre.cr3[src], top, k.1, f));
                 }
             }
         }
@@ -1644,17 +1624,15 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             assert(post.frame_to_objs[root].contains(post.frame_to_objs[root].choose()));
         }
         lemma_absent_word::<A>();
-        assert forall|k: (nat, nat)| #[trigger] post.vmap_dom.contains(k) implies translate(
-            post.phy_view(),
+        assert forall|k: (nat, nat)| #[trigger] post.vmap_dom.contains(k) implies post.phy_view().translate(
             post.cr3[k.0],
             post.top(),
             k.1,
         ) == walk_target(post.vmap, post.obj_to_frame, k.0, k.1) by {
-            lemma_boot_walk_at(post.phy_view(), root, post.top(), k.1);
+            lemma_boot_walk_leaf_entry(post.phy_view(), root, post.top(), k.1);
         }
         assert forall|k: (nat, nat), f: FrameId|
-            post.vmap_dom.contains(k) && #[trigger] walk_visits(
-                post.phy_view(),
+            post.vmap_dom.contains(k) && #[trigger] post.phy_view().walk_visits(
                 post.cr3[k.0],
                 post.top(),
                 k.1,
@@ -1664,22 +1642,21 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
                 &&& exists|o: ObjId| post.frame_to_objs[f] =~= Set::<ObjId>::empty().insert(o)
             } by {
             assert(post.cr3[k.0] == root);
-            lemma_boot_walk_at(post.phy_view(), root, post.top(), k.1);
+            lemma_boot_walk_leaf_entry(post.phy_view(), root, post.top(), k.1);
             assert(post.frame_to_objs[root] =~= Set::<ObjId>::empty().insert(ObjId(0)));
         }
         assert forall|k: (nat, nat), c: WordId|
-            post.vmap_dom.contains(k) && #[trigger] on_path(
-                post.phy_view(),
+            post.vmap_dom.contains(k) && #[trigger] post.phy_view().on_walk_path(
                 post.cr3[k.0],
                 post.top(),
                 k.1,
                 c,
             ) implies post.pt_words.contains(c) by {
-            lemma_boot_walk_at(post.phy_view(), root, post.top(), k.1);
+            lemma_boot_walk_leaf_entry(post.phy_view(), root, post.top(), k.1);
         }
         assert forall|k: (nat, nat)| #[trigger] post.vmap_dom.contains(k) implies post.leaf_id[k]
-            == Some(resting_path_id(post.phy_view(), post.cr3[k.0], post.top(), k.1)) by {
-            lemma_boot_walk_at(post.phy_view(), root, post.top(), k.1);
+            == Some(post.phy_view().resting_path_id(post.cr3[k.0], post.top(), k.1)) by {
+            lemma_boot_walk_leaf_entry(post.phy_view(), root, post.top(), k.1);
         }
     }
 });
@@ -1687,7 +1664,7 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
 verus! {
 
 /// A tree whose entries are all absent stops the walk at the root.
-pub proof fn lemma_boot_walk_at<A: ArchPagingMeta>(
+pub proof fn lemma_boot_walk_leaf_entry<A: ArchPagingMeta>(
     view: PhyMemView<A>,
     cr3: FrameId,
     top: PageLevel,
@@ -1699,19 +1676,19 @@ pub proof fn lemma_boot_walk_at<A: ArchPagingMeta>(
         forall|c: WordId| #[trigger] obj_ids::<A>(ObjId(0)).contains(c) ==> view.word_at(c)
             == absent_word(),
     ensures
-        walk_rest(view, cr3, top, vpage) == (cr3, top),
+        view.walk_leaf_ptbl(cr3, top, vpage) == (cr3, top),
         !PTEntry::<A>::spec_from_bits(
-            view.word_at(path_id(view, cr3, vpage, top)),
+            view.word_at(view.path_id(cr3, vpage, top)),
         ).present_spec(),
-        obj_ids::<A>(ObjId(0)).contains(path_id(view, cr3, vpage, top)),
+        obj_ids::<A>(ObjId(0)).contains(view.path_id(cr3, vpage, top)),
         forall|c: WordId| #[trigger]
-            on_path(view, cr3, top, vpage, c) == (c == path_id(view, cr3, vpage, top)),
-        forall|f: FrameId| #[trigger] walk_visits(view, cr3, top, vpage, f) == (f == cr3),
+            view.on_walk_path(cr3, top, vpage, c) == (c == view.path_id(cr3, vpage, top)),
+        forall|f: FrameId| #[trigger] view.walk_visits(cr3, top, vpage, f) == (f == cr3),
 {
     lemma_absent_word::<A>();
     lemma_pgtbl_idx_bounded::<A>(vpage, top);
-    assert(obj_ids::<A>(ObjId(0)).contains(path_id(view, cr3, vpage, top)));
-    lemma_walk_rest_stops(view, cr3, top, vpage);
+    assert(obj_ids::<A>(ObjId(0)).contains(view.path_id(cr3, vpage, top)));
+    lemma_walk_leaf_ptbl_stops(view, cr3, top, vpage);
 }
 
 
@@ -1730,12 +1707,11 @@ pub proof fn lemma_path_words<A: ArchPagingMeta>(
         forall|c: WordId| !touched.contains(c) ==> pre.phy_view().word_at(c) == post.phy_view().word_at(c),
     ensures
         forall|c: WordId| #[trigger]
-            on_path(pre.phy_view(), pre.cr3[k.0], pre.top(), k.1, c)
+            pre.phy_view().on_walk_path(pre.cr3[k.0], pre.top(), k.1, c)
                 ==> pre.phy_view().word_at(c) == post.phy_view().word_at(c),
 {
     assert forall|c: WordId| #[trigger]
-        on_path(
-            pre.phy_view(),
+        pre.phy_view().on_walk_path(
             pre.cr3[k.0],
             pre.top(),
             k.1,
@@ -1782,19 +1758,17 @@ pub proof fn lemma_frames_local<A: ArchPagingMeta>(
         post.paths_in_tables(),
         post.leaf_ids_agree(),
         forall|k: (nat, nat), f: FrameId|
-            #![trigger walk_visits(post.phy_view(), post.cr3[k.0], post.top(), k.1, f)]
-            #![trigger walk_visits(pre.phy_view(), pre.cr3[k.0], pre.top(), k.1, f)]
-            pre.vmap_dom.contains(k) ==> walk_visits(
-                post.phy_view(),
+            #![trigger post.phy_view().walk_visits(post.cr3[k.0], post.top(), k.1, f)]
+            #![trigger pre.phy_view().walk_visits(pre.cr3[k.0], pre.top(), k.1, f)]
+            pre.vmap_dom.contains(k) ==> post.phy_view().walk_visits(
                 post.cr3[k.0],
                 post.top(),
                 k.1,
                 f,
-            ) == walk_visits(pre.phy_view(), pre.cr3[k.0], pre.top(), k.1, f),
+            ) == pre.phy_view().walk_visits(pre.cr3[k.0], pre.top(), k.1, f),
 {
     assert forall|k: (nat, nat), f: FrameId|
-        pre.vmap_dom.contains(k) && #[trigger] walk_visits(
-            pre.phy_view(),
+        pre.vmap_dom.contains(k) && #[trigger] pre.phy_view().walk_visits(
             pre.cr3[k.0],
             pre.top(),
             k.1,
@@ -1802,14 +1776,13 @@ pub proof fn lemma_frames_local<A: ArchPagingMeta>(
         ) implies live.contains(f) by {
         assert(pre.allocated.contains(f));
     }
-    assert forall|k: (nat, nat), f: FrameId| pre.vmap_dom.contains(k) implies #[trigger] walk_visits(
-        post.phy_view(),
+    assert forall|k: (nat, nat), f: FrameId| pre.vmap_dom.contains(k) implies #[trigger] post.phy_view().walk_visits(
         post.cr3[k.0],
         post.top(),
         k.1,
         f,
-    ) == walk_visits(pre.phy_view(), pre.cr3[k.0], pre.top(), k.1, f) by {
-        lemma_walk_at_frames(
+    ) == pre.phy_view().walk_visits(pre.cr3[k.0], pre.top(), k.1, f) by {
+        lemma_walk_leaf_entry_frames(
             pre.phy_view(),
             post.phy_view(),
             live,
@@ -1818,13 +1791,12 @@ pub proof fn lemma_frames_local<A: ArchPagingMeta>(
             k.1,
         );
     }
-    assert forall|k: (nat, nat)| #[trigger] post.vmap_dom.contains(k) implies translate(
-        post.phy_view(),
+    assert forall|k: (nat, nat)| #[trigger] post.vmap_dom.contains(k) implies post.phy_view().translate(
         post.cr3[k.0],
         post.top(),
         k.1,
     ) == walk_target(post.vmap, post.obj_to_frame, k.0, k.1) && post.leaf_id[k] == Some(
-        resting_path_id(post.phy_view(), post.cr3[k.0], post.top(), k.1),
+        post.phy_view().resting_path_id(post.cr3[k.0], post.top(), k.1),
     ) by {
         lemma_translate_frames(
             pre.phy_view(),
@@ -1836,14 +1808,13 @@ pub proof fn lemma_frames_local<A: ArchPagingMeta>(
         );
     }
     assert forall|k: (nat, nat), c: WordId|
-        post.vmap_dom.contains(k) && #[trigger] on_path(
-            post.phy_view(),
+        post.vmap_dom.contains(k) && #[trigger] post.phy_view().on_walk_path(
             post.cr3[k.0],
             post.top(),
             k.1,
             c,
         ) implies post.pt_words.contains(c) by {
-        lemma_walk_at_frames(
+        lemma_walk_leaf_entry_frames(
             pre.phy_view(),
             post.phy_view(),
             live,
@@ -1851,7 +1822,7 @@ pub proof fn lemma_frames_local<A: ArchPagingMeta>(
             pre.top(),
             k.1,
         );
-        assert(on_path(pre.phy_view(), pre.cr3[k.0], pre.top(), k.1, c));
+        assert(pre.phy_view().on_walk_path(pre.cr3[k.0], pre.top(), k.1, c));
     }
 }
 
@@ -1888,88 +1859,79 @@ pub proof fn lemma_words_local<A: ArchPagingMeta>(
         post.paths_in_tables(),
         post.leaf_ids_agree(),
         forall|k: (nat, nat)|
-            #![trigger walk_rest(post.phy_view(), post.cr3[k.0], post.top(), k.1)]
-            #![trigger walk_rest(pre.phy_view(), pre.cr3[k.0], pre.top(), k.1)]
-            pre.vmap_dom.contains(k) ==> walk_rest(
-                post.phy_view(),
+            #![trigger post.phy_view().walk_leaf_ptbl(post.cr3[k.0], post.top(), k.1)]
+            #![trigger pre.phy_view().walk_leaf_ptbl(pre.cr3[k.0], pre.top(), k.1)]
+            pre.vmap_dom.contains(k) ==> post.phy_view().walk_leaf_ptbl(
                 post.cr3[k.0],
                 post.top(),
                 k.1,
-            ) == walk_rest(pre.phy_view(), pre.cr3[k.0], pre.top(), k.1),
+            ) == pre.phy_view().walk_leaf_ptbl(pre.cr3[k.0], pre.top(), k.1),
         forall|k: (nat, nat), f: FrameId|
-            #![trigger walk_visits(post.phy_view(), post.cr3[k.0], post.top(), k.1, f)]
-            #![trigger walk_visits(pre.phy_view(), pre.cr3[k.0], pre.top(), k.1, f)]
-            pre.vmap_dom.contains(k) ==> walk_visits(
-                post.phy_view(),
+            #![trigger post.phy_view().walk_visits(post.cr3[k.0], post.top(), k.1, f)]
+            #![trigger pre.phy_view().walk_visits(pre.cr3[k.0], pre.top(), k.1, f)]
+            pre.vmap_dom.contains(k) ==> post.phy_view().walk_visits(
                 post.cr3[k.0],
                 post.top(),
                 k.1,
                 f,
-            ) == walk_visits(pre.phy_view(), pre.cr3[k.0], pre.top(), k.1, f),
+            ) == pre.phy_view().walk_visits(pre.cr3[k.0], pre.top(), k.1, f),
         forall|k: (nat, nat), c: WordId|
-            #![trigger on_path(post.phy_view(), post.cr3[k.0], post.top(), k.1, c)]
-            #![trigger on_path(pre.phy_view(), pre.cr3[k.0], pre.top(), k.1, c)]
-            pre.vmap_dom.contains(k) ==> on_path(
-                post.phy_view(),
+            #![trigger post.phy_view().on_walk_path(post.cr3[k.0], post.top(), k.1, c)]
+            #![trigger pre.phy_view().on_walk_path(pre.cr3[k.0], pre.top(), k.1, c)]
+            pre.vmap_dom.contains(k) ==> post.phy_view().on_walk_path(
                 post.cr3[k.0],
                 post.top(),
                 k.1,
                 c,
-            ) == on_path(pre.phy_view(), pre.cr3[k.0], pre.top(), k.1, c),
+            ) == pre.phy_view().on_walk_path(pre.cr3[k.0], pre.top(), k.1, c),
 {
-    assert forall|k: (nat, nat)| pre.vmap_dom.contains(k) implies #[trigger] walk_rest(
-        post.phy_view(),
+    assert forall|k: (nat, nat)| pre.vmap_dom.contains(k) implies #[trigger] post.phy_view().walk_leaf_ptbl(
         post.cr3[k.0],
         post.top(),
         k.1,
-    ) == walk_rest(pre.phy_view(), pre.cr3[k.0], pre.top(), k.1) by {
+    ) == pre.phy_view().walk_leaf_ptbl(pre.cr3[k.0], pre.top(), k.1) by {
         lemma_path_words::<A>(pre, post, touched, k);
-        lemma_walk_at_local(pre.phy_view(), post.phy_view(), pre.cr3[k.0], pre.top(), k.1);
+        lemma_walk_leaf_entry_local(pre.phy_view(), post.phy_view(), pre.cr3[k.0], pre.top(), k.1);
     }
-    assert forall|k: (nat, nat), f: FrameId| pre.vmap_dom.contains(k) implies #[trigger] walk_visits(
-        post.phy_view(),
+    assert forall|k: (nat, nat), f: FrameId| pre.vmap_dom.contains(k) implies #[trigger] post.phy_view().walk_visits(
         post.cr3[k.0],
         post.top(),
         k.1,
         f,
-    ) == walk_visits(pre.phy_view(), pre.cr3[k.0], pre.top(), k.1, f) by {
+    ) == pre.phy_view().walk_visits(pre.cr3[k.0], pre.top(), k.1, f) by {
         lemma_path_words::<A>(pre, post, touched, k);
-        lemma_walk_at_local(pre.phy_view(), post.phy_view(), pre.cr3[k.0], pre.top(), k.1);
+        lemma_walk_leaf_entry_local(pre.phy_view(), post.phy_view(), pre.cr3[k.0], pre.top(), k.1);
     }
-    assert forall|k: (nat, nat), c: WordId| pre.vmap_dom.contains(k) implies #[trigger] on_path(
-        post.phy_view(),
+    assert forall|k: (nat, nat), c: WordId| pre.vmap_dom.contains(k) implies #[trigger] post.phy_view().on_walk_path(
         post.cr3[k.0],
         post.top(),
         k.1,
         c,
-    ) == on_path(pre.phy_view(), pre.cr3[k.0], pre.top(), k.1, c) by {
+    ) == pre.phy_view().on_walk_path(pre.cr3[k.0], pre.top(), k.1, c) by {
         lemma_path_words::<A>(pre, post, touched, k);
-        lemma_walk_at_local(pre.phy_view(), post.phy_view(), pre.cr3[k.0], pre.top(), k.1);
+        lemma_walk_leaf_entry_local(pre.phy_view(), post.phy_view(), pre.cr3[k.0], pre.top(), k.1);
     }
-    assert forall|k: (nat, nat)| #[trigger] post.vmap_dom.contains(k) implies translate(
-        post.phy_view(),
+    assert forall|k: (nat, nat)| #[trigger] post.vmap_dom.contains(k) implies post.phy_view().translate(
         post.cr3[k.0],
         post.top(),
         k.1,
     ) == walk_target(post.vmap, post.obj_to_frame, k.0, k.1) && post.leaf_id[k] == Some(
-        resting_path_id(post.phy_view(), post.cr3[k.0], post.top(), k.1),
+        post.phy_view().resting_path_id(post.cr3[k.0], post.top(), k.1),
     ) by {
         lemma_path_words::<A>(pre, post, touched, k);
         lemma_translate_local(pre.phy_view(), post.phy_view(), pre.cr3[k.0], pre.top(), k.1);
     }
     assert forall|k: (nat, nat), c: WordId|
-        post.vmap_dom.contains(k) && #[trigger] on_path(
-            post.phy_view(),
+        post.vmap_dom.contains(k) && #[trigger] post.phy_view().on_walk_path(
             post.cr3[k.0],
             post.top(),
             k.1,
             c,
         ) implies post.pt_words.contains(c) by {
-        assert(on_path(pre.phy_view(), pre.cr3[k.0], pre.top(), k.1, c));
+        assert(pre.phy_view().on_walk_path(pre.cr3[k.0], pre.top(), k.1, c));
     }
     assert forall|k: (nat, nat), f: FrameId|
-        post.vmap_dom.contains(k) && #[trigger] walk_visits(
-            post.phy_view(),
+        post.vmap_dom.contains(k) && #[trigger] post.phy_view().walk_visits(
             post.cr3[k.0],
             post.top(),
             k.1,
@@ -1978,7 +1940,7 @@ pub proof fn lemma_words_local<A: ArchPagingMeta>(
         &&& post.allocated.contains(f)
         &&& exists|o: ObjId| post.frame_to_objs[f] =~= Set::<ObjId>::empty().insert(o)
     } by {
-        assert(walk_visits(pre.phy_view(), pre.cr3[k.0], pre.top(), k.1, f));
+        assert(pre.phy_view().walk_visits(pre.cr3[k.0], pre.top(), k.1, f));
     }
 }
 
