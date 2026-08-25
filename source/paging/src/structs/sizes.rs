@@ -17,12 +17,16 @@ verus! {
 
 /// Marker type describing the width of the in-page byte offset, i.e. the page
 /// shift.
+///
+/// The shift is at least 12 because every architecture this models -- x86,
+/// AArch64 and RISC-V -- has a 4 KiB smallest page. That bound is what makes a
+/// table page hold at least one entry.
 pub trait PageOffset {
     const SHIFT: usize;
 
     proof fn lemma_shift_wf()
         ensures
-            0 < Self::SHIFT < usize::BITS,
+            12 <= Self::SHIFT < usize::BITS,
             common_proofs::bits::is_pow_of_2((1usize << Self::SHIFT) as u64),
     ;
 }
@@ -35,8 +39,8 @@ pub trait PageSize: PageOffset {
     proof fn lemma_size_wf()
         ensures
             Self::SIZE == 1usize << Self::SHIFT,
-            0 < Self::SHIFT < usize::BITS,
-            0 < Self::SIZE,
+            12 <= Self::SHIFT < usize::BITS,
+            Self::SIZE >= 4096usize,
             common_proofs::bits::is_pow_of_2(Self::SIZE as u64),
     ;
 }
@@ -87,9 +91,9 @@ impl<T: PageOffset> PageSize for T {
         T::lemma_shift_wf();
         let shift = T::SHIFT;
         assert(Self::SIZE == 1usize << shift);
-        assert(1usize << shift > 0) by (bit_vector)
+        assert(1usize << shift >= 4096usize) by (bit_vector)
             requires
-                shift < 64,
+                12 <= shift < 64,
         ;
     }
 }

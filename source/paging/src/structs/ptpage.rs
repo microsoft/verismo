@@ -48,6 +48,15 @@ impl<A: ArchPagingMeta> PTPage<A> {
     pub open spec fn count() -> nat {
         (<A::MinPageSize as PageSize>::SIZE as nat) / vstd::layout::size_of::<usize>()
     }
+
+    /// A table page holds at least one entry, because every architecture this models has a
+    /// smallest page of at least 4 KiB.
+    pub proof fn lemma_count_positive()
+        ensures
+            Self::count() > 0,
+    {
+        <A::MinPageSize as PageSize>::lemma_size_wf();
+    }
 }
 
 /// The page `perm` describes, as a pointer.

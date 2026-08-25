@@ -202,12 +202,11 @@ impl<A: ArchPagingMeta> PhyMemView<A> {
 }
 
 /// Pages covered by a leaf at `level` are consecutive frames starting at the entry's frame.
-pub open spec fn leaf_offset<A: ArchPagingMeta>(vpage: nat, level: PageLevel) -> nat {
-    if PTPage::<A>::count() > 0 {
-        (vpage % (pow(PTPage::<A>::count() as int, level.depth() as nat) as nat)) as nat
-    } else {
-        0
-    }
+pub open spec fn leaf_offset<A: ArchPagingMeta>(vpage: nat, level: PageLevel) -> nat 
+recommends
+    PTPage::<A>::count() > 0
+{
+    (vpage % (pow(PTPage::<A>::count() as int, level.depth() as nat) as nat)) as nat
 }
 
 /// Word an absent entry holds.
@@ -300,7 +299,6 @@ pub proof fn lemma_page_base_div<A: ArchPagingMeta>(vpage: nat)
 
 pub proof fn lemma_pgtbl_idx_page_base_step<A: ArchPagingMeta>(vpage: nat, level: PageLevel)
     requires
-        PTPage::<A>::count() > 0,
         level.spec_child() is Some,
     ensures
         pgtbl_idx::<A>(page_base::<A>(vpage), level) == pgtbl_idx::<A>(
@@ -314,12 +312,11 @@ pub proof fn lemma_pgtbl_idx_page_base_step<A: ArchPagingMeta>(vpage: nat, level
 
 /// An entry always lies inside its table page.
 pub proof fn lemma_pgtbl_idx_bounded<A: ArchPagingMeta>(vpage: nat, level: PageLevel)
-    requires
-        PTPage::<A>::count() > 0,
     ensures
         (pgtbl_idx::<A>(page_base::<A>(vpage), level) as nat) < PTPage::<A>::count(),
     decreases level.depth(),
 {
+    PTPage::<A>::lemma_count_positive();
     lemma_page_base_div::<A>(vpage);
     if let Some(child) = level.spec_child() {
         PageLevel::lemma_child_decreases(level);
@@ -332,7 +329,6 @@ pub proof fn lemma_pgtbl_idx_bounded<A: ArchPagingMeta>(vpage: nat, level: PageL
 /// exactly one page.
 pub proof fn lemma_pgtbl_idx_injective<A: ArchPagingMeta>(vpage1: nat, vpage2: nat, levels: nat)
     requires
-        PTPage::<A>::count() > 0,
         levels <= 5,
         vpage1 < pow(PTPage::<A>::count() as int, levels as nat),
         vpage2 < pow(PTPage::<A>::count() as int, levels as nat),
@@ -341,6 +337,7 @@ pub proof fn lemma_pgtbl_idx_injective<A: ArchPagingMeta>(vpage1: nat, vpage2: n
         vpage1 == vpage2,
     decreases levels,
 {
+    PTPage::<A>::lemma_count_positive();
     let e = PTPage::<A>::count();
     if levels == 0 {
         vstd::arithmetic::power::lemma_pow0(e as int);
@@ -595,7 +592,6 @@ pub proof fn lemma_root_copy_entry<A: ArchPagingMeta>(
     vpage: nat,
 )
     requires
-        PTPage::<A>::count() > 0,
         forall|i: nat| i < PTPage::<A>::count() ==> #[trigger] view.word_at(
             WordId((view.resident(r1).0 + i) as nat),
         ) == view.word_at(WordId((view.resident(r2).0 + i) as nat)),
@@ -624,7 +620,6 @@ pub proof fn lemma_walk_leaf_entry_root_copy<A: ArchPagingMeta>(
     vpage: nat,
 )
     requires
-        PTPage::<A>::count() > 0,
         PTEntry::<A>::spec_from_bits(
             view.word_at(view.path_id(r1, vpage, level)),
         ).is_table_spec(level),
@@ -658,7 +653,6 @@ pub proof fn lemma_translate_root_copy<A: ArchPagingMeta>(
     vpage: nat,
 )
     requires
-        PTPage::<A>::count() > 0,
         forall|i: nat| i < PTPage::<A>::count() ==> #[trigger] view.word_at(
             WordId((view.resident(r1).0 + i) as nat),
         ) == view.word_at(WordId((view.resident(r2).0 + i) as nat)),
@@ -906,12 +900,6 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
         pub marker: PhantomData<A>,
     }
 
-    /// Page-table geometry modeled by this state machine.
-    #[invariant]
-    pub spec fn geometry(&self) -> bool {
-        PTPage::<A>::count() > 0
-    }
-
     #[invariant]
     pub spec fn domains_fixed(&self) -> bool {
         &&& self.vmem.dom() =~= self.vmem_dom
@@ -1097,7 +1085,6 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             root: FrameId,
             top: PageLevel,
         ) {
-            require PTPage::<A>::count() > 0;
             require frames.contains(root);
             require forall|f: FrameId| #[trigger] frames.contains(f)
                 ==> f.0 <= usize::MAX && encodable::<A>(f.0 as usize);
@@ -1176,6 +1163,9 @@ tokenized_state_machine!(Mem<A: ArchPagingMeta> {
             src_vmap: Map<(nat, nat), Option<ObjId>>,
             words: Map<WordId, usize>,
         ) {
+            assert(PTPage::<A>::count() > 0) by {
+                PTPage::<A>::lemma_count_positive();
+            };
             let a = pre.next_asid;
             let nobj = ObjId(pre.next_oid);
             require pre.asids.contains(src);
@@ -1665,7 +1655,6 @@ pub proof fn lemma_boot_walk_leaf_entry<A: ArchPagingMeta>(
 )
     requires
         view.resident(cr3) == ObjId(0),
-        PTPage::<A>::count() > 0,
         forall|c: WordId| #[trigger] obj_ids::<A>(ObjId(0)).contains(c) ==> view.word_at(c)
             == absent_word(),
     ensures
