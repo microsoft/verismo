@@ -11,11 +11,11 @@ use core::marker::PhantomData;
 use vstd::prelude::*;
 
 use crate::structs::address::{Address, PhysAddr};
-use crate::structs::level::PageLevel;
-use crate::structs::ptpage::PTPage;
 use crate::structs::arch_contract::{
     ArchPagingMeta, GenericPageTableFlags, GenericPageTableFlagsSpec,
 };
+use crate::structs::level::PageLevel;
+use crate::structs::ptpage::PTPage;
 use bitflags::Flags;
 use bitflags_verus::FlagsSpec;
 
@@ -25,32 +25,32 @@ verus! {
 
 /// The page-table slot selected by a virtual address at a given level, in the
 /// architecture-neutral arithmetic form used by tree-walk proofs.
-pub open spec fn pgtbl_idx<A: ArchPagingMeta>(vaddr: nat, level: PageLevel) -> usize
+pub open spec fn pgtbl_idx<A: ArchPagingMeta>(vaddr: usize, level: PageLevel) -> usize
     decreases level.depth(),
 {
     let page_size = <A::MinPageSize as PageSize>::SIZE as nat;
     let entry_count = PTPage::<A>::count();
-    let vpage = vaddr / page_size;
+    let vpage = vaddr as nat / page_size;
     match level.spec_child() {
         None => (vpage % entry_count) as usize,
-        Some(child) => pgtbl_idx::<A>(((vpage / entry_count) * page_size) as nat, child),
+        Some(child) => pgtbl_idx::<A>(((vpage / entry_count) * page_size) as usize, child),
     }
 }
 
-pub proof fn lemma_pgtbl_idx_zero<A: ArchPagingMeta>(vaddr: nat)
+pub proof fn lemma_pgtbl_idx_zero<A: ArchPagingMeta>(vaddr: usize)
     ensures
-        pgtbl_idx::<A>(vaddr, PageLevel::Level0) == ((vaddr / (<A::MinPageSize as PageSize>::SIZE
-            as nat)) % PTPage::<A>::count()) as usize,
+        pgtbl_idx::<A>(vaddr, PageLevel::Level0) == ((vaddr as nat / (
+        <A::MinPageSize as PageSize>::SIZE as nat)) % PTPage::<A>::count()) as usize,
 {
 }
 
-pub proof fn lemma_pgtbl_idx_step<A: ArchPagingMeta>(vaddr: nat, level: PageLevel)
+pub proof fn lemma_pgtbl_idx_step<A: ArchPagingMeta>(vaddr: usize, level: PageLevel)
     requires
         level.spec_child() is Some,
     ensures
         pgtbl_idx::<A>(vaddr, level) == pgtbl_idx::<A>(
-            (((vaddr / (<A::MinPageSize as PageSize>::SIZE as nat)) / PTPage::<A>::count())
-                * (<A::MinPageSize as PageSize>::SIZE as nat)) as nat,
+            (((vaddr as nat / (<A::MinPageSize as PageSize>::SIZE as nat)) / PTPage::<A>::count())
+                * (<A::MinPageSize as PageSize>::SIZE as nat)) as usize,
             level.spec_child().unwrap(),
         ),
 {
@@ -377,7 +377,7 @@ impl<A: ArchPagingMeta> PTEntry<A> {
         requires
             addr@ & !A::spec_address_mask() == 0,
         ensures
-            forall|level: PageLevel| !level.is_leaf() ==> ret.is_table_spec(level),
+            forall|level: PageLevel| !level.is_leaf() ==> #[trigger] ret.is_table_spec(level),
             ret.escrows_spec(),
             ret.paddr_field_spec() == addr@,
     {

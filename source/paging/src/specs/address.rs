@@ -4,17 +4,17 @@
 //
 // Author: Ziqiao Zhou <ziqiaozhou@microsoft.com>
 //
+use crate::arch::x86_64::paging::{X86Paging, X86PagingParams};
 use crate::specs::external::SpecVAddrImpl;
 use crate::specs::external::{exists_into, forall_into};
-use crate::util::{align_down_integer_ens, align_up_integer_ens, proof_align_down, proof_align_up};
-use vstd::raw_ptr::{ptr_from_data, ptr_mut_from_data, PtrData};
-use vstd::set_lib::set_int_range;
-use crate::arch::x86_64::paging::{X86Paging, X86PagingParams};
 use crate::structs::arch_contract::ArchPagingGeometry;
 use crate::structs::entry::{lemma_pgtbl_idx_step, lemma_pgtbl_idx_zero, pgtbl_idx};
 use crate::structs::level::PageLevel;
 use crate::structs::ptpage::PTPage;
+use crate::util::{align_down_integer_ens, align_up_integer_ens, proof_align_down, proof_align_up};
 use vstd::arithmetic::div_mod::lemma_div_by_multiple;
+use vstd::raw_ptr::{ptr_from_data, ptr_mut_from_data, PtrData};
+use vstd::set_lib::set_int_range;
 use vstd::std_specs::cmp::PartialOrdSpec;
 use vstd::std_specs::convert::{FromSpec, IntoSpec};
 use vstd::std_specs::ops::AddSpec;
@@ -112,7 +112,7 @@ pub proof fn lemma_pt_idx_spec_is_pgtbl_idx_x86<P: X86PagingParams>(addr: InnerA
     requires
         l <= 4,
     ensures
-        pt_idx_spec(addr, l) == pgtbl_idx::<X86Paging<P>>(addr as nat, PageLevel::from_nat(l as nat)),
+        pt_idx_spec(addr, l) == pgtbl_idx::<X86Paging<P>>(addr, PageLevel::from_nat(l as nat)),
 {
     lemma_size_4k();
     assert(<<X86Paging<P> as ArchPagingGeometry>::MinPageSize as PageSize>::SIZE == 4096usize);
@@ -137,10 +137,26 @@ pub proof fn lemma_pt_idx_spec_is_pgtbl_idx_x86<P: X86PagingParams>(addr: InnerA
     assert((vp1 as nat) / 512nat == vp2 as nat);
     assert((vp2 as nat) / 512nat == vp3 as nat);
     assert((vp3 as nat) / 512nat == vp4 as nat);
-    vstd::arithmetic::div_mod::lemma_div_denominator(addr as int, page_size as int, entry_count as int);
-    vstd::arithmetic::div_mod::lemma_div_denominator(addr as int, (page_size * entry_count) as int, entry_count as int);
-    vstd::arithmetic::div_mod::lemma_div_denominator(addr as int, (page_size * entry_count * entry_count) as int, entry_count as int);
-    vstd::arithmetic::div_mod::lemma_div_denominator(addr as int, (page_size * entry_count * entry_count * entry_count) as int, entry_count as int);
+    vstd::arithmetic::div_mod::lemma_div_denominator(
+        addr as int,
+        page_size as int,
+        entry_count as int,
+    );
+    vstd::arithmetic::div_mod::lemma_div_denominator(
+        addr as int,
+        (page_size * entry_count) as int,
+        entry_count as int,
+    );
+    vstd::arithmetic::div_mod::lemma_div_denominator(
+        addr as int,
+        (page_size * entry_count * entry_count) as int,
+        entry_count as int,
+    );
+    vstd::arithmetic::div_mod::lemma_div_denominator(
+        addr as int,
+        (page_size * entry_count * entry_count * entry_count) as int,
+        entry_count as int,
+    );
     assert((addr >> 12usize) == addr / 4096usize) by (bit_vector);
     assert((addr >> 21usize) == addr / 2097152usize) by (bit_vector);
     assert((addr >> 30usize) == addr / 1073741824usize) by (bit_vector);
@@ -149,7 +165,8 @@ pub proof fn lemma_pt_idx_spec_is_pgtbl_idx_x86<P: X86PagingParams>(addr: InnerA
     assert(4096usize * 512usize == 2097152usize) by (compute);
     assert(4096usize * 512usize * 512usize == 1073741824usize) by (compute);
     assert(4096usize * 512usize * 512usize * 512usize == 549755813888usize) by (compute);
-    assert(4096usize * 512usize * 512usize * 512usize * 512usize == 281474976710656usize) by (compute);
+    assert(4096usize * 512usize * 512usize * 512usize * 512usize == 281474976710656usize)
+        by (compute);
     assert(page_size * entry_count == 2097152);
     assert(page_size * entry_count * entry_count == 1073741824);
     assert(page_size * entry_count * entry_count * entry_count == 549755813888);
@@ -159,28 +176,48 @@ pub proof fn lemma_pt_idx_spec_is_pgtbl_idx_x86<P: X86PagingParams>(addr: InnerA
     assert((vp2 % entry_count) as nat == (vp2 as nat) % 512nat);
     assert((vp3 % entry_count) as nat == (vp3 as nat) % 512nat);
     assert((vp4 % entry_count) as nat == (vp4 as nat) % 512nat);
-    lemma_pgtbl_idx_zero::<X86Paging<P>>(addr as nat);
-    assert(pgtbl_idx::<X86Paging<P>>(addr as nat, PageLevel::from_nat(0nat)) == vp0 % entry_count);
-    lemma_pgtbl_idx_step::<X86Paging<P>>(addr as nat, PageLevel::from_nat(1nat));
-    lemma_pgtbl_idx_zero::<X86Paging<P>>((vp1 as nat * 4096nat) as nat);
-    assert((pgtbl_idx::<X86Paging<P>>(addr as nat, PageLevel::from_nat(1nat)) as nat) == (vp1 as nat) % 512nat);
-    assert(pgtbl_idx::<X86Paging<P>>(addr as nat, PageLevel::from_nat(1nat)) == vp1 % entry_count);
-    lemma_pgtbl_idx_step::<X86Paging<P>>(addr as nat, PageLevel::from_nat(2nat));
-    lemma_pgtbl_idx_step::<X86Paging<P>>((vp1 as nat * 4096nat) as nat, PageLevel::from_nat(1nat));
-    lemma_pgtbl_idx_zero::<X86Paging<P>>((vp2 as nat * 4096nat) as nat);
-    assert((pgtbl_idx::<X86Paging<P>>(addr as nat, PageLevel::from_nat(2nat)) as nat) == (vp2 as nat) % 512nat);
-    assert(pgtbl_idx::<X86Paging<P>>(addr as nat, PageLevel::from_nat(2nat)) == vp2 % entry_count);
-    lemma_pgtbl_idx_step::<X86Paging<P>>(addr as nat, PageLevel::from_nat(3nat));
-    lemma_pgtbl_idx_step::<X86Paging<P>>((vp1 as nat * 4096nat) as nat, PageLevel::from_nat(2nat));
-    lemma_pgtbl_idx_step::<X86Paging<P>>((vp2 as nat * 4096nat) as nat, PageLevel::from_nat(1nat));
-    lemma_pgtbl_idx_zero::<X86Paging<P>>((vp3 as nat * 4096nat) as nat);
-    assert(pgtbl_idx::<X86Paging<P>>(addr as nat, PageLevel::from_nat(3nat)) == vp3 % entry_count);
-    lemma_pgtbl_idx_step::<X86Paging<P>>(addr as nat, PageLevel::from_nat(4nat));
-    lemma_pgtbl_idx_step::<X86Paging<P>>((vp1 as nat * 4096nat) as nat, PageLevel::from_nat(3nat));
-    lemma_pgtbl_idx_step::<X86Paging<P>>((vp2 as nat * 4096nat) as nat, PageLevel::from_nat(2nat));
-    lemma_pgtbl_idx_step::<X86Paging<P>>((vp3 as nat * 4096nat) as nat, PageLevel::from_nat(1nat));
-    lemma_pgtbl_idx_zero::<X86Paging<P>>((vp4 as nat * 4096nat) as nat);
-    assert(pgtbl_idx::<X86Paging<P>>(addr as nat, PageLevel::from_nat(4nat)) == vp4 % entry_count);
+    lemma_pgtbl_idx_zero::<X86Paging<P>>(addr);
+    assert(pgtbl_idx::<X86Paging<P>>(addr, PageLevel::from_nat(0nat)) == vp0 % entry_count);
+    lemma_pgtbl_idx_step::<X86Paging<P>>(addr, PageLevel::from_nat(1nat));
+    lemma_pgtbl_idx_zero::<X86Paging<P>>((vp1 as nat * 4096nat) as usize);
+    assert((pgtbl_idx::<X86Paging<P>>(addr, PageLevel::from_nat(1nat)) as nat) == (vp1 as nat)
+        % 512nat);
+    assert(pgtbl_idx::<X86Paging<P>>(addr, PageLevel::from_nat(1nat)) == vp1 % entry_count);
+    lemma_pgtbl_idx_step::<X86Paging<P>>(addr, PageLevel::from_nat(2nat));
+    lemma_pgtbl_idx_step::<X86Paging<P>>(
+        (vp1 as nat * 4096nat) as usize,
+        PageLevel::from_nat(1nat),
+    );
+    lemma_pgtbl_idx_zero::<X86Paging<P>>((vp2 as nat * 4096nat) as usize);
+    assert((pgtbl_idx::<X86Paging<P>>(addr, PageLevel::from_nat(2nat)) as nat) == (vp2 as nat)
+        % 512nat);
+    assert(pgtbl_idx::<X86Paging<P>>(addr, PageLevel::from_nat(2nat)) == vp2 % entry_count);
+    lemma_pgtbl_idx_step::<X86Paging<P>>(addr, PageLevel::from_nat(3nat));
+    lemma_pgtbl_idx_step::<X86Paging<P>>(
+        (vp1 as nat * 4096nat) as usize,
+        PageLevel::from_nat(2nat),
+    );
+    lemma_pgtbl_idx_step::<X86Paging<P>>(
+        (vp2 as nat * 4096nat) as usize,
+        PageLevel::from_nat(1nat),
+    );
+    lemma_pgtbl_idx_zero::<X86Paging<P>>((vp3 as nat * 4096nat) as usize);
+    assert(pgtbl_idx::<X86Paging<P>>(addr, PageLevel::from_nat(3nat)) == vp3 % entry_count);
+    lemma_pgtbl_idx_step::<X86Paging<P>>(addr, PageLevel::from_nat(4nat));
+    lemma_pgtbl_idx_step::<X86Paging<P>>(
+        (vp1 as nat * 4096nat) as usize,
+        PageLevel::from_nat(3nat),
+    );
+    lemma_pgtbl_idx_step::<X86Paging<P>>(
+        (vp2 as nat * 4096nat) as usize,
+        PageLevel::from_nat(2nat),
+    );
+    lemma_pgtbl_idx_step::<X86Paging<P>>(
+        (vp3 as nat * 4096nat) as usize,
+        PageLevel::from_nat(1nat),
+    );
+    lemma_pgtbl_idx_zero::<X86Paging<P>>((vp4 as nat * 4096nat) as usize);
+    assert(pgtbl_idx::<X86Paging<P>>(addr, PageLevel::from_nat(4nat)) == vp4 % entry_count);
     if l == 0 {
         assert(pt_idx_spec(addr, l) == vp0 % entry_count);
     } else if l == 1 {
