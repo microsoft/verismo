@@ -3,6 +3,7 @@ pub mod arch_contract;
 pub mod build;
 pub mod concurrent_pt;
 pub mod entry;
+pub mod frame;
 pub mod free;
 pub mod geometry;
 pub mod handle;

@@ -108,6 +108,7 @@ pub use structs::level;
 pub use structs::os_contract;
 pub use structs::ptpage;
 pub use structs::free;
+pub use structs::frame;
 pub use structs::map;
 pub use structs::range;
 pub use structs::region;
