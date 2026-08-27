@@ -23,7 +23,7 @@ use machine_model::arch::x86_64::Cr3;
 use machine_model::register::RustRegisterPointsTo;
 use vstd::prelude::*;
 
-use crate::arch::x86_64::reg_contract::cr3_root_frame;
+use crate::arch::x86_64::reg_contract::cr3_phys_addr;
 use crate::structs::address::{Address, PhysAddr};
 use crate::structs::arch_contract::ArchPagingMeta;
 
@@ -77,7 +77,7 @@ impl<A: ArchPagingMeta> PTInstallState<A> {
     )
         requires
             old(state).root_frame() == root@,
-            cr3_root_frame::<A>(cr3.value()) == root@,
+            cr3_phys_addr::<A>(cr3.value()) == root@,
         ensures
             final(state).root_frame() == old(state).root_frame(),
             final(state).installed(),

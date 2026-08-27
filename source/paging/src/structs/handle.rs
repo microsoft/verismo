@@ -13,7 +13,7 @@
 use machine_model::arch::x86_64::Cr3;
 use machine_model::register::RustRegisterPointsTo;
 
-use crate::arch::x86_64::reg_contract::cr3_root_frame;
+use crate::arch::x86_64::reg_contract::cr3_phys_addr;
 use core::marker::PhantomData;
 
 use vstd::prelude::*;
@@ -314,7 +314,7 @@ impl<A: ArchPagingMeta, P: OSPagingContract<A>, L: PagingLevel> GenericPageTable
     pub fn install(&mut self, Tracked(cr3): Tracked<&RustRegisterPointsTo<Cr3>>)
         requires
             old(self).inv(),
-            cr3_root_frame::<A>(cr3.value()) == old(self).install_spec().root_frame(),
+            cr3_phys_addr::<A>(cr3.value()) == old(self).install_spec().root_frame(),
         ensures
             final(self).inv(),
             final(self).installed(),

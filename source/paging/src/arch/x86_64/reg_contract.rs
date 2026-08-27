@@ -59,7 +59,6 @@ pub open spec fn cr3_paging_precondition<A: ArchPagingGeometry>(
     cr4: Cr4Value,
 ) -> bool {
     &&& (cr3@ & !(low_bits_mask_u64(A::phys_addr_width()))) == 0
-    &&& !cr3.intersects(Cr3Value::NOFLUSH)
     &&& (!cr4.contains(Cr4Value::PCIDE) ==> (cr3@ & (low_bits_mask_u64(page_offset_width::<A>())
         & !(Cr3Value::PWT@ | Cr3Value::PCD@))) == 0)
 }
@@ -86,9 +85,9 @@ pub open spec fn efer_paging_precondition(efer: EferValue) -> bool {
     &&& efer.contains(EferValue::LMA)
 }
 
-/// The frame the paging-root register names, with the flag and PCID bits the
+/// The physical address of the paging root, with the flag and PCID bits the
 /// architecture keeps in the low word stripped off.
-pub open spec fn cr3_root_frame<A: ArchPagingMeta>(cr3: Cr3Value) -> usize {
+pub open spec fn cr3_phys_addr<A: ArchPagingMeta>(cr3: Cr3Value) -> usize {
     (cr3@ as usize) & A::spec_address_mask()
 }
 
