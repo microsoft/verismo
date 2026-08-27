@@ -85,6 +85,22 @@ pub closed spec fn sign_extend_impl(addr: InnerAddr) -> InnerAddr {
     }
 }
 
+/// Sign extension is the identity on an address that is already canonical.
+/// This is what lets a caller move a virtual address within its own half --
+/// aligning it down to a page start, say -- and rebuild a `VirtAddr` from the
+/// result without the address moving again.
+pub proof fn lemma_sign_extend_canonical(v: InnerAddr)
+    requires
+        v <= VADDR_LOWER_MASK || v >= VADDR_UPPER_MASK,
+    ensures
+        sign_extend_spec(v) == v,
+{
+    if v > VADDR_LOWER_MASK {
+        assert(VADDR_UPPER_MASK >= VADDR_RANGE_SIZE);
+        assert(vaddr_upper_bits(v) == VADDR_UPPER_MASK);
+    }
+}
+
 /// Ensures that ret is a new canonical address, throwing out bits 48..64.
 #[verifier(inline)]
 pub open spec fn sign_extend_ensures(addr: InnerAddr, ret: InnerAddr) -> bool {

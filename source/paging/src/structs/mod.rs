@@ -10,6 +10,7 @@ pub mod handle;
 pub mod level;
 pub mod map;
 pub mod os_contract;
+pub mod page;
 pub mod ptpage;
 pub mod range;
 pub mod region;

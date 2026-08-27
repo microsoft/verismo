@@ -106,6 +106,7 @@ pub use structs::entry;
 pub use structs::handle;
 pub use structs::level;
 pub use structs::os_contract;
+pub use structs::page;
 pub use structs::ptpage;
 pub use structs::free;
 pub use structs::frame;
