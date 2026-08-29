@@ -10,4 +10,7 @@ pub mod concurrent_entry;
 #[cfg(verus_only)]
 pub mod entry;
 pub mod external;
+pub mod init_state;
 pub mod nonnull;
+pub mod page_table;
+pub mod points_to;

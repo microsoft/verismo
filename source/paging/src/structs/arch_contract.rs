@@ -143,8 +143,19 @@ pub trait ArchPagingGeometry: Sized {
 }
 
 /// Width of the in-page byte offset, in bits.
+#[verifier::inline]
 pub open spec fn page_offset_width<A: ArchPagingGeometry>() -> nat {
     <A::MinPageSize as PageOffset>::SHIFT as nat
+}
+
+#[verifier::inline]
+pub open spec fn page_offset_mask<A: ArchPagingGeometry>() -> usize {
+    (page_size::<A>() - 1) as usize
+}
+
+#[verifier::inline]
+pub open spec fn page_size<A: ArchPagingGeometry>() -> usize {
+    A::MinPageSize::SIZE
 }
 
 /// Number of virtual-address bits one paging level consumes: enough to index
