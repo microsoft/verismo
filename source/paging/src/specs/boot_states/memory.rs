@@ -210,7 +210,7 @@ pub tracked struct DirectMap<A: ArchPagingMeta> {
     /// The physical addresses the firmware mapped through. A set rather than a
     /// range: firmware is free to leave several disjoint regions mapped, and
     /// nothing here needs them contiguous.
-    pub ghost pas: Set<int>,
+    pub ghost pa_set: Set<int>,
     /// Where a physical address appears. Any function will do: the invariants
     /// below say only that the tables are reachable through it, so an OS that
     /// establishes a `DirectMap` proves its own translation fits.
@@ -224,7 +224,7 @@ pub tracked struct DirectMap<A: ArchPagingMeta> {
 impl<A: ArchPagingMeta> DirectMap<A> {
     /// Whether `pa` is mapped through.
     pub open spec fn covers(&self, pa: int) -> bool {
-        self.pas.contains(pa)
+        self.pa_set.contains(pa)
     }
 
     /// Whether every byte of `frame` is mapped through.
