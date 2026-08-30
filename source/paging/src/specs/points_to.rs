@@ -41,6 +41,7 @@ use vstd::layout::{align_of, size_of};
 use vstd::raw_ptr::PointsTo;
 use vstd::raw_ptr::PointsToRaw;
 use vstd::raw_ptr::spec_cast_ptr_to_thin_ptr;
+use vstd::raw_ptr::{PtrData, ptr_mut_from_data};
 use vstd::resource::frac::FracGhost;
 use vstd::resource::Loc;
 use vstd::tokens::InstanceId;
@@ -55,6 +56,55 @@ pub open spec fn page_offset_of<A: ArchPagingMeta>(addr: int) -> int {
 pub open spec fn page_start_of<A: ArchPagingMeta>(addr: int) -> int {
     addr - page_offset_of::<A>(addr)
 }
+
+/// The `i`-th element of an array, as a pointer.
+///
+/// Address and provenance are what say which memory a pointer reaches, and an
+/// array element is at a known offset within the same allocation, so the
+/// element pointer keeps the array's provenance and moves the address.
+pub open spec fn array_element_ptr<T, const N: usize>(p: *mut [T; N], i: int) -> *mut T {
+    ptr_mut_from_data(
+        PtrData {
+            addr: (p@.addr + i * size_of::<T>()) as usize,
+            provenance: p@.provenance,
+            metadata: (),
+        },
+    )
+}
+
+/// **Assumption.** An array is its elements, laid out end to end.
+///
+/// Rust guarantees this -- `[T; N]` is `N` contiguous `T`s, aligned as a `T` --
+/// but vstd's [`size_of`] and [`align_of`] are uninterpreted, so nothing in it
+/// relates the two. This is a statement about layout, not about paging, and it
+/// is the whole of what is assumed here.
+pub broadcast axiom fn axiom_array_layout<T, const N: usize>()
+    ensures
+        #[trigger] size_of::<[T; N]>() == N * size_of::<T>(),
+        align_of::<[T; N]>() == align_of::<T>(),
+;
+
+/// **Assumption.** A permission to an array is permission to each of its
+/// elements, each keeping the value it had.
+///
+/// The counterpart of [`axiom_array_layout`] for ownership rather than for
+/// addresses: vstd's [`PointsTo`] is opaque, and it offers no way to see an
+/// array permission as its elements' -- [`PointsTo::into_raw`] insists the
+/// memory be uninitialized, which is exactly the case this must not be limited
+/// to.
+pub axiom fn points_to_array_split<T, const N: usize>(tracked pt: PointsTo<[T; N]>) -> (tracked
+    ret: Seq<PointsTo<T>>)
+    requires
+        pt.is_init(),
+    ensures
+        ret.len() == N,
+        forall|i: int|
+            #![trigger ret[i]]
+            0 <= i < N ==> {
+                &&& ret[i].ptr() == array_element_ptr(pt.ptr(), i)
+                &&& ret[i].opt_value() == MemContents::Init(pt.value()[i])
+            },
+;
 
 /// Data associated with a [`GeneralPointsTo`] permission.
 ///
@@ -122,8 +172,48 @@ impl VirtAddrTok {
         use_type_invariant(other);
         self.0.prove_disjoint(&other.0);
     }
-}
 
+    /// Cut a contiguous range in two at `mid`.
+    ///
+    /// Owning a range is owning each of its addresses, so the halves are the
+    /// same ownership described in more detail; nothing is created, which is
+    /// why this is a proof and not one of the module's assumptions.
+    pub proof fn split_range(tracked self, start: int, len: int, mid: int) -> (tracked res: (
+        Self,
+        Self,
+    ))
+        requires
+            self.is_range(start, len),
+            start <= mid <= start + len,
+        ensures
+            res.0.is_range(start, mid - start),
+            res.1.is_range(mid, start + len - mid),
+    {
+        use_type_invariant(&self);
+        let ghost range = Set::range(start, mid);
+        assert(range.subset_of(self.0.dom()));
+        let tracked (left, right) = self.0.split(range);
+        assert(right.dom() =~= Set::range(mid, start + len));
+        (VirtAddrTok(left), VirtAddrTok(right))
+    }
+
+    /// Put two adjacent ranges back together.
+    pub proof fn join_range(tracked self, tracked other: Self, start: int, mid: int, end: int)
+        -> (tracked res: Self)
+        requires
+            self.is_range(start, mid - start),
+            other.is_range(mid, end - mid),
+            start <= mid <= end,
+        ensures
+            res.is_range(start, end - start),
+    {
+        use_type_invariant(&self);
+        use_type_invariant(&other);
+        let tracked joined = self.0.join(other.0);
+        assert(joined.dom() =~= Set::range(start, end));
+        VirtAddrTok(joined)
+    }
+}
 
 /// Ownership of a range of *physical* addresses, drawn from one global address
 /// space so that two tokens naming the same address cannot both exist.
@@ -156,6 +246,44 @@ impl PhysAddrTok {
         use_type_invariant(&*self);
         use_type_invariant(other);
         self.0.prove_disjoint(&other.0);
+    }
+
+    /// Cut a contiguous range in two at `mid`. See
+    /// [`VirtAddrTok::split_range`].
+    pub proof fn split_range(tracked self, start: int, len: int, mid: int) -> (tracked res: (
+        Self,
+        Self,
+    ))
+        requires
+            self.is_range(start, len),
+            start <= mid <= start + len,
+        ensures
+            res.0.is_range(start, mid - start),
+            res.1.is_range(mid, start + len - mid),
+    {
+        use_type_invariant(&self);
+        let ghost range = Set::range(start, mid);
+        assert(range.subset_of(self.0.dom()));
+        let tracked (left, right) = self.0.split(range);
+        assert(right.dom() =~= Set::range(mid, start + len));
+        (PhysAddrTok(left), PhysAddrTok(right))
+    }
+
+    /// Put two adjacent ranges back together.
+    pub proof fn join_range(tracked self, tracked other: Self, start: int, mid: int, end: int)
+        -> (tracked res: Self)
+        requires
+            self.is_range(start, mid - start),
+            other.is_range(mid, end - mid),
+            start <= mid <= end,
+        ensures
+            res.is_range(start, end - start),
+    {
+        use_type_invariant(&self);
+        use_type_invariant(&other);
+        let tracked joined = self.0.join(other.0);
+        assert(joined.dom() =~= Set::range(start, end));
+        PhysAddrTok(joined)
     }
 }
 
@@ -425,27 +553,245 @@ impl<A: ArchPagingMeta> MemShape<A> {
     }
 }
 
-/// A more **General** memory permission that supports
-/// shared mapping.
-#[verifier::accept_recursive_types(T)]
+/// Ownership of a run of bytes, with nothing said about what they hold or what
+/// type they have: the address tokens for every way in, the tokens for the
+/// physical memory beneath, and the record shares that keep the page table
+/// honest about where that memory is.
+///
+/// The common part of [`GeneralPointsTo`] and [`GeneralPointsToRaw`], which add
+/// only the permission that gives the bytes a value. Keyed by *address* rather
+/// than by pointer, so that the same ownership can be described by the array
+/// that spans it or by any of the elements inside -- which is what makes
+/// [`Self::split_at`] statable at all, since the leftover of peeling an element
+/// off an array has no Rust type to be keyed by.
 #[verifier::reject_recursive_types(A)]
-pub tracked struct GeneralPointsTo<T, A: ArchPagingMeta> {
-    /// One address token per alias. Owning the virtual range a pointer spans
-    /// is what makes that pointer this permission's to use, and the tokens come
-    /// from one address space, so no other permission can claim the same
-    /// address.
-    tracked virt: Map<*mut T, VirtAddrTok>,
-    /// One address token per frame the memory occupies.
+pub tracked struct MemOwn<A: ArchPagingMeta> {
+    /// One address token per alias, keyed by the address the alias starts at.
+    /// Owning the virtual range a pointer spans is what makes that pointer this
+    /// permission's to use, and the tokens come from one address space, so no
+    /// other permission can claim the same address.
+    tracked virt: Map<int, VirtAddrTok>,
+    /// One address token per page the memory occupies.
     tracked phys: Seq<PhysAddrTok>,
-    /// A share of the record for each virtual page an alias starts in, sized by
+    /// A share of the record of every page every alias runs through, sized by
     /// how much of that page this permission owns. A share is enough to read
     /// what the page maps to, and not enough to change it, so the table cannot
     /// repoint a page while any permission into it is outstanding, and this
     /// permission cannot claim a mapping the table does not agree it installed.
     ///
-    /// Keyed by page, and the ids are [`Mapping::id_of_vpage`], so no id has to
-    /// travel with the permission for the two sides to be comparable.
-    tracked mapping: Map<*mut T, Seq<Mapping<A>>>,
+    /// The ids are [`Mapping::id_of_vpage`], so no id has to travel with the
+    /// permission for the two sides to be comparable.
+    tracked mapping: Map<int, Seq<Mapping<A>>>,
+    ghost size: nat,
+    ghost offset: usize,
+    ghost frame_addrs: Seq<PhysFrame<A::MinPageSize>>,
+    ghost is_pt: bool,
+}
+
+impl<A: ArchPagingMeta> MemOwn<A> {
+    /// The addresses at which this memory can be reached.
+    pub closed spec fn addrs(&self) -> Set<int> {
+        self.virt.dom()
+    }
+
+    /// How far into its page this memory starts.
+    ///
+    /// A property of the memory rather than of any one alias: translation
+    /// replaces only the page part of an address, so every alias sits at the
+    /// same offset, and the invariant holds them to it.
+    pub closed spec fn offset(&self) -> usize {
+        self.offset
+    }
+
+    /// What this memory is, without its type.
+    pub closed spec fn shape(&self) -> MemShape<A> {
+        MemShape { size: self.size, offset: self.offset, frame_addrs: self.frame_addrs }
+    }
+
+    pub closed spec fn size(&self) -> nat {
+        self.size
+    }
+
+    pub closed spec fn frames(&self) -> Seq<PhysFrame<A::MinPageSize>> {
+        self.frame_addrs
+    }
+
+    pub open spec fn has_pinned_phys_addr(&self) -> bool {
+        self.frames().len() > 0
+    }
+
+    /// Whether the MMU reads this memory as part of a page table.
+    pub closed spec fn is_pt(&self) -> bool {
+        self.is_pt
+    }
+
+    #[verifier::type_invariant]
+    pub closed spec fn wf(&self) -> bool {
+        &&& self.shape().wf()
+        &&& self.shape().phys_wf(self.phys)
+        // Every alias starts at the same offset within its page, and that
+        // offset is the shape's: aliases are the same bytes seen through
+        // different translations, and translation does not move a byte within
+        // its page.
+        &&& forall|a: int| #[trigger]
+            self.virt.dom().contains(a) ==> page_offset_of::<A>(a) == self.shape().offset
+        &&& forall|a: int| #[trigger]
+            self.virt.dom().contains(a) ==> self.shape().alias_wf(self.virt[a], a)
+        &&& self.mapping.dom() =~= self.virt.dom()
+        &&& forall|a: int| #[trigger]
+            self.mapping.dom().contains(a) ==> self.shape().records_wf(
+                self.mapping[a],
+                a,
+                self.has_pinned_phys_addr(),
+            )
+    }
+
+    /// Every alias sits at the offset [`MemShape::offset`] records.
+    pub proof fn lemma_aliases_share_page_offset(tracked &self)
+        ensures
+            forall|a: int| #[trigger]
+                self.addrs().contains(a) ==> page_offset_of::<A>(a) == self.shape().offset,
+    {
+        use_type_invariant(self);
+    }
+
+    /// What the page table records as backing the `i`-th page of the alias at
+    /// `a`.
+    ///
+    /// No id hypothesis and no instance to match: the record for a page is
+    /// pinned to [`Mapping::id_of_vpage`], so this permission's share and the
+    /// table's are shares of the same ghost variable by construction.
+    pub closed spec fn record_at(&self, a: int, i: int) -> Option<VirtMapping<A::MinPageSize>>
+        recommends
+            self.addrs().contains(a),
+            0 <= i < self.shape().npages(),
+    {
+        self.mapping[a][i].frame()
+    }
+
+    /// How many frame tokens this permission holds.
+    pub closed spec fn phys_len(&self) -> nat {
+        self.phys.len()
+    }
+
+    /// The physical addresses the `i`-th frame token owns.
+    pub closed spec fn phys_dom(&self, i: int) -> Set<int> {
+        self.phys[i].dom()
+    }
+
+    /// Every page this memory occupies is mapped to something.
+    ///
+    /// Owning a permission is owning memory that can be read and written, so a
+    /// page it runs through cannot be one that reaches no frame. Exposes the
+    /// part of the type invariant callers need, since the invariant itself is
+    /// `closed`.
+    pub proof fn lemma_record_is_mapped(tracked &self, a: int, i: int)
+        requires
+            self.addrs().contains(a),
+            0 <= i < self.shape().npages(),
+        ensures
+            self.record_at(a, i).is_some(),
+    {
+        use_type_invariant(self);
+    }
+
+    /// Two permissions never share an alias: an alias is owned by holding the
+    /// [`VirtAddrTok`] for the range it spans, and the virtual address space
+    /// hands each address out once.
+    ///
+    /// No longer an appeal to vstd -- this is the address space's own guarantee,
+    /// the virtual counterpart of [`Self::is_disjoint_pfn`], and it takes `self`
+    /// by value for the same reason: refuting a shared alias needs a mutable
+    /// borrow of a token, and a token borrowed out of `self.virt` would have to
+    /// satisfy this permission's invariant for an arbitrary final value.
+    ///
+    /// Memory of no size spans no addresses and so is owned by nobody; the
+    /// guarantee has nothing to say about it.
+    pub proof fn is_disjoint(tracked self, tracked other: &Self) -> (tracked res: Self)
+        requires
+            self.size() != 0,
+            other.size() != 0,
+        ensures
+            res == self,
+            self.addrs().disjoint(other.addrs()),
+    {
+        broadcast use vstd::set_lib::range_set_properties;
+
+        use_type_invariant(&self);
+        use_type_invariant(other);
+        let ghost old_self = self;
+        let tracked MemOwn { mut virt, phys, mapping, size, offset, frame_addrs, is_pt } = self;
+        if !old_self.addrs().disjoint(other.addrs()) {
+            let ghost a = choose|a: int|
+                #![trigger other.addrs().contains(a)]
+                old_self.addrs().contains(a) && other.addrs().contains(a);
+            let tracked tok = virt.tracked_borrow_mut(a);
+            let tracked other_tok = other.virt.tracked_borrow(a);
+            tok.is_disjoint(other_tok);
+            let ghost n = old_self.size() as int;
+            assert(old_self.virt[a].dom() =~= Set::range(a, a + n));
+            assert(other.virt[a].dom() =~= Set::range(a, a + other.size() as int));
+            assert(Set::range(a, a + n).contains(a));
+            assert(Set::range(a, a + other.size() as int).contains(a));
+            assert(false);
+        }
+        MemOwn { virt, phys, mapping, size, offset, frame_addrs, is_pt }
+    }
+
+    /// Two permissions never own the same physical byte: their frame tokens are
+    /// drawn from one address space, and that space hands each address out once.
+    ///
+    /// Frame-level distinctness is deliberately *not* claimed -- two objects may
+    /// share a frame at different offsets -- so the guarantee is stated on the
+    /// address ranges themselves.
+    ///
+    /// Takes `self` by value rather than by `&mut`, because refuting a shared
+    /// address needs a mutable borrow of a frame token, and a token borrowed out
+    /// of `self.phys` would have to satisfy this permission's invariant for an
+    /// arbitrary final value. Unpacking first puts the tokens in a plain `Seq`,
+    /// which carries no invariant, and the invariant is re-established on the
+    /// way out from the tokens' preserved domains.
+    pub proof fn is_disjoint_pfn(tracked self, tracked other: &Self) -> (tracked res: Self)
+        ensures
+            res == self,
+            forall|i: int, j: int|
+                #![trigger self.phys_dom(i), other.phys_dom(j)]
+                0 <= i < self.phys_len() && 0 <= j < other.phys_len()
+                    ==> self.phys_dom(i).disjoint(other.phys_dom(j)),
+    {
+        use_type_invariant(&self);
+        use_type_invariant(other);
+        let ghost old_self = self;
+        let tracked MemOwn { virt, mut phys, mapping, size, offset, frame_addrs, is_pt } = self;
+        if !(forall|i: int, j: int|
+            #![trigger old_self.phys_dom(i), other.phys_dom(j)]
+            0 <= i < old_self.phys_len() && 0 <= j < other.phys_len()
+                ==> old_self.phys_dom(i).disjoint(other.phys_dom(j))) {
+            let (i, j) = choose|i: int, j: int|
+                #![trigger old_self.phys_dom(i), other.phys_dom(j)]
+                0 <= i < old_self.phys_len() && 0 <= j < other.phys_len()
+                    && !old_self.phys_dom(i).disjoint(other.phys_dom(j));
+            let tracked tok = phys.tracked_borrow_mut(i);
+            let tracked other_tok = other.phys.tracked_borrow(j);
+            tok.is_disjoint(other_tok);
+        }
+        MemOwn { virt, phys, mapping, size, offset, frame_addrs, is_pt }
+    }
+}
+
+/// A more **General** memory permission that supports
+/// shared mapping.
+#[verifier::accept_recursive_types(T)]
+#[verifier::reject_recursive_types(A)]
+pub tracked struct GeneralPointsTo<T, A: ArchPagingMeta> {
+    /// The bytes this permission owns, and every way in to them.
+    tracked own: MemOwn<A>,
+    /// Every pointer that reaches those bytes.
+    ///
+    /// Kept alongside the addresses because a pointer is more than an address:
+    /// two pointers to one address may carry different provenance, and it is
+    /// the pointer, not the address, that exec code writes through.
+    ghost ptrs: Set<*mut T>,
     /// The vstd permission for one of the aliases, and the *only* source of
     /// this permission's value.
     ///
@@ -460,9 +806,6 @@ pub tracked struct GeneralPointsTo<T, A: ArchPagingMeta> {
     /// frame has no virtual address for a `PointsTo` to name, and no contents
     /// its owner may assume anything about.
     tracked inner: Option<PointsTo<T>>,
-    ghost frame_addrs: Seq<PhysFrame<A::MinPageSize>>,
-    ghost offset: usize,
-    ghost is_pt: bool,
 }
 
 #[verifier::reject_recursive_types(A)]
@@ -565,18 +908,23 @@ impl<T, A: ArchPagingMeta> View for GeneralPointsTo<T, A> {
 
     closed spec fn view(&self) -> Self::V {
         GeneralPointsToData {
-            ptrs: self.virt.dom(),
+            ptrs: self.ptrs,
             opt_value: self.opt_value(),
-            is_pt: self.is_pt,
-            frame_addrs: self.frame_addrs,
+            is_pt: self.own.is_pt(),
+            frame_addrs: self.own.frames(),
         }
     }
 }
 
 impl<T, A: ArchPagingMeta> GeneralPointsTo<T, A> {
+    /// The bytes this permission owns, and every way in to them.
+    pub closed spec fn own(&self) -> MemOwn<A> {
+        self.own
+    }
+
     /// What this memory is, without its type: the shape both permissions share.
     pub closed spec fn shape(&self) -> MemShape<A> {
-        MemShape { size: size_of::<T>(), offset: self.offset, frame_addrs: self.frame_addrs }
+        self.own.shape()
     }
 
     /// The number of pages this memory occupies, one frame each.
@@ -607,28 +955,17 @@ impl<T, A: ArchPagingMeta> GeneralPointsTo<T, A> {
 
     #[verifier::type_invariant]
     spec fn wf(&self) -> bool {
-        &&& self.shape().wf()
-        &&& self.shape().phys_wf(self.phys)
-        &&& self.aliases_share_page_offset()
-        &&& forall|p: *mut T| #[trigger]
-            self.virt.dom().contains(p) ==> self.shape().alias_wf(self.virt[p], p@.addr as int)
+        // The bytes are exactly those the pointers reach: an address is owned
+        // if and only if some pointer of this permission starts there.
+        &&& self.own.size() == size_of::<T>()
+        &&& self.own.addrs() =~= self.ptrs.map(|p: *mut T| p@.addr as int)
         // The value is held, not asserted: memory that any pointer reaches is
         // memory whose vstd permission this one keeps, and the permission names
         // one of those pointers.
         &&& match self.inner {
-            Some(pt) => self.virt.dom().contains(pt.ptr()),
-            None => self.virt.dom() =~= Set::empty(),
+            Some(pt) => self.ptrs.contains(pt.ptr()),
+            None => self.ptrs =~= Set::empty(),
         }
-        // One record per page per alias, keyed by alias rather than by page, so
-        // two aliases running through one page hold a share each and the shares
-        // add up on their own.
-        &&& self.mapping.dom() =~= self.virt.dom()
-        &&& forall|p: *mut T| #[trigger]
-            self.mapping.dom().contains(p) ==> self.shape().records_wf(
-                self.mapping[p],
-                p@.addr as int,
-                self.has_pinned_phys_addr(),
-            )
     }
 
     #[verifier::inline]
@@ -670,7 +1007,7 @@ impl<T, A: ArchPagingMeta> GeneralPointsTo<T, A> {
             self.covers(p),
             0 <= i < self.npages(),
     {
-        self.mapping[p][i].frame()
+        self.own.record_at(p@.addr as int, i)
     }
 
     /// Every page this memory occupies is mapped to something.
@@ -687,6 +1024,8 @@ impl<T, A: ArchPagingMeta> GeneralPointsTo<T, A> {
             self.record_at(p, i).is_some(),
     {
         use_type_invariant(self);
+        assert(self.own.addrs().contains(p@.addr as int));
+        self.own.lemma_record_is_mapped(p@.addr as int, i);
     }
 
     #[verifier::inline]
@@ -711,11 +1050,22 @@ impl<T, A: ArchPagingMeta> GeneralPointsTo<T, A> {
     /// bytes, and translation replaces only the page part of an address. So the
     /// offset is a property of the memory, not of any one pointer, and does not
     /// have to be recorded separately.
-    pub open spec fn aliases_share_page_offset(&self) -> bool {
-        forall|p: *mut T, q: *mut T|
-            #![trigger self@.ptrs.contains(p), self@.ptrs.contains(q)]
-            self@.ptrs.contains(p) && self@.ptrs.contains(q) ==> page_offset_of::<A>(p@.addr as int)
-                == page_offset_of::<A>(q@.addr as int)
+    ///
+    /// A lemma rather than a hypothesis: the offset is fixed by the type
+    /// invariant, so no caller has to carry it around.
+    pub proof fn lemma_aliases_share_page_offset(tracked &self)
+        ensures
+            forall|p: *mut T| #[trigger]
+                self.covers(p) ==> page_offset_of::<A>(p@.addr as int) == self.shape().offset,
+    {
+        use_type_invariant(self);
+        let tracked own = &self.own;
+        own.lemma_aliases_share_page_offset();
+        assert forall|p: *mut T| #[trigger] self.covers(p) implies page_offset_of::<A>(
+            p@.addr as int,
+        ) == self.shape().offset by {
+            assert(self.own.addrs().contains(p@.addr as int));
+        }
     }
 
     /// Whether `pa` is where this memory is: in its first frame, at the offset
@@ -762,12 +1112,8 @@ impl<T, A: ArchPagingMeta> GeneralPointsTo<T, A> {
     /// would let two permissions claim one frame, and the address space's
     /// hand-each-address-out-once guarantee prove `false`.
     pub closed spec fn same_except_value(&self, other: &Self) -> bool {
-        &&& self.virt == other.virt
-        &&& self.phys == other.phys
-        &&& self.mapping == other.mapping
-        &&& self.frame_addrs == other.frame_addrs
-        &&& self.offset == other.offset
-        &&& self.is_pt == other.is_pt
+        &&& self.own == other.own
+        &&& self.ptrs == other.ptrs
         &&& self.inner is Some <==> other.inner is Some
     }
 
@@ -821,45 +1167,29 @@ impl<T, A: ArchPagingMeta> GeneralPointsTo<T, A> {
             res == self,
             self.ptrs().disjoint(other.ptrs()),
     {
-        broadcast use vstd::set_lib::range_set_properties;
-
         use_type_invariant(&self);
         use_type_invariant(other);
         let ghost old_self = self;
-        let tracked GeneralPointsTo {
-            mut virt,
-            phys,
-            mapping,
-            inner,
-            frame_addrs,
-            offset,
-            is_pt,
-        } = self;
-        if !old_self.ptrs().disjoint(other.ptrs()) {
-            let ghost p = choose|p: *mut T|
-                #![trigger other.ptrs().contains(p)]
-                old_self.ptrs().contains(p) && other.ptrs().contains(p);
-            let tracked tok = virt.tracked_borrow_mut(p);
-            let tracked other_tok = other.virt.tracked_borrow(p);
-            tok.is_disjoint(other_tok);
-            let ghost addr = p@.addr as int;
-            let ghost n = size_of::<T>() as int;
-            assert(old_self.virt[p].dom() =~= Set::range(addr, addr + n));
-            assert(other.virt[p].dom() =~= Set::range(addr, addr + n));
-            assert(Set::range(addr, addr + n).contains(addr));
-            assert(false);
+        let tracked GeneralPointsTo { own, ptrs, inner } = self;
+        let tracked own = own.is_disjoint(&other.own);
+        assert forall|p: *mut T| #[trigger] old_self.ptrs().contains(p) implies !other.ptrs().contains(
+            p,
+        ) by {
+            assert(old_self.own.addrs().contains(p@.addr as int));
+            assert(other.own.addrs().contains(p@.addr as int) ==> false);
         }
-        GeneralPointsTo { virt, phys, mapping, inner, frame_addrs, offset, is_pt }
+        assert(old_self.ptrs().disjoint(other.ptrs()));
+        GeneralPointsTo { own, ptrs, inner }
     }
 
     /// How many frame tokens this permission holds.
     pub closed spec fn phys_len(&self) -> nat {
-        self.phys.len()
+        self.own.phys_len()
     }
 
     /// The physical addresses the `i`-th frame token owns.
     pub closed spec fn phys_dom(&self, i: int) -> Set<int> {
-        self.phys[i].dom()
+        self.own.phys_dom(i)
     }
 
     /// Two permissions never own the same physical byte: their frame tokens are
@@ -877,31 +1207,16 @@ impl<T, A: ArchPagingMeta> GeneralPointsTo<T, A> {
     /// way out from the tokens' preserved domains.
     pub proof fn is_disjoint_pfn(tracked self, tracked other: &Self) -> (tracked res: Self)
         ensures
-            res@ == self@,
-            res.phys_len() == self.phys_len(),
-            forall|i: int| #[trigger] res.phys_dom(i) == self.phys_dom(i),
+            res == self,
             forall|i: int, j: int|
                 #![trigger self.phys_dom(i), other.phys_dom(j)]
                 0 <= i < self.phys_len() && 0 <= j < other.phys_len()
                     ==> self.phys_dom(i).disjoint(other.phys_dom(j)),
     {
         use_type_invariant(&self);
-        use_type_invariant(other);
-        let ghost old_self = self;
-        let tracked GeneralPointsTo { virt, mut phys, mapping, inner, frame_addrs, offset, is_pt } = self;
-        if !(forall|i: int, j: int|
-            #![trigger old_self.phys_dom(i), other.phys_dom(j)]
-            0 <= i < old_self.phys_len() && 0 <= j < other.phys_len()
-                ==> old_self.phys_dom(i).disjoint(other.phys_dom(j))) {
-            let (i, j) = choose|i: int, j: int|
-                #![trigger old_self.phys_dom(i), other.phys_dom(j)]
-                0 <= i < old_self.phys_len() && 0 <= j < other.phys_len()
-                    && !old_self.phys_dom(i).disjoint(other.phys_dom(j));
-            let tracked tok = phys.tracked_borrow_mut(i);
-            let tracked other_tok = other.phys.tracked_borrow(j);
-            tok.is_disjoint(other_tok);
-        }
-        GeneralPointsTo { virt, phys, mapping, inner, frame_addrs, offset, is_pt }
+        let tracked GeneralPointsTo { own, ptrs, inner } = self;
+        let tracked own = own.is_disjoint_pfn(&other.own);
+        GeneralPointsTo { own, ptrs, inner }
     }
 
     /// Borrow through a *translation* rather than through the alias set: the
@@ -970,30 +1285,29 @@ pub open spec fn retype_ptr<S, D>(p: *mut S) -> *mut D {
 /// OS is, and [`Self::into_typed`] is the only way out.
 #[verifier::reject_recursive_types(A)]
 pub tracked struct GeneralPointsToRaw<A: ArchPagingMeta> {
-    /// One address token per alias, keyed by the untyped pointer.
-    tracked virt: Map<*mut u8, VirtAddrTok>,
-    /// One address token per frame the memory occupies.
-    tracked phys: Seq<PhysAddrTok>,
-    /// A share of the record of every page each alias runs through.
-    tracked mapping: Map<*mut u8, Seq<Mapping<A>>>,
+    /// The bytes this permission owns, and every way in to them.
+    tracked own: MemOwn<A>,
+    /// Every untyped pointer that reaches those bytes.
+    ghost ptrs: Set<*mut u8>,
     /// The raw permission for one of the aliases, and the reason this is
     /// ownership at all rather than a claim about bytes nobody holds.
     tracked inner: Option<PointsToRaw>,
-    ghost size: nat,
-    ghost frame_addrs: Seq<PhysFrame<A::MinPageSize>>,
-    ghost offset: usize,
-    ghost is_pt: bool,
 }
 
 impl<A: ArchPagingMeta> GeneralPointsToRaw<A> {
+    /// The bytes this permission owns, and every way in to them.
+    pub closed spec fn own(&self) -> MemOwn<A> {
+        self.own
+    }
+
     /// What this memory is: the shape it shares with [`GeneralPointsTo`].
     pub closed spec fn shape(&self) -> MemShape<A> {
-        MemShape { size: self.size, offset: self.offset, frame_addrs: self.frame_addrs }
+        self.own.shape()
     }
 
     /// Every untyped pointer that reaches this memory.
     pub closed spec fn ptrs(&self) -> Set<*mut u8> {
-        self.virt.dom()
+        self.ptrs
     }
 
     pub open spec fn covers(&self, ptr: *mut u8) -> bool {
@@ -1002,12 +1316,12 @@ impl<A: ArchPagingMeta> GeneralPointsToRaw<A> {
 
     /// How many bytes this memory spans.
     pub closed spec fn size(&self) -> nat {
-        self.size
+        self.own.size()
     }
 
     /// The frames backing this memory, in order.
     pub closed spec fn frames(&self) -> Seq<PhysFrame<A::MinPageSize>> {
-        self.frame_addrs
+        self.own.frames()
     }
 
     pub open spec fn has_pinned_phys_addr(&self) -> bool {
@@ -1016,44 +1330,23 @@ impl<A: ArchPagingMeta> GeneralPointsToRaw<A> {
 
     /// Whether the MMU reads this memory as part of a page table.
     pub closed spec fn is_pt(&self) -> bool {
-        self.is_pt
-    }
-
-    /// Every alias sits at the same offset within its page. See
-    /// [`GeneralPointsTo::aliases_share_page_offset`].
-    pub open spec fn aliases_share_page_offset(&self) -> bool {
-        forall|p: *mut u8, q: *mut u8|
-            #![trigger self.ptrs().contains(p), self.ptrs().contains(q)]
-            self.ptrs().contains(p) && self.ptrs().contains(q) ==> page_offset_of::<A>(
-                p@.addr as int,
-            ) == page_offset_of::<A>(q@.addr as int)
+        self.own.is_pt()
     }
 
     #[verifier::type_invariant]
     spec fn wf(&self) -> bool {
-        &&& self.shape().wf()
-        &&& self.shape().phys_wf(self.phys)
-        &&& self.aliases_share_page_offset()
-        &&& forall|p: *mut u8| #[trigger]
-            self.virt.dom().contains(p) ==> self.shape().alias_wf(self.virt[p], p@.addr as int)
+        &&& self.own.addrs() =~= self.ptrs.map(|p: *mut u8| p@.addr as int)
         // The bytes are held, not asserted, exactly as in the typed permission;
         // the raw permission spans one alias's range and carries that alias's
         // provenance, so retyping it lands back on a pointer this permission
         // owns.
         &&& match self.inner {
             Some(raw) => exists|p: *mut u8|
-                #![trigger self.virt.dom().contains(p)]
-                self.virt.dom().contains(p) && raw.is_range(p@.addr as int, self.size as int)
+                #![trigger self.ptrs.contains(p)]
+                self.ptrs.contains(p) && raw.is_range(p@.addr as int, self.own.size() as int)
                     && raw.provenance() == p@.provenance,
-            None => self.virt.dom() =~= Set::empty(),
+            None => self.ptrs =~= Set::empty(),
         }
-        &&& self.mapping.dom() =~= self.virt.dom()
-        &&& forall|p: *mut u8| #[trigger]
-            self.mapping.dom().contains(p) ==> self.shape().records_wf(
-                self.mapping[p],
-                p@.addr as int,
-                self.has_pinned_phys_addr(),
-            )
     }
 
     /// Give the bytes a type.
@@ -1071,51 +1364,49 @@ impl<A: ArchPagingMeta> GeneralPointsToRaw<A> {
             size_of::<T>() == self.size(),
             size_of::<T>() != 0,
             forall|p: *mut u8| #[trigger]
-                self.ptrs().contains(p) ==> p@.addr as int % align_of::<T>() as int
-                    == 0,
+                self.ptrs().contains(p) ==> p@.addr as int % align_of::<T>() as int == 0,
         ensures
             ret.ptrs() =~= self.ptrs().map(|p: *mut u8| retype_ptr::<u8, T>(p)),
-            ret.frames() == self.frames(),
-            ret@.is_pt == self.is_pt(),
+            ret.own() == self.own(),
             ret.is_uninit(),
     {
         broadcast use vstd::raw_ptr::group_raw_ptr_axioms;
 
         use_type_invariant(&self);
         let ghost old_self = self;
-        let tracked GeneralPointsToRaw {
-            virt,
-            phys,
-            mapping,
-            inner,
-            size,
-            frame_addrs,
-            offset,
-            is_pt,
-        } = self;
-        let ghost key_map = Map::<*mut T, *mut u8>::new(
-            virt.dom().map(|p: *mut u8| retype_ptr::<u8, T>(p)),
-            |q: *mut T| retype_ptr::<T, u8>(q),
-        );
-        assert forall|q: *mut T| #[trigger] old_self.ptrs().contains(retype_ptr::<T, u8>(q)) implies
-        retype_ptr::<u8, T>(retype_ptr::<T, u8>(q)) == q by {}
-        let tracked virt = Map::tracked_map_keys(virt, key_map);
-        let tracked mapping = Map::tracked_map_keys(mapping, key_map);
+        let tracked GeneralPointsToRaw { own, ptrs, inner } = self;
+        let ghost new_ptrs = ptrs.map(|p: *mut u8| retype_ptr::<u8, T>(p));
+        let ghost new_addrs = new_ptrs.map(|q: *mut T| q@.addr as int);
+        let ghost old_addrs = ptrs.map(|p: *mut u8| p@.addr as int);
+        assert(new_addrs =~= old_addrs) by {
+            assert forall|a: int| #[trigger] new_addrs.contains(a) implies old_addrs.contains(a) by {
+                let q = choose|q: *mut T| new_ptrs.contains(q) && q@.addr as int == a;
+                let p = choose|p: *mut u8| ptrs.contains(p) && retype_ptr::<u8, T>(p) == q;
+                assert(old_addrs.contains(p@.addr as int));
+            }
+            assert forall|a: int| #[trigger] old_addrs.contains(a) implies new_addrs.contains(a) by {
+                let p = choose|p: *mut u8| ptrs.contains(p) && p@.addr as int == a;
+                assert(new_ptrs.contains(retype_ptr::<u8, T>(p)));
+                assert(new_addrs.contains(a));
+            }
+        }
         let tracked inner = match inner {
             Some(raw) => {
                 let ghost p = choose|p: *mut u8|
-                    #![trigger old_self.ptrs().contains(p)]
-                    old_self.ptrs().contains(p) && raw.is_range(p@.addr as int, size as int)
+                    #![trigger old_self.ptrs.contains(p)]
+                    old_self.ptrs.contains(p) && raw.is_range(p@.addr as int, own.size() as int)
                         && raw.provenance() == p@.provenance;
                 assert(old_self.ptrs().contains(p));
-                Some(raw.into_typed::<T>(p@.addr))
+                let tracked pt = raw.into_typed::<T>(p@.addr);
+                assert(pt.ptr() == retype_ptr::<u8, T>(p));
+                assert(new_ptrs.contains(pt.ptr()));
+                Some(pt)
             },
             None => None,
         };
-        GeneralPointsTo { virt, phys, mapping, inner, frame_addrs, offset, is_pt }
+        GeneralPointsTo { own, ptrs: new_ptrs, inner }
     }
 }
-
 
 /// Permission to memory named by **where it is**, not by how to reach it.
 ///
