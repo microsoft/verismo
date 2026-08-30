@@ -110,31 +110,31 @@ pub open spec fn self_map_base<A: ArchPagingMeta>(k: usize, level: PageLevel) ->
     }
 }
 
-/// Virtual address of word `slot` of a table page exposed at `base`.
-pub open spec fn word_vaddr_at<A: ArchPagingMeta>(base: usize, slot: nat) -> int {
+/// Virtual address of entry `slot` of a table page exposed at `base`.
+pub open spec fn entry_vaddr_at<A: ArchPagingMeta>(base: usize, slot: nat) -> int {
     slot_addr::<A>(base, slot as int)
 }
 
-/// What every table word the firmware hands over looks like: a page-table word,
-/// pinned to its own frame at its own slot, and reachable at exactly the one
-/// virtual address the handover exposes it at.
+/// What every table entry the firmware hands over looks like: a page-table
+/// entry, pinned to its own frame at its own slot, and reachable at exactly the
+/// one virtual address the handover exposes it at.
 ///
 /// Shared by both ways in, because the two differ only in what that address is.
 /// The `forall`/`exists` pair is the whole of "exactly one alias": no alias the
-/// handover does not account for, and at least one, or the word could not be
+/// handover does not account for, and at least one, or the entry could not be
 /// read at all.
-pub open spec fn table_word_wf<A: ArchPagingMeta>(
-    word: PhysPointsTo<PTEntry<A>, A>,
+pub open spec fn table_entry_wf<A: ArchPagingMeta>(
+    entry: PhysPointsTo<PTEntry<A>, A>,
     frame: usize,
     slot: nat,
     vaddr: int,
 ) -> bool {
-    &&& word.is_pt()
-    &&& word.is_init()
-    &&& word.pinned_to_frame(frame)
-    &&& word.is_at_phys_addr(slot_addr::<A>(frame, slot as int))
-    &&& forall|p: *mut PTEntry<A>| #[trigger] word.covers(p) ==> p@.addr == vaddr
-    &&& exists|p: *mut PTEntry<A>| #[trigger] word.covers(p)
+    &&& entry.is_pt()
+    &&& entry.is_init()
+    &&& entry.pinned_to_frame(frame)
+    &&& entry.is_at_phys_addr(slot_addr::<A>(frame, slot as int))
+    &&& forall|p: *mut PTEntry<A>| #[trigger] entry.covers(p) ==> p@.addr == vaddr
+    &&& exists|p: *mut PTEntry<A>| #[trigger] entry.covers(p)
 }
 
 /// One root slot pointing back at the root frame: the root table, and only the
@@ -146,10 +146,10 @@ pub open spec fn table_word_wf<A: ArchPagingMeta>(
 pub tracked struct SelfMap<A: ArchPagingMeta> {
     /// Slot of the root table that points back at the root.
     pub ghost slot: nat,
-    /// One permission per word of the root table, keyed by slot. Pinned: the
+    /// One permission per entry of the root table, keyed by slot. Pinned: the
     /// MMU walks the table by physical address, so a table page whose frame
     /// could move is not a table page.
-    pub tracked words: Map<nat, PhysPointsTo<PTEntry<A>, A>>,
+    pub tracked entries: Map<nat, PhysPointsTo<PTEntry<A>, A>>,
 }
 
 impl<A: ArchPagingMeta> SelfMap<A> {
@@ -158,41 +158,41 @@ impl<A: ArchPagingMeta> SelfMap<A> {
         self_map_base::<A>(self.slot as usize, max_level) as usize
     }
 
-    /// Virtual address of the root table's word `slot`, as the self map exposes
-    /// it.
-    pub open spec fn word_vaddr(&self, max_level: PageLevel, slot: nat) -> int {
-        word_vaddr_at::<A>(self.base(max_level), slot)
+    /// Virtual address of the root table's entry `slot`, as the self map
+    /// exposes it.
+    pub open spec fn entry_vaddr(&self, max_level: PageLevel, slot: nat) -> int {
+        entry_vaddr_at::<A>(self.base(max_level), slot)
     }
 
     /// The one virtual page the root table occupies.
     ///
-    /// Every word of the table shares it: the self map exposes the whole table
+    /// Every entry of the table shares it: the self map exposes the whole table
     /// at [`Self::base`], and a table is exactly one page, so the slot only
     /// picks an offset within this page.
     pub open spec fn vpage(&self, max_level: PageLevel) -> int {
         page_start_of::<A>(self.base(max_level) as int)
     }
 
-    /// Every word of the root table is well formed at the address the self map
+    /// Every entry of the root table is well formed at the address the self map
     /// exposes it at, and the root maps itself and nothing else: the self slot
     /// holds a table entry pointing at the root frame, and every other slot is
     /// absent.
     pub open spec fn wf(&self, root: PhysFrame<A::MinPageSize>, max_level: PageLevel) -> bool {
         &&& self.slot < PTPage::<A>::count()
         &&& forall|slot: nat|
-            (#[trigger] self.words.dom().contains(slot)) <==> slot < PTPage::<A>::count()
+            (#[trigger] self.entries.dom().contains(slot)) <==> slot < PTPage::<A>::count()
         &&& forall|slot: nat| #[trigger]
-            self.words.dom().contains(slot) ==> table_word_wf::<A>(
-                self.words[slot],
+            self.entries.dom().contains(slot) ==> table_entry_wf::<A>(
+                self.entries[slot],
                 root@,
                 slot,
-                self.word_vaddr(max_level, slot),
+                self.entry_vaddr(max_level, slot),
             )
-        &&& self.words[self.slot].value().is_table_spec(max_level)
-        &&& self.words[self.slot].value().page_frame_spec() == root@
+        &&& self.entries[self.slot].value().is_table_spec(max_level)
+        &&& self.entries[self.slot].value().page_frame_spec() == root@
         &&& forall|slot: nat| #[trigger]
-            self.words.dom().contains(slot) && slot != self.slot
-                ==> !self.words[slot].value().present_spec()
+            self.entries.dom().contains(slot) && slot != self.slot
+                ==> !self.entries[slot].value().present_spec()
     }
 }
 
@@ -212,8 +212,8 @@ pub tracked struct DirectMap<A: ArchPagingMeta> {
     pub ghost pa_end: int,
     /// The frames in the window that hold page tables, the root among them.
     pub ghost tables: Set<usize>,
-    /// One permission per table word, keyed by its frame and slot.
-    pub tracked words: Map<(usize, nat), PhysPointsTo<PTEntry<A>, A>>,
+    /// One permission per table entry, keyed by its frame and slot.
+    pub tracked entries: Map<(usize, nat), PhysPointsTo<PTEntry<A>, A>>,
 }
 
 impl<A: ArchPagingMeta> DirectMap<A> {
@@ -227,9 +227,9 @@ impl<A: ArchPagingMeta> DirectMap<A> {
         A::spec_paddr_to_vaddr(frame)
     }
 
-    /// Virtual address of word `slot` of the table in `frame`.
-    pub open spec fn word_vaddr(&self, frame: usize, slot: nat) -> int {
-        word_vaddr_at::<A>(self.base(frame), slot)
+    /// Virtual address of entry `slot` of the table in `frame`.
+    pub open spec fn entry_vaddr(&self, frame: usize, slot: nat) -> int {
+        entry_vaddr_at::<A>(self.base(frame), slot)
     }
 
     /// The one virtual page a table page occupies.
@@ -238,7 +238,7 @@ impl<A: ArchPagingMeta> DirectMap<A> {
     }
 
     /// Every table page lies wholly inside the window, and every one of its
-    /// words is well formed at the address the direct map exposes it at.
+    /// entries is well formed at the address the direct map exposes it at.
     ///
     /// The root is among them: it is a table like any other here, which is the
     /// difference from [`SelfMap`], where it is the only one.
@@ -249,14 +249,14 @@ impl<A: ArchPagingMeta> DirectMap<A> {
                 frame + page_size::<A>() - 1,
             )
         &&& forall|frame: usize, slot: nat|
-            (#[trigger] self.words.dom().contains((frame, slot))) <==> self.tables.contains(frame)
+            (#[trigger] self.entries.dom().contains((frame, slot))) <==> self.tables.contains(frame)
                 && slot < PTPage::<A>::count()
         &&& forall|frame: usize, slot: nat| #[trigger]
-            self.words.dom().contains((frame, slot)) ==> table_word_wf::<A>(
-                self.words[(frame, slot)],
+            self.entries.dom().contains((frame, slot)) ==> table_entry_wf::<A>(
+                self.entries[(frame, slot)],
                 frame,
                 slot,
-                self.word_vaddr(frame, slot),
+                self.entry_vaddr(frame, slot),
             )
     }
 
@@ -318,7 +318,7 @@ impl<A: ArchPagingMeta, P> InitialPermissions<A, P> {
 
     /// The virtual pages the handover has already spent on tables.
     ///
-    /// Their records live in the table words, so [`Self::init_toks`] cannot
+    /// Their records live in the table entries, so [`Self::init_toks`] cannot
     /// still hold them: two claims on one page would give two permissions over
     /// one pointer.
     pub open spec fn table_vpages(&self) -> Set<int> {
