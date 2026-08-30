@@ -9,7 +9,7 @@
 //! Firmware leaves the tables reachable one of two ways, and this module
 //! describes both. A [`SelfMap`] points one root slot back at the root, which
 //! exposes the root table and nothing else. A [`DirectMap`] maps a region of
-//! physical memory straight through at [`ArchPagingGeometry::spec_paddr_to_vaddr`],
+//! physical memory straight through at addresses its own `pa_to_va` computes,
 //! which exposes every table in that region at once. A handover has at least one
 //! of them -- with neither, no walk could read its own root.
 //!
@@ -196,20 +196,25 @@ impl<A: ArchPagingMeta> SelfMap<A> {
     }
 }
 
-/// A region of physical memory mapped straight through, at the addresses
-/// [`ArchPagingGeometry::spec_paddr_to_vaddr`] computes.
+/// A region of physical memory mapped straight through, at addresses computed
+/// from the physical address alone.
 ///
-/// This is the arrangement the rest of the crate already walks on: a walker
-/// reaching a child table computes its address as `spec_paddr_to_vaddr` of the
-/// frame in the parent entry, which only reads anything because the firmware
-/// mapped the region through. So the invariant is that *every* table page lies
-/// in it -- one table outside and a walk stops there.
+/// The translation is a field rather than something read off the architecture:
+/// where firmware parked the direct map is a choice it made, two handovers to
+/// the same machine can differ, and the page table has no business being told
+/// about it. What matters here is only that one exists and that the tables lie
+/// under it -- one table outside and a walk of the handed-over tree stops
+/// there.
 #[verifier::reject_recursive_types(A)]
 pub tracked struct DirectMap<A: ArchPagingMeta> {
     /// The physical addresses the firmware mapped through. A set rather than a
     /// range: firmware is free to leave several disjoint regions mapped, and
     /// nothing here needs them contiguous.
     pub ghost pas: Set<int>,
+    /// Where a physical address appears. Any function will do: the invariants
+    /// below say only that the tables are reachable through it, so an OS that
+    /// establishes a `DirectMap` proves its own translation fits.
+    pub ghost pa_to_va: spec_fn(usize) -> usize,
     /// The mapped frames that hold page tables, the root among them.
     pub ghost tables: Set<usize>,
     /// One permission per table entry, keyed by its frame and slot.
@@ -232,7 +237,7 @@ impl<A: ArchPagingMeta> DirectMap<A> {
 
     /// Where the direct map exposes the table in `frame`.
     pub open spec fn base(&self, frame: usize) -> usize {
-        A::spec_paddr_to_vaddr(frame)
+        (self.pa_to_va)(frame)
     }
 
     /// Virtual address of entry `slot` of the table in `frame`.
