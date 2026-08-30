@@ -1,4 +1,4 @@
-//! The permissions an OS holds before it has mapped anything.
+//! A handover whose root page table is reached through a self map.
 //!
 //! Two kinds of memory, and they are opposites. The root page table is
 //! *reachable and pinned*: the self map gives it a virtual address, and being a

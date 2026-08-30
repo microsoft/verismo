@@ -6,11 +6,11 @@
 //! The rest specify our own types, and live apart from them because Verus
 //! treats an impl block as one recursion node: an impl that names another is
 //! grouped with it and cannot see its definitions.
+pub mod boot_states;
 pub mod concurrent_entry;
 #[cfg(verus_only)]
 pub mod entry;
 pub mod external;
-pub mod init_state;
 pub mod nonnull;
 pub mod page_table;
 pub mod points_to;
