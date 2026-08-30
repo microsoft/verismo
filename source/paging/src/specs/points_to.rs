@@ -329,6 +329,46 @@ impl<A: ArchPagingMeta> Mapping<A> {
         Self::OWNER_TOTAL_SHARE * (bytes as real) / (page_size::<A>() as real)
     }
 
+    /// A share is proportional to the bytes it comes with, so splitting the
+    /// bytes splits the share.
+    pub proof fn lemma_share_of_add(b1: int, b2: int)
+        ensures
+            Self::share_of(b1) + Self::share_of(b2) == Self::share_of(b1 + b2),
+    {
+        let ps = page_size::<A>() as real;
+        assert((b1 + b2) as real == (b1 as real) + (b2 as real));
+        assert(Self::OWNER_TOTAL_SHARE * ((b1 as real) + (b2 as real)) == Self::OWNER_TOTAL_SHARE
+            * (b1 as real) + Self::OWNER_TOTAL_SHARE * (b2 as real));
+        let x = Self::OWNER_TOTAL_SHARE * (b1 as real);
+        let y = Self::OWNER_TOTAL_SHARE * (b2 as real);
+        <A::MinPageSize as PageSize>::lemma_size_wf();
+        assert(ps > 0.0real);
+        assert((x + y) / ps == x / ps + y / ps) by (nonlinear_arith)
+            requires
+                ps > 0.0real,
+        ;
+    }
+
+    /// Owning some of a page is owning some of its record, and owning more of
+    /// it is owning more.
+    pub proof fn lemma_share_of_pos(b1: int, b2: int)
+        requires
+            0 < b1 < b2 <= page_size::<A>(),
+        ensures
+            0.0real < Self::share_of(b1) < Self::share_of(b2),
+    {
+        <A::MinPageSize as PageSize>::lemma_size_wf();
+        let ps = page_size::<A>() as real;
+        let x = Self::OWNER_TOTAL_SHARE * (b1 as real);
+        let y = Self::OWNER_TOTAL_SHARE * (b2 as real);
+        assert(0.0real < x < y);
+        assert(0.0real < x / ps < y / ps) by (nonlinear_arith)
+            requires
+                ps > 0.0real,
+                0.0real < x < y,
+        ;
+    }
+
     #[verifier::type_invariant]
     closed spec fn wf(&self) -> bool {
         self.frame.id() == Self::id_of_vpage(self.vpage@ as int)
@@ -855,6 +895,163 @@ impl<A: ArchPagingMeta> MemShape<A> {
             }
             assert(at == self.bytes_before_split(at) + self.byte_start_of_page(st));
         }
+    }
+
+    /// Splitting the bytes moves the split along with them: an alias of the
+    /// right half starts `at` bytes further into the same page run.
+    pub proof fn lemma_alias_offset_shift(&self, at: nat, addr: int)
+        requires
+            self.wf(),
+            0 < at < self.size,
+            page_offset_of::<A>(addr) == self.offset,
+        ensures
+            page_offset_of::<A>(addr + at) == self.skip(at).offset,
+            page_start_of::<A>(addr + at) == page_start_of::<A>(addr) + self.page_of_byte(
+                at as int,
+            ) * page_size::<A>(),
+    {
+        self.lemma_split(at);
+        let ps = page_size::<A>() as int;
+        let off = self.offset as int;
+        let a2 = at as int;
+        vstd::arithmetic::div_mod::lemma_add_mod_noop(addr, a2, ps);
+        vstd::arithmetic::div_mod::lemma_add_mod_noop(off, a2, ps);
+        vstd::arithmetic::div_mod::lemma_small_mod(self.offset as nat, page_size::<A>() as nat);
+    }
+
+    /// Split the record shares one alias holds at byte `at`.
+    ///
+    /// Every page but the one the split lands in goes wholly to one side. That
+    /// page's record is shared, and the share follows the bytes: each half is
+    /// left owning exactly as much of the record as it owns of the page.
+    pub proof fn split_records(
+        &self,
+        tracked records: Seq<Mapping<A>>,
+        at: nat,
+        addr: int,
+    ) -> (tracked res: (Seq<Mapping<A>>, Seq<Mapping<A>>))
+        requires
+            self.wf(),
+            0 < at < self.size,
+            page_offset_of::<A>(addr) == self.offset,
+            self.records_wf(records, addr, self.pinned()),
+        ensures
+            self.take(at).records_wf(res.0, addr, self.pinned()),
+            self.skip(at).records_wf(res.1, addr + at, self.pinned()),
+    {
+        self.lemma_split(at);
+        self.lemma_alias_offset_shift(at, addr);
+        let ghost ps = page_size::<A>() as int;
+        let ghost st = self.page_of_byte(at as int);
+        let ghost np = self.take(at).npages();
+        let ghost lbytes = self.bytes_before_split(at);
+        let tracked mut left = records;
+        let tracked mut right = left.tracked_split_at(st);
+        if np == st + 1 {
+            self.lemma_take_page(at, st);
+            self.lemma_skip_page(at, 0);
+            self.take(at).lemma_bytes_in_page(st);
+            self.skip(at).lemma_bytes_in_page(0);
+            self.lemma_bytes_in_page(st);
+            let ghost rbytes = self.bytes_in_page(st) - lbytes;
+            Mapping::<A>::lemma_share_of_add(lbytes, rbytes);
+            Mapping::<A>::lemma_share_of_pos(rbytes, self.bytes_in_page(st));
+            let tracked mut rec = right.tracked_pop_front();
+            let tracked part = rec.split(Mapping::<A>::share_of(rbytes));
+            left.tracked_push(rec);
+            right.tracked_push_front(part);
+        }
+        assert(self.take(at).records_wf(left, addr, self.pinned())) by {
+            assert forall|i: int| 0 <= i < np implies #[trigger] left[i].vpage_addr()
+                == self.take(at).vpage_at(addr, i) && left[i].share() == Mapping::<A>::share_of(
+                self.take(at).bytes_in_page(i),
+            ) && left[i].frame().is_some() && (self.pinned() ==> left[i].frame() == Some(
+                VirtMapping::Fixed(self.take(at).frame_addrs[i]),
+            )) by {
+                self.lemma_take_page(at, i);
+                assert(records[i].vpage_addr() == self.vpage_at(addr, i));
+            }
+        }
+        assert(self.skip(at).records_wf(right, addr + at, self.pinned())) by {
+            assert forall|j: int| 0 <= j < self.skip(at).npages() implies #[trigger]
+            right[j].vpage_addr() == self.skip(at).vpage_at(addr + at, j) && right[j].share()
+                == Mapping::<A>::share_of(self.skip(at).bytes_in_page(j)) && right[j].frame().is_some()
+                && (self.pinned() ==> right[j].frame() == Some(
+                VirtMapping::Fixed(self.skip(at).frame_addrs[j]),
+            )) by {
+                self.lemma_skip_page(at, j);
+                assert(records[j + st].vpage_addr() == self.vpage_at(addr, j + st));
+                assert(self.skip(at).vpage_at(addr + at, j) == self.vpage_at(addr, j + st)) by {
+                    assert((j + st) * ps == j * ps + st * ps) by (nonlinear_arith);
+                }
+            }
+        }
+        (left, right)
+    }
+
+    /// Split the physical tokens at byte `at`, the same way and for the same
+    /// reason as [`Self::split_records`]. Unpinned memory holds none.
+    pub proof fn split_phys(&self, tracked phys: Seq<PhysAddrTok>, at: nat) -> (tracked res: (
+        Seq<PhysAddrTok>,
+        Seq<PhysAddrTok>,
+    ))
+        requires
+            self.wf(),
+            0 < at < self.size,
+            self.phys_wf(phys),
+        ensures
+            self.take(at).phys_wf(res.0),
+            self.skip(at).phys_wf(res.1),
+    {
+        self.lemma_split(at);
+        let ghost st = self.page_of_byte(at as int);
+        let ghost np = self.take(at).npages();
+        let ghost lbytes = self.bytes_before_split(at);
+        let tracked mut left = phys;
+        if !self.pinned() {
+            let tracked right = left.tracked_split_at(0);
+            return (left, right);
+        }
+        let tracked mut right = left.tracked_split_at(st);
+        if np == st + 1 {
+            self.lemma_take_page(at, st);
+            self.lemma_skip_page(at, 0);
+            let tracked tok = right.tracked_pop_front();
+            let tracked (l, r) = tok.split_range(
+                self.frame_addrs[st]@ + self.offset_in_page(st),
+                self.bytes_in_page(st),
+                self.frame_addrs[st]@ + self.skip(at).offset,
+            );
+            left.tracked_push(l);
+            right.tracked_push_front(r);
+        }
+        assert(self.take(at).phys_wf(left)) by {
+            assert forall|i: int|
+                0 <= i < np implies (#[trigger] left[i]).is_range(
+                self.take(at).frame_addrs[i]@ + self.take(at).offset_in_page(i),
+                self.take(at).bytes_in_page(i),
+            ) by {
+                self.lemma_take_page(at, i);
+                assert(phys[i].is_range(
+                    self.frame_addrs[i]@ + self.offset_in_page(i),
+                    self.bytes_in_page(i),
+                ));
+            }
+        }
+        assert(self.skip(at).phys_wf(right)) by {
+            assert forall|j: int|
+                0 <= j < self.skip(at).npages() implies (#[trigger] right[j]).is_range(
+                self.skip(at).frame_addrs[j]@ + self.skip(at).offset_in_page(j),
+                self.skip(at).bytes_in_page(j),
+            ) by {
+                self.lemma_skip_page(at, j);
+                assert(phys[j + st].is_range(
+                    self.frame_addrs[j + st]@ + self.offset_in_page(j + st),
+                    self.bytes_in_page(j + st),
+                ));
+            }
+        }
+        (left, right)
     }
 
     /// One physical token per page, covering the bytes this memory owns in that
