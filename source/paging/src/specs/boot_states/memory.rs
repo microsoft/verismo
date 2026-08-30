@@ -8,9 +8,9 @@
 //!
 //! Firmware leaves the tables reachable one of two ways, and this module
 //! describes both. A [`SelfMap`] points one root slot back at the root, which
-//! exposes the root table and nothing else. A [`DirectMap`] maps a window of
+//! exposes the root table and nothing else. A [`DirectMap`] maps a region of
 //! physical memory straight through at [`ArchPagingGeometry::spec_paddr_to_vaddr`],
-//! which exposes every table in the window at once. A handover has at least one
+//! which exposes every table in that region at once. A handover has at least one
 //! of them -- with neither, no walk could read its own root.
 //!
 //! A free frame is a [`PhysPointsTo`]: pinned, so its physical address names
@@ -196,30 +196,38 @@ impl<A: ArchPagingMeta> SelfMap<A> {
     }
 }
 
-/// A window of physical memory mapped straight through, at the addresses
+/// A region of physical memory mapped straight through, at the addresses
 /// [`ArchPagingGeometry::spec_paddr_to_vaddr`] computes.
 ///
 /// This is the arrangement the rest of the crate already walks on: a walker
 /// reaching a child table computes its address as `spec_paddr_to_vaddr` of the
 /// frame in the parent entry, which only reads anything because the firmware
-/// mapped the window through. So the invariant is that *every* table page lies
+/// mapped the region through. So the invariant is that *every* table page lies
 /// in it -- one table outside and a walk stops there.
 #[verifier::reject_recursive_types(A)]
 pub tracked struct DirectMap<A: ArchPagingMeta> {
-    /// First physical address the window covers.
-    pub ghost pa_start: int,
-    /// One past the last.
-    pub ghost pa_end: int,
-    /// The frames in the window that hold page tables, the root among them.
+    /// The physical addresses the firmware mapped through. A set rather than a
+    /// range: firmware is free to leave several disjoint regions mapped, and
+    /// nothing here needs them contiguous.
+    pub ghost pas: Set<int>,
+    /// The mapped frames that hold page tables, the root among them.
     pub ghost tables: Set<usize>,
     /// One permission per table entry, keyed by its frame and slot.
     pub tracked entries: Map<(usize, nat), PhysPointsTo<PTEntry<A>, A>>,
 }
 
 impl<A: ArchPagingMeta> DirectMap<A> {
-    /// Whether the window covers `pa`.
+    /// Whether `pa` is mapped through.
     pub open spec fn covers(&self, pa: int) -> bool {
-        self.pa_start <= pa < self.pa_end
+        self.pas.contains(pa)
+    }
+
+    /// Whether every byte of `frame` is mapped through.
+    ///
+    /// Every byte, not just the ends: with no contiguity to appeal to, a table
+    /// straddling a hole would be unreadable in the middle.
+    pub open spec fn covers_frame(&self, frame: usize) -> bool {
+        forall|off: int| 0 <= off < page_size::<A>() ==> #[trigger] self.covers(frame + off)
     }
 
     /// Where the direct map exposes the table in `frame`.
@@ -237,17 +245,14 @@ impl<A: ArchPagingMeta> DirectMap<A> {
         page_start_of::<A>(self.base(frame) as int)
     }
 
-    /// Every table page lies wholly inside the window, and every one of its
-    /// entries is well formed at the address the direct map exposes it at.
+    /// Every table page is mapped through in full, and every one of its entries
+    /// is well formed at the address the direct map exposes it at.
     ///
     /// The root is among them: it is a table like any other here, which is the
     /// difference from [`SelfMap`], where it is the only one.
     pub open spec fn wf(&self, root: PhysFrame<A::MinPageSize>, max_level: PageLevel) -> bool {
         &&& self.tables.contains(root@)
-        &&& forall|frame: usize| #[trigger]
-            self.tables.contains(frame) ==> self.covers(frame as int) && self.covers(
-                frame + page_size::<A>() - 1,
-            )
+        &&& forall|frame: usize| #[trigger] self.tables.contains(frame) ==> self.covers_frame(frame)
         &&& forall|frame: usize, slot: nat|
             (#[trigger] self.entries.dom().contains((frame, slot))) <==> self.tables.contains(frame)
                 && slot < PTPage::<A>::count()
