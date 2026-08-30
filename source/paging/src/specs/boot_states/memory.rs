@@ -10,8 +10,9 @@
 //! describes both. A [`SelfMap`] points one root slot back at the root, which
 //! exposes the root table and nothing else. A [`DirectMap`] maps a region of
 //! physical memory straight through at addresses its own `pa_to_va` computes,
-//! which exposes every table in that region at once. A handover has at least one
-//! of them -- with neither, no walk could read its own root.
+//! which exposes every table that happens to lie in that region at once. A
+//! handover reaches its root one way or the other -- neither, and no walk could
+//! read its own root.
 //!
 //! A free frame is a [`PhysPointsTo`]: pinned, so its physical address names
 //! it, which is the only name it has. The difference from a mapped page is
@@ -202,9 +203,12 @@ impl<A: ArchPagingMeta> SelfMap<A> {
 /// The translation is a field rather than something read off the architecture:
 /// where firmware parked the direct map is a choice it made, two handovers to
 /// the same machine can differ, and the page table has no business being told
-/// about it. What matters here is only that one exists and that the tables lie
-/// under it -- one table outside and a walk of the handed-over tree stops
-/// there.
+/// about it.
+///
+/// A direct map need not be the way in. Firmware that left a self map may still
+/// have mapped a region of ordinary memory through, and then [`Self::tables`]
+/// is empty and this is just a window the OS can read. Whether the *root* is
+/// reachable here is [`InitialPermissions::wf`]'s question, not this struct's.
 #[verifier::reject_recursive_types(A)]
 pub tracked struct DirectMap<A: ArchPagingMeta> {
     /// The physical addresses the firmware mapped through. A set rather than a
@@ -215,7 +219,8 @@ pub tracked struct DirectMap<A: ArchPagingMeta> {
     /// below say only that the tables are reachable through it, so an OS that
     /// establishes a `DirectMap` proves its own translation fits.
     pub ghost pa_to_va: spec_fn(usize) -> usize,
-    /// The mapped frames that hold page tables, the root among them.
+    /// Which of the mapped frames hold page tables. Empty for a direct map of
+    /// ordinary memory.
     pub ghost tables: Set<usize>,
     /// One permission per table entry, keyed by its frame and slot.
     pub tracked entries: Map<(usize, nat), PhysPointsTo<PTEntry<A>, A>>,
@@ -250,13 +255,15 @@ impl<A: ArchPagingMeta> DirectMap<A> {
         page_start_of::<A>(self.base(frame) as int)
     }
 
-    /// Every table page is mapped through in full, and every one of its entries
-    /// is well formed at the address the direct map exposes it at.
+    /// Whichever table pages this map does hold are mapped through in full, and
+    /// every one of their entries is well formed at the address the map exposes
+    /// it at.
     ///
-    /// The root is among them: it is a table like any other here, which is the
-    /// difference from [`SelfMap`], where it is the only one.
-    pub open spec fn wf(&self, root: PhysFrame<A::MinPageSize>, max_level: PageLevel) -> bool {
-        &&& self.tables.contains(root@)
+    /// Vacuous when [`Self::tables`] is empty, which is what lets a direct map
+    /// of ordinary memory satisfy it. Unlike [`SelfMap`], the root gets no
+    /// special treatment: here it is a table like any other, and it need not be
+    /// one of these at all.
+    pub open spec fn map_pts(&self) -> bool {
         &&& forall|frame: usize| #[trigger] self.tables.contains(frame) ==> self.covers_frame(frame)
         &&& forall|frame: usize, slot: nat|
             (#[trigger] self.entries.dom().contains((frame, slot))) <==> self.tables.contains(frame)
@@ -345,11 +352,20 @@ impl<A: ArchPagingMeta, P> InitialPermissions<A, P> {
         from_self.union(from_direct)
     }
 
+    /// The root table can be read: either the self map exposes it, or it is one
+    /// of the tables the direct map covers.
+    ///
+    /// Without this no walk could begin, and a direct map alone does not supply
+    /// it -- firmware may have mapped a region through that holds no tables.
+    pub open spec fn root_is_reachable(&self) -> bool {
+        ||| self.self_map is Some
+        ||| self.direct_map is Some && self.direct_map->Some_0.tables.contains(self.root@)
+    }
+
     pub open spec fn wf(&self) -> bool {
-        // With neither map the root is unreachable, and no walk could begin.
-        &&& self.self_map is Some || self.direct_map is Some
         &&& self.self_map is Some ==> self.self_map->Some_0.wf(self.root, self.max_level)
-        &&& self.direct_map is Some ==> self.direct_map->Some_0.wf(self.root, self.max_level)
+        &&& self.direct_map is Some ==> self.direct_map->Some_0.map_pts()
+        &&& self.root_is_reachable()
         &&& self.free_frames_wf()
         &&& self.init_toks.init_wf()
         &&& forall|vpage: int| #[trigger]
