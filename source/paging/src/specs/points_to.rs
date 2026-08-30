@@ -572,6 +572,291 @@ impl<A: ArchPagingMeta> MemShape<A> {
         }
     }
 
+    /// Which of this memory's pages holds the byte at index `b`.
+    pub open spec fn page_of_byte(&self, b: int) -> int {
+        (b + self.offset) / page_size::<A>() as int
+    }
+
+    /// The shape of the first `at` bytes.
+    pub open spec fn take(&self, at: nat) -> MemShape<A> {
+        let np = self.page_of_byte(at - 1) + 1;
+        MemShape {
+            size: at,
+            offset: self.offset,
+            npages: np as nat,
+            frame_addrs: if self.pinned() {
+                self.frame_addrs.take(np)
+            } else {
+                Seq::empty()
+            },
+        }
+    }
+
+    /// The shape of everything from byte `at` on.
+    ///
+    /// It starts where the split lands, so its offset is that byte's offset in
+    /// its page, and it runs from that page rather than from this memory's
+    /// first: the page the split lands in belongs to both halves whenever the
+    /// split is not page-aligned.
+    pub open spec fn skip(&self, at: nat) -> MemShape<A> {
+        let st = self.page_of_byte(at as int);
+        MemShape {
+            size: (self.size - at) as nat,
+            offset: ((at + self.offset) % page_size::<A>() as int) as usize,
+            npages: (self.npages() - st) as nat,
+            frame_addrs: if self.pinned() {
+                self.frame_addrs.skip(st)
+            } else {
+                Seq::empty()
+            },
+        }
+    }
+
+    /// Splitting a run of bytes leaves two runs of bytes.
+    ///
+    /// The page the split lands in is the only one the halves can disagree
+    /// about, and they disagree about it only when the split is not
+    /// page-aligned -- which is exactly when the left half needs one page more
+    /// than the right half starts at.
+    pub proof fn lemma_split(&self, at: nat)
+        requires
+            self.wf(),
+            0 < at < self.size,
+        ensures
+            self.take(at).wf(),
+            self.skip(at).wf(),
+            ({
+                let st = self.page_of_byte(at as int);
+                let np = self.take(at).npages();
+                &&& 0 <= st <= np <= self.npages()
+                &&& np <= st + 1
+                &&& at + self.offset == st * page_size::<A>() + self.skip(at).offset
+                &&& self.skip(at).offset == 0 <==> np == st
+                &&& self.take(at).pinned() == self.pinned()
+                &&& self.skip(at).pinned() == self.pinned()
+            }),
+    {
+        broadcast use {
+            vstd::arithmetic::div_mod::lemma_fundamental_div_mod,
+            vstd::arithmetic::div_mod::lemma_mod_bound,
+        };
+
+        let ps = page_size::<A>() as int;
+        let st = self.page_of_byte(at as int);
+        let stl = self.page_of_byte(at - 1);
+        let np = stl + 1;
+        let off2 = (at + self.offset) % ps;
+        assert(at + self.offset == ps * st + off2);
+        assert(at - 1 + self.offset == ps * stl + (at - 1 + self.offset) % ps);
+        // The two page indices differ by at most one, since the byte indices do.
+        assert(stl <= st) by (nonlinear_arith)
+            requires
+                at - 1 + self.offset == ps * stl + (at - 1 + self.offset) % ps,
+                at + self.offset == ps * st + off2,
+                0 <= off2 < ps,
+                0 <= (at - 1 + self.offset) % ps < ps,
+                ps > 0,
+        ;
+        assert(st <= stl + 1) by (nonlinear_arith)
+            requires
+                at - 1 + self.offset == ps * stl + (at - 1 + self.offset) % ps,
+                at + self.offset == ps * st + off2,
+                0 <= off2 < ps,
+                0 <= (at - 1 + self.offset) % ps < ps,
+                ps > 0,
+        ;
+        let r = (at - 1 + self.offset) % ps;
+        assert(ps * (st - stl) == 1 + r - off2) by (nonlinear_arith)
+            requires
+                at - 1 + self.offset == ps * stl + r,
+                at + self.offset == ps * st + off2,
+        ;
+        if st == stl {
+            assert(ps * (st - stl) == 0) by (nonlinear_arith)
+                requires
+                    st == stl,
+            ;
+        } else {
+            assert(st == stl + 1);
+            assert(ps * (st - stl) == ps) by (nonlinear_arith)
+                requires
+                    st == stl + 1,
+            ;
+        }
+        assert(off2 == 0 <==> np == st);
+        // The left half needs exactly the pages up to the one holding byte
+        // `at - 1`, and no fewer.
+        assert(at + self.offset <= np * ps) by (nonlinear_arith)
+            requires
+                at - 1 + self.offset == ps * stl + r,
+                0 <= r < ps,
+                np == stl + 1,
+                ps > 0,
+        ;
+        assert((np - 1) * ps < at + self.offset) by (nonlinear_arith)
+            requires
+                at - 1 + self.offset == ps * stl + r,
+                0 <= r < ps,
+                np == stl + 1,
+                ps > 0,
+        ;
+        // The right half starts inside this memory, so it keeps at least one
+        // page, and shifting both its size and its page count by the same
+        // amount preserves the fit.
+        assert(st < self.npages()) by (nonlinear_arith)
+            requires
+                at + self.offset == ps * st + off2,
+                0 <= off2 < ps,
+                at + self.offset < self.size + self.offset,
+                self.size + self.offset <= self.npages() * ps,
+                ps > 0,
+        ;
+        assert(self.size - at + off2 <= (self.npages() - st) * ps) by (nonlinear_arith)
+            requires
+                at + self.offset == ps * st + off2,
+                self.size + self.offset <= self.npages() * ps,
+                ps > 0,
+        ;
+        assert((self.npages() - st - 1) * ps < self.size - at + off2) by (nonlinear_arith)
+            requires
+                at + self.offset == ps * st + off2,
+                (self.npages() - 1) * ps < self.size + self.offset,
+                ps > 0,
+        ;
+        assert(np <= self.npages());
+        assert(self.take(at).npages() == np);
+        assert(self.skip(at).npages() == self.npages() - st);
+        assert(self.skip(at).offset == off2);
+        assert(at + self.offset == st * ps + off2) by (nonlinear_arith)
+            requires
+                at + self.offset == ps * st + off2,
+        ;
+        assert(self.take(at).pinned() == self.pinned());
+        assert(self.skip(at).pinned() == self.pinned());
+        if self.pinned() {
+            assert(self.take(at).frame_addrs.len() == np);
+            assert(self.skip(at).frame_addrs.len() == self.npages() - st);
+        }
+    }
+
+    /// How many bytes the left half keeps in the page the split lands in.
+    ///
+    /// Zero exactly when the split is page-aligned, in which case that page
+    /// belongs to the right half alone.
+    pub open spec fn bytes_before_split(&self, at: nat) -> int {
+        self.skip(at).offset - self.offset_in_page(self.page_of_byte(at as int))
+    }
+
+    /// The left half occupies the same pages this memory does, holding the same
+    /// bytes in each, until the page the split lands in.
+    pub proof fn lemma_take_page(&self, at: nat, i: int)
+        requires
+            self.wf(),
+            0 < at < self.size,
+            0 <= i < self.take(at).npages(),
+        ensures
+            self.take(at).byte_start_of_page(i) == self.byte_start_of_page(i),
+            self.take(at).offset_in_page(i) == self.offset_in_page(i),
+            i < self.take(at).npages() - 1 ==> self.take(at).bytes_in_page(i) == self.bytes_in_page(
+                i,
+            ),
+            i == self.take(at).npages() - 1 ==> self.take(at).bytes_in_page(i)
+                == self.bytes_before_split(at) + self.byte_start_of_page(
+                self.page_of_byte(at as int),
+            ) - self.byte_start_of_page(i),
+    {
+        broadcast use {
+            vstd::arithmetic::div_mod::lemma_fundamental_div_mod,
+            vstd::arithmetic::div_mod::lemma_mod_bound,
+        };
+
+        self.lemma_split(at);
+        let ps = page_size::<A>() as int;
+        let st = self.page_of_byte(at as int);
+        let np = self.take(at).npages();
+        assert(at + self.offset <= np * ps);
+        if i < np - 1 {
+            assert((i + 1) * ps <= (np - 1) * ps) by (nonlinear_arith)
+                requires
+                    i + 1 <= np - 1,
+                    ps > 0,
+            ;
+            assert((np - 1) * ps <= at - 1 + self.offset) by (nonlinear_arith)
+                requires
+                    at - 1 + self.offset == ps * (np - 1) + (at - 1 + self.offset) % ps,
+                    0 <= (at - 1 + self.offset) % ps < ps,
+            ;
+        } else {
+            assert(i == np - 1);
+            let off2 = self.skip(at).offset as int;
+            assert(at + self.offset == st * ps + off2) by (nonlinear_arith)
+                requires
+                    at + self.offset == ps * st + off2,
+            ;
+            // The bytes before the split, measured from the start of the page
+            // it lands in, are the bytes the left half keeps there.
+            if st == 0 {
+                assert(self.byte_start_of_page(st) == 0);
+            } else {
+                assert(self.byte_start_of_page(st) == st * ps - self.offset);
+            }
+            assert(at == self.bytes_before_split(at) + self.byte_start_of_page(st));
+        }
+    }
+
+    /// The right half occupies the pages from the split on, holding the same
+    /// bytes in each after the first, whose bytes are what the left half left
+    /// behind.
+    pub proof fn lemma_skip_page(&self, at: nat, j: int)
+        requires
+            self.wf(),
+            0 < at < self.size,
+            0 <= j < self.skip(at).npages(),
+        ensures
+            j > 0 ==> self.skip(at).byte_start_of_page(j) + at == self.byte_start_of_page(
+                j + self.page_of_byte(at as int),
+            ),
+            self.skip(at).offset_in_page(j) == if j == 0 {
+                self.skip(at).offset as int
+            } else {
+                0
+            },
+            j > 0 ==> self.skip(at).bytes_in_page(j) == self.bytes_in_page(
+                j + self.page_of_byte(at as int),
+            ),
+            j == 0 ==> self.skip(at).bytes_in_page(0) == self.bytes_in_page(
+                self.page_of_byte(at as int),
+            ) - self.bytes_before_split(at),
+    {
+        broadcast use {
+            vstd::arithmetic::div_mod::lemma_fundamental_div_mod,
+            vstd::arithmetic::div_mod::lemma_mod_bound,
+        };
+
+        self.lemma_split(at);
+        let ps = page_size::<A>() as int;
+        let st = self.page_of_byte(at as int);
+        let off2 = self.skip(at).offset as int;
+        assert(at + self.offset == st * ps + off2);
+        assert((j + st) * ps == j * ps + st * ps) by (nonlinear_arith);
+        assert((j + 1 + st) * ps == (j + 1) * ps + st * ps) by (nonlinear_arith);
+        assert((st + 1) * ps == st * ps + ps) by (nonlinear_arith);
+        assert(1int * ps == ps) by (nonlinear_arith);
+        if j > 0 {
+            assert(self.skip(at).byte_start_of_page(j + 1) + at == self.byte_start_of_page(
+                j + 1 + st,
+            ));
+        } else {
+            assert(self.skip(at).byte_start_of_page(1) + at == self.byte_start_of_page(st + 1));
+            if st == 0 {
+                assert(self.byte_start_of_page(st) == 0);
+            } else {
+                assert(self.byte_start_of_page(st) == st * ps - self.offset);
+            }
+            assert(at == self.bytes_before_split(at) + self.byte_start_of_page(st));
+        }
+    }
+
     /// One physical token per page, covering the bytes this memory owns in that
     /// page's frame. Unpinned memory names no frames and so holds no tokens.
     pub open spec fn phys_wf(&self, phys: Seq<PhysAddrTok>) -> bool {
