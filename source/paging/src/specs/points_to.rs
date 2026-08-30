@@ -10,7 +10,10 @@
 //! spans and the physical range beneath it is what it means to own the memory.
 //!
 //! That last sentence is the part no model of memory indexed by address can
-//! decide, so it is assumed, in exactly two places and in three modes:
+//! decide, so it is assumed. This module is where the whole crate's assumptions
+//! live, and there are six of them, in two groups.
+//!
+//! Owning the tokens is owning the memory:
 //!
 //! - [`GeneralPointsTo::borrow`], [`GeneralPointsTo::borrow_mut`] and
 //!   [`GeneralPointsTo::into_points_to`] -- holding the tokens for an alias
@@ -21,8 +24,20 @@
 //!   pointer to where this memory is lets that pointer reach it, for as long as
 //!   the walk is borrowed.
 //!
-//! The disjointness of two permissions, virtual and physical alike, is *derived*
-//! from the address spaces rather than assumed.
+//! Rust lays an array out as its elements, which vstd states nowhere:
+//!
+//! - [`axiom_array_layout`] -- an array is its elements' sizes, end to end, at
+//!   its elements' alignment. vstd leaves `size_of` uninterpreted.
+//! - [`points_to_array_split`] -- and a permission to an array is its elements'
+//!   permissions, *keeping what each element holds*. vstd's only route from an
+//!   array permission to its parts demands the memory be uninitialized, which
+//!   is the one case this must not be limited to.
+//!
+//! Everything else is derived. The disjointness of two permissions, virtual and
+//! physical alike, follows from the address spaces; splitting a permission --
+//! [`MemOwn::split_at`] and, on top of it,
+//! [`GeneralPointsTo::into_elements`] -- is token arithmetic that creates
+//! nothing and loses nothing.
 use crate::UniqueAddress;
 use crate::arch::x86_64::reg_contract::cr3_phys_addr;
 use crate::entry::PTEntry;
@@ -56,6 +71,60 @@ pub open spec fn page_offset_of<A: ArchPagingMeta>(addr: int) -> int {
 /// Start of the page an address falls in.
 pub open spec fn page_start_of<A: ArchPagingMeta>(addr: int) -> int {
     addr - page_offset_of::<A>(addr)
+}
+
+/// The elements of an array sit one element apart, so their addresses are the
+/// array's addresses shifted by the element's size.
+///
+/// The `usize` bound is what makes that true rather than nearly true: an
+/// address that wrapped would not be the element's.
+pub proof fn lemma_element_addrs<T, const N: usize>(ptrs: Set<*mut [T; N]>, i: int)
+    requires
+        0 <= i,
+        forall|p: *mut [T; N]| #[trigger]
+            ptrs.contains(p) ==> p@.addr + i * size_of::<T>() <= usize::MAX,
+    ensures
+        ptrs.map(|p: *mut [T; N]| array_element_ptr(p, i)).map(|q: *mut T| q@.addr as int)
+            =~= ptrs.map(|p: *mut [T; N]| p@.addr as int).map(|a: int| a + i * size_of::<T>()),
+{
+    broadcast use vstd::raw_ptr::group_raw_ptr_axioms;
+
+    let elems = ptrs.map(|p: *mut [T; N]| array_element_ptr(p, i));
+    let lhs = elems.map(|q: *mut T| q@.addr as int);
+    let base = ptrs.map(|p: *mut [T; N]| p@.addr as int);
+    let rhs = base.map(|a: int| a + i * size_of::<T>());
+    assert forall|y: int| #[trigger] lhs.contains(y) implies rhs.contains(y) by {
+        let q = choose|q: *mut T| #[trigger] elems.contains(q) && q@.addr as int == y;
+        let p = choose|p: *mut [T; N]| #[trigger] ptrs.contains(p) && array_element_ptr(p, i) == q;
+        assert(base.contains(p@.addr as int));
+        assert(rhs.contains(p@.addr + i * size_of::<T>()));
+    }
+    assert forall|y: int| #[trigger] rhs.contains(y) implies lhs.contains(y) by {
+        let a = choose|a: int| #[trigger] base.contains(a) && a + i * size_of::<T>() == y;
+        let p = choose|p: *mut [T; N]| #[trigger] ptrs.contains(p) && p@.addr as int == a;
+        assert(elems.contains(array_element_ptr(p, i)));
+        assert(lhs.contains(y));
+    }
+}
+
+/// Shifting a set of addresses twice shifts it once by the sum.
+pub proof fn lemma_shift_twice(s: Set<int>, d1: int, d2: int)
+    ensures
+        s.map(|a: int| a + d1).map(|a: int| a + d2) =~= s.map(|a: int| a + d1 + d2),
+{
+    let s1 = s.map(|a: int| a + d1);
+    let s12 = s1.map(|a: int| a + d2);
+    let sd = s.map(|a: int| a + d1 + d2);
+    assert forall|y: int| #[trigger] s12.contains(y) implies sd.contains(y) by {
+        let z = choose|z: int| #[trigger] s1.contains(z) && z + d2 == y;
+        let x = choose|x: int| #[trigger] s.contains(x) && x + d1 == z;
+        assert(sd.contains(x + d1 + d2));
+    }
+    assert forall|y: int| #[trigger] sd.contains(y) implies s12.contains(y) by {
+        let x = choose|x: int| #[trigger] s.contains(x) && x + d1 + d2 == y;
+        assert(s1.contains(x + d1));
+        assert(s12.contains(x + d1 + d2));
+    }
 }
 
 /// The `i`-th element of an array, as a pointer.
@@ -1343,6 +1412,66 @@ impl<A: ArchPagingMeta> MemOwn<A> {
         (left, right)
     }
 
+    /// Chop this memory into `n` runs of `esize` bytes each.
+    ///
+    /// The `i`-th run is reached `i * esize` bytes along every alias of the
+    /// whole, which is where the `i`-th element of an array sits.
+    pub proof fn into_chunks(tracked self, esize: nat, n: nat) -> (tracked res: Seq<Self>)
+        requires
+            0 < esize,
+            0 < n,
+            self.size() == n * esize,
+        ensures
+            res.len() == n,
+            forall|i: int|
+                #![trigger res[i]]
+                0 <= i < n ==> {
+                    &&& res[i].size() == esize
+                    &&& res[i].addrs() =~= self.addrs().map(|a: int| a + i * esize)
+                    &&& res[i].is_pt() == self.is_pt()
+                },
+        decreases n,
+    {
+        if n == 1 {
+            let tracked mut res = Seq::tracked_empty();
+            assert(self.addrs() =~= self.addrs().map(|a: int| a + 0 * esize));
+            assert(1nat * esize == esize) by (nonlinear_arith);
+            let ghost head = self;
+            res.tracked_push(self);
+            assert(res[0] == head);
+            res
+        } else {
+            assert(n * esize == esize + (n - 1) * esize) by (nonlinear_arith);
+            assert(esize < n * esize) by (nonlinear_arith)
+                requires
+                    n >= 2,
+                    esize > 0,
+            ;
+            let ghost old_addrs = self.addrs();
+            let tracked (first, rest) = self.split_at(esize);
+            let tracked mut res = rest.into_chunks(esize, (n - 1) as nat);
+            assert forall|i: int| 0 < i < n implies #[trigger] res[i - 1].addrs()
+                =~= old_addrs.map(|a: int| a + i * esize) by {
+                assert(i * esize == esize + (i - 1) * esize) by (nonlinear_arith);
+                lemma_shift_twice(old_addrs, esize as int, (i - 1) * esize);
+            }
+            assert(first.addrs() =~= old_addrs.map(|a: int| a + 0 * esize));
+            let ghost tail = res;
+            let ghost head = first;
+            res.tracked_push_front(first);
+            assert forall|i: int| 0 <= i < n implies #[trigger] res[i].size() == esize
+                && res[i].addrs() =~= old_addrs.map(|a: int| a + i * esize) && res[i].is_pt()
+                == head.is_pt() by {
+                if i == 0 {
+                    assert(res[0] == head);
+                } else {
+                    assert(res[i] == tail[i - 1]);
+                }
+            }
+            res
+        }
+    }
+
     /// Every alias sits at the offset [`MemShape::offset`] records.
     pub proof fn lemma_aliases_share_page_offset(tracked &self)
         ensures
@@ -1963,6 +2092,139 @@ impl<T, A: ArchPagingMeta> GeneralPointsTo<T, A> {
             ret.ptr() == ptr,
             ret.opt_value() == self.opt_value(),
     ;
+
+    /// Assemble one permission per chunk of memory, each with the value that
+    /// chunk holds and the pointers that reach it.
+    ///
+    /// The pieces arrive in three separate sequences -- the ownership, the
+    /// values, the alias sets -- because they are produced by three different
+    /// splits; this is what puts them back together.
+    proof fn zip_chunks(
+        tracked chunks: Seq<MemOwn<A>>,
+        tracked vals: Seq<PointsTo<T>>,
+        ptrs: Seq<Set<*mut T>>,
+    ) -> (tracked res: Seq<Self>)
+        requires
+            chunks.len() == vals.len(),
+            chunks.len() == ptrs.len(),
+            forall|i: int|
+                #![trigger chunks[i]]
+                0 <= i < chunks.len() ==> {
+                    &&& chunks[i].size() == size_of::<T>()
+                    &&& chunks[i].addrs() =~= ptrs[i].map(|p: *mut T| p@.addr as int)
+                    &&& ptrs[i].contains(vals[i].ptr())
+                },
+        ensures
+            res.len() == chunks.len(),
+            forall|i: int|
+                #![trigger res[i]]
+                0 <= i < res.len() ==> {
+                    &&& res[i].ptrs() =~= ptrs[i]
+                    &&& res[i].opt_value() == vals[i].opt_value()
+                    &&& res[i].own() == chunks[i]
+                },
+        decreases chunks.len(),
+    {
+        let tracked mut chunks = chunks;
+        let tracked mut vals = vals;
+        if chunks.len() == 0 {
+            Seq::tracked_empty()
+        } else {
+            let ghost p0 = ptrs[0];
+            let ghost old_chunks = chunks;
+            let ghost old_vals = vals;
+            let tracked c = chunks.tracked_pop_front();
+            let tracked v = vals.tracked_pop_front();
+            let tracked mut rest = Self::zip_chunks(chunks, vals, ptrs.drop_first());
+            let ghost tail = rest;
+            let tracked head = GeneralPointsTo { own: c, ptrs: p0, inner: Some(v) };
+            let ghost ghead = head;
+            rest.tracked_push_front(head);
+            assert forall|i: int| 0 <= i < rest.len() implies #[trigger] rest[i].ptrs() =~= ptrs[i]
+                && rest[i].opt_value() == old_vals[i].opt_value() && rest[i].own()
+                == old_chunks[i] by {
+                if i == 0 {
+                    assert(rest[0] == ghead);
+                } else {
+                    assert(rest[i] == tail[i - 1]);
+                    assert(ptrs.drop_first()[i - 1] == ptrs[i]);
+                }
+            }
+            rest
+        }
+    }
+}
+
+impl<T, A: ArchPagingMeta, const N: usize> GeneralPointsTo<[T; N], A> {
+    /// See this array as its elements: one permission each, holding the value
+    /// that element holds.
+    ///
+    /// The ownership is chopped up by [`MemOwn::into_chunks`], which loses
+    /// nothing; the values come from [`points_to_array_split`], which is where
+    /// the Rust layout of an array is assumed. Each element is reached at every
+    /// alias of the array, one element's width further along.
+    pub proof fn into_elements(tracked self) -> (tracked res: Seq<GeneralPointsTo<T, A>>)
+        requires
+            self.is_init(),
+            size_of::<T>() != 0,
+            N > 0,
+            forall|p: *mut [T; N]| #[trigger]
+                self.ptrs().contains(p) ==> p@.addr + N * size_of::<T>() <= usize::MAX,
+        ensures
+            res.len() == N,
+            forall|i: int|
+                #![trigger res[i]]
+                0 <= i < N ==> {
+                    &&& res[i].ptrs() =~= self.ptrs().map(
+                        |p: *mut [T; N]| array_element_ptr(p, i),
+                    )
+                    &&& res[i].opt_value() == MemContents::Init(self.value()[i])
+                    &&& res[i].own().is_pt() == self.own().is_pt()
+                    &&& res[i].own().size() == size_of::<T>()
+                },
+    {
+        broadcast use {axiom_array_layout, vstd::raw_ptr::group_raw_ptr_axioms};
+
+        use_type_invariant(&self);
+        let ghost esize = size_of::<T>() as nat;
+        let ghost aptrs = self.ptrs;
+        assert forall|p: *mut [T; N]| #[trigger] aptrs.contains(p) implies p@.addr + N
+            * size_of::<T>() <= usize::MAX by {
+            assert(self.ptrs().contains(p));
+        }
+        let ghost eptrs = Seq::new(
+            N as nat,
+            |i: int| aptrs.map(|p: *mut [T; N]| array_element_ptr(p, i)),
+        );
+        let tracked GeneralPointsTo { own, ptrs, inner } = self;
+        let tracked pt = inner.tracked_unwrap();
+        let ghost aptr = pt.ptr();
+        let ghost avalue = pt.value();
+        let tracked vals = points_to_array_split::<T, N>(pt);
+        assert(N * esize == esize * N) by (nonlinear_arith);
+        let tracked chunks = own.into_chunks(esize, N as nat);
+        assert forall|i: int| 0 <= i < N implies {
+            &&& (#[trigger] chunks[i]).size() == esize
+            &&& chunks[i].addrs() =~= eptrs[i].map(|p: *mut T| p@.addr as int)
+            &&& eptrs[i].contains(vals[i].ptr())
+        } by {
+            assert(i * size_of::<T>() <= N * size_of::<T>()) by (nonlinear_arith)
+                requires
+                    0 <= i < N,
+            ;
+            assert forall|p: *mut [T; N]| #[trigger] aptrs.contains(p) implies p@.addr + i
+                * size_of::<T>() <= usize::MAX by {}
+            lemma_element_addrs::<T, N>(aptrs, i);
+            assert(aptrs.contains(aptr));
+            assert(eptrs[i].contains(array_element_ptr(aptr, i)));
+        }
+        let tracked res = GeneralPointsTo::<T, A>::zip_chunks(chunks, vals, eptrs);
+        assert forall|i: int| 0 <= i < N implies (#[trigger] res[i]).own().is_pt()
+            == own.is_pt() by {
+            assert(chunks[i].is_pt() == own.is_pt());
+        }
+        res
+    }
 }
 
 /// The same alias seen as a pointer to a different type: address and provenance
