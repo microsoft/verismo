@@ -1192,6 +1192,157 @@ impl<A: ArchPagingMeta> MemOwn<A> {
             )
     }
 
+    /// Split every alias's virtual token and record shares at byte `at`.
+    ///
+    /// One alias at a time, because there is no way to act on a tracked map
+    /// wholesale: the left half keeps each alias's address, and the right half
+    /// is reached `at` bytes further along.
+    proof fn split_aliases(
+        tracked virt: Map<int, VirtAddrTok>,
+        tracked mapping: Map<int, Seq<Mapping<A>>>,
+        sh: MemShape<A>,
+        at: nat,
+    ) -> (tracked res: (
+        Map<int, VirtAddrTok>,
+        Map<int, Seq<Mapping<A>>>,
+        Map<int, VirtAddrTok>,
+        Map<int, Seq<Mapping<A>>>,
+    ))
+        requires
+            sh.wf(),
+            0 < at < sh.size,
+            mapping.dom() =~= virt.dom(),
+            forall|a: int| #[trigger]
+                virt.dom().contains(a) ==> page_offset_of::<A>(a) == sh.offset && sh.alias_wf(
+                    virt[a],
+                    a,
+                ),
+            forall|a: int| #[trigger]
+                mapping.dom().contains(a) ==> sh.records_wf(mapping[a], a, sh.pinned()),
+        ensures
+            res.0.dom() =~= virt.dom(),
+            res.1.dom() =~= virt.dom(),
+            res.2.dom() =~= virt.dom().map(|a: int| a + at),
+            res.3.dom() =~= res.2.dom(),
+            forall|a: int| #[trigger]
+                res.0.dom().contains(a) ==> page_offset_of::<A>(a) == sh.take(at).offset
+                    && sh.take(at).alias_wf(res.0[a], a),
+            forall|a: int| #[trigger]
+                res.1.dom().contains(a) ==> sh.take(at).records_wf(res.1[a], a, sh.pinned()),
+            forall|b: int| #[trigger]
+                res.2.dom().contains(b) ==> page_offset_of::<A>(b) == sh.skip(at).offset
+                    && sh.skip(at).alias_wf(res.2[b], b),
+            forall|b: int| #[trigger]
+                res.3.dom().contains(b) ==> sh.skip(at).records_wf(res.3[b], b, sh.pinned()),
+        decreases virt.dom().len(),
+    {
+        sh.lemma_split(at);
+        let tracked mut virt = virt;
+        let tracked mut mapping = mapping;
+        if virt.dom().len() == 0 {
+            assert(virt.dom() =~= Set::<int>::empty());
+            assert(virt.dom().map(|a: int| a + at) =~= Set::<int>::empty());
+            (
+                Map::tracked_empty(),
+                Map::tracked_empty(),
+                Map::tracked_empty(),
+                Map::tracked_empty(),
+            )
+        } else {
+            let ghost a = virt.dom().choose();
+            let ghost old_dom = virt.dom();
+            assert(old_dom.contains(a));
+            let tracked tok = virt.tracked_remove(a);
+            let tracked recs = mapping.tracked_remove(a);
+            sh.lemma_alias_offset_shift(at, a);
+            let tracked (mut lv, mut lm, mut rv, mut rm) = Self::split_aliases(
+                virt,
+                mapping,
+                sh,
+                at,
+            );
+            let tracked (lt, rt) = tok.split_range(a, sh.size as int, a + at);
+            let tracked (lr, rr) = sh.split_records(recs, at, a);
+            lv.tracked_insert(a, lt);
+            lm.tracked_insert(a, lr);
+            rv.tracked_insert(a + at, rt);
+            rm.tracked_insert(a + at, rr);
+            assert(lv.dom() =~= old_dom);
+            assert(lm.dom() =~= old_dom);
+            assert(rv.dom() =~= old_dom.map(|a: int| a + at)) by {
+                assert(old_dom.remove(a).map(|a: int| a + at).insert(a + at) =~= old_dom.map(
+                    |a: int| a + at,
+                ));
+            }
+            assert(rm.dom() =~= rv.dom());
+            (lv, lm, rv, rm)
+        }
+    }
+
+    /// Split this memory at byte `at`: the first `at` bytes and the rest.
+    ///
+    /// Nothing is created and nothing is lost. Every address token, every frame
+    /// token and every record share ends up in exactly one half, except in the
+    /// page the split lands in, which both halves hold a part of. Which is what
+    /// makes this a proof rather than an assumption: the halves together own
+    /// what the whole owned, so neither can be used to reach memory the whole
+    /// could not.
+    ///
+    /// The right half is reached `at` bytes further along every alias, and
+    /// starts that much further into its page.
+    pub proof fn split_at(tracked self, at: nat) -> (tracked res: (Self, Self))
+        requires
+            0 < at < self.size(),
+        ensures
+            res.0.shape() == self.shape().take(at),
+            res.1.shape() == self.shape().skip(at),
+            res.0.addrs() =~= self.addrs(),
+            res.1.addrs() =~= self.addrs().map(|a: int| a + at),
+            res.0.is_pt() == self.is_pt(),
+            res.1.is_pt() == self.is_pt(),
+    {
+        use_type_invariant(&self);
+        let ghost sh = self.shape();
+        sh.lemma_split(at);
+        let tracked MemOwn {
+            virt,
+            phys,
+            mapping,
+            size,
+            offset,
+            npages,
+            frame_addrs,
+            is_pt,
+        } = self;
+        let tracked (lphys, rphys) = sh.split_phys(phys, at);
+        let tracked (lv, lm, rv, rm) = Self::split_aliases(virt, mapping, sh, at);
+        let ghost lsh = sh.take(at);
+        let ghost rsh = sh.skip(at);
+        let tracked left = MemOwn {
+            virt: lv,
+            phys: lphys,
+            mapping: lm,
+            size: lsh.size,
+            offset: lsh.offset,
+            npages: lsh.npages,
+            frame_addrs: lsh.frame_addrs,
+            is_pt,
+        };
+        let tracked right = MemOwn {
+            virt: rv,
+            phys: rphys,
+            mapping: rm,
+            size: rsh.size,
+            offset: rsh.offset,
+            npages: rsh.npages,
+            frame_addrs: rsh.frame_addrs,
+            is_pt,
+        };
+        assert(left.shape() =~= lsh);
+        assert(right.shape() =~= rsh);
+        (left, right)
+    }
+
     /// Every alias sits at the offset [`MemShape::offset`] records.
     pub proof fn lemma_aliases_share_page_offset(tracked &self)
         ensures
