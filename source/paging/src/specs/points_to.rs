@@ -30,6 +30,7 @@ use crate::level::PageLevel;
 use crate::structs::frame::PhysFrame;
 use crate::structs::page::Page;
 use crate::structs::sizes::PageSize;
+use vstd::math::min;
 use vstd::arithmetic::power2::pow2;
 use crate::structs::arch_contract::*;
 use crate::ArchPagingMeta;
@@ -457,14 +458,41 @@ pub ghost struct MemShape<A: ArchPagingMeta> {
     pub size: nat,
     /// Where it starts inside its first page.
     pub offset: usize,
+    /// How many pages it runs through.
+    ///
+    /// A field rather than a division of `size + offset`: it is pinned to that
+    /// value by [`Self::wf`] multiplicatively, which is the form the solver can
+    /// actually use, and it lets unpinned memory have pages without having
+    /// frames to name them by.
+    pub npages: nat,
     /// The frames it sits in, in order, when it is pinned; empty when it is not.
     pub frame_addrs: Seq<PhysFrame<A::MinPageSize>>,
 }
 
 impl<A: ArchPagingMeta> MemShape<A> {
-    /// The number of pages this memory occupies, one frame each.
+    /// The number of pages this memory occupies.
+    #[verifier::inline]
     pub open spec fn npages(&self) -> int {
-        self.frame_addrs.len() as int
+        self.npages as int
+    }
+
+    /// Whether the frames backing this memory are its to name.
+    #[verifier::inline]
+    pub open spec fn pinned(&self) -> bool {
+        self.frame_addrs.len() > 0
+    }
+
+    /// How many of this memory's bytes lie before the `i`-th page it occupies.
+    ///
+    /// Page `i` begins `i` pages after the start of page 0, which is `offset`
+    /// bytes before the memory does; clamped at the start, since page 0 holds
+    /// no bytes before the memory begins.
+    pub open spec fn byte_start_of_page(&self, i: int) -> int {
+        if i <= 0 {
+            0
+        } else {
+            i * page_size::<A>() - self.offset
+        }
     }
 
     /// Where this memory starts inside the `i`-th page it occupies: the offset
@@ -477,22 +505,11 @@ impl<A: ArchPagingMeta> MemShape<A> {
         }
     }
 
-    /// How many bytes of this memory lie in the `i`-th page it occupies.
-    ///
-    /// A single page holds all of it. Otherwise the first page holds whatever
-    /// follows the offset, the last holds the remainder, and the pages between
-    /// are full.
+    /// How many bytes of this memory lie in the `i`-th page it occupies: what
+    /// lies before the next page, less what lies before this one, and never
+    /// past the end.
     pub open spec fn bytes_in_page(&self, i: int) -> int {
-        let first = page_size::<A>() - self.offset;
-        if self.npages() == 1 {
-            self.size as int
-        } else if i == 0 {
-            first
-        } else if i < self.npages() - 1 {
-            page_size::<A>() as int
-        } else {
-            self.size - first - (i - 1) * page_size::<A>()
-        }
+        min(self.size as int, self.byte_start_of_page(i + 1)) - self.byte_start_of_page(i)
     }
 
     /// The page an alias at `addr` occupies at index `i`.
@@ -505,22 +522,63 @@ impl<A: ArchPagingMeta> MemShape<A> {
         Set::range(0, self.npages()).map(|i: int| self.vpage_at(addr, i))
     }
 
-    /// The bytes account for themselves: each page holds a whole number of them
-    /// and no more than a page's worth, and the first page has room for the
-    /// offset.
+    /// The pages account for the bytes exactly: the offset fits in the first
+    /// page, the pages are enough to hold everything, and dropping one would
+    /// not be. Memory of no size occupies no page at all.
+    ///
+    /// Frames are either named for every page or for none: memory is pinned or
+    /// it is not, and there is no state in between.
     pub open spec fn wf(&self) -> bool {
         &&& self.offset < page_size::<A>()
-        &&& forall|i: int| 0 <= i < self.npages() ==> 0 <= #[trigger] self.bytes_in_page(i)
-            <= page_size::<A>()
+        &&& self.size == 0 <==> self.npages == 0
+        &&& self.npages > 0 ==> {
+            &&& self.size + self.offset <= self.npages * page_size::<A>()
+            &&& (self.npages - 1) * page_size::<A>() < self.size + self.offset
+        }
+        &&& self.pinned() ==> self.frame_addrs.len() == self.npages
+    }
+
+    /// Each page holds a whole number of bytes and no more than a page's worth,
+    /// and together they hold all of them.
+    pub proof fn lemma_bytes_in_page(&self, i: int)
+        requires
+            self.wf(),
+            0 <= i < self.npages(),
+        ensures
+            0 < self.bytes_in_page(i) <= page_size::<A>(),
+            self.byte_start_of_page(i) + self.bytes_in_page(i) == min(
+                self.size as int,
+                self.byte_start_of_page(i + 1),
+            ),
+            i == self.npages() - 1 ==> self.byte_start_of_page(i) + self.bytes_in_page(i)
+                == self.size,
+            i < self.npages() - 1 ==> self.byte_start_of_page(i + 1) <= self.size,
+    {
+        let ps = page_size::<A>() as int;
+        assert((i + 1) * ps == i * ps + ps) by (nonlinear_arith);
+        if i > 0 {
+            assert(i * ps >= 1 * ps) by (nonlinear_arith)
+                requires
+                    i >= 1,
+                    ps > 0,
+            ;
+        }
+        if i < self.npages() - 1 {
+            assert((i + 1) * ps <= (self.npages() - 1) * ps) by (nonlinear_arith)
+                requires
+                    i + 1 <= self.npages() - 1,
+                    ps > 0,
+            ;
+        }
     }
 
     /// One physical token per page, covering the bytes this memory owns in that
-    /// page's frame.
+    /// page's frame. Unpinned memory names no frames and so holds no tokens.
     pub open spec fn phys_wf(&self, phys: Seq<PhysAddrTok>) -> bool {
         &&& phys.len() == self.frame_addrs.len()
         &&& forall|i: int|
             #![trigger phys[i], self.frame_addrs[i]]
-            0 <= i < self.npages() ==> phys[i].is_range(
+            0 <= i < phys.len() ==> phys[i].is_range(
                 self.frame_addrs[i]@ + self.offset_in_page(i),
                 self.bytes_in_page(i),
             )
@@ -584,6 +642,7 @@ pub tracked struct MemOwn<A: ArchPagingMeta> {
     tracked mapping: Map<int, Seq<Mapping<A>>>,
     ghost size: nat,
     ghost offset: usize,
+    ghost npages: nat,
     ghost frame_addrs: Seq<PhysFrame<A::MinPageSize>>,
     ghost is_pt: bool,
 }
@@ -605,7 +664,12 @@ impl<A: ArchPagingMeta> MemOwn<A> {
 
     /// What this memory is, without its type.
     pub closed spec fn shape(&self) -> MemShape<A> {
-        MemShape { size: self.size, offset: self.offset, frame_addrs: self.frame_addrs }
+        MemShape {
+            size: self.size,
+            offset: self.offset,
+            npages: self.npages,
+            frame_addrs: self.frame_addrs,
+        }
     }
 
     pub closed spec fn size(&self) -> nat {
@@ -720,7 +784,7 @@ impl<A: ArchPagingMeta> MemOwn<A> {
         use_type_invariant(&self);
         use_type_invariant(other);
         let ghost old_self = self;
-        let tracked MemOwn { mut virt, phys, mapping, size, offset, frame_addrs, is_pt } = self;
+        let tracked MemOwn { mut virt, phys, mapping, size, offset, npages, frame_addrs, is_pt } = self;
         if !old_self.addrs().disjoint(other.addrs()) {
             let ghost a = choose|a: int|
                 #![trigger other.addrs().contains(a)]
@@ -735,7 +799,7 @@ impl<A: ArchPagingMeta> MemOwn<A> {
             assert(Set::range(a, a + other.size() as int).contains(a));
             assert(false);
         }
-        MemOwn { virt, phys, mapping, size, offset, frame_addrs, is_pt }
+        MemOwn { virt, phys, mapping, size, offset, npages, frame_addrs, is_pt }
     }
 
     /// Two permissions never own the same physical byte: their frame tokens are
@@ -762,7 +826,7 @@ impl<A: ArchPagingMeta> MemOwn<A> {
         use_type_invariant(&self);
         use_type_invariant(other);
         let ghost old_self = self;
-        let tracked MemOwn { virt, mut phys, mapping, size, offset, frame_addrs, is_pt } = self;
+        let tracked MemOwn { virt, mut phys, mapping, size, offset, npages, frame_addrs, is_pt } = self;
         if !(forall|i: int, j: int|
             #![trigger old_self.phys_dom(i), other.phys_dom(j)]
             0 <= i < old_self.phys_len() && 0 <= j < other.phys_len()
@@ -775,7 +839,7 @@ impl<A: ArchPagingMeta> MemOwn<A> {
             let tracked other_tok = other.phys.tracked_borrow(j);
             tok.is_disjoint(other_tok);
         }
-        MemOwn { virt, phys, mapping, size, offset, frame_addrs, is_pt }
+        MemOwn { virt, phys, mapping, size, offset, npages, frame_addrs, is_pt }
     }
 }
 
