@@ -14,6 +14,16 @@
 //! handover reaches its root one way or the other -- neither, and no walk could
 //! read its own root.
 //!
+//! # The three parts of the address space
+//!
+//! Every virtual address a handover leaves behind is in exactly one of three
+//! parts: the self map's, whose addresses are derived from its slot; the direct
+//! map's, whose addresses are derived from its physical set; and everything
+//! else, which is what the OS is free to map. [`InitialPermissions::init_toks`]
+//! holds records for the third part only, because the first two already have
+//! permissions over them -- a record in two places would give two permissions
+//! over one pointer.
+//!
 //! A free frame is a [`PhysPointsTo`]: pinned, so its physical address names
 //! it, which is the only name it has. The difference from a mapped page is
 //! entirely in `ptrs` -- that is the point of a permission carrying a *set* of
@@ -101,6 +111,19 @@ impl<A: ArchPagingMeta> InitialVirtMappings<A> {
 /// Every index of the address is `k`, because each step of the walk re-reads
 /// the self entry and lands back on the root. It is the one address a walk can
 /// reach the root at when the root maps nothing else.
+/// Bytes of virtual address space one slot of `level` spans.
+pub open spec fn slot_region_size<A: ArchPagingMeta>(level: PageLevel) -> nat {
+    pow2(level_shift::<A>(level.depth() as nat))
+}
+
+/// The starts of the pages covering `[start, end)`, whose ends are both page
+/// aligned.
+pub open spec fn pages_in<A: ArchPagingMeta>(start: int, end: int) -> Set<int> {
+    Set::range(start / page_size::<A>() as int, end / page_size::<A>() as int).map(
+        |i: int| i * page_size::<A>() as int,
+    )
+}
+
 pub open spec fn self_map_base<A: ArchPagingMeta>(k: usize, level: PageLevel) -> nat
     decreases level.depth(),
 {
@@ -172,6 +195,26 @@ impl<A: ArchPagingMeta> SelfMap<A> {
     /// picks an offset within this page.
     pub open spec fn vpage(&self, max_level: PageLevel) -> int {
         page_start_of::<A>(self.base(max_level) as int)
+    }
+
+    /// First address of the slot the self map spends.
+    pub open spec fn region_start(&self, max_level: PageLevel) -> int {
+        self.slot as int * slot_region_size::<A>(max_level) as int
+    }
+
+    /// One past the last.
+    pub open spec fn region_end(&self, max_level: PageLevel) -> int {
+        self.region_start(max_level) + slot_region_size::<A>(max_level)
+    }
+
+    /// Every page of the slot, not just the root's.
+    ///
+    /// A root that maps nothing but itself sends every address in the slot back
+    /// through the self entry, so the whole region resolves into the root's own
+    /// frame. None of it is the OS's to hand out, even though only
+    /// [`Self::vpage`] is where a walk reads the table.
+    pub open spec fn vpages(&self, max_level: PageLevel) -> Set<int> {
+        pages_in::<A>(self.region_start(max_level), self.region_end(max_level))
     }
 
     /// Every entry of the root table is well formed at the address the self map
@@ -277,10 +320,12 @@ impl<A: ArchPagingMeta> DirectMap<A> {
             )
     }
 
-    /// The virtual pages the tables occupy, which the handover can no longer
-    /// hold records for.
+    /// Every page the direct map exposes.
+    ///
+    /// The whole region, not just the tables': firmware mapped all of it, so
+    /// all of it is readable and none of it is the OS's to hand out.
     pub open spec fn vpages(&self) -> Set<int> {
-        self.tables.map(|frame: usize| self.vpage(frame))
+        self.pa_set.map(|pa: int| page_start_of::<A>((self.pa_to_va)(pa as usize) as int))
     }
 }
 
@@ -333,23 +378,27 @@ impl<A: ArchPagingMeta, P> InitialPermissions<A, P> {
             self.free_frames.dom().contains(pa) ==> !self.direct_map->Some_0.tables.contains(pa)
     }
 
-    /// The virtual pages the handover has already spent on tables.
-    ///
-    /// Their records live in the table entries, so [`Self::init_toks`] cannot
-    /// still hold them: two claims on one page would give two permissions over
-    /// one pointer.
-    pub open spec fn table_vpages(&self) -> Set<int> {
-        let from_self = if self.self_map is Some {
-            set![self.self_map->Some_0.vpage(self.max_level)]
+    /// The first of the three parts: what the self map's slot spends.
+    pub open spec fn self_vpages(&self) -> Set<int> {
+        if self.self_map is Some {
+            self.self_map->Some_0.vpages(self.max_level)
         } else {
             Set::empty()
-        };
-        let from_direct = if self.direct_map is Some {
+        }
+    }
+
+    /// The second: what the direct map's physical set spends.
+    pub open spec fn direct_vpages(&self) -> Set<int> {
+        if self.direct_map is Some {
             self.direct_map->Some_0.vpages()
         } else {
             Set::empty()
-        };
-        from_self.union(from_direct)
+        }
+    }
+
+    /// Both, which is everything the handover has already spent.
+    pub open spec fn mapped_vpages(&self) -> Set<int> {
+        self.self_vpages().union(self.direct_vpages())
     }
 
     /// The root table can be read: either the self map exposes it, or it is one
@@ -368,8 +417,14 @@ impl<A: ArchPagingMeta, P> InitialPermissions<A, P> {
         &&& self.root_is_reachable()
         &&& self.free_frames_wf()
         &&& self.init_toks.init_wf()
-        &&& forall|vpage: int| #[trigger]
-            self.table_vpages().contains(vpage) ==> !self.init_toks.dom().contains(vpage)
+        // The three parts really are three: firmware that put its direct map
+        // inside the self map's slot would have the two describe one page
+        // twice.
+        &&& self.self_vpages().disjoint(
+            self.direct_vpages(),
+        )
+        // And what is left over is the third part, which is all the OS may map.
+        &&& self.init_toks.dom().disjoint(self.mapped_vpages())
     }
 }
 
