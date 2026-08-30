@@ -12,17 +12,21 @@
 //! evidence is per access rather than baked in, the *same* permission can be read through two
 //! different page tables, which is what `example_two_address_spaces` shows.
 //!
-//! [`PhysPointsTo::borrow_at`] is trusted, and is the only trusted thing here: no proof can
-//! establish that a virtual address reaches a frame, because that is a fact about the hardware's
-//! translation, not about the token. It is stated as an `external_body` proof fn whose `requires`
-//! names exactly the assumption -- a page table that translates the address to the frame.
+//! The two borrows are trusted, and are the only trusted thing here: no proof can establish that
+//! a virtual address reaches a frame, because that is a fact about the hardware's translation, not
+//! about the token. They are stated as `external_body` proof fns whose `requires` names exactly
+//! the assumption -- a page table that translates the address to the frame.
+//!
+//! `example_contract_over_a_frame` at the end is the payoff: the whole of `protocol::contract`,
+//! reads and writes included, running on this permission.
 use concurrent_rw::*;
 use vstd::prelude::*;
 
 #[cfg(verus_only)]
 use crate::pt::{Extra, PTEntry};
-#[cfg(verus_only)]
 use vstd::raw_ptr::PointsTo;
+#[cfg(verus_only)]
+use vstd::std_specs::convert::{FromSpec, FromSpecImpl, IntoSpec};
 
 verus! {
 
@@ -85,6 +89,17 @@ impl<T> AnyPointsTo<T> for PhysPointsTo<T> {
     #[verifier::external_body]
     proof fn borrow_at<'a>(tracked &'a self, ptr: *mut T, tracked ev: &PTPerm) -> (tracked ret:
         &'a PointsTo<T>) {
+        unimplemented!()
+    }
+
+    /// **Trusted**, for the same reason, and the write half of it: a store through a translated
+    /// address is a store to the frame.
+    #[verifier::external_body]
+    proof fn borrow_mut_at<'a>(
+        tracked &'a mut self,
+        ptr: *mut T,
+        tracked ev: &PTPerm,
+    ) -> (tracked ret: &'a mut PointsTo<T>) {
         unimplemented!()
     }
 }
@@ -151,6 +166,118 @@ pub proof fn example_phys_keyed_shared(
         ret.0.location() == perm.frame(),
 {
     RWShared::new(value, perm, payload)
+}
+
+} // verus!
+verus! {
+
+/// A counter that only ever goes up, kept in one machine word.
+///
+/// A whole model, in the smallest form that still exercises every obligation, so that the example
+/// below can run the *contract* -- not just the tokens -- on a permission that names a frame.
+pub struct Counter {
+    pub v: usize,
+}
+
+impl From<usize> for Counter {
+    fn from(v: usize) -> Self {
+        Counter { v }
+    }
+}
+
+impl From<Counter> for usize {
+    fn from(c: Counter) -> Self {
+        c.v
+    }
+}
+
+impl FromSpecImpl<usize> for Counter {
+    open spec fn obeys_from_spec() -> bool {
+        true
+    }
+
+    open spec fn from_spec(v: usize) -> Counter {
+        Counter { v }
+    }
+}
+
+impl FromSpecImpl<Counter> for usize {
+    open spec fn obeys_from_spec() -> bool {
+        true
+    }
+
+    open spec fn from_spec(c: Counter) -> usize {
+        c.v
+    }
+}
+
+impl WithPayload for Counter {
+    type Payload = ();
+
+    open spec fn wf_payload(self, payload: ()) -> bool {
+        true
+    }
+}
+
+impl IsValidAtomicType for Counter {
+    type AtomicType = usize;
+}
+
+impl RWModel for Counter {
+    /// The whole point: this model's locations are frames, so every access is paid for with a
+    /// page table rather than assumed to be at some address.
+    type Perm = PhysPointsTo<usize>;
+
+    proof fn into_from_obeys() where Self: From<Self::AtomicType> + Into<Self::AtomicType> {
+    }
+
+    proof fn into_from_atomic_agree(self) where
+        Self: From<Self::AtomicType> + Into<Self::AtomicType>,
+     {
+    }
+
+    open spec fn reachable(
+        pair: Snapshot<Self, Self::Payload>,
+        other: Snapshot<Self, Self::Payload>,
+    ) -> bool {
+        pair.value().v <= other.value().v
+    }
+
+    proof fn reachable_self(pair: Snapshot<Self, Self::Payload>) {
+    }
+
+    proof fn reachable_transitive(
+        a: Snapshot<Self, Self::Payload>,
+        b: Snapshot<Self, Self::Payload>,
+        c: Snapshot<Self, Self::Payload>,
+    ) {
+    }
+}
+
+/// The contract, run on a frame.
+///
+/// Nothing in the signature is an address except `ptr`, and `ptr` carries no authority: what makes
+/// the access legal is `pt`, and the reader is named by the frame throughout. Swap `pt` for
+/// another page table mapping the same frame at another address and the same reader still works,
+/// which is what a permission keyed on the address cannot do.
+fn example_contract_over_a_frame(
+    ptr: *mut usize,
+    Tracked(r): Tracked<&RWShared<Counter, (), PhysPointsTo<usize>>>,
+    Tracked(w): Tracked<&mut WritePerm<Counter>>,
+    Tracked(pt): Tracked<&PTPerm>,
+)
+    requires
+        pt.translate(ptr@.addr) == Some(r.location()),
+        r.id() == old(w).id(),
+        old(w)@.v < usize::MAX,
+{
+    let (seen, Tracked(past)) = Counter::read_exact(ptr, Tracked(r), Tracked(w), Tracked(pt));
+    let next = Counter { v: seen.v + 1 };
+    let Tracked(stored) = Counter::write(ptr, next, Tracked(r), Tracked(w), Tracked(pt));
+    proof {
+        // PROPERTY 1 still holds, and it is now a statement about a frame.
+        assert(Counter::reachable(past.snapshot(), stored.snapshot()));
+    }
 }
 
 } // verus!

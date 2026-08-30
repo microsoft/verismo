@@ -21,6 +21,7 @@ use super::*;
 use vstd::open_atomic_invariant;
 use vstd::prelude::*;
 
+use crate::protocol::perm::AnyPointsTo;
 use crate::tokens_impl::payload_slot::PayloadTicket;
 use vstd::atomic::PAtomicUsize;
 #[cfg(verus_only)]
@@ -41,13 +42,14 @@ verus! {
 /// No payload comes back. To reach the payload, either open the reader's invariant and use
 /// `RWState::borrow_payload`, or -- if the model implements `PublishPayload` -- call
 /// [`read_published`], which also hands back a ticket.
-pub fn read<T: RWModel<AtomicType = usize> + From<usize> + Into<usize>>(
+pub fn read<T: RWModel<AtomicType = usize> + From<usize> + Into<usize>, P: AnyPointsTo<usize>>(
     ptr: *mut usize,
-    Tracked(r): Tracked<&RWShared<T, T::Payload>>,
+    Tracked(r): Tracked<&RWShared<T, T::Payload, P>>,
     Tracked(past): Tracked<Option<&Observed<T>>>,
+    Tracked(ev): Tracked<&P::Evidence>,
 ) -> (ret: (T, Tracked<Observed<T>>))
     requires
-        r.location() == ptr,
+        P::resolves_to(ev, ptr, r.location()),
         past is Some ==> r.has_observed(*past->Some_0),
     ensures
         ret.0 == ret.1@@,
@@ -55,7 +57,7 @@ pub fn read<T: RWModel<AtomicType = usize> + From<usize> + Into<usize>>(
         // PROPERTY 1: the pair now is reachable from the pair observed.
         past is Some ==> T::reachable(past->Some_0.snapshot(), ret.1@.snapshot()),
 {
-    let (value, o): (usize, Tracked<Observed<T>>) = read_value(ptr, Tracked(r), Tracked(past));
+    let (value, o): (usize, Tracked<Observed<T>>) = read_value::<T, P>(ptr, Tracked(r), Tracked(past), Tracked(ev));
     proof {
         T::into_from_obeys();
     }
@@ -63,13 +65,14 @@ pub fn read<T: RWModel<AtomicType = usize> + From<usize> + Into<usize>>(
 }
 
 #[verifier::atomic]
-pub fn read_value<T: RWModel<AtomicType = usize> + From<usize> + Into<usize>>(
+pub fn read_value<T: RWModel<AtomicType = usize> + From<usize> + Into<usize>, P: AnyPointsTo<usize>>(
     ptr: *mut usize,
-    Tracked(r): Tracked<&RWShared<T, T::Payload>>,
+    Tracked(r): Tracked<&RWShared<T, T::Payload, P>>,
     Tracked(past): Tracked<Option<&Observed<T>>>,
+    Tracked(ev): Tracked<&P::Evidence>,
 ) -> (ret: (T::AtomicType, Tracked<Observed<T>>))
     requires
-        r.location() == ptr,
+        P::resolves_to(ev, ptr, r.location()),
         past is Some ==> r.has_observed(*past->Some_0),
     ensures
         ret.0.into_spec() === ret.1@@,
@@ -87,6 +90,7 @@ pub fn read_value<T: RWModel<AtomicType = usize> + From<usize> + Into<usize>>(
     let tracked atom = r.borrow_atom();
     open_atomic_invariant!(atom => state => {
         proof {
+            state.lemma_inv_perm(r);
             if past is Some {
                 state.read_with_observed(past.tracked_unwrap());
             }
@@ -94,7 +98,8 @@ pub fn read_value<T: RWModel<AtomicType = usize> + From<usize> + Into<usize>>(
             assert(observed@ == state.value());
             assert(observed.payload() == state.payload_value());
         }
-        value = PAtomicUsize::from_ptr_load(ptr, Tracked(&state.perm));
+        let tracked perm = state.perm.borrow_at(ptr, ev);
+        value = PAtomicUsize::from_ptr_load(ptr, Tracked(perm));
     });
 
     (value, Tracked(observed))
@@ -110,13 +115,14 @@ pub fn read_value<T: RWModel<AtomicType = usize> + From<usize> + Into<usize>>(
 /// happen inside the very block that reads, because the ticket's `wf_payload` guarantee is about
 /// the value read *there*. A ticket minted afterwards would be well formed for whatever value is
 /// stored by then, which is not what a caller needs.
-pub fn read_published<T: PublishPayload<AtomicType = usize> + From<usize> + Into<usize>>(
+pub fn read_published<T: PublishPayload<AtomicType = usize> + From<usize> + Into<usize>, P: AnyPointsTo<usize>>(
     ptr: *mut usize,
-    Tracked(r): Tracked<&RWShared<T, T::Payload>>,
+    Tracked(r): Tracked<&RWShared<T, T::Payload, P>>,
     Tracked(past): Tracked<Option<&Observed<T>>>,
+    Tracked(ev): Tracked<&P::Evidence>,
 ) -> (ret: (T, Tracked<Observed<T>>, Tracked<Option<PayloadTicket<T::Payload>>>))
     requires
-        r.location() == ptr,
+        P::resolves_to(ev, ptr, r.location()),
         past is Some ==> r.has_observed(*past->Some_0),
     ensures
         ret.0 == ret.1@@,
@@ -139,6 +145,7 @@ pub fn read_published<T: PublishPayload<AtomicType = usize> + From<usize> + Into
     let tracked atom = r.borrow_atom();
     open_atomic_invariant!(atom => state => {
         proof {
+            state.lemma_inv_perm(r);
             if past is Some {
                 state.read_with_observed(past.tracked_unwrap());
             }
@@ -151,7 +158,8 @@ pub fn read_published<T: PublishPayload<AtomicType = usize> + From<usize> + Into
                 None
             };
         }
-        value = PAtomicUsize::from_ptr_load(ptr, Tracked(&state.perm));
+        let tracked perm = state.perm.borrow_at(ptr, ev);
+        value = PAtomicUsize::from_ptr_load(ptr, Tracked(perm));
     });
 
     (value.into(), Tracked(observed), Tracked(ticket))
@@ -163,13 +171,14 @@ pub fn read_published<T: PublishPayload<AtomicType = usize> + From<usize> + Into
 /// value reachable from one you observed earlier, because a writer could store at any moment.
 /// Holding the `WritePerm` rules that out -- there is no second one -- so `ret.0 == w@` is available
 /// here and nowhere else.
-pub fn read_exact<T: RWModel<AtomicType = usize> + From<usize> + Into<usize>>(
+pub fn read_exact<T: RWModel<AtomicType = usize> + From<usize> + Into<usize>, P: AnyPointsTo<usize>>(
     ptr: *mut usize,
-    Tracked(r): Tracked<&RWShared<T, T::Payload>>,
+    Tracked(r): Tracked<&RWShared<T, T::Payload, P>>,
     Tracked(w): Tracked<&WritePerm<T>>,
+    Tracked(ev): Tracked<&P::Evidence>,
 ) -> (ret: (T, Tracked<Observed<T>>))
     requires
-        r.location() == ptr,
+        P::resolves_to(ev, ptr, r.location()),
         r.id() == w.id(),
     ensures
         r.has_observed(ret.1@),
@@ -184,10 +193,12 @@ pub fn read_exact<T: RWModel<AtomicType = usize> + From<usize> + Into<usize>>(
     let tracked atom = r.borrow_atom();
     open_atomic_invariant!(atom => state => {
         proof {
+            state.lemma_inv_perm(r);
             state.read_with_writer(w);
             observed = state.observe();
         }
-        value = PAtomicUsize::from_ptr_load(ptr, Tracked(&state.perm));
+        let tracked perm = state.perm.borrow_at(ptr, ev);
+        value = PAtomicUsize::from_ptr_load(ptr, Tracked(perm));
     });
 
     (value.into(), Tracked(observed))
@@ -198,15 +209,16 @@ pub fn read_exact<T: RWModel<AtomicType = usize> + From<usize> + Into<usize>>(
 /// The `!value.has_published_payload()` precondition is what keeps it unpublished, so no reader
 /// can reach it and nothing is promised about agreement. To publish the payload instead, use
 /// [`write_with_published_payload`], which returns a `PayloadTicket`.
-pub fn write_with_payload<T: RWModel<AtomicType = usize> + From<usize> + Into<usize>>(
+pub fn write_with_payload<T: RWModel<AtomicType = usize> + From<usize> + Into<usize>, P: AnyPointsTo<usize>>(
     ptr: *mut usize,
     value: T,
-    Tracked(r): Tracked<&RWShared<T, T::Payload>>,
+    Tracked(r): Tracked<&RWShared<T, T::Payload, P>>,
     Tracked(w): Tracked<&mut WritePerm<T>>,
     Tracked(payload): Tracked<T::Payload>,
+    Tracked(ev): Tracked<&P::Evidence>,
 ) -> (ret: Tracked<Observed<T>>)
     requires
-        r.location() == ptr,
+        P::resolves_to(ev, ptr, r.location()),
         r.id() == w.id(),
         old(w).write_value_payload_requires(value, payload),
         !old(w)@.has_published_payload(),
@@ -225,7 +237,9 @@ pub fn write_with_payload<T: RWModel<AtomicType = usize> + From<usize> + Into<us
     }
     let tracked atom = r.borrow_atom();
     open_atomic_invariant!(atom => state => {
-            PAtomicUsize::from_ptr_store(ptr, value_atomic, Tracked(&mut state.perm));
+            proof { state.lemma_inv_perm(r); }
+            let tracked perm = state.perm.borrow_mut_at(ptr, ev);
+            PAtomicUsize::from_ptr_store(ptr, value_atomic, Tracked(perm));
             proof {
                 observed = state.update_value_with_payload(w, value, payload);
             }
@@ -238,15 +252,17 @@ pub fn write_with_payload<T: RWModel<AtomicType = usize> + From<usize> + Into<us
 // it. From here on the payload cannot be replaced -- only reclaimed, by surrendering the reader.
 pub fn write_with_published_payload<
     T: PublishPayload<AtomicType = usize> + From<usize> + Into<usize>,
+    P: AnyPointsTo<usize>,
 >(
     ptr: *mut usize,
     value: T,
-    Tracked(r): Tracked<&RWShared<T, T::Payload>>,
+    Tracked(r): Tracked<&RWShared<T, T::Payload, P>>,
     Tracked(w): Tracked<&mut WritePerm<T>>,
     Tracked(payload): Tracked<T::Payload>,
+    Tracked(ev): Tracked<&P::Evidence>,
 ) -> (ret: (Tracked<Observed<T>>, Tracked<PayloadTicket<T::Payload>>))
     requires
-        r.location() == ptr,
+        P::resolves_to(ev, ptr, r.location()),
         r.id() == w.id(),
         old(w).write_value_payload_requires(value, payload),
         value.has_published_payload(),
@@ -269,7 +285,9 @@ pub fn write_with_published_payload<
     }
     let tracked atom = r.borrow_atom();
     open_atomic_invariant!(atom => state => {
-        PAtomicUsize::from_ptr_store(ptr, value_atomic, Tracked(&mut state.perm));
+        proof { state.lemma_inv_perm(r); }
+        let tracked perm = state.perm.borrow_mut_at(ptr, ev);
+        PAtomicUsize::from_ptr_store(ptr, value_atomic, Tracked(perm));
         proof {
             let tracked pair = state.update_value_publishing_payload(w, value, payload);
             observed = pair.0;
@@ -285,14 +303,15 @@ pub fn write_with_published_payload<
 /// `write_value_requires` therefore holds the caller to a value that has published a payload if
 /// and only if the current one has: a plain store cannot publish. Use [`write_with_payload`] to
 /// install a fresh unpublished payload, or [`write_with_published_payload`] to publish one.
-pub fn write<T: RWModel<AtomicType = usize> + From<usize> + Into<usize>>(
+pub fn write<T: RWModel<AtomicType = usize> + From<usize> + Into<usize>, P: AnyPointsTo<usize>>(
     ptr: *mut usize,
     value: T,
-    Tracked(r): Tracked<&RWShared<T, T::Payload>>,
+    Tracked(r): Tracked<&RWShared<T, T::Payload, P>>,
     Tracked(w): Tracked<&mut WritePerm<T>>,
+    Tracked(ev): Tracked<&P::Evidence>,
 ) -> (ret: Tracked<Observed<T>>)
     requires
-        r.location() == ptr,
+        P::resolves_to(ev, ptr, r.location()),
         r.id() == w.id(),
         old(w).write_value_requires(value),
     ensures
@@ -309,7 +328,9 @@ pub fn write<T: RWModel<AtomicType = usize> + From<usize> + Into<usize>>(
     }
     let tracked atom = r.borrow_atom();
     open_atomic_invariant!(atom => state => {
-            PAtomicUsize::from_ptr_store(ptr, value_atomic, Tracked(&mut state.perm));
+            proof { state.lemma_inv_perm(r); }
+            let tracked perm = state.perm.borrow_mut_at(ptr, ev);
+            PAtomicUsize::from_ptr_store(ptr, value_atomic, Tracked(perm));
             proof {
                 observed = state.update_value(w, value);
             }
@@ -320,20 +341,22 @@ pub fn write<T: RWModel<AtomicType = usize> + From<usize> + Into<usize>>(
 
 fn write_unrestricted_inner<
     T: RWModel<AtomicType = usize> + From<usize> + Into<usize>,
+    P: AnyPointsTo<usize>,
 >(
     ptr: *mut usize,
     value: T,
-    Tracked(r): Tracked<RWShared<T, T::Payload>>,
+    Tracked(r): Tracked<RWShared<T, T::Payload, P>>,
     Tracked(w): Tracked<&mut WritePerm<T>>,
     Tracked(payload): Tracked<T::Payload>,
+    Tracked(ev): Tracked<&P::Evidence>,
     _publish: bool,
 ) -> (ret: (
-    Tracked<RWShared<T, T::Payload>>,
+    Tracked<RWShared<T, T::Payload, P>>,
     Tracked<Observed<T>>,
     Tracked<Option<PayloadTicket<T::Payload>>>,
 )) where usize: From<T>
     requires
-        r.location() == ptr,
+        P::resolves_to(ev, ptr, r.location()),
         r.id() == old(w).id(),
         value.wf_payload(payload),
         value.has_published_payload() == _publish,
@@ -354,6 +377,8 @@ fn write_unrestricted_inner<
     opens_invariants any
 {
     let ghost namespace = r.namespace();
+    let ghost location = r.location();
+    let ghost constant = r.constant();
     let tracked mut dummy_frac = FracGhost::new(arbitrary());
     let tracked mut old_writer_perm = dummy_frac.split();
     proof {
@@ -381,7 +406,8 @@ fn write_unrestricted_inner<
         value.into_from_atomic_agree();
         assert(value === value_atomic.into_spec());
     }
-    PAtomicUsize::from_ptr_store(ptr, value_atomic, Tracked(&mut points_to));
+    let tracked perm = points_to.borrow_mut_at(ptr, ev);
+    PAtomicUsize::from_ptr_store(ptr, value_atomic, Tracked(perm));
     let tracked reader;
     let tracked observed;
     let tracked ticket;
@@ -423,15 +449,16 @@ fn write_unrestricted_inner<
     (Tracked(reader), Tracked(observed), Tracked(ticket))
 }
 
-pub fn write_unrestricted<T: RWModel<AtomicType = usize> + From<usize> + Into<usize>>(
+pub fn write_unrestricted<T: RWModel<AtomicType = usize> + From<usize> + Into<usize>, P: AnyPointsTo<usize>>(
     ptr: *mut usize,
     value: T,
-    Tracked(r): Tracked<RWShared<T, T::Payload>>,
+    Tracked(r): Tracked<RWShared<T, T::Payload, P>>,
     Tracked(w): Tracked<&mut WritePerm<T>>,
     Tracked(payload): Tracked<T::Payload>,
-) -> (ret: (Tracked<RWShared<T, T::Payload>>, Tracked<Observed<T>>)) where usize: From<T>
+    Tracked(ev): Tracked<&P::Evidence>,
+) -> (ret: (Tracked<RWShared<T, T::Payload, P>>, Tracked<Observed<T>>)) where usize: From<T>
     requires
-        r.location() == ptr,
+        P::resolves_to(ev, ptr, r.location()),
         r.id() == old(w).id(),
         value.wf_payload(payload),
         !value.has_published_payload(),
@@ -443,12 +470,13 @@ pub fn write_unrestricted<T: RWModel<AtomicType = usize> + From<usize> + Into<us
         ret.0@.has_observed(ret.1@),
         ret.1@@ == value,
 {
-    let (Tracked(reader), Tracked(observed), Tracked(ticket)) = write_unrestricted_inner(
+    let (Tracked(reader), Tracked(observed), Tracked(ticket)) = write_unrestricted_inner::<T, P>(
         ptr,
         value,
         Tracked(r),
         Tracked(w),
         Tracked(payload),
+        Tracked(ev),
         false,
     );
     (Tracked(reader), Tracked(observed))
@@ -456,19 +484,21 @@ pub fn write_unrestricted<T: RWModel<AtomicType = usize> + From<usize> + Into<us
 
 pub fn write_published_unrestricted<
     T: PublishPayload<AtomicType = usize> + From<usize> + Into<usize>,
+    P: AnyPointsTo<usize>,
 >(
     ptr: *mut usize,
     value: T,
-    Tracked(r): Tracked<RWShared<T, T::Payload>>,
+    Tracked(r): Tracked<RWShared<T, T::Payload, P>>,
     Tracked(w): Tracked<&mut WritePerm<T>>,
     Tracked(payload): Tracked<T::Payload>,
+    Tracked(ev): Tracked<&P::Evidence>,
 ) -> (ret: (
-    Tracked<RWShared<T, T::Payload>>,
+    Tracked<RWShared<T, T::Payload, P>>,
     Tracked<Observed<T>>,
     Tracked<PayloadTicket<T::Payload>>,
 )) where usize: From<T>
     requires
-        r.location() == ptr,
+        P::resolves_to(ev, ptr, r.location()),
         r.id() == old(w).id(),
         value.wf_payload(payload),
         value.has_published_payload(),
@@ -483,12 +513,13 @@ pub fn write_published_unrestricted<
         ret.2@.version() == ret.0@.slot_version(),
         value.wf_payload(ret.2@.payload()),
 {
-    let (Tracked(reader), Tracked(observed), Tracked(ticket)) = write_unrestricted_inner(
+    let (Tracked(reader), Tracked(observed), Tracked(ticket)) = write_unrestricted_inner::<T, P>(
         ptr,
         value,
         Tracked(r),
         Tracked(w),
         Tracked(payload),
+        Tracked(ev),
         true,
     );
     (Tracked(reader), Tracked(observed), Tracked(ticket.tracked_unwrap()))

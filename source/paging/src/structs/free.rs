@@ -132,6 +132,7 @@ fn free_slots<A: ArchPagingMeta, P: OSPagingContract<A>>(
         ptr,
         Tracked(&reader),
         Tracked(&writer),
+        Tracked(&()),
     );
     let tracked (word, payload) = PTEntry::<A>::teardown_rw(reader, writer);
     free_child::<A, P>(level, entry, Tracked(payload));

@@ -8,6 +8,7 @@
 //! holds a table pointer keeps it -- and it is this file's `RWModel::reachable`.
 use concurrent_rw::{IsValidAtomicType, PublishPayload, RWModel, Snapshot, WithPayload};
 use vstd::prelude::*;
+use vstd::raw_ptr::PointsTo;
 
 use crate::specs::entry::{lemma_entry_from_usize, lemma_usize_from_entry};
 use crate::structs::arch_contract::ArchPagingMeta;
@@ -39,6 +40,10 @@ impl<A: ArchPagingMeta> IsValidAtomicType for PTEntry<A> {
 }
 
 impl<A: ArchPagingMeta> RWModel for PTEntry<A> {
+    /// A slot is ordinary memory reached through the walk that found it, so the
+    /// permission already names the address and an access shows nothing.
+    type Perm = PointsTo<usize>;
+
     /// PIN, as the protocol states it: a reader that saw an escrowed child may
     /// act on it later, because no writer may take it back.
     ///

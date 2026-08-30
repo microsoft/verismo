@@ -66,6 +66,7 @@ pub fn update_leaf_at<A: ArchPagingMeta, P: OSPagingContract<A>>(
         ptr,
         Tracked(slot),
         Tracked(None),
+        Tracked(&()),
     );
     if current.escrows() {
         let child_level = match level.child() {

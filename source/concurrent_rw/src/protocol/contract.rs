@@ -4,16 +4,25 @@
 //! library gives back. Nothing here has a body: [`crate::tokens_impl::contract_proof`] carries
 //! the impls, so a guarantee stated here and not proved there is a compile error.
 //!
+//! # What a location is
+//!
+//! Nothing here says a location is an address. A client picks `RWModel::Perm` -- any
+//! [`AnyPointsTo`], so a `PointsTo` for ordinary memory, or a permission naming a physical frame
+//! -- and every operation is stated over that. `RWShared::location()` is then whatever that
+//! permission names, and each access is paid for with an extra [`Evidence<Self>`] argument: `()`
+//! when the permission already knows its address, a page table when it does not. This is why
+//! there is no separate physically-addressed variant of anything below.
+//!
 //! # The trade
 //!
-//! A `PointsTo` is already a concurrency model -- shared xor mutable. `RWContract::build_rw`
+//! A permission is already a concurrency model -- shared xor mutable. `RWContract::build_rw`
 //! consumes it and hands back two tokens that may be used at the same time. There is no cell
 //! type here; these tokens are what replaces the `PointsTo`. Exactly one of each exists per
 //! pointer -- the "multiple readers" is that a read needs only `&RWShared`, so the one token can
 //! be shared across threads.
 //!
 //! ```text
-//!              PointsTo<T>
+//!              Perm
 //!                  | build_rw
 //!      +--------------------------------------+
 //!      v                                      v
@@ -51,7 +60,7 @@
 //! | 1 | **Reads move forward.** Once you have observed a value and the payload beside it, every later read returns a pair `reachable` from that one. | [`RWContract::read`] |
 //! | 2 | **With the writer in hand, reads are exact again.** Nobody else can be storing, so you read *the* stored value. | [`RWContract::read_exact`] |
 //! | 3a | **A published payload is available.** If the value you read says it published, you get a ticket. | [`RWWithPublishPayloadContract::read_published`] |
-//! | 3b | **A published payload is one payload.** Two tickets at one slot and version name the *same* payload. Without this, publishing would be empty. | `RWWithPublishPayloadContract::payloads_agree` |
+//! | 3b | **A published payload is one payload.** Two tickets at one slot and version name the *same* payload. Without this, publishing would be empty. | [`PayloadAgreement::payloads_agree`] |
 //!
 //! Property 1's relation is on *pairs*, because a claim about a value alone would say nothing
 //! about the payload beside it: a writer may swap the payload for any other well formed one.
@@ -85,19 +94,24 @@
 //! reader's `SlotHandle`, and nothing in [`crate::tokens_impl`] surrenders that handle yet. What
 //! holds unconditionally is `PublishPayload::payload_stays_published`: no value reachable by
 //! *reading* ever un-publishes, so a concurrent write cannot undercut a ticket you hold.
-#[cfg(verus_only)]
 use crate::protocol::perm::AnyPointsTo;
 use crate::tokens_impl::payload_slot::PayloadTicket;
-use crate::tokens_impl::{Observed, PublishPayload, RWModel, RWShared, WritePerm};
+use crate::tokens_impl::{
+    IsValidAtomicType, Observed, PublishPayload, RWModel, RWShared, WritePerm,
+};
 #[cfg(verus_only)]
 use vstd::invariant::OpenInvariantCredit;
 use vstd::prelude::*;
 #[cfg(verus_only)]
-use vstd::raw_ptr::PointsTo;
-#[cfg(verus_only)]
 use vstd::std_specs::convert::{FromSpec, FromSpecImpl, IntoSpec};
 
 verus! {
+
+/// What an access to a `T`-governed location must show, spelled out once: the evidence
+/// `T::Perm` asks for. `()` for a permission that already names its address.
+pub type Evidence<T> = <<T as RWModel>::Perm as AnyPointsTo<
+    <T as IsValidAtomicType>::AtomicType,
+>>::Evidence;
 
 /// The guarantees `mrsw_tokens_v2` offers a client that has implemented [`RWModel`].
 pub trait RWContract: RWModel + From<Self::AtomicType> + Into<Self::AtomicType> {
@@ -113,9 +127,9 @@ pub trait RWContract: RWModel + From<Self::AtomicType> + Into<Self::AtomicType> 
     /// every later read is a [`Self::read`] from one you already hold.
     proof fn build_rw(
         value: Self,
-        tracked points_to: PointsTo<Self::AtomicType>,
+        tracked points_to: Self::Perm,
         tracked payload: Self::Payload,
-    ) -> (tracked ret: (RWShared<Self, Self::Payload>, WritePerm<Self>, Observed<Self>))
+    ) -> (tracked ret: (RWShared<Self, Self::Payload, Self::Perm>, WritePerm<Self>, Observed<Self>))
         requires
             points_to.is_init(),
             points_to.value().into_spec() === value,
@@ -135,9 +149,9 @@ pub trait RWContract: RWModel + From<Self::AtomicType> + Into<Self::AtomicType> 
     /// ghost state no longer grant a borrow. The returned permission contains the value named by
     /// the consumed writer token.
     proof fn teardown_rw(
-        tracked r: RWShared<Self, Self::Payload>,
+        tracked r: RWShared<Self, Self::Payload, Self::Perm>,
         tracked w: WritePerm<Self>,
-    ) -> (tracked ret: (PointsTo<Self::AtomicType>, Self::Payload))
+    ) -> (tracked ret: (Self::Perm, Self::Payload))
         requires
             r.id() == w.id(),
         ensures
@@ -159,11 +173,12 @@ pub trait RWContract: RWModel + From<Self::AtomicType> + Into<Self::AtomicType> 
     /// No payload comes back; see [`RWWithPublishPayloadContract::read_published`].
     fn read(
         ptr: *mut Self::AtomicType,
-        Tracked(r): Tracked<&RWShared<Self, Self::Payload>>,
+        Tracked(r): Tracked<&RWShared<Self, Self::Payload, Self::Perm>>,
         Tracked(past): Tracked<Option<&Observed<Self>>>,
+        Tracked(ev): Tracked<&Evidence<Self>>,
     ) -> (ret: (Self, Tracked<Observed<Self>>))
         requires
-            r.location() == ptr,
+            Self::Perm::resolves_to(ev, ptr, r.location()),
             past is Some ==> r.has_observed(*past->Some_0),
         ensures
             ret.0 == ret.1@@,
@@ -186,11 +201,12 @@ pub trait RWContract: RWModel + From<Self::AtomicType> + Into<Self::AtomicType> 
     /// refunded here, where there is none. No `past` is needed: the exact value is strictly more.
     fn read_exact(
         ptr: *mut Self::AtomicType,
-        Tracked(r): Tracked<&RWShared<Self, Self::Payload>>,
+        Tracked(r): Tracked<&RWShared<Self, Self::Payload, Self::Perm>>,
         Tracked(w): Tracked<&WritePerm<Self>>,
+        Tracked(ev): Tracked<&Evidence<Self>>,
     ) -> (ret: (Self, Tracked<Observed<Self>>))
         requires
-            r.location() == ptr,
+            Self::Perm::resolves_to(ev, ptr, r.location()),
             r.id() == w.id(),
         ensures
             ret.0 == ret.1@@,
@@ -209,11 +225,12 @@ pub trait RWContract: RWModel + From<Self::AtomicType> + Into<Self::AtomicType> 
     fn write(
         ptr: *mut Self::AtomicType,
         value: Self,
-        Tracked(r): Tracked<&RWShared<Self, Self::Payload>>,
+        Tracked(r): Tracked<&RWShared<Self, Self::Payload, Self::Perm>>,
         Tracked(w): Tracked<&mut WritePerm<Self>>,
+        Tracked(ev): Tracked<&Evidence<Self>>,
     ) -> (ret: Tracked<Observed<Self>>)
         requires
-            r.location() == ptr,
+            Self::Perm::resolves_to(ev, ptr, r.location()),
             r.id() == w.id(),
             old(w).write_value_requires(value),
         ensures
@@ -234,12 +251,13 @@ pub trait RWContract: RWModel + From<Self::AtomicType> + Into<Self::AtomicType> 
     fn write_with_payload(
         ptr: *mut Self::AtomicType,
         value: Self,
-        Tracked(r): Tracked<&RWShared<Self, Self::Payload>>,
+        Tracked(r): Tracked<&RWShared<Self, Self::Payload, Self::Perm>>,
         Tracked(w): Tracked<&mut WritePerm<Self>>,
         Tracked(payload): Tracked<Self::Payload>,
+        Tracked(ev): Tracked<&Evidence<Self>>,
     ) -> (ret: Tracked<Observed<Self>>)
         requires
-            r.location() == ptr,
+            Self::Perm::resolves_to(ev, ptr, r.location()),
             r.id() == w.id(),
             old(w).write_value_payload_requires(value, payload),
             !old(w)@.has_published_payload(),
@@ -261,17 +279,18 @@ pub trait RWContract: RWModel + From<Self::AtomicType> + Into<Self::AtomicType> 
     fn write_unrestricted(
         ptr: *mut Self::AtomicType,
         value: Self,
-        Tracked(r): Tracked<RWShared<Self, Self::Payload>>,
+        Tracked(r): Tracked<RWShared<Self, Self::Payload, Self::Perm>>,
         Tracked(w): Tracked<&mut WritePerm<Self>>,
         Tracked(payload): Tracked<Self::Payload>,
-    ) -> (ret: (Tracked<RWShared<Self, Self::Payload>>, Tracked<Observed<Self>>))
+        Tracked(ev): Tracked<&Evidence<Self>>,
+    ) -> (ret: (Tracked<RWShared<Self, Self::Payload, Self::Perm>>, Tracked<Observed<Self>>))
         requires
-            r.location() == ptr,
+            Self::Perm::resolves_to(ev, ptr, r.location()),
             r.id() == old(w).id(),
             value.wf_payload(payload),
             !value.has_published_payload(),
         ensures
-            ret.0@.location() == ptr,
+            ret.0@.location() == r.location(),
             ret.0@.namespace() == r.namespace(),
             ret.0@.id() == final(w).id(),
             ret.0@.has_observed(ret.1@),
@@ -281,12 +300,38 @@ pub trait RWContract: RWModel + From<Self::AtomicType> + Into<Self::AtomicType> 
     ;
 }
 
+/// PROPERTY 3b, on its own because it is the one guarantee that names no location.
+///
+/// A ticket is evidence about a payload slot; which permission the location was named by never
+/// enters into it. Keeping it out of [`RWWithPublishPayloadContract`] is also what lets a client
+/// write `T::payloads_agree(..)` without saying which permission type it meant.
+pub trait PayloadAgreement: PublishPayload {
+    /// Two tickets at one slot and version name the same payload.
+    ///
+    /// This thread: two of its own tickets agree.
+    /// Other threads: agree with it too -- the statement is over tickets, not readers, so it says
+    /// nothing about who holds them. That is the whole content of publishing.
+    ///
+    /// Stated over tickets because that is the honest form: two premises instead of six, and the
+    /// reader-level version follows from what [`Self::read_published`] hands back.
+    proof fn payloads_agree(
+        tracked t1: &PayloadTicket<Self::Payload>,
+        tracked t2: &PayloadTicket<Self::Payload>,
+    )
+        requires
+            t1.id() == t2.id(),
+            t1.version() == t2.version(),
+        ensures
+            t1.payload() == t2.payload(),
+    ;
+}
+
 /// The extra guarantees `mrsw_tokens_v2` offers a client that has also implemented
 /// [`PublishPayload`] -- property 3, in its two halves.
 ///
 /// This is the whole of the published-payload API's contract. A model that never publishes never
 /// implements [`PublishPayload`], never sees these methods, and never names [`PayloadTicket`].
-pub trait RWWithPublishPayloadContract: RWContract + PublishPayload {
+pub trait RWWithPublishPayloadContract: RWContract + PayloadAgreement {
     /// [`RWContract::read`], plus a ticket when the value has published its payload.
     ///
     /// This thread: PROPERTY 3a -- if the value read has published, a ticket always comes back,
@@ -298,11 +343,12 @@ pub trait RWWithPublishPayloadContract: RWContract + PublishPayload {
     /// -- an empty entry -- and those yield no ticket.
     fn read_published(
         ptr: *mut Self::AtomicType,
-        Tracked(r): Tracked<&RWShared<Self, Self::Payload>>,
+        Tracked(r): Tracked<&RWShared<Self, Self::Payload, Self::Perm>>,
         Tracked(past): Tracked<Option<&Observed<Self>>>,
+        Tracked(ev): Tracked<&Evidence<Self>>,
     ) -> (ret: (Self, Tracked<Observed<Self>>, Tracked<Option<PayloadTicket<Self::Payload>>>))
         requires
-            r.location() == ptr,
+            Self::Perm::resolves_to(ev, ptr, r.location()),
             past is Some ==> r.has_observed(*past->Some_0),
         ensures
             ret.0 == ret.1@@,
@@ -321,25 +367,6 @@ pub trait RWWithPublishPayloadContract: RWContract + PublishPayload {
         opens_invariants any
     ;
 
-    /// PROPERTY 3b -- two tickets at one slot and version name the same payload.
-    ///
-    /// This thread: two of its own tickets agree.
-    /// Other threads: agree with it too -- the statement is over tickets, not readers, so it says
-    /// nothing about who holds them. That is the whole content of publishing.
-    ///
-    /// Stated over tickets because that is the honest form: two premises instead of six, and the
-    /// reader-level version follows from what [`Self::read_published`] hands back.
-    proof fn payloads_agree(
-        tracked t1: &PayloadTicket<Self::Payload>,
-        tracked t2: &PayloadTicket<Self::Payload>,
-    )
-        requires
-            t1.id() == t2.id(),
-            t1.version() == t2.version(),
-        ensures
-            t1.payload() == t2.payload(),
-    ;
-
     /// Stores `value` and publishes the payload with it, returning the *first* ticket.
     ///
     /// This thread: as [`RWContract::write`], plus a ticket for the payload just published.
@@ -351,12 +378,13 @@ pub trait RWWithPublishPayloadContract: RWContract + PublishPayload {
     fn write_with_published_payload(
         ptr: *mut Self::AtomicType,
         value: Self,
-        Tracked(r): Tracked<&RWShared<Self, Self::Payload>>,
+        Tracked(r): Tracked<&RWShared<Self, Self::Payload, Self::Perm>>,
         Tracked(w): Tracked<&mut WritePerm<Self>>,
         Tracked(payload): Tracked<Self::Payload>,
+        Tracked(ev): Tracked<&Evidence<Self>>,
     ) -> (ret: (Tracked<Observed<Self>>, Tracked<PayloadTicket<Self::Payload>>))
         requires
-            r.location() == ptr,
+            Self::Perm::resolves_to(ev, ptr, r.location()),
             r.id() == w.id(),
             old(w).write_value_payload_requires(value, payload),
             value.has_published_payload(),
@@ -378,21 +406,22 @@ pub trait RWWithPublishPayloadContract: RWContract + PublishPayload {
     fn write_published_unrestricted(
         ptr: *mut Self::AtomicType,
         value: Self,
-        Tracked(r): Tracked<RWShared<Self, Self::Payload>>,
+        Tracked(r): Tracked<RWShared<Self, Self::Payload, Self::Perm>>,
         Tracked(w): Tracked<&mut WritePerm<Self>>,
         Tracked(payload): Tracked<Self::Payload>,
+        Tracked(ev): Tracked<&Evidence<Self>>,
     ) -> (ret: (
-        Tracked<RWShared<Self, Self::Payload>>,
+        Tracked<RWShared<Self, Self::Payload, Self::Perm>>,
         Tracked<Observed<Self>>,
         Tracked<PayloadTicket<Self::Payload>>,
     ))
         requires
-            r.location() == ptr,
+            Self::Perm::resolves_to(ev, ptr, r.location()),
             r.id() == old(w).id(),
             value.wf_payload(payload),
             value.has_published_payload(),
         ensures
-            ret.0@.location() == ptr,
+            ret.0@.location() == r.location(),
             ret.0@.namespace() == r.namespace(),
             ret.0@.id() == final(w).id(),
             ret.0@.has_observed(ret.1@),

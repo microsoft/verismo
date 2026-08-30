@@ -52,7 +52,7 @@ pub fn set_leaf_slot<A: ArchPagingMeta>(
     }
     let ghost before = *writers;
     let tracked writer = writers.slots.tracked_borrow_mut(i);
-    let Tracked(_observed) = PTEntry::write(ptr, entry, Tracked(reader), Tracked(writer));
+    let Tracked(_observed) = PTEntry::write(ptr, entry, Tracked(reader), Tracked(writer), Tracked(&()));
     proof {
         lemma_ids_unchanged::<A>(before, *writers, i);
     }
@@ -107,6 +107,7 @@ pub fn link_table_slot<A: ArchPagingMeta>(
         Tracked(reader),
         Tracked(writer),
         Tracked(Some(child)),
+        Tracked(&()),
     );
     proof {
         lemma_ids_unchanged::<A>(before, *writers, i);
@@ -150,7 +151,7 @@ pub fn replace_leaf_slot<A: ArchPagingMeta>(
     }
     let ghost before = *writers;
     let tracked writer = writers.slots.tracked_borrow_mut(i);
-    let Tracked(_observed) = PTEntry::write(ptr, entry, Tracked(reader), Tracked(writer));
+    let Tracked(_observed) = PTEntry::write(ptr, entry, Tracked(reader), Tracked(writer), Tracked(&()));
     proof {
         lemma_ids_unchanged::<A>(before, *writers, i);
     }
@@ -211,6 +212,7 @@ pub fn split_leaf_slot<A: ArchPagingMeta>(
         Tracked(reader),
         Tracked(writer),
         Tracked(Some(child)),
+        Tracked(&()),
     );
     proof {
         lemma_ids_unchanged::<A>(before, *writers, i);
@@ -237,7 +239,7 @@ pub fn read_slot_exact<A: ArchPagingMeta>(
         ret == writers.slots[index as int]@,
 {
     let tracked writer = writers.slots.tracked_borrow(index as int);
-    let (value, Tracked(_observed)) = PTEntry::read_exact(ptr, Tracked(reader), Tracked(writer));
+    let (value, Tracked(_observed)) = PTEntry::read_exact(ptr, Tracked(reader), Tracked(writer), Tracked(&()));
     value
 }
 

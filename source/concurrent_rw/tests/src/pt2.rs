@@ -16,7 +16,6 @@ use vstd::iset::ISet;
 use vstd::iset::iset;
 use vstd::prelude::*;
 use vstd::raw_ptr::IsExposed;
-#[cfg(verus_only)]
 use vstd::raw_ptr::PointsTo;
 #[cfg(verus_only)]
 use vstd::std_specs::convert::{FromSpec, FromSpecImpl, IntoSpec};
@@ -114,6 +113,9 @@ impl IsValidAtomicType for PTEntry {
 }
 
 impl RWModel for PTEntry {
+    // Ordinary memory: the permission already names the address, so an access shows nothing.
+    type Perm = PointsTo<usize>;
+
     proof fn into_from_obeys() where Self: From<Self::AtomicType> + Into<Self::AtomicType>
     {
     }
@@ -839,7 +841,7 @@ fn example_read_moves_forward(
         r.has_observed(past),
 {
     let ghost was = past.snapshot();
-    let (value, Tracked(now)) = PTEntry::read(ptr, Tracked(r), Tracked(Some(&past)));
+    let (value, Tracked(now)) = PTEntry::read(ptr, Tracked(r), Tracked(Some(&past)), Tracked(&()));
     proof {
         // Whatever a concurrent writer did, it moved us forward and not back.
         assert(PTEntry::reachable(was, now.snapshot()));
@@ -866,7 +868,14 @@ fn example_write_unrestricted(
         ret.1@@ == value,
         final(w)@ == value,
 {
-    PTEntry::write_unrestricted(ptr, value, Tracked(r), Tracked(w), Tracked(payload))
+    PTEntry::write_unrestricted(
+        ptr,
+        value,
+        Tracked(r),
+        Tracked(w),
+        Tracked(payload),
+        Tracked(&()),
+    )
 }
 
 /// Tearing down an unpublished instance returns the exclusive memory permission and payload.

@@ -16,7 +16,6 @@
 use concurrent_rw::*;
 use vstd::prelude::*;
 use vstd::raw_ptr::IsExposed;
-#[cfg(verus_only)]
 use vstd::raw_ptr::PointsTo;
 #[cfg(verus_only)]
 use vstd::std_specs::convert::{FromSpec, FromSpecImpl, IntoSpec};
@@ -114,6 +113,9 @@ impl IsValidAtomicType for PTEntry {
 }
 
 impl RWModel for PTEntry {
+    // Ordinary memory: the permission already names the address, so an access shows nothing.
+    type Perm = PointsTo<usize>;
+
     // A present entry has handed its child readers out to page walkers; reading can only take it
     // to another present entry with the same child, so the payload stays valid.
     open spec fn has_published_payload(self) -> bool {
@@ -166,7 +168,10 @@ impl PublishPayload for PTEntry {
 
 // End-to-end check: read an entry, and go on holding a reference to its payload after the atomic
 // invariant block has closed. This is the thing an `AtomicInvariant` cannot do by itself.
-fn example_borrow_outlives_invariant(ptr: *mut usize, Tracked(r): Tracked<&RWShared<PTEntry, Extra>>)
+fn example_borrow_outlives_invariant(
+    ptr: *mut usize,
+    Tracked(r): Tracked<&RWShared<PTEntry, Extra>>,
+)
     requires
         r.location() == ptr,
 {
@@ -174,6 +179,7 @@ fn example_borrow_outlives_invariant(ptr: *mut usize, Tracked(r): Tracked<&RWSha
         ptr,
         Tracked(r),
         Tracked(None),
+        Tracked(&()),
     );
     if value.value != 0 {
         proof {
@@ -201,6 +207,7 @@ fn example_read_child_entry(ptr: *mut usize, Tracked(r): Tracked<&RWShared<PTEnt
         ptr,
         Tracked(r),
         Tracked(None),
+        Tracked(&()),
     );
     if !value.present() {
         return;
@@ -225,6 +232,7 @@ fn example_read_child_entry(ptr: *mut usize, Tracked(r): Tracked<&RWShared<PTEnt
         child_ptr,
         Tracked(next_reader),
         Tracked(None),
+        Tracked(&()),
     );
 }
 
@@ -244,6 +252,7 @@ fn example_read_moves_forward(
         ptr,
         Tracked(r),
         Tracked(Some(&past)),
+        Tracked(&()),
     );
     proof {
         // Whatever a concurrent writer did, it moved us forward and not back.
@@ -280,7 +289,14 @@ fn example_write_published_unrestricted(
         ret.2@.id() == ret.0@.slot_id(),
         ret.2@.version() == ret.0@.slot_version(),
 {
-    PTEntry::write_published_unrestricted(ptr, value, Tracked(r), Tracked(w), Tracked(payload))
+    PTEntry::write_published_unrestricted(
+        ptr,
+        value,
+        Tracked(r),
+        Tracked(w),
+        Tracked(payload),
+        Tracked(&()),
+    )
 }
 
 /// PROPERTY 2b, through the contract: two readers of one slot borrow the *same* payload.
@@ -335,6 +351,7 @@ fn walk(
         ptr,
         Tracked(r),
         Tracked(None),
+        Tracked(&()),
     );
     if level == 0 || !value.present() {
         return value.value;

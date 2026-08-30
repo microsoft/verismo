@@ -163,6 +163,7 @@ fn range_step<A: ArchPagingMeta, P: OSPagingContract<A>>(
         ptr,
         Tracked(slot),
         Tracked(None),
+        Tracked(&()),
     );
     if current.escrows() {
         let tracked slot_ticket;
@@ -342,6 +343,7 @@ fn leaf_step<A: ArchPagingMeta>(
                 ptr,
                 Tracked(reader),
                 Tracked(writer),
+                Tracked(&()),
             );
             if !current.present() {
                 return Ok(());

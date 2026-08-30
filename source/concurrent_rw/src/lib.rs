@@ -34,7 +34,7 @@ pub mod trusted_t;
 pub mod tokens_impl;
 
 /// Everything a client needs.
-pub use protocol::contract::{RWContract, RWWithPublishPayloadContract};
+pub use protocol::contract::{PayloadAgreement, RWContract, RWWithPublishPayloadContract};
 pub use protocol::model::{IsValidAtomicType, PublishPayload, RWModel, Snapshot, WithPayload};
 pub use protocol::perm::AnyPointsTo;
 pub use tokens_impl::payload_slot::{PayloadHolder, PayloadTicket, SlotHandle};

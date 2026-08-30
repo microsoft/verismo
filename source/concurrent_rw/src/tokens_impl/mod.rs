@@ -10,7 +10,7 @@
 //! live in `rw_proof::rw_exec`.
 //!
 //! ```text
-//!     PointsTo<AtomicType>        exclusive: no read may run during a write
+//!     RWModel::Perm               exclusive: no read may run during a write
 //!            |  RWShared::new       (the contract calls this RWContract::build_rw)
 //!            v
 //!     WritePerm + RWShared + Observed  reads and the write may now overlap

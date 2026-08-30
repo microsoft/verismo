@@ -75,6 +75,7 @@ pub fn walk<A: ArchPagingMeta, P: OSPagingContract<A>>(
         ptr,
         Tracked(slot),
         Tracked(None),
+        Tracked(&()),
     );
     let stop = WalkResult { level, page_ptr, index, entry };
     if !entry.is_table(level) || !entry.escrows() {

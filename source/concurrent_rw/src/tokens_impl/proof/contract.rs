@@ -9,16 +9,26 @@
 //! it. Swap `tokens_impl` for a different construction and this is the file that goes with it.
 use vstd::prelude::*;
 
+use crate::protocol::perm::AnyPointsTo;
 use crate::tokens_impl::payload_slot::PayloadTicket;
 use crate::tokens_impl::*;
 #[cfg(verus_only)]
 use vstd::invariant::OpenInvariantCredit;
 #[cfg(verus_only)]
-use vstd::raw_ptr::PointsTo;
-#[cfg(verus_only)]
 use vstd::{open_atomic_invariant, open_atomic_invariant_in_proof};
 
 verus! {
+
+impl<
+    T: PublishPayload<AtomicType = usize> + From<usize> + Into<usize>,
+> crate::protocol::contract::PayloadAgreement for T where usize: From<T> {
+    proof fn payloads_agree(
+        tracked t1: &PayloadTicket<Self::Payload>,
+        tracked t2: &PayloadTicket<Self::Payload>,
+    ) {
+        t1.agree(t2)
+    }
+}
 
 // The proofs behind `protocol::contract::RWWithPublishPayloadContract`, the published-payload half.
 // Bounded on `PublishPayload`, so a model that never publishes gets neither the obligations nor
@@ -28,52 +38,55 @@ impl<
 > crate::protocol::contract::RWWithPublishPayloadContract for T where usize: From<T> {
     fn read_published(
         ptr: *mut Self::AtomicType,
-        Tracked(r): Tracked<&RWShared<Self, Self::Payload>>,
+        Tracked(r): Tracked<&RWShared<Self, Self::Payload, Self::Perm>>,
         Tracked(past): Tracked<Option<&Observed<Self>>>,
+        Tracked(ev): Tracked<&crate::protocol::contract::Evidence<Self>>,
     ) -> (ret: (Self, Tracked<Observed<Self>>, Tracked<Option<PayloadTicket<Self::Payload>>>)) {
-        crate::tokens_impl::rw_proof::rw_exec::read_published(ptr, Tracked(r), Tracked(past))
-    }
-
-    proof fn payloads_agree(
-        tracked t1: &PayloadTicket<Self::Payload>,
-        tracked t2: &PayloadTicket<Self::Payload>,
-    ) {
-        t1.agree(t2)
+        crate::tokens_impl::rw_proof::rw_exec::read_published::<Self, Self::Perm>(
+            ptr,
+            Tracked(r),
+            Tracked(past),
+            Tracked(ev),
+        )
     }
 
     fn write_with_published_payload(
         ptr: *mut Self::AtomicType,
         value: Self,
-        Tracked(r): Tracked<&RWShared<Self, Self::Payload>>,
+        Tracked(r): Tracked<&RWShared<Self, Self::Payload, Self::Perm>>,
         Tracked(w): Tracked<&mut WritePerm<Self>>,
         Tracked(payload): Tracked<Self::Payload>,
+        Tracked(ev): Tracked<&crate::protocol::contract::Evidence<Self>>,
     ) -> (ret: (Tracked<Observed<Self>>, Tracked<PayloadTicket<Self::Payload>>)) {
-        crate::tokens_impl::rw_proof::rw_exec::write_with_published_payload(
+        crate::tokens_impl::rw_proof::rw_exec::write_with_published_payload::<Self, Self::Perm>(
             ptr,
             value,
             Tracked(r),
             Tracked(w),
             Tracked(payload),
+            Tracked(ev),
         )
     }
 
     fn write_published_unrestricted(
         ptr: *mut Self::AtomicType,
         value: Self,
-        Tracked(r): Tracked<RWShared<Self, Self::Payload>>,
+        Tracked(r): Tracked<RWShared<Self, Self::Payload, Self::Perm>>,
         Tracked(w): Tracked<&mut WritePerm<Self>>,
         Tracked(payload): Tracked<Self::Payload>,
+        Tracked(ev): Tracked<&crate::protocol::contract::Evidence<Self>>,
     ) -> (ret: (
-        Tracked<RWShared<Self, Self::Payload>>,
+        Tracked<RWShared<Self, Self::Payload, Self::Perm>>,
         Tracked<Observed<Self>>,
         Tracked<PayloadTicket<Self::Payload>>,
     )) {
-        crate::tokens_impl::rw_proof::rw_exec::write_published_unrestricted(
+        crate::tokens_impl::rw_proof::rw_exec::write_published_unrestricted::<Self, Self::Perm>(
             ptr,
             value,
             Tracked(r),
             Tracked(w),
             Tracked(payload),
+            Tracked(ev),
         )
     }
 }
@@ -86,74 +99,105 @@ impl<
 > crate::protocol::contract::RWContract for T where usize: From<T> {
     proof fn build_rw(
         value: Self,
-        tracked points_to: PointsTo<Self::AtomicType>,
+        tracked points_to: Self::Perm,
         tracked payload: Self::Payload,
-    ) -> (tracked ret: (RWShared<Self, Self::Payload>, WritePerm<Self>, Observed<Self>)) {
-        let tracked out = RWShared::<Self, Self::Payload>::new(value, points_to, payload);
+    ) -> (tracked ret: (
+        RWShared<Self, Self::Payload, Self::Perm>,
+        WritePerm<Self>,
+        Observed<Self>,
+    )) {
+        let tracked out = RWShared::<Self, Self::Payload, Self::Perm>::new(
+            value,
+            points_to,
+            payload,
+        );
         out
     }
 
     proof fn teardown_rw(
-        tracked r: RWShared<Self, Self::Payload>,
+        tracked r: RWShared<Self, Self::Payload, Self::Perm>,
         tracked w: WritePerm<Self>,
-    ) -> (tracked ret: (PointsTo<Self::AtomicType>, Self::Payload)) {
+    ) -> (tracked ret: (Self::Perm, Self::Payload)) {
         r.teardown(w)
     }
 
     fn read(
         ptr: *mut Self::AtomicType,
-        Tracked(r): Tracked<&RWShared<Self, Self::Payload>>,
+        Tracked(r): Tracked<&RWShared<Self, Self::Payload, Self::Perm>>,
         Tracked(past): Tracked<Option<&Observed<Self>>>,
+        Tracked(ev): Tracked<&crate::protocol::contract::Evidence<Self>>,
     ) -> (ret: (Self, Tracked<Observed<Self>>)) {
-        crate::tokens_impl::rw_proof::rw_exec::read(ptr, Tracked(r), Tracked(past))
+        crate::tokens_impl::rw_proof::rw_exec::read::<Self, Self::Perm>(
+            ptr,
+            Tracked(r),
+            Tracked(past),
+            Tracked(ev),
+        )
     }
 
     fn read_exact(
         ptr: *mut Self::AtomicType,
-        Tracked(r): Tracked<&RWShared<Self, Self::Payload>>,
+        Tracked(r): Tracked<&RWShared<Self, Self::Payload, Self::Perm>>,
         Tracked(w): Tracked<&WritePerm<Self>>,
+        Tracked(ev): Tracked<&crate::protocol::contract::Evidence<Self>>,
     ) -> (ret: (Self, Tracked<Observed<Self>>)) {
-        crate::tokens_impl::rw_proof::rw_exec::read_exact(ptr, Tracked(r), Tracked(w))
+        crate::tokens_impl::rw_proof::rw_exec::read_exact::<Self, Self::Perm>(
+            ptr,
+            Tracked(r),
+            Tracked(w),
+            Tracked(ev),
+        )
     }
 
     fn write(
         ptr: *mut Self::AtomicType,
         value: Self,
-        Tracked(r): Tracked<&RWShared<Self, Self::Payload>>,
+        Tracked(r): Tracked<&RWShared<Self, Self::Payload, Self::Perm>>,
         Tracked(w): Tracked<&mut WritePerm<Self>>,
+        Tracked(ev): Tracked<&crate::protocol::contract::Evidence<Self>>,
     ) -> (ret: Tracked<Observed<Self>>) {
-        crate::tokens_impl::rw_proof::rw_exec::write(ptr, value, Tracked(r), Tracked(w))
+        crate::tokens_impl::rw_proof::rw_exec::write::<Self, Self::Perm>(
+            ptr,
+            value,
+            Tracked(r),
+            Tracked(w),
+            Tracked(ev),
+        )
     }
 
     fn write_with_payload(
         ptr: *mut Self::AtomicType,
         value: Self,
-        Tracked(r): Tracked<&RWShared<Self, Self::Payload>>,
+        Tracked(r): Tracked<&RWShared<Self, Self::Payload, Self::Perm>>,
         Tracked(w): Tracked<&mut WritePerm<Self>>,
         Tracked(payload): Tracked<Self::Payload>,
+        Tracked(ev): Tracked<&crate::protocol::contract::Evidence<Self>>,
     ) -> (ret: Tracked<Observed<Self>>) {
-        crate::tokens_impl::rw_proof::rw_exec::write_with_payload(
+        crate::tokens_impl::rw_proof::rw_exec::write_with_payload::<Self, Self::Perm>(
             ptr,
             value,
             Tracked(r),
             Tracked(w),
             Tracked(payload),
+            Tracked(ev),
         )
     }
 
     fn write_unrestricted(
         ptr: *mut Self::AtomicType,
         value: Self,
-        Tracked(r): Tracked<RWShared<Self, Self::Payload>>,
+        Tracked(r): Tracked<RWShared<Self, Self::Payload, Self::Perm>>,
         Tracked(w): Tracked<&mut WritePerm<Self>>,
         Tracked(payload): Tracked<Self::Payload>,
-    ) -> (ret: (Tracked<RWShared<Self, Self::Payload>>, Tracked<Observed<Self>>)) {
-        crate::tokens_impl::rw_proof::rw_exec::write_unrestricted(
+        Tracked(ev): Tracked<&crate::protocol::contract::Evidence<Self>>,
+    ) -> (ret: (Tracked<RWShared<Self, Self::Payload, Self::Perm>>, Tracked<Observed<Self>>)) {
+        crate::tokens_impl::rw_proof::rw_exec::write_unrestricted::<Self, Self::Perm>(
             ptr,
             value,
             Tracked(r),
             Tracked(w),
             Tracked(payload),
+            Tracked(ev),
         )
     }
 }

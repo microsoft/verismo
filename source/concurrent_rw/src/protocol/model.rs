@@ -14,6 +14,7 @@
 //! The companion `concurrent_rw_tests` package discharges these traits two different ways -- one
 //! publishing its payload, one not -- and stands as evidence that the obligations are
 //! dischargeable at all.
+use crate::protocol::perm::AnyPointsTo;
 use vstd::prelude::*;
 #[cfg(verus_only)]
 use vstd::std_specs::convert::{FromSpec, FromSpecImpl, IntoSpec};
@@ -52,6 +53,14 @@ pub trait IsValidAtomicType: Sized {
 }
 
 pub trait RWModel: WithPayload + IsValidAtomicType + Sized {
+    /// How this model's location is named, and what it takes to reach it.
+    ///
+    /// `PointsTo<Self::AtomicType>` for ordinary memory, where the permission already knows its
+    /// address. A model whose location is a physical frame names it that way instead, and pays
+    /// for each access with the evidence its permission asks for -- see
+    /// [`crate::protocol::perm::AnyPointsTo`].
+    type Perm: AnyPointsTo<Self::AtomicType>;
+
     /// **The one relation a client supplies:** a preorder on pairs, saying where a value and its
     /// payload may go together, and so what an observer may later see.
     spec fn reachable(

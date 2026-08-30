@@ -1,7 +1,7 @@
 //! A `PointsTo` as an [`AnyPointsTo`]: the case where a permission already names an address.
 //!
 //! Nothing here is assumed. A `PointsTo` names the address it points at, the evidence that an
-//! address reaches it is the address being that one, and `borrow_at` hands back the permission
+//! address reaches it is the address being that one, and the borrows hand back the permission
 //! itself. This is the impl the crate's own executable reads and writes run on; a client that
 //! names locations some other way supplies its own.
 use vstd::prelude::*;
@@ -34,6 +34,11 @@ impl<T> AnyPointsTo<T> for PointsTo<T> {
 
     proof fn borrow_at<'a>(tracked &'a self, ptr: *mut T, tracked ev: &()) -> (tracked ret:
         &'a PointsTo<T>) {
+        self
+    }
+
+    proof fn borrow_mut_at<'a>(tracked &'a mut self, ptr: *mut T, tracked ev: &()) -> (tracked ret:
+        &'a mut PointsTo<T>) {
         self
     }
 }
