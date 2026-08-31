@@ -34,7 +34,7 @@ use crate::level::PageLevel;
 use crate::specs::points_to::{page_start_of, Mapping, PhysPointsTo, VirtAddrTok};
 use crate::structs::arch_contract::*;
 use crate::structs::frame::PhysFrame;
-use crate::structs::ptpage::PTPage;
+use crate::structs::ptpage::{PTPage, ENTRY_COUNT};
 use crate::ArchPagingMeta;
 use vstd::arithmetic::power2::pow2;
 use vstd::prelude::*;
@@ -134,31 +134,38 @@ pub open spec fn self_map_base<A: ArchPagingMeta>(k: usize, level: PageLevel) ->
     }
 }
 
-/// Virtual address of entry `slot` of a table page exposed at `base`.
-pub open spec fn entry_vaddr_at<A: ArchPagingMeta>(base: usize, slot: nat) -> int {
-    slot_addr::<A>(base, slot as int)
-}
+/// The entries of one table page, as the type a permission over the whole page
+/// carries.
+///
+/// One permission per page rather than one per entry: a page is what firmware
+/// allocated, what a lock will later guard, and what
+/// [`crate::specs::points_to::GeneralPointsTo::into_elements`] can still chop up
+/// when a caller wants the entries separately.
+///
+/// The length is [`ENTRY_COUNT`] rather than `PTPage::<A>::NUM_ENTRIES` because
+/// the latter is a generic const operation, which Rust will not accept in a type
+/// outside `PTPage` itself. `level_geometry_wf` is what ties the two together.
+pub type TableEntries<A> = [PTEntry<A>; ENTRY_COUNT];
 
-/// What every table entry the firmware hands over looks like: a page-table
-/// entry, pinned to its own frame at its own slot, and reachable at exactly the
-/// one virtual address the handover exposes it at.
+/// What every table page the firmware hands over looks like: page-table memory,
+/// pinned to its own frame, and reachable at exactly the one virtual address the
+/// handover exposes it at.
 ///
 /// Shared by both ways in, because the two differ only in what that address is.
 /// The `forall`/`exists` pair is the whole of "exactly one alias": no alias the
-/// handover does not account for, and at least one, or the entry could not be
+/// handover does not account for, and at least one, or the page could not be
 /// read at all.
-pub open spec fn table_entry_wf<A: ArchPagingMeta>(
-    entry: PhysPointsTo<PTEntry<A>, A>,
+pub open spec fn table_page_wf<A: ArchPagingMeta>(
+    page: PhysPointsTo<TableEntries<A>, A>,
     frame: usize,
-    slot: nat,
     vaddr: int,
 ) -> bool {
-    &&& entry.is_pt()
-    &&& entry.is_init()
-    &&& entry.pinned_to_frame(frame)
-    &&& entry.is_at_phys_addr(slot_addr::<A>(frame, slot as int))
-    &&& forall|p: *mut PTEntry<A>| #[trigger] entry.covers(p) ==> p@.addr == vaddr
-    &&& exists|p: *mut PTEntry<A>| #[trigger] entry.covers(p)
+    &&& page.is_pt()
+    &&& page.is_init()
+    &&& page.pinned_to_frame(frame)
+    &&& page.is_at_phys_addr(frame as int)
+    &&& forall|p: *mut TableEntries<A>| #[trigger] page.covers(p) ==> p@.addr == vaddr
+    &&& exists|p: *mut TableEntries<A>| #[trigger] page.covers(p)
 }
 
 /// One root slot pointing back at the root frame: the root table, and only the
@@ -170,10 +177,9 @@ pub open spec fn table_entry_wf<A: ArchPagingMeta>(
 pub tracked struct SelfMap<A: ArchPagingMeta> {
     /// Slot of the root table that points back at the root.
     pub ghost slot: nat,
-    /// One permission per entry of the root table, keyed by slot. Pinned: the
-    /// MMU walks the table by physical address, so a table page whose frame
-    /// could move is not a table page.
-    pub tracked entries: Map<nat, PhysPointsTo<PTEntry<A>, A>>,
+    /// The root table. Pinned: the MMU walks the table by physical address, so
+    /// a table page whose frame could move is not a table page.
+    pub tracked table: PhysPointsTo<TableEntries<A>, A>,
 }
 
 impl<A: ArchPagingMeta> SelfMap<A> {
@@ -182,17 +188,8 @@ impl<A: ArchPagingMeta> SelfMap<A> {
         self_map_base::<A>(self.slot as usize, max_level) as usize
     }
 
-    /// Virtual address of the root table's entry `slot`, as the self map
-    /// exposes it.
-    pub open spec fn entry_vaddr(&self, max_level: PageLevel, slot: nat) -> int {
-        entry_vaddr_at::<A>(self.base(max_level), slot)
-    }
-
-    /// The one virtual page the root table occupies.
-    ///
-    /// Every entry of the table shares it: the self map exposes the whole table
-    /// at [`Self::base`], and a table is exactly one page, so the slot only
-    /// picks an offset within this page.
+    /// The one virtual page the root table occupies. The self map exposes the
+    /// whole table at [`Self::base`], and a table is exactly one page.
     pub open spec fn vpage(&self, max_level: PageLevel) -> int {
         page_start_of::<A>(self.base(max_level) as int)
     }
@@ -217,26 +214,17 @@ impl<A: ArchPagingMeta> SelfMap<A> {
         pages_in::<A>(self.region_start(max_level), self.region_end(max_level))
     }
 
-    /// Every entry of the root table is well formed at the address the self map
-    /// exposes it at, and the root maps itself and nothing else: the self slot
-    /// holds a table entry pointing at the root frame, and every other slot is
-    /// absent.
+    /// The root table is well formed at the address the self map exposes it at,
+    /// and it maps itself and nothing else: the self slot holds a table entry
+    /// pointing at the root frame, and every other slot is absent.
     pub open spec fn wf(&self, root: PhysFrame<A::MinPageSize>, max_level: PageLevel) -> bool {
-        &&& self.slot < PTPage::<A>::count()
-        &&& forall|slot: nat|
-            (#[trigger] self.entries.dom().contains(slot)) <==> slot < PTPage::<A>::count()
-        &&& forall|slot: nat| #[trigger]
-            self.entries.dom().contains(slot) ==> table_entry_wf::<A>(
-                self.entries[slot],
-                root@,
-                slot,
-                self.entry_vaddr(max_level, slot),
-            )
-        &&& self.entries[self.slot].value().is_table_spec(max_level)
-        &&& self.entries[self.slot].value().page_frame_spec() == root@
-        &&& forall|slot: nat| #[trigger]
-            self.entries.dom().contains(slot) && slot != self.slot
-                ==> !self.entries[slot].value().present_spec()
+        &&& self.slot < ENTRY_COUNT
+        &&& table_page_wf::<A>(self.table, root@, self.base(max_level) as int)
+        &&& self.table.value()[self.slot as int].is_table_spec(max_level)
+        &&& self.table.value()[self.slot as int].page_frame_spec() == root@
+        &&& forall|i: int|
+            0 <= i < ENTRY_COUNT && i != self.slot ==> !(
+            #[trigger] self.table.value()[i]).present_spec()
     }
 }
 
@@ -262,11 +250,9 @@ pub tracked struct DirectMap<A: ArchPagingMeta> {
     /// below say only that the tables are reachable through it, so an OS that
     /// establishes a `DirectMap` proves its own translation fits.
     pub ghost pa_to_va: spec_fn(usize) -> usize,
-    /// Which of the mapped frames hold page tables. Empty for a direct map of
-    /// ordinary memory.
-    pub ghost tables: Set<usize>,
-    /// One permission per table entry, keyed by its frame and slot.
-    pub tracked entries: Map<(usize, nat), PhysPointsTo<PTEntry<A>, A>>,
+    /// The table pages this map holds, keyed by frame. Empty for a direct map
+    /// of ordinary memory, whose domain is then the set of no frames.
+    pub tracked tables: Map<usize, PhysPointsTo<TableEntries<A>, A>>,
 }
 
 impl<A: ArchPagingMeta> DirectMap<A> {
@@ -288,11 +274,6 @@ impl<A: ArchPagingMeta> DirectMap<A> {
         (self.pa_to_va)(frame)
     }
 
-    /// Virtual address of entry `slot` of the table in `frame`.
-    pub open spec fn entry_vaddr(&self, frame: usize, slot: nat) -> int {
-        entry_vaddr_at::<A>(self.base(frame), slot)
-    }
-
     /// The one virtual page a table page occupies.
     pub open spec fn vpage(&self, frame: usize) -> int {
         page_start_of::<A>(self.base(frame) as int)
@@ -307,16 +288,11 @@ impl<A: ArchPagingMeta> DirectMap<A> {
     /// special treatment: here it is a table like any other, and it need not be
     /// one of these at all.
     pub open spec fn map_pts(&self) -> bool {
-        &&& forall|frame: usize| #[trigger] self.tables.contains(frame) ==> self.covers_frame(frame)
-        &&& forall|frame: usize, slot: nat|
-            (#[trigger] self.entries.dom().contains((frame, slot))) <==> self.tables.contains(frame)
-                && slot < PTPage::<A>::count()
-        &&& forall|frame: usize, slot: nat| #[trigger]
-            self.entries.dom().contains((frame, slot)) ==> table_entry_wf::<A>(
-                self.entries[(frame, slot)],
+        forall|frame: usize| #[trigger]
+            self.tables.dom().contains(frame) ==> self.covers_frame(frame) && table_page_wf::<A>(
+                self.tables[frame],
                 frame,
-                slot,
-                self.entry_vaddr(frame, slot),
+                self.base(frame) as int,
             )
     }
 
@@ -331,10 +307,10 @@ impl<A: ArchPagingMeta> DirectMap<A> {
         decreases level.depth(),
     {
         let index = spec_entry_index::<A>(vaddr, level);
-        if !self.entries.dom().contains((frame, index)) {
+        if !self.tables.dom().contains(frame) {
             None
         } else {
-            let entry = self.entries[(frame, index)].value();
+            let entry = self.tables[frame].value()[index as int];
             if !entry.present_spec() {
                 None
             } else if entry.is_table_spec(level) {
@@ -368,7 +344,7 @@ impl<A: ArchPagingMeta> DirectMap<A> {
         max_level: PageLevel,
     ) -> bool {
         &&& self.map_pts()
-        &&& self.tables.contains(root@)
+        &&& self.tables.dom().contains(root@)
         &&& forall|pa: int| #[trigger]
             self.pa_set.contains(pa) ==> self.walk(root@, max_level, (self.pa_to_va)(pa as usize))
                 == Some(pa)
@@ -429,7 +405,9 @@ impl<A: ArchPagingMeta, P> InitialPermissions<A, P> {
             // A frame the OS may hand out is not a frame it is walking.
         &&& !self.free_frames.dom().contains(self.root@)
         &&& self.direct_map is Some ==> forall|pa: usize| #[trigger]
-            self.free_frames.dom().contains(pa) ==> !self.direct_map->Some_0.tables.contains(pa)
+            self.free_frames.dom().contains(pa) ==> !self.direct_map->Some_0.tables.dom().contains(
+                pa,
+            )
     }
 
     /// The first of the three parts: what the self map's slot spends.
@@ -462,7 +440,7 @@ impl<A: ArchPagingMeta, P> InitialPermissions<A, P> {
     /// it -- firmware may have mapped a region through that holds no tables.
     pub open spec fn root_is_reachable(&self) -> bool {
         ||| self.self_map is Some
-        ||| self.direct_map is Some && self.direct_map->Some_0.tables.contains(self.root@)
+        ||| self.direct_map is Some && self.direct_map->Some_0.tables.dom().contains(self.root@)
     }
 
     pub open spec fn wf(&self) -> bool {
@@ -471,7 +449,7 @@ impl<A: ArchPagingMeta, P> InitialPermissions<A, P> {
             ==> self.direct_map->Some_0.map_pts()
         // When the direct map is the way in, it also has to translate: the walk
         // that reaches the root through it walks these very entries.
-        &&& self.direct_map is Some && self.direct_map->Some_0.tables.contains(self.root@)
+        &&& self.direct_map is Some && self.direct_map->Some_0.tables.dom().contains(self.root@)
             ==> self.direct_map->Some_0.wf_with_root(self.root, self.max_level)
         &&& self.root_is_reachable()
         &&& self.free_frames_wf()
