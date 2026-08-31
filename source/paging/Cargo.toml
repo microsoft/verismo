@@ -17,9 +17,6 @@ concurrent_rw = { path = "../concurrent_rw" }
 
 [features]
 verification-test = []
-# The smallest page this build maps. None selected means 4 KiB.
-min-page-2mib = []
-min-page-1gib = []
 
 [package.metadata.verus]
 verify = true
@@ -28,4 +25,10 @@ verify = true
 # Verus turns on `--cfg verus_only` during verification and sets
 # `verus_keep_ghost` itself; declaring both keeps a plain `cargo build`
 # warning-free.
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(verus_only)', 'cfg(verus_keep_ghost)', 'cfg(verus_keep_ghost_body)'] }
+unexpected_cfgs = { level = "warn", check-cfg = [
+    'cfg(verus_only)',
+    'cfg(verus_keep_ghost)',
+    'cfg(verus_keep_ghost_body)',
+    # The smallest page this build maps; see `structs::sizes::MinPageSize`.
+    'cfg(target_min_page, values("4kib", "2mib", "1gib"))',
+] }

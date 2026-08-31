@@ -103,51 +103,59 @@ impl<T: PageOffset> PageSize for T {
 /// A property of the machine the kernel is built for, not of the paging code:
 /// one binary targets one machine, so a build-wide choice is both simpler and
 /// more honest than a trait member every architecture would separately have to
-/// agree on. Nothing selected means 4 KiB, which every architecture this models
-/// supports.
-#[cfg(not(any(feature = "min-page-2mib", feature = "min-page-1gib")))]
+/// agree on.
+///
+/// Selected by `--cfg target_min_page="..."`, set in `.cargo/config.toml`
+/// alongside the target itself. Deliberately not a cargo feature: features are
+/// additive, so any crate in the graph that depended on `paging` could enable a
+/// larger page for everyone. A cfg value is chosen by whoever chooses the
+/// target, and by nobody else. Unset means 4 KiB, which every architecture this
+/// models supports.
+#[cfg(not(any(target_min_page = "2mib", target_min_page = "1gib")))]
 pub type MinPageSize = Size4KiB;
 
-#[cfg(feature = "min-page-2mib")]
+#[cfg(target_min_page = "2mib")]
 pub type MinPageSize = Size2MiB;
 
-#[cfg(feature = "min-page-1gib")]
+#[cfg(target_min_page = "1gib")]
 pub type MinPageSize = Size1GiB;
 
-#[cfg(all(feature = "min-page-2mib", feature = "min-page-1gib"))]
-compile_error!("min-page-2mib and min-page-1gib select different page sizes");
+#[cfg(any(
+    all(target_min_page = "4kib", any(target_min_page = "2mib", target_min_page = "1gib")),
+    all(target_min_page = "2mib", target_min_page = "1gib")
+))]
+compile_error!("target_min_page was given more than one value");
 
 /// Width of the in-page byte offset, in bits.
 ///
 /// Spelled out rather than written `<MinPageSize as PageOffset>::SHIFT`, which
 /// Verus cannot evaluate in a `const`. [`lemma_min_page_wf`] proves the
 /// geometry facts consumers need from the spelled-out numbers.
-#[cfg(not(any(feature = "min-page-2mib", feature = "min-page-1gib")))]
+#[cfg(not(any(target_min_page = "2mib", target_min_page = "1gib")))]
 pub const PAGE_OFFSET_WIDTH: usize = 12;
 
-#[cfg(feature = "min-page-2mib")]
+#[cfg(target_min_page = "2mib")]
 pub const PAGE_OFFSET_WIDTH: usize = 21;
 
-#[cfg(feature = "min-page-1gib")]
+#[cfg(target_min_page = "1gib")]
 pub const PAGE_OFFSET_WIDTH: usize = 30;
 
 /// Bytes in the smallest page. Also spelled out, because Verus checks a `const`
 /// body for overflow and cannot be given a proof to do it with.
-#[cfg(not(any(feature = "min-page-2mib", feature = "min-page-1gib")))]
+#[cfg(not(any(target_min_page = "2mib", target_min_page = "1gib")))]
 pub const PAGE_SIZE: usize = 0x1000;
 
-#[cfg(feature = "min-page-2mib")]
+#[cfg(target_min_page = "2mib")]
 pub const PAGE_SIZE: usize = 0x20_0000;
 
-#[cfg(feature = "min-page-1gib")]
+#[cfg(target_min_page = "1gib")]
 pub const PAGE_SIZE: usize = 0x4000_0000;
 
 /// The geometry facts [`PageSize::lemma_size_wf`] would give for the selected
 /// marker, proved from the spelled-out numbers instead.
 ///
-/// Not routed through the trait: `MinPageSize` is concrete, and asking Verus for
-/// a blanket impl's associated const on a concrete type makes rustc evaluate its
-/// body, which Verus cannot erase.
+/// Not routed through the trait, because `PageSize::SIZE` is not a literal and
+/// so cannot be used where Verus wants a constant.
 pub proof fn lemma_min_page_wf()
     ensures
         PAGE_SIZE == 1usize << PAGE_OFFSET_WIDTH,
