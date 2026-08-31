@@ -16,39 +16,40 @@
 //! permission -- [`MemOwn::split_at`], and [`GeneralPointsTo::into_elements`]
 //! on top of it -- is token arithmetic that creates nothing and loses nothing.
 use super::points_to_axiom::{axiom_array_layout, points_to_array_split};
-use crate::UniqueAddress;
 use crate::arch::x86_64::reg_contract::cr3_phys_addr;
 use crate::entry::PTEntry;
 use crate::level::PageLevel;
+use crate::structs::arch_contract::*;
 use crate::structs::frame::PhysFrame;
 use crate::structs::page::Page;
-use crate::structs::sizes::PageSize;
-use vstd::math::min;
-use vstd::arithmetic::power2::pow2;
-use crate::structs::arch_contract::*;
+use crate::structs::sizes::{lemma_min_page_wf, MinPageSize, PageSize, PAGE_SIZE};
 use crate::ArchPagingMeta;
+use crate::UniqueAddress;
 use machine_model::arch::Cr3;
 use machine_model::register::RustRegisterPointsTo;
-use vstd::prelude::*;
-use vstd::raw_ptr::MemContents;
+use vstd::arithmetic::power2::pow2;
 use vstd::layout::{align_of, size_of};
+use vstd::math::min;
+use vstd::prelude::*;
+use vstd::raw_ptr::spec_cast_ptr_to_thin_ptr;
+use vstd::raw_ptr::MemContents;
 use vstd::raw_ptr::PointsTo;
 use vstd::raw_ptr::PointsToRaw;
-use vstd::raw_ptr::spec_cast_ptr_to_thin_ptr;
-use vstd::raw_ptr::{PtrData, ptr_mut_from_data};
+use vstd::raw_ptr::{ptr_mut_from_data, PtrData};
 use vstd::resource::frac::FracGhost;
 use vstd::resource::Loc;
 use vstd::tokens::InstanceId;
 
 verus! {
+
 /// Offset of an address within its page.
-pub open spec fn page_offset_of<A: ArchPagingMeta>(addr: int) -> int {
-    addr % page_size::<A>() as int
+pub open spec fn page_offset_of(addr: int) -> int {
+    addr % PAGE_SIZE as int
 }
 
 /// Start of the page an address falls in.
-pub open spec fn page_start_of<A: ArchPagingMeta>(addr: int) -> int {
-    addr - page_offset_of::<A>(addr)
+pub open spec fn page_start_of(addr: int) -> int {
+    addr - page_offset_of(addr)
 }
 
 /// The elements of an array sit one element apart, so their addresses are the
@@ -130,7 +131,7 @@ pub open spec fn array_element_ptr<T, const N: usize>(p: *mut [T; N], i: int) ->
 /// the first says the MMU reads it, so writing it changes what other pointers
 /// mean; the second says which physical memory it is pinned to, when that is
 /// knowable at all.
-pub ghost struct GeneralPointsToData<T, A: ArchPagingMeta> {
+pub ghost struct GeneralPointsToData<T> {
     /// Every virtual pointer that reaches this memory.
     pub ptrs: Set<*mut T>,
     /// The possibly-uninitialized value all of `ptrs` reach.
@@ -151,7 +152,7 @@ pub ghost struct GeneralPointsToData<T, A: ArchPagingMeta> {
     /// than bare addresses, so that the alignment the translation depends on is
     /// carried by the type instead of restated as a clause every user has to
     /// remember.
-    pub frame_addrs: Seq<PhysFrame<A::MinPageSize>>,
+    pub frame_addrs: Seq<PhysFrame<MinPageSize>>,
 }
 
 /// Ownership of a range of *virt* addresses, drawn from one global address
@@ -212,8 +213,13 @@ impl VirtAddrTok {
     }
 
     /// Put two adjacent ranges back together.
-    pub proof fn join_range(tracked self, tracked other: Self, start: int, mid: int, end: int)
-        -> (tracked res: Self)
+    pub proof fn join_range(
+        tracked self,
+        tracked other: Self,
+        start: int,
+        mid: int,
+        end: int,
+    ) -> (tracked res: Self)
         requires
             self.is_range(start, mid - start),
             other.is_range(mid, end - mid),
@@ -284,8 +290,13 @@ impl PhysAddrTok {
     }
 
     /// Put two adjacent ranges back together.
-    pub proof fn join_range(tracked self, tracked other: Self, start: int, mid: int, end: int)
-        -> (tracked res: Self)
+    pub proof fn join_range(
+        tracked self,
+        tracked other: Self,
+        start: int,
+        mid: int,
+        end: int,
+    ) -> (tracked res: Self)
         requires
             self.is_range(start, mid - start),
             other.is_range(mid, end - mid),
@@ -309,12 +320,11 @@ impl PhysAddrTok {
 /// statable, and it means nothing else has to restate it: any `Mapping` in hand
 /// is already known to be a share of the right variable, so two of them for one
 /// page necessarily [`agree`](Self::agree).
-#[verifier::reject_recursive_types(A)]
-pub tracked struct Mapping<A: ArchPagingMeta> {
+pub tracked struct Mapping {
     /// The page this records.
-    ghost vpage: Page<A::MinPageSize>,
+    ghost vpage: Page<MinPageSize>,
     /// A share of that page's record.
-    tracked frame: FracGhost<Option<VirtMapping<A::MinPageSize>>>,
+    tracked frame: FracGhost<Option<VirtMapping<MinPageSize>>>,
 }
 
 /// What a page is mapped to, as much as its owner is entitled to rely on.
@@ -322,11 +332,11 @@ pub tracked struct Mapping<A: ArchPagingMeta> {
 /// Wrapped in an `Option` where it is recorded: `None` is a page that maps to
 /// no frame at all.
 pub enum VirtMapping<S: PageSize> {
-    Fixed(PhysFrame<S>), // Type 1 - 4 mapping
-    Dynamic, // Type 5 mapping, no COW, no Dedup, no page swap
+    Fixed(PhysFrame<S>),  // Type 1 - 4 mapping
+    Dynamic,  // Type 5 mapping, no COW, no Dedup, no page swap
 }
 
-impl<A: ArchPagingMeta> Mapping<A> {
+impl Mapping {
     /// The identity of the ghost variable recording what the page starting at
     /// `vpage` maps to.
     pub uninterp spec fn id_of_vpage(vpage: int) -> Loc;
@@ -339,7 +349,7 @@ impl<A: ArchPagingMeta> Mapping<A> {
 
     /// The share of a page's record that comes with owning `bytes` bytes of it.
     pub open spec fn share_of(bytes: int) -> real {
-        Self::OWNER_TOTAL_SHARE * (bytes as real) / (page_size::<A>() as real)
+        Self::OWNER_TOTAL_SHARE * (bytes as real) / (PAGE_SIZE as real)
     }
 
     /// A share is proportional to the bytes it comes with, so splitting the
@@ -348,13 +358,13 @@ impl<A: ArchPagingMeta> Mapping<A> {
         ensures
             Self::share_of(b1) + Self::share_of(b2) == Self::share_of(b1 + b2),
     {
-        let ps = page_size::<A>() as real;
+        let ps = PAGE_SIZE as real;
         assert((b1 + b2) as real == (b1 as real) + (b2 as real));
         assert(Self::OWNER_TOTAL_SHARE * ((b1 as real) + (b2 as real)) == Self::OWNER_TOTAL_SHARE
             * (b1 as real) + Self::OWNER_TOTAL_SHARE * (b2 as real));
         let x = Self::OWNER_TOTAL_SHARE * (b1 as real);
         let y = Self::OWNER_TOTAL_SHARE * (b2 as real);
-        <A::MinPageSize as PageSize>::lemma_size_wf();
+        lemma_min_page_wf();
         assert(ps > 0.0real);
         assert((x + y) / ps == x / ps + y / ps) by (nonlinear_arith)
             requires
@@ -366,12 +376,12 @@ impl<A: ArchPagingMeta> Mapping<A> {
     /// it is owning more.
     pub proof fn lemma_share_of_pos(b1: int, b2: int)
         requires
-            0 < b1 < b2 <= page_size::<A>(),
+            0 < b1 < b2 <= PAGE_SIZE,
         ensures
             0.0real < Self::share_of(b1) < Self::share_of(b2),
     {
-        <A::MinPageSize as PageSize>::lemma_size_wf();
-        let ps = page_size::<A>() as real;
+        lemma_min_page_wf();
+        let ps = PAGE_SIZE as real;
         let x = Self::OWNER_TOTAL_SHARE * (b1 as real);
         let y = Self::OWNER_TOTAL_SHARE * (b2 as real);
         assert(0.0real < x < y);
@@ -388,7 +398,7 @@ impl<A: ArchPagingMeta> Mapping<A> {
     }
 
     /// The page this records.
-    pub closed spec fn vpage(&self) -> Page<A::MinPageSize> {
+    pub closed spec fn vpage(&self) -> Page<MinPageSize> {
         self.vpage
     }
 
@@ -398,7 +408,7 @@ impl<A: ArchPagingMeta> Mapping<A> {
     }
 
     /// What the page resolves to, or `None` where the record says nothing.
-    pub closed spec fn frame(&self) -> Option<VirtMapping<A::MinPageSize>> {
+    pub closed spec fn frame(&self) -> Option<VirtMapping<MinPageSize>> {
         self.frame@
     }
 
@@ -455,7 +465,7 @@ impl<A: ArchPagingMeta> Mapping<A> {
     pub proof fn update_frame(
         tracked &mut self,
         tracked other: &mut Self,
-        frame: Option<VirtMapping<A::MinPageSize>>,
+        frame: Option<VirtMapping<MinPageSize>>,
     )
         requires
             old(self).share() == Self::OWNER_TOTAL_SHARE,
@@ -505,8 +515,7 @@ impl<A: ArchPagingMeta> Mapping<A> {
 /// here instead of once per permission -- two copies of an invariant this
 /// delicate would drift, and a permission that disagreed with its twin about
 /// which bytes it owns is exactly the unsoundness the tokens exist to prevent.
-#[verifier::reject_recursive_types(A)]
-pub ghost struct MemShape<A: ArchPagingMeta> {
+pub ghost struct MemShape {
     /// How many bytes the memory spans.
     pub size: nat,
     /// Where it starts inside its first page.
@@ -519,10 +528,10 @@ pub ghost struct MemShape<A: ArchPagingMeta> {
     /// frames to name them by.
     pub npages: nat,
     /// The frames it sits in, in order, when it is pinned; empty when it is not.
-    pub frame_addrs: Seq<PhysFrame<A::MinPageSize>>,
+    pub frame_addrs: Seq<PhysFrame<MinPageSize>>,
 }
 
-impl<A: ArchPagingMeta> MemShape<A> {
+impl MemShape {
     /// The number of pages this memory occupies.
     #[verifier::inline]
     pub open spec fn npages(&self) -> int {
@@ -544,7 +553,7 @@ impl<A: ArchPagingMeta> MemShape<A> {
         if i <= 0 {
             0
         } else {
-            i * page_size::<A>() - self.offset
+            i * PAGE_SIZE - self.offset
         }
     }
 
@@ -567,7 +576,7 @@ impl<A: ArchPagingMeta> MemShape<A> {
 
     /// The page an alias at `addr` occupies at index `i`.
     pub open spec fn vpage_at(&self, addr: int, i: int) -> int {
-        page_start_of::<A>(addr) + i * page_size::<A>()
+        page_start_of(addr) + i * PAGE_SIZE
     }
 
     /// The pages an alias at `addr` occupies.
@@ -582,11 +591,11 @@ impl<A: ArchPagingMeta> MemShape<A> {
     /// Frames are either named for every page or for none: memory is pinned or
     /// it is not, and there is no state in between.
     pub open spec fn wf(&self) -> bool {
-        &&& self.offset < page_size::<A>()
+        &&& self.offset < PAGE_SIZE
         &&& self.size == 0 <==> self.npages == 0
         &&& self.npages > 0 ==> {
-            &&& self.size + self.offset <= self.npages * page_size::<A>()
-            &&& (self.npages - 1) * page_size::<A>() < self.size + self.offset
+            &&& self.size + self.offset <= self.npages * PAGE_SIZE
+            &&& (self.npages - 1) * PAGE_SIZE < self.size + self.offset
         }
         &&& self.pinned() ==> self.frame_addrs.len() == self.npages
     }
@@ -598,7 +607,7 @@ impl<A: ArchPagingMeta> MemShape<A> {
             self.wf(),
             0 <= i < self.npages(),
         ensures
-            0 < self.bytes_in_page(i) <= page_size::<A>(),
+            0 < self.bytes_in_page(i) <= PAGE_SIZE,
             self.byte_start_of_page(i) + self.bytes_in_page(i) == min(
                 self.size as int,
                 self.byte_start_of_page(i + 1),
@@ -607,7 +616,7 @@ impl<A: ArchPagingMeta> MemShape<A> {
                 == self.size,
             i < self.npages() - 1 ==> self.byte_start_of_page(i + 1) <= self.size,
     {
-        let ps = page_size::<A>() as int;
+        let ps = PAGE_SIZE as int;
         assert((i + 1) * ps == i * ps + ps) by (nonlinear_arith);
         if i > 0 {
             assert(i * ps >= 1 * ps) by (nonlinear_arith)
@@ -627,11 +636,11 @@ impl<A: ArchPagingMeta> MemShape<A> {
 
     /// Which of this memory's pages holds the byte at index `b`.
     pub open spec fn page_of_byte(&self, b: int) -> int {
-        (b + self.offset) / page_size::<A>() as int
+        (b + self.offset) / PAGE_SIZE as int
     }
 
     /// The shape of the first `at` bytes.
-    pub open spec fn take(&self, at: nat) -> MemShape<A> {
+    pub open spec fn take(&self, at: nat) -> MemShape {
         let np = self.page_of_byte(at - 1) + 1;
         MemShape {
             size: at,
@@ -651,11 +660,11 @@ impl<A: ArchPagingMeta> MemShape<A> {
     /// its page, and it runs from that page rather than from this memory's
     /// first: the page the split lands in belongs to both halves whenever the
     /// split is not page-aligned.
-    pub open spec fn skip(&self, at: nat) -> MemShape<A> {
+    pub open spec fn skip(&self, at: nat) -> MemShape {
         let st = self.page_of_byte(at as int);
         MemShape {
             size: (self.size - at) as nat,
-            offset: ((at + self.offset) % page_size::<A>() as int) as usize,
+            offset: ((at + self.offset) % PAGE_SIZE as int) as usize,
             npages: (self.npages() - st) as nat,
             frame_addrs: if self.pinned() {
                 self.frame_addrs.skip(st)
@@ -683,7 +692,7 @@ impl<A: ArchPagingMeta> MemShape<A> {
                 let np = self.take(at).npages();
                 &&& 0 <= st <= np <= self.npages()
                 &&& np <= st + 1
-                &&& at + self.offset == st * page_size::<A>() + self.skip(at).offset
+                &&& at + self.offset == st * PAGE_SIZE + self.skip(at).offset
                 &&& self.skip(at).offset == 0 <==> np == st
                 &&& self.take(at).pinned() == self.pinned()
                 &&& self.skip(at).pinned() == self.pinned()
@@ -694,7 +703,7 @@ impl<A: ArchPagingMeta> MemShape<A> {
             vstd::arithmetic::div_mod::lemma_mod_bound,
         };
 
-        let ps = page_size::<A>() as int;
+        let ps = PAGE_SIZE as int;
         let st = self.page_of_byte(at as int);
         let stl = self.page_of_byte(at - 1);
         let np = stl + 1;
@@ -824,7 +833,7 @@ impl<A: ArchPagingMeta> MemShape<A> {
         };
 
         self.lemma_split(at);
-        let ps = page_size::<A>() as int;
+        let ps = PAGE_SIZE as int;
         let st = self.page_of_byte(at as int);
         let np = self.take(at).npages();
         assert(at + self.offset <= np * ps);
@@ -887,7 +896,7 @@ impl<A: ArchPagingMeta> MemShape<A> {
         };
 
         self.lemma_split(at);
-        let ps = page_size::<A>() as int;
+        let ps = PAGE_SIZE as int;
         let st = self.page_of_byte(at as int);
         let off2 = self.skip(at).offset as int;
         assert(at + self.offset == st * ps + off2);
@@ -916,20 +925,19 @@ impl<A: ArchPagingMeta> MemShape<A> {
         requires
             self.wf(),
             0 < at < self.size,
-            page_offset_of::<A>(addr) == self.offset,
+            page_offset_of(addr) == self.offset,
         ensures
-            page_offset_of::<A>(addr + at) == self.skip(at).offset,
-            page_start_of::<A>(addr + at) == page_start_of::<A>(addr) + self.page_of_byte(
-                at as int,
-            ) * page_size::<A>(),
+            page_offset_of(addr + at) == self.skip(at).offset,
+            page_start_of(addr + at) == page_start_of(addr) + self.page_of_byte(at as int)
+                * PAGE_SIZE,
     {
         self.lemma_split(at);
-        let ps = page_size::<A>() as int;
+        let ps = PAGE_SIZE as int;
         let off = self.offset as int;
         let a2 = at as int;
         vstd::arithmetic::div_mod::lemma_add_mod_noop(addr, a2, ps);
         vstd::arithmetic::div_mod::lemma_add_mod_noop(off, a2, ps);
-        vstd::arithmetic::div_mod::lemma_small_mod(self.offset as nat, page_size::<A>() as nat);
+        vstd::arithmetic::div_mod::lemma_small_mod(self.offset as nat, PAGE_SIZE as nat);
     }
 
     /// Split the record shares one alias holds at byte `at`.
@@ -939,14 +947,14 @@ impl<A: ArchPagingMeta> MemShape<A> {
     /// left owning exactly as much of the record as it owns of the page.
     pub proof fn split_records(
         &self,
-        tracked records: Seq<Mapping<A>>,
+        tracked records: Seq<Mapping>,
         at: nat,
         addr: int,
-    ) -> (tracked res: (Seq<Mapping<A>>, Seq<Mapping<A>>))
+    ) -> (tracked res: (Seq<Mapping>, Seq<Mapping>))
         requires
             self.wf(),
             0 < at < self.size,
-            page_offset_of::<A>(addr) == self.offset,
+            page_offset_of(addr) == self.offset,
             self.records_wf(records, addr, self.pinned()),
         ensures
             self.take(at).records_wf(res.0, addr, self.pinned()),
@@ -954,7 +962,7 @@ impl<A: ArchPagingMeta> MemShape<A> {
     {
         self.lemma_split(at);
         self.lemma_alias_offset_shift(at, addr);
-        let ghost ps = page_size::<A>() as int;
+        let ghost ps = PAGE_SIZE as int;
         let ghost st = self.page_of_byte(at as int);
         let ghost np = self.take(at).npages();
         let ghost lbytes = self.bytes_before_split(at);
@@ -967,16 +975,17 @@ impl<A: ArchPagingMeta> MemShape<A> {
             self.skip(at).lemma_bytes_in_page(0);
             self.lemma_bytes_in_page(st);
             let ghost rbytes = self.bytes_in_page(st) - lbytes;
-            Mapping::<A>::lemma_share_of_add(lbytes, rbytes);
-            Mapping::<A>::lemma_share_of_pos(rbytes, self.bytes_in_page(st));
+            Mapping::lemma_share_of_add(lbytes, rbytes);
+            Mapping::lemma_share_of_pos(rbytes, self.bytes_in_page(st));
             let tracked mut rec = right.tracked_pop_front();
-            let tracked part = rec.split(Mapping::<A>::share_of(rbytes));
+            let tracked part = rec.split(Mapping::share_of(rbytes));
             left.tracked_push(rec);
             right.tracked_push_front(part);
         }
         assert(self.take(at).records_wf(left, addr, self.pinned())) by {
-            assert forall|i: int| 0 <= i < np implies #[trigger] left[i].vpage_addr()
-                == self.take(at).vpage_at(addr, i) && left[i].share() == Mapping::<A>::share_of(
+            assert forall|i: int| 0 <= i < np implies #[trigger] left[i].vpage_addr() == self.take(
+                at,
+            ).vpage_at(addr, i) && left[i].share() == Mapping::share_of(
                 self.take(at).bytes_in_page(i),
             ) && left[i].frame().is_some() && (self.pinned() ==> left[i].frame() == Some(
                 VirtMapping::Fixed(self.take(at).frame_addrs[i]),
@@ -986,10 +995,11 @@ impl<A: ArchPagingMeta> MemShape<A> {
             }
         }
         assert(self.skip(at).records_wf(right, addr + at, self.pinned())) by {
-            assert forall|j: int| 0 <= j < self.skip(at).npages() implies #[trigger]
-            right[j].vpage_addr() == self.skip(at).vpage_at(addr + at, j) && right[j].share()
-                == Mapping::<A>::share_of(self.skip(at).bytes_in_page(j)) && right[j].frame().is_some()
-                && (self.pinned() ==> right[j].frame() == Some(
+            assert forall|j: int|
+                0 <= j < self.skip(at).npages() implies #[trigger] right[j].vpage_addr()
+                == self.skip(at).vpage_at(addr + at, j) && right[j].share() == Mapping::share_of(
+                self.skip(at).bytes_in_page(j),
+            ) && right[j].frame().is_some() && (self.pinned() ==> right[j].frame() == Some(
                 VirtMapping::Fixed(self.skip(at).frame_addrs[j]),
             )) by {
                 self.lemma_skip_page(at, j);
@@ -1039,8 +1049,7 @@ impl<A: ArchPagingMeta> MemShape<A> {
             right.tracked_push_front(r);
         }
         assert(self.take(at).phys_wf(left)) by {
-            assert forall|i: int|
-                0 <= i < np implies (#[trigger] left[i]).is_range(
+            assert forall|i: int| 0 <= i < np implies (#[trigger] left[i]).is_range(
                 self.take(at).frame_addrs[i]@ + self.take(at).offset_in_page(i),
                 self.take(at).bytes_in_page(i),
             ) by {
@@ -1052,8 +1061,8 @@ impl<A: ArchPagingMeta> MemShape<A> {
             }
         }
         assert(self.skip(at).phys_wf(right)) by {
-            assert forall|j: int|
-                0 <= j < self.skip(at).npages() implies (#[trigger] right[j]).is_range(
+            assert forall|j: int| 0 <= j < self.skip(at).npages() implies (
+            #[trigger] right[j]).is_range(
                 self.skip(at).frame_addrs[j]@ + self.skip(at).offset_in_page(j),
                 self.skip(at).bytes_in_page(j),
             ) by {
@@ -1090,13 +1099,15 @@ impl<A: ArchPagingMeta> MemShape<A> {
     /// `pinned` is whether the frames are the permission's to name, and it is
     /// what decides how much the records must say -- an unpinned page is known
     /// to be mapped, a pinned one to be mapped to a named frame.
-    pub open spec fn records_wf(&self, records: Seq<Mapping<A>>, addr: int, pinned: bool) -> bool {
+    pub open spec fn records_wf(&self, records: Seq<Mapping>, addr: int, pinned: bool) -> bool {
         &&& records.len() == self.npages()
         &&& forall|i: int|
             #![trigger records[i]]
             0 <= i < self.npages() ==> {
                 &&& records[i].vpage_addr() == self.vpage_at(addr, i)
-                &&& records[i].share() == Mapping::<A>::share_of(self.bytes_in_page(i))
+                &&& records[i].share() == Mapping::share_of(
+                    self.bytes_in_page(i),
+                )
                 // Holding a permission is holding memory that can be read and
                 // written, which an unmapped page cannot be: a record of `None`
                 // says the page reaches no frame at all.
@@ -1117,8 +1128,7 @@ impl<A: ArchPagingMeta> MemShape<A> {
 /// that spans it or by any of the elements inside -- which is what makes
 /// [`Self::split_at`] statable at all, since the leftover of peeling an element
 /// off an array has no Rust type to be keyed by.
-#[verifier::reject_recursive_types(A)]
-pub tracked struct MemOwn<A: ArchPagingMeta> {
+pub tracked struct MemOwn {
     /// One address token per alias, keyed by the address the alias starts at.
     /// Owning the virtual range a pointer spans is what makes that pointer this
     /// permission's to use, and the tokens come from one address space, so no
@@ -1134,15 +1144,15 @@ pub tracked struct MemOwn<A: ArchPagingMeta> {
     ///
     /// The ids are [`Mapping::id_of_vpage`], so no id has to travel with the
     /// permission for the two sides to be comparable.
-    tracked mapping: Map<int, Seq<Mapping<A>>>,
+    tracked mapping: Map<int, Seq<Mapping>>,
     ghost size: nat,
     ghost offset: usize,
     ghost npages: nat,
-    ghost frame_addrs: Seq<PhysFrame<A::MinPageSize>>,
+    ghost frame_addrs: Seq<PhysFrame<MinPageSize>>,
     ghost is_pt: bool,
 }
 
-impl<A: ArchPagingMeta> MemOwn<A> {
+impl MemOwn {
     /// The addresses at which this memory can be reached.
     pub closed spec fn addrs(&self) -> Set<int> {
         self.virt.dom()
@@ -1158,7 +1168,7 @@ impl<A: ArchPagingMeta> MemOwn<A> {
     }
 
     /// What this memory is, without its type.
-    pub closed spec fn shape(&self) -> MemShape<A> {
+    pub closed spec fn shape(&self) -> MemShape {
         MemShape {
             size: self.size,
             offset: self.offset,
@@ -1171,7 +1181,7 @@ impl<A: ArchPagingMeta> MemOwn<A> {
         self.size
     }
 
-    pub closed spec fn frames(&self) -> Seq<PhysFrame<A::MinPageSize>> {
+    pub closed spec fn frames(&self) -> Seq<PhysFrame<MinPageSize>> {
         self.frame_addrs
     }
 
@@ -1187,13 +1197,15 @@ impl<A: ArchPagingMeta> MemOwn<A> {
     #[verifier::type_invariant]
     pub closed spec fn wf(&self) -> bool {
         &&& self.shape().wf()
-        &&& self.shape().phys_wf(self.phys)
+        &&& self.shape().phys_wf(
+            self.phys,
+        )
         // Every alias starts at the same offset within its page, and that
         // offset is the shape's: aliases are the same bytes seen through
         // different translations, and translation does not move a byte within
         // its page.
         &&& forall|a: int| #[trigger]
-            self.virt.dom().contains(a) ==> page_offset_of::<A>(a) == self.shape().offset
+            self.virt.dom().contains(a) ==> page_offset_of(a) == self.shape().offset
         &&& forall|a: int| #[trigger]
             self.virt.dom().contains(a) ==> self.shape().alias_wf(self.virt[a], a)
         &&& self.mapping.dom() =~= self.virt.dom()
@@ -1212,21 +1224,21 @@ impl<A: ArchPagingMeta> MemOwn<A> {
     /// is reached `at` bytes further along.
     proof fn split_aliases(
         tracked virt: Map<int, VirtAddrTok>,
-        tracked mapping: Map<int, Seq<Mapping<A>>>,
-        sh: MemShape<A>,
+        tracked mapping: Map<int, Seq<Mapping>>,
+        sh: MemShape,
         at: nat,
     ) -> (tracked res: (
         Map<int, VirtAddrTok>,
-        Map<int, Seq<Mapping<A>>>,
+        Map<int, Seq<Mapping>>,
         Map<int, VirtAddrTok>,
-        Map<int, Seq<Mapping<A>>>,
+        Map<int, Seq<Mapping>>,
     ))
         requires
             sh.wf(),
             0 < at < sh.size,
             mapping.dom() =~= virt.dom(),
             forall|a: int| #[trigger]
-                virt.dom().contains(a) ==> page_offset_of::<A>(a) == sh.offset && sh.alias_wf(
+                virt.dom().contains(a) ==> page_offset_of(a) == sh.offset && sh.alias_wf(
                     virt[a],
                     a,
                 ),
@@ -1238,13 +1250,15 @@ impl<A: ArchPagingMeta> MemOwn<A> {
             res.2.dom() =~= virt.dom().map(|a: int| a + at),
             res.3.dom() =~= res.2.dom(),
             forall|a: int| #[trigger]
-                res.0.dom().contains(a) ==> page_offset_of::<A>(a) == sh.take(at).offset
-                    && sh.take(at).alias_wf(res.0[a], a),
+                res.0.dom().contains(a) ==> page_offset_of(a) == sh.take(at).offset && sh.take(
+                    at,
+                ).alias_wf(res.0[a], a),
             forall|a: int| #[trigger]
                 res.1.dom().contains(a) ==> sh.take(at).records_wf(res.1[a], a, sh.pinned()),
             forall|b: int| #[trigger]
-                res.2.dom().contains(b) ==> page_offset_of::<A>(b) == sh.skip(at).offset
-                    && sh.skip(at).alias_wf(res.2[b], b),
+                res.2.dom().contains(b) ==> page_offset_of(b) == sh.skip(at).offset && sh.skip(
+                    at,
+                ).alias_wf(res.2[b], b),
             forall|b: int| #[trigger]
                 res.3.dom().contains(b) ==> sh.skip(at).records_wf(res.3[b], b, sh.pinned()),
         decreases virt.dom().len(),
@@ -1255,12 +1269,7 @@ impl<A: ArchPagingMeta> MemOwn<A> {
         if virt.dom().len() == 0 {
             assert(virt.dom() =~= Set::<int>::empty());
             assert(virt.dom().map(|a: int| a + at) =~= Set::<int>::empty());
-            (
-                Map::tracked_empty(),
-                Map::tracked_empty(),
-                Map::tracked_empty(),
-                Map::tracked_empty(),
-            )
+            (Map::tracked_empty(), Map::tracked_empty(), Map::tracked_empty(), Map::tracked_empty())
         } else {
             let ghost a = virt.dom().choose();
             let ghost old_dom = virt.dom();
@@ -1317,16 +1326,7 @@ impl<A: ArchPagingMeta> MemOwn<A> {
         use_type_invariant(&self);
         let ghost sh = self.shape();
         sh.lemma_split(at);
-        let tracked MemOwn {
-            virt,
-            phys,
-            mapping,
-            size,
-            offset,
-            npages,
-            frame_addrs,
-            is_pt,
-        } = self;
+        let tracked MemOwn { virt, phys, mapping, size, offset, npages, frame_addrs, is_pt } = self;
         let tracked (lphys, rphys) = sh.split_phys(phys, at);
         let tracked (lv, lm, rv, rm) = Self::split_aliases(virt, mapping, sh, at);
         let ghost lsh = sh.take(at);
@@ -1394,8 +1394,9 @@ impl<A: ArchPagingMeta> MemOwn<A> {
             let ghost old_addrs = self.addrs();
             let tracked (first, rest) = self.split_at(esize);
             let tracked mut res = rest.into_chunks(esize, (n - 1) as nat);
-            assert forall|i: int| 0 < i < n implies #[trigger] res[i - 1].addrs()
-                =~= old_addrs.map(|a: int| a + i * esize) by {
+            assert forall|i: int| 0 < i < n implies #[trigger] res[i - 1].addrs() =~= old_addrs.map(
+                |a: int| a + i * esize,
+            ) by {
                 assert(i * esize == esize + (i - 1) * esize) by (nonlinear_arith);
                 lemma_shift_twice(old_addrs, esize as int, (i - 1) * esize);
             }
@@ -1420,7 +1421,7 @@ impl<A: ArchPagingMeta> MemOwn<A> {
     pub proof fn lemma_aliases_share_page_offset(tracked &self)
         ensures
             forall|a: int| #[trigger]
-                self.addrs().contains(a) ==> page_offset_of::<A>(a) == self.shape().offset,
+                self.addrs().contains(a) ==> page_offset_of(a) == self.shape().offset,
     {
         use_type_invariant(self);
     }
@@ -1431,7 +1432,7 @@ impl<A: ArchPagingMeta> MemOwn<A> {
     /// No id hypothesis and no instance to match: the record for a page is
     /// pinned to [`Mapping::id_of_vpage`], so this permission's share and the
     /// table's are shares of the same ghost variable by construction.
-    pub closed spec fn record_at(&self, a: int, i: int) -> Option<VirtMapping<A::MinPageSize>>
+    pub closed spec fn record_at(&self, a: int, i: int) -> Option<VirtMapping<MinPageSize>>
         recommends
             self.addrs().contains(a),
             0 <= i < self.shape().npages(),
@@ -1490,7 +1491,8 @@ impl<A: ArchPagingMeta> MemOwn<A> {
         use_type_invariant(&self);
         use_type_invariant(other);
         let ghost old_self = self;
-        let tracked MemOwn { mut virt, phys, mapping, size, offset, npages, frame_addrs, is_pt } = self;
+        let tracked MemOwn { mut virt, phys, mapping, size, offset, npages, frame_addrs, is_pt } =
+            self;
         if !old_self.addrs().disjoint(other.addrs()) {
             let ghost a = choose|a: int|
                 #![trigger other.addrs().contains(a)]
@@ -1526,21 +1528,25 @@ impl<A: ArchPagingMeta> MemOwn<A> {
             res == self,
             forall|i: int, j: int|
                 #![trigger self.phys_dom(i), other.phys_dom(j)]
-                0 <= i < self.phys_len() && 0 <= j < other.phys_len()
-                    ==> self.phys_dom(i).disjoint(other.phys_dom(j)),
+                0 <= i < self.phys_len() && 0 <= j < other.phys_len() ==> self.phys_dom(i).disjoint(
+                    other.phys_dom(j),
+                ),
     {
         use_type_invariant(&self);
         use_type_invariant(other);
         let ghost old_self = self;
-        let tracked MemOwn { virt, mut phys, mapping, size, offset, npages, frame_addrs, is_pt } = self;
+        let tracked MemOwn { virt, mut phys, mapping, size, offset, npages, frame_addrs, is_pt } =
+            self;
         if !(forall|i: int, j: int|
             #![trigger old_self.phys_dom(i), other.phys_dom(j)]
-            0 <= i < old_self.phys_len() && 0 <= j < other.phys_len()
-                ==> old_self.phys_dom(i).disjoint(other.phys_dom(j))) {
+            0 <= i < old_self.phys_len() && 0 <= j < other.phys_len() ==> old_self.phys_dom(
+                i,
+            ).disjoint(other.phys_dom(j))) {
             let (i, j) = choose|i: int, j: int|
                 #![trigger old_self.phys_dom(i), other.phys_dom(j)]
-                0 <= i < old_self.phys_len() && 0 <= j < other.phys_len()
-                    && !old_self.phys_dom(i).disjoint(other.phys_dom(j));
+                0 <= i < old_self.phys_len() && 0 <= j < other.phys_len() && !old_self.phys_dom(
+                    i,
+                ).disjoint(other.phys_dom(j));
             let tracked tok = phys.tracked_borrow_mut(i);
             let tracked other_tok = other.phys.tracked_borrow(j);
             tok.is_disjoint(other_tok);
@@ -1552,10 +1558,9 @@ impl<A: ArchPagingMeta> MemOwn<A> {
 /// A more **General** memory permission that supports
 /// shared mapping.
 #[verifier::accept_recursive_types(T)]
-#[verifier::reject_recursive_types(A)]
-pub tracked struct GeneralPointsTo<T, A: ArchPagingMeta> {
+pub tracked struct GeneralPointsTo<T> {
     /// The bytes this permission owns, and every way in to them.
-    tracked own: MemOwn<A>,
+    tracked own: MemOwn,
     /// Every pointer that reaches those bytes.
     ///
     /// Kept alongside the addresses because a pointer is more than an address:
@@ -1584,7 +1589,7 @@ pub tracked struct PageWalkPath<'a, A: ArchPagingMeta> {
     ghost max_level: PageLevel,
     tracked cr3: &'a RustRegisterPointsTo<Cr3>,
     // 0-> root table, 1-> next level, ...
-    tracked entries: Seq<&'a GeneralPointsTo<PTEntry<A>, A>>,
+    tracked entries: Seq<&'a GeneralPointsTo<PTEntry<A>>>,
 }
 
 impl<'a, A: ArchPagingMeta> PageWalkPath<'a, A> {
@@ -1638,9 +1643,7 @@ impl<'a, A: ArchPagingMeta> PageWalkPath<'a, A> {
     /// in-page offset.
     spec fn translate_to_phys_addr(&self) -> Option<usize> {
         if self.is_leaf() {
-            Some(
-                (self.entries.last().value().page_frame_spec() + self.leaf_page_offset()) as usize,
-            )
+            Some((self.entries.last().value().page_frame_spec() + self.leaf_page_offset()) as usize)
         } else {
             None
         }
@@ -1673,8 +1676,8 @@ impl<'a, A: ArchPagingMeta> PageWalkPath<'a, A> {
     }
 }
 
-impl<T, A: ArchPagingMeta> View for GeneralPointsTo<T, A> {
-    type V = GeneralPointsToData<T, A>;
+impl<T> View for GeneralPointsTo<T> {
+    type V = GeneralPointsToData<T>;
 
     closed spec fn view(&self) -> Self::V {
         GeneralPointsToData {
@@ -1686,14 +1689,14 @@ impl<T, A: ArchPagingMeta> View for GeneralPointsTo<T, A> {
     }
 }
 
-impl<T, A: ArchPagingMeta> GeneralPointsTo<T, A> {
+impl<T> GeneralPointsTo<T> {
     /// The bytes this permission owns, and every way in to them.
-    pub closed spec fn own(&self) -> MemOwn<A> {
+    pub closed spec fn own(&self) -> MemOwn {
         self.own
     }
 
     /// What this memory is, without its type: the shape both permissions share.
-    pub closed spec fn shape(&self) -> MemShape<A> {
+    pub closed spec fn shape(&self) -> MemShape {
         self.own.shape()
     }
 
@@ -1728,7 +1731,9 @@ impl<T, A: ArchPagingMeta> GeneralPointsTo<T, A> {
         // The bytes are exactly those the pointers reach: an address is owned
         // if and only if some pointer of this permission starts there.
         &&& self.own.size() == size_of::<T>()
-        &&& self.own.addrs() =~= self.ptrs.map(|p: *mut T| p@.addr as int)
+        &&& self.own.addrs() =~= self.ptrs.map(
+            |p: *mut T| p@.addr as int,
+        )
         // The value is held, not asserted: memory that any pointer reaches is
         // memory whose vstd permission this one keeps, and the permission names
         // one of those pointers.
@@ -1770,9 +1775,7 @@ impl<T, A: ArchPagingMeta> GeneralPointsTo<T, A> {
     /// No id hypothesis and no instance to match: the record for a page is
     /// pinned to [`Mapping::id_of_vpage`], so this permission's share and the
     /// table's are shares of the same ghost variable by construction.
-    pub closed spec fn record_at(&self, p: *mut T, i: int) -> Option<
-        VirtMapping<A::MinPageSize>,
-    >
+    pub closed spec fn record_at(&self, p: *mut T, i: int) -> Option<VirtMapping<MinPageSize>>
         recommends
             self.covers(p),
             0 <= i < self.npages(),
@@ -1805,7 +1808,7 @@ impl<T, A: ArchPagingMeta> GeneralPointsTo<T, A> {
 
     /// The frames backing this memory, in order.
     #[verifier::inline]
-    pub open spec fn frames(&self) -> Seq<PhysFrame<A::MinPageSize>> {
+    pub open spec fn frames(&self) -> Seq<PhysFrame<MinPageSize>> {
         self@.frame_addrs
     }
 
@@ -1826,14 +1829,13 @@ impl<T, A: ArchPagingMeta> GeneralPointsTo<T, A> {
     pub proof fn lemma_aliases_share_page_offset(tracked &self)
         ensures
             forall|p: *mut T| #[trigger]
-                self.covers(p) ==> page_offset_of::<A>(p@.addr as int) == self.shape().offset,
+                self.covers(p) ==> page_offset_of(p@.addr as int) == self.shape().offset,
     {
         use_type_invariant(self);
         let tracked own = &self.own;
         own.lemma_aliases_share_page_offset();
-        assert forall|p: *mut T| #[trigger] self.covers(p) implies page_offset_of::<A>(
-            p@.addr as int,
-        ) == self.shape().offset by {
+        assert forall|p: *mut T| #[trigger] self.covers(p) implies page_offset_of(p@.addr as int)
+            == self.shape().offset by {
             assert(self.own.addrs().contains(p@.addr as int));
         }
     }
@@ -1847,11 +1849,9 @@ impl<T, A: ArchPagingMeta> GeneralPointsTo<T, A> {
     /// to invent an answer there.
     pub open spec fn is_at_phys_addr(&self, pa: int) -> bool {
         &&& self.frames().len() > 0
-        &&& self.frames()[0]@ == pa - page_offset_of::<A>(pa)
+        &&& self.frames()[0]@ == pa - page_offset_of(pa)
         &&& forall|p: *mut T| #[trigger]
-            self@.ptrs.contains(p) ==> page_offset_of::<A>(p@.addr as int) == page_offset_of::<A>(
-                pa,
-            )
+            self@.ptrs.contains(p) ==> page_offset_of(p@.addr as int) == page_offset_of(pa)
     }
 
     #[verifier::inline]
@@ -1906,9 +1906,8 @@ impl<T, A: ArchPagingMeta> GeneralPointsTo<T, A> {
         let ghost old_self = self;
         let tracked GeneralPointsTo { own, ptrs, inner } = self;
         let tracked own = own.is_disjoint(&other.own);
-        assert forall|p: *mut T| #[trigger] old_self.ptrs().contains(p) implies !other.ptrs().contains(
-            p,
-        ) by {
+        assert forall|p: *mut T| #[trigger]
+            old_self.ptrs().contains(p) implies !other.ptrs().contains(p) by {
             assert(old_self.own.addrs().contains(p@.addr as int));
             assert(other.own.addrs().contains(p@.addr as int) ==> false);
         }
@@ -1944,8 +1943,9 @@ impl<T, A: ArchPagingMeta> GeneralPointsTo<T, A> {
             res == self,
             forall|i: int, j: int|
                 #![trigger self.phys_dom(i), other.phys_dom(j)]
-                0 <= i < self.phys_len() && 0 <= j < other.phys_len()
-                    ==> self.phys_dom(i).disjoint(other.phys_dom(j)),
+                0 <= i < self.phys_len() && 0 <= j < other.phys_len() ==> self.phys_dom(i).disjoint(
+                    other.phys_dom(j),
+                ),
     {
         use_type_invariant(&self);
         let tracked GeneralPointsTo { own, ptrs, inner } = self;
@@ -1960,7 +1960,7 @@ impl<T, A: ArchPagingMeta> GeneralPointsTo<T, A> {
     /// values, the alias sets -- because they are produced by three different
     /// splits; this is what puts them back together.
     proof fn zip_chunks(
-        tracked chunks: Seq<MemOwn<A>>,
+        tracked chunks: Seq<MemOwn>,
         tracked vals: Seq<PointsTo<T>>,
         ptrs: Seq<Set<*mut T>>,
     ) -> (tracked res: Seq<Self>)
@@ -2015,7 +2015,7 @@ impl<T, A: ArchPagingMeta> GeneralPointsTo<T, A> {
     }
 }
 
-impl<T, A: ArchPagingMeta, const N: usize> GeneralPointsTo<[T; N], A> {
+impl<T, const N: usize> GeneralPointsTo<[T; N]> {
     /// See this array as its elements: one permission each, holding the value
     /// that element holds.
     ///
@@ -2023,7 +2023,7 @@ impl<T, A: ArchPagingMeta, const N: usize> GeneralPointsTo<[T; N], A> {
     /// nothing; the values come from [`points_to_array_split`], which is where
     /// the Rust layout of an array is assumed. Each element is reached at every
     /// alias of the array, one element's width further along.
-    pub proof fn into_elements(tracked self) -> (tracked res: Seq<GeneralPointsTo<T, A>>)
+    pub proof fn into_elements(tracked self) -> (tracked res: Seq<GeneralPointsTo<T>>)
         requires
             self.is_init(),
             size_of::<T>() != 0,
@@ -2035,9 +2035,7 @@ impl<T, A: ArchPagingMeta, const N: usize> GeneralPointsTo<[T; N], A> {
             forall|i: int|
                 #![trigger res[i]]
                 0 <= i < N ==> {
-                    &&& res[i].ptrs() =~= self.ptrs().map(
-                        |p: *mut [T; N]| array_element_ptr(p, i),
-                    )
+                    &&& res[i].ptrs() =~= self.ptrs().map(|p: *mut [T; N]| array_element_ptr(p, i))
                     &&& res[i].opt_value() == MemContents::Init(self.value()[i])
                     &&& res[i].own().is_pt() == self.own().is_pt()
                     &&& res[i].own().size() == size_of::<T>()
@@ -2048,8 +2046,9 @@ impl<T, A: ArchPagingMeta, const N: usize> GeneralPointsTo<[T; N], A> {
         use_type_invariant(&self);
         let ghost esize = size_of::<T>() as nat;
         let ghost aptrs = self.ptrs;
-        assert forall|p: *mut [T; N]| #[trigger] aptrs.contains(p) implies p@.addr + N
-            * size_of::<T>() <= usize::MAX by {
+        assert forall|p: *mut [T; N]| #[trigger] aptrs.contains(p) implies p@.addr + N * size_of::<
+            T,
+        >() <= usize::MAX by {
             assert(self.ptrs().contains(p));
         }
         let ghost eptrs = Seq::new(
@@ -2078,7 +2077,7 @@ impl<T, A: ArchPagingMeta, const N: usize> GeneralPointsTo<[T; N], A> {
             assert(aptrs.contains(aptr));
             assert(eptrs[i].contains(array_element_ptr(aptr, i)));
         }
-        let tracked res = GeneralPointsTo::<T, A>::zip_chunks(chunks, vals, eptrs);
+        let tracked res = GeneralPointsTo::<T>::zip_chunks(chunks, vals, eptrs);
         assert forall|i: int| 0 <= i < N implies (#[trigger] res[i]).own().is_pt()
             == own.is_pt() by {
             assert(chunks[i].is_pt() == own.is_pt());
@@ -2102,10 +2101,9 @@ pub open spec fn retype_ptr<S, D>(p: *mut S) -> *mut D {
 /// gives no pointer that `ptr_read`/`ptr_write` will accept. Memory in this
 /// form is *owned but not yet usable*, which is what a frame just handed to the
 /// OS is, and [`Self::into_typed`] is the only way out.
-#[verifier::reject_recursive_types(A)]
-pub tracked struct GeneralPointsToRaw<A: ArchPagingMeta> {
+pub tracked struct GeneralPointsToRaw {
     /// The bytes this permission owns, and every way in to them.
-    tracked own: MemOwn<A>,
+    tracked own: MemOwn,
     /// Every untyped pointer that reaches those bytes.
     ghost ptrs: Set<*mut u8>,
     /// The raw permission for one of the aliases, and the reason this is
@@ -2113,14 +2111,14 @@ pub tracked struct GeneralPointsToRaw<A: ArchPagingMeta> {
     tracked inner: Option<PointsToRaw>,
 }
 
-impl<A: ArchPagingMeta> GeneralPointsToRaw<A> {
+impl GeneralPointsToRaw {
     /// The bytes this permission owns, and every way in to them.
-    pub closed spec fn own(&self) -> MemOwn<A> {
+    pub closed spec fn own(&self) -> MemOwn {
         self.own
     }
 
     /// What this memory is: the shape it shares with [`GeneralPointsTo`].
-    pub closed spec fn shape(&self) -> MemShape<A> {
+    pub closed spec fn shape(&self) -> MemShape {
         self.own.shape()
     }
 
@@ -2139,7 +2137,7 @@ impl<A: ArchPagingMeta> GeneralPointsToRaw<A> {
     }
 
     /// The frames backing this memory, in order.
-    pub closed spec fn frames(&self) -> Seq<PhysFrame<A::MinPageSize>> {
+    pub closed spec fn frames(&self) -> Seq<PhysFrame<MinPageSize>> {
         self.own.frames()
     }
 
@@ -2154,7 +2152,9 @@ impl<A: ArchPagingMeta> GeneralPointsToRaw<A> {
 
     #[verifier::type_invariant]
     spec fn wf(&self) -> bool {
-        &&& self.own.addrs() =~= self.ptrs.map(|p: *mut u8| p@.addr as int)
+        &&& self.own.addrs() =~= self.ptrs.map(
+            |p: *mut u8| p@.addr as int,
+        )
         // The bytes are held, not asserted, exactly as in the typed permission;
         // the raw permission spans one alias's range and carries that alias's
         // provenance, so retyping it lands back on a pointer this permission
@@ -2178,7 +2178,7 @@ impl<A: ArchPagingMeta> GeneralPointsToRaw<A> {
     /// meaningful object rather than a reinterpretation of somebody's bytes.
     ///
     /// The result is uninitialized, because raw memory has no value to inherit.
-    pub proof fn into_typed<T>(tracked self) -> (tracked ret: GeneralPointsTo<T, A>)
+    pub proof fn into_typed<T>(tracked self) -> (tracked ret: GeneralPointsTo<T>)
         requires
             size_of::<T>() == self.size(),
             size_of::<T>() != 0,
@@ -2198,12 +2198,16 @@ impl<A: ArchPagingMeta> GeneralPointsToRaw<A> {
         let ghost new_addrs = new_ptrs.map(|q: *mut T| q@.addr as int);
         let ghost old_addrs = ptrs.map(|p: *mut u8| p@.addr as int);
         assert(new_addrs =~= old_addrs) by {
-            assert forall|a: int| #[trigger] new_addrs.contains(a) implies old_addrs.contains(a) by {
+            assert forall|a: int| #[trigger] new_addrs.contains(a) implies old_addrs.contains(
+                a,
+            ) by {
                 let q = choose|q: *mut T| new_ptrs.contains(q) && q@.addr as int == a;
                 let p = choose|p: *mut u8| ptrs.contains(p) && retype_ptr::<u8, T>(p) == q;
                 assert(old_addrs.contains(p@.addr as int));
             }
-            assert forall|a: int| #[trigger] old_addrs.contains(a) implies new_addrs.contains(a) by {
+            assert forall|a: int| #[trigger] old_addrs.contains(a) implies new_addrs.contains(
+                a,
+            ) by {
                 let p = choose|p: *mut u8| ptrs.contains(p) && p@.addr as int == a;
                 assert(new_ptrs.contains(retype_ptr::<u8, T>(p)));
                 assert(new_addrs.contains(a));
@@ -2239,20 +2243,19 @@ impl<A: ArchPagingMeta> GeneralPointsToRaw<A> {
 /// move, this knows where the memory *is* however many ways in there turn out
 /// to be.
 #[verifier::accept_recursive_types(T)]
-#[verifier::reject_recursive_types(A)]
-pub tracked struct PhysPointsTo<T, A: ArchPagingMeta> {
-    inner: GeneralPointsTo<T, A>,
+pub tracked struct PhysPointsTo<T> {
+    inner: GeneralPointsTo<T>,
 }
 
-impl<T, A: ArchPagingMeta> View for PhysPointsTo<T, A> {
-    type V = GeneralPointsToData<T, A>;
+impl<T> View for PhysPointsTo<T> {
+    type V = GeneralPointsToData<T>;
 
     closed spec fn view(&self) -> Self::V {
         self.inner@
     }
 }
 
-impl<T, A: ArchPagingMeta> PhysPointsTo<T, A> {
+impl<T> PhysPointsTo<T> {
     #[verifier::type_invariant]
     closed spec fn wf(&self) -> bool {
         self.inner.has_pinned_phys_addr()
@@ -2260,13 +2263,13 @@ impl<T, A: ArchPagingMeta> PhysPointsTo<T, A> {
 
     /// The frames this memory sits in, in order.
     #[verifier::inline]
-    pub open spec fn frames(&self) -> Seq<PhysFrame<A::MinPageSize>> {
+    pub open spec fn frames(&self) -> Seq<PhysFrame<MinPageSize>> {
         self@.frame_addrs
     }
 
     /// The frame this memory starts in.
     #[verifier::inline]
-    pub open spec fn start_frame(&self) -> PhysFrame<A::MinPageSize>
+    pub open spec fn start_frame(&self) -> PhysFrame<MinPageSize>
         recommends
             self.frames().len() > 0,
     {
@@ -2285,11 +2288,9 @@ impl<T, A: ArchPagingMeta> PhysPointsTo<T, A> {
     #[verifier::inline]
     pub open spec fn is_at_phys_addr(&self, pa: int) -> bool {
         &&& self.frames().len() > 0
-        &&& self.frames()[0]@ == pa - page_offset_of::<A>(pa)
+        &&& self.frames()[0]@ == pa - page_offset_of(pa)
         &&& forall|p: *mut T| #[trigger]
-            self@.ptrs.contains(p) ==> page_offset_of::<A>(p@.addr as int) == page_offset_of::<A>(
-                pa,
-            )
+            self@.ptrs.contains(p) ==> page_offset_of(p@.addr as int) == page_offset_of(pa)
     }
 
     /// Every virtual pointer that reaches this memory. Empty when nothing maps
@@ -2341,7 +2342,7 @@ impl<T, A: ArchPagingMeta> PhysPointsTo<T, A> {
 
     /// Pinned memory is physical memory. The precondition is the whole
     /// difference between the two permissions.
-    pub proof fn new(tracked inner: GeneralPointsTo<T, A>) -> (tracked ret: PhysPointsTo<T, A>)
+    pub proof fn new(tracked inner: GeneralPointsTo<T>) -> (tracked ret: PhysPointsTo<T>)
         requires
             inner.has_pinned_phys_addr(),
         ensures
@@ -2351,7 +2352,7 @@ impl<T, A: ArchPagingMeta> PhysPointsTo<T, A> {
     }
 
     /// Forget that the memory is pinned.
-    pub proof fn into_general(tracked self) -> (tracked ret: GeneralPointsTo<T, A>)
+    pub proof fn into_general(tracked self) -> (tracked ret: GeneralPointsTo<T>)
         ensures
             ret@ == self@,
     {
@@ -2359,7 +2360,7 @@ impl<T, A: ArchPagingMeta> PhysPointsTo<T, A> {
     }
 
     /// Read the underlying permission without giving up the pinning.
-    pub proof fn borrow_general(tracked &self) -> (tracked ret: &GeneralPointsTo<T, A>)
+    pub proof fn borrow_general(tracked &self) -> (tracked ret: &GeneralPointsTo<T>)
         ensures
             ret@ == self@,
     {

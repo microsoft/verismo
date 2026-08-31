@@ -1,21 +1,4 @@
-//! Everything this crate assumes, in one place.
-//!
-//! [`points_to`](super::points_to) derives its permissions from address tokens;
-//! this module is the handful of steps that cannot be derived, gathered here so
-//! that reviewing what is trusted means reviewing one file.
-//!
-//! There are six, in two groups.
-//!
-//! **Owning the tokens is owning the memory.** vstd's memory is indexed by
-//! address and knows nothing of an MMU, so nothing in it says that owning a
-//! virtual range and the physical range beneath it owns any bytes at all.
-//! [`GeneralPointsTo::borrow`], [`GeneralPointsTo::borrow_mut`] and
-//! [`GeneralPointsTo::into_points_to`] are one assumption in three signatures --
-//! shared, mutable, by value -- and [`GeneralPointsTo::borrow_mut_via_pt`] is
-//! the same for a pointer reached by a page walk rather than by the alias set.
-//!
-//! **Rust lays an array out as its elements.** [`axiom_array_layout`] for the
-//! addresses, [`points_to_array_split`] for the ownership.
+//! Everything this crate assumes in one place for GeneralPointsTo.
 use vstd::layout::{align_of, size_of};
 use vstd::prelude::*;
 use vstd::raw_ptr::{MemContents, PointsTo};
@@ -57,7 +40,7 @@ pub axiom fn points_to_array_split<T, const N: usize>(tracked pt: PointsTo<[T; N
             },
 ;
 
-impl<T, A: ArchPagingMeta> GeneralPointsTo<T, A> {
+impl<T> GeneralPointsTo<T> {
     /// **Assumption.** Holding the address tokens for an alias is holding the
     /// memory it reaches, so a vstd permission for it can be handed out.
     pub axiom fn borrow(tracked &self, ptr: *mut T) -> (tracked ret: &PointsTo<T>)
@@ -112,7 +95,7 @@ impl<T, A: ArchPagingMeta> GeneralPointsTo<T, A> {
     /// claiming a pointer that no longer reaches it -- and nesting the entry
     /// permissions cannot supply that, because a self-mapped root's permission
     /// would have to contain itself.
-    pub axiom fn borrow_mut_via_pt(
+    pub axiom fn borrow_mut_via_pt<A: ArchPagingMeta>(
         tracked &mut self,
         pa: usize,
         ptr: *mut T,
@@ -136,6 +119,14 @@ impl<T, A: ArchPagingMeta> GeneralPointsTo<T, A> {
         ensures
             ret.ptr() == ptr,
             ret.opt_value() == self.opt_value(),
+    ;
+
+    /// **Assumption.** [`Self::borrow`] by value: keeping one alias, and giving
+    /// up every token in exchange for a plain vstd permission to it.
+    pub axiom fn from_points_to(tracked pt: PointsTo<T>) -> (tracked ret: Self)
+        ensures
+            ret.covers(pt.ptr()),
+            ret.opt_value() == pt.opt_value(),
     ;
 }
 

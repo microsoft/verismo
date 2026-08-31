@@ -19,7 +19,7 @@ use crate::structs::ptpage::PTPage;
 use bitflags::Flags;
 use bitflags_verus::FlagsSpec;
 
-use crate::structs::sizes::PageSize;
+use crate::structs::sizes::{MinPageSize, PageSize, PAGE_SIZE};
 
 verus! {
 
@@ -28,7 +28,7 @@ verus! {
 pub open spec fn pgtbl_idx<A: ArchPagingMeta>(vaddr: usize, level: PageLevel) -> usize
     decreases level.depth(),
 {
-    let page_size = <A::MinPageSize as PageSize>::SIZE as nat;
+    let page_size = PAGE_SIZE as nat;
     let entry_count = PTPage::<A>::count();
     let vpage = vaddr as nat / page_size;
     match level.spec_child() {
@@ -39,8 +39,9 @@ pub open spec fn pgtbl_idx<A: ArchPagingMeta>(vaddr: usize, level: PageLevel) ->
 
 pub proof fn lemma_pgtbl_idx_zero<A: ArchPagingMeta>(vaddr: usize)
     ensures
-        pgtbl_idx::<A>(vaddr, PageLevel::Level0) == ((vaddr as nat / (
-        <A::MinPageSize as PageSize>::SIZE as nat)) % PTPage::<A>::count()) as usize,
+        pgtbl_idx::<A>(vaddr, PageLevel::Level0) == ((vaddr as nat / (PAGE_SIZE as nat)) % PTPage::<
+            A,
+        >::count()) as usize,
 {
 }
 
@@ -49,8 +50,8 @@ pub proof fn lemma_pgtbl_idx_step<A: ArchPagingMeta>(vaddr: usize, level: PageLe
         level.spec_child() is Some,
     ensures
         pgtbl_idx::<A>(vaddr, level) == pgtbl_idx::<A>(
-            (((vaddr as nat / (<A::MinPageSize as PageSize>::SIZE as nat)) / PTPage::<A>::count())
-                * (<A::MinPageSize as PageSize>::SIZE as nat)) as usize,
+            (((vaddr as nat / (PAGE_SIZE as nat)) / PTPage::<A>::count()) * (
+            PAGE_SIZE as nat)) as usize,
             level.spec_child().unwrap(),
         ),
 {

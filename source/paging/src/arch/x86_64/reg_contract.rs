@@ -14,8 +14,8 @@ use vstd::prelude::*;
 use machine_model::arch::x86_64::state::RegisterState;
 use machine_model::arch::x86_64::{Cr0Value, Cr3Value, Cr4Value, EferValue};
 
-use crate::structs::arch_contract::{page_offset_width, ArchPagingGeometry, ArchPagingMeta};
-use crate::structs::sizes::PageOffset;
+use crate::structs::arch_contract::{ArchPagingGeometry, ArchPagingMeta};
+use crate::structs::sizes::{MinPageSize, PageOffset, PAGE_OFFSET_WIDTH};
 
 verus! {
 
@@ -59,7 +59,7 @@ pub open spec fn cr3_paging_precondition<A: ArchPagingGeometry>(
     cr4: Cr4Value,
 ) -> bool {
     &&& (cr3@ & !(low_bits_mask_u64(A::phys_addr_width()))) == 0
-    &&& (!cr4.contains(Cr4Value::PCIDE) ==> (cr3@ & (low_bits_mask_u64(page_offset_width::<A>())
+    &&& (!cr4.contains(Cr4Value::PCIDE) ==> (cr3@ & (low_bits_mask_u64(PAGE_OFFSET_WIDTH as nat)
         & !(Cr3Value::PWT@ | Cr3Value::PCD@))) == 0)
 }
 
@@ -189,7 +189,7 @@ impl<A: ArchPagingGeometry> PagingRegisters<A> {
         &&& cr3_paging_precondition::<A>(self.cr3, self.cr4)
         &&& cr4_paging_precondition(self.cr0, self.cr4, self.efer)
         &&& efer_paging_precondition(self.efer)
-        &&& A::MinPageSize::SHIFT == 12
+        &&& PAGE_OFFSET_WIDTH == 12
     }
 }
 

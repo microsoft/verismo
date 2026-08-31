@@ -15,8 +15,8 @@ use crate::structs::arch_contract::{
     level_geometry_wf, ArchPagingGeometry, ArchPagingMeta, GenericPageTableFlagsSpec,
 };
 use crate::structs::entry::PTEntry;
-use crate::structs::ptpage::PTPage;
 use crate::structs::level::PageLevel;
+use crate::structs::ptpage::PTPage;
 use crate::structs::sizes::{lemma_size_4k, PageOffset, Size4KiB};
 use vstd::arithmetic::logarithm::log;
 use vstd::arithmetic::power2::pow2;
@@ -68,8 +68,6 @@ impl<P: X86PagingParams> Copy for X86Paging<P> {
 }
 
 impl<P: X86PagingParams> ArchPagingGeometry for X86Paging<P> {
-    type MinPageSize = Size4KiB;
-
     /// 52 bits, the widest the architecture defines.
     open spec fn phys_addr_width() -> nat {
         52

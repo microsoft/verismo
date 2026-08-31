@@ -98,27 +98,25 @@ pub use arch::x86_64::reg_contract::{
 };
 pub use proofs::address_space::UniqueAddress;
 pub use structs::address;
-pub use structs::arch_contract::{
-    page_offset_width, ArchPagingGeometry, ArchPagingMeta, GenericPageTableFlags,
-};
+pub use structs::arch_contract::{ArchPagingGeometry, ArchPagingMeta, GenericPageTableFlags};
 pub use structs::concurrent_pt;
 pub use structs::entry;
+pub use structs::frame;
+pub use structs::free;
 pub use structs::handle;
 pub use structs::level;
+pub use structs::map;
 pub use structs::os_contract;
 pub use structs::page;
 pub use structs::ptpage;
-pub use structs::free;
-pub use structs::frame;
-pub use structs::map;
 pub use structs::range;
 pub use structs::region;
+pub use structs::sizes;
 pub use structs::split;
+pub use structs::state;
 pub use structs::tlb;
 pub use structs::unmap;
 pub use structs::walk;
-pub use structs::sizes;
-pub use structs::state;
 
 verus! {
 

@@ -20,6 +20,7 @@ use crate::structs::arch_contract::{slot_addr, ArchPagingMeta};
 use crate::structs::concurrent_pt::PTPageSharedPerm;
 use crate::structs::entry::PTEntry;
 use crate::structs::sizes::PageSize;
+use crate::structs::sizes::{lemma_min_page_wf, MinPageSize, PAGE_SIZE};
 
 verus! {
 
@@ -29,7 +30,7 @@ pub const PTE_SHIFT: usize = 9;
 
 /// How many entries a table page holds.
 ///
-/// Fixed here rather than derived from `A::MinPageSize`, because the type of a
+/// Fixed here rather than derived from `MinPageSize`, because the type of a
 /// page has to have a size. An architecture whose smallest page is not four
 /// kibibytes cannot satisfy `level_geometry_wf`, which requires exactly this
 /// many entries.
@@ -46,7 +47,7 @@ impl<A: ArchPagingMeta> PTPage<A> {
     /// How many entries a table page holds: one page of the architecture's smallest size, filled
     /// with entries.
     pub open spec fn count() -> nat {
-        (<A::MinPageSize as PageSize>::SIZE as nat) / vstd::layout::size_of::<usize>()
+        (PAGE_SIZE as nat) / vstd::layout::size_of::<usize>()
     }
 
     /// A table page holds at least one entry, because every architecture this models has a
@@ -55,7 +56,7 @@ impl<A: ArchPagingMeta> PTPage<A> {
         ensures
             Self::count() > 0,
     {
-        <A::MinPageSize as PageSize>::lemma_size_wf();
+        lemma_min_page_wf();
     }
 }
 

@@ -34,9 +34,9 @@ use crate::specs::points_to::page_start_of;
 use crate::specs::points_to::{
     page_offset_of, GeneralPointsTo, PhysAddrTok, PhysPointsTo, VirtAddrTok,
 };
-use crate::structs::arch_contract::page_size;
 use crate::structs::frame::PhysFrame;
 use crate::structs::page::Page;
+use crate::structs::sizes::{MinPageSize, PAGE_SIZE};
 use crate::ArchPagingMeta;
 use vstd::prelude::*;
 use vstd::raw_ptr::MemContents;
@@ -56,17 +56,16 @@ verus! {
 ///   claimed inside the permission, so no new token is needed; what changes is
 ///   the frame, and its claim is lent mutably by the party that owns it -- the
 ///   kernel's page metadata.
-#[verifier::reject_recursive_types(A)]
-pub tracked enum MapVirtPhysToks<'a, T, A: ArchPagingMeta> {
+pub tracked enum MapVirtPhysToks<'a, T> {
     /// The permission is pinned, so it carries the physical claim itself. The
     /// direct map, `vmalloc`, fixed mappings and the recursive map -- types 1-4.
-    MapPinnedPfn(VirtAddrTok, PhysPointsTo<T, A>),
+    MapPinnedPfn(VirtAddrTok, PhysPointsTo<T>),
     /// The permission is unpinned and owns no physical identity, so the frame
     /// claim is lent mutably by whoever does own it. Demand paging -- type 5.
-    MapUnpinnedPfn(GeneralPointsTo<T, A>, &'a mut PhysAddrTok),
+    MapUnpinnedPfn(GeneralPointsTo<T>, &'a mut PhysAddrTok),
 }
 
-impl<'a, T, A: ArchPagingMeta> MapVirtPhysToks<'a, T, A> {
+impl<'a, T> MapVirtPhysToks<'a, T> {
     /// Whether the variant matches the permission it carries. `MapPinnedPfn`
     /// needs no clause: being pinned is [`PhysPointsTo`]'s type invariant.
     pub open spec fn wf(&self) -> bool {
@@ -83,8 +82,8 @@ impl<'a, T, A: ArchPagingMeta> MapVirtPhysToks<'a, T, A> {
     /// reaches.
     pub open spec fn for_page_and_frame(
         &self,
-        vpage: Page<A::MinPageSize>,
-        frame: PhysFrame<A::MinPageSize>,
+        vpage: Page<MinPageSize>,
+        frame: PhysFrame<MinPageSize>,
     ) -> bool {
         &&& self.owns_virt_page(vpage)
         &&& self.owns_phys_frame(frame)
@@ -95,25 +94,25 @@ impl<'a, T, A: ArchPagingMeta> MapVirtPhysToks<'a, T, A> {
     /// Adding a name demands the whole page: a fresh [`VirtAddrTok`] spanning
     /// it. Repointing one demands only that the permission is already reached
     /// through that page, since the name is not what is changing.
-    pub open spec fn owns_virt_page(&self, vpage: Page<A::MinPageSize>) -> bool {
+    pub open spec fn owns_virt_page(&self, vpage: Page<MinPageSize>) -> bool {
         match self {
             MapVirtPhysToks::MapPinnedPfn(virt, _) => virt.is_range(
                 vpage@ as int,
-                page_size::<A>() as int,
+                PAGE_SIZE as int,
             ),
-            MapVirtPhysToks::MapUnpinnedPfn(target, _) => exists|p: *mut T|
-                #[trigger] target.covers(p) && page_start_of::<A>(p@.addr as int) == vpage@ as int,
+            MapVirtPhysToks::MapUnpinnedPfn(target, _) => exists|p: *mut T| #[trigger]
+                target.covers(p) && page_start_of(p@.addr as int) == vpage@ as int,
         }
     }
 
     /// Whether the caller owns every physical address in `frame`, wherever the
     /// claim is kept.
-    pub open spec fn owns_phys_frame(&self, frame: PhysFrame<A::MinPageSize>) -> bool {
+    pub open spec fn owns_phys_frame(&self, frame: PhysFrame<MinPageSize>) -> bool {
         match self {
             MapVirtPhysToks::MapPinnedPfn(_, target) => target.pinned_to_frame(frame@),
             MapVirtPhysToks::MapUnpinnedPfn(_, phys) => phys.is_range(
                 frame@ as int,
-                page_size::<A>() as int,
+                PAGE_SIZE as int,
             ),
         }
     }
@@ -163,7 +162,7 @@ impl<'a, T, A: ArchPagingMeta> MapVirtPhysToks<'a, T, A> {
 
     /// The frames backing the target. Empty for an unpinned target, which is
     /// what owning no physical identity means.
-    pub open spec fn frames(&self) -> Seq<PhysFrame<A::MinPageSize>> {
+    pub open spec fn frames(&self) -> Seq<PhysFrame<MinPageSize>> {
         match self {
             MapVirtPhysToks::MapPinnedPfn(_, target) => target.frames(),
             MapVirtPhysToks::MapUnpinnedPfn(target, _) => target.frames(),
@@ -191,7 +190,6 @@ pub trait PageTableHandle<A: ArchPagingMeta>: Sized {
     /// Whether this address space translates `vaddr` to `pa` right now.
     spec fn translates(&self, vaddr: usize, pa: usize) -> bool;
 
-
     /// Install a translation from `ptr` to `pa`: a new name for pinned memory,
     /// a new frame for unpinned memory.
     ///
@@ -203,15 +201,15 @@ pub trait PageTableHandle<A: ArchPagingMeta>: Sized {
         tracked &mut self,
         ptr: *mut T,
         pa: usize,
-        tracked toks: MapVirtPhysToks<'a, T, A>,
-    ) -> (tracked ret: GeneralPointsTo<T, A>)
+        tracked toks: MapVirtPhysToks<'a, T>,
+    ) -> (tracked ret: GeneralPointsTo<T>)
         requires
             old(self).wf(),
             toks.wf(),
             toks.owns_virt_range(ptr),
             toks.owns_phys_range(pa),
             toks.is_pinned() ==> !toks.target_ptrs().contains(ptr),
-            page_offset_of::<A>(ptr@.addr as int) == page_offset_of::<A>(pa as int),
+            page_offset_of(ptr@.addr as int) == page_offset_of(pa as int),
         ensures
             final(self).wf(),
             final(self).translates(ptr@.addr, pa),
@@ -232,8 +230,8 @@ pub trait PageTableHandle<A: ArchPagingMeta>: Sized {
     proof fn unmap<T>(
         tracked &mut self,
         ptr: *mut T,
-        tracked target: GeneralPointsTo<T, A>,
-    ) -> (tracked ret: (GeneralPointsTo<T, A>, VirtAddrTok))
+        tracked target: GeneralPointsTo<T>,
+    ) -> (tracked ret: (GeneralPointsTo<T>, VirtAddrTok))
         requires
             old(self).wf(),
             target.covers(ptr),

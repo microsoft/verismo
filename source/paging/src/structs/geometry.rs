@@ -8,13 +8,12 @@ use vstd::prelude::*;
 
 use crate::structs::address::{Address, VirtAddr};
 use crate::structs::arch_contract::{
-    level_geometry_wf, level_index_width, level_shift, page_offset_width, spec_entry_index,
-    ArchPagingMeta,
+    level_geometry_wf, level_index_width, level_shift, spec_entry_index, ArchPagingMeta,
 };
 use crate::structs::entry::PTEntry;
-use crate::structs::ptpage::PTPage;
 use crate::structs::level::PageLevel;
-use crate::structs::sizes::PageOffset;
+use crate::structs::ptpage::PTPage;
+use crate::structs::sizes::{MinPageSize, PageOffset, PAGE_OFFSET_WIDTH};
 
 #[verus_verify]
 #[verus_spec(ret =>
@@ -26,7 +25,7 @@ use crate::structs::sizes::PageOffset;
 )]
 pub fn shift_at<A: ArchPagingMeta>(level: PageLevel) -> usize {
     proof! { lemma_level_shift_monotone::<A>(level); }
-    <A::MinPageSize as PageOffset>::SHIFT + level.depth() * A::index_width()
+    PAGE_OFFSET_WIDTH + level.depth() * A::index_width()
 }
 
 #[verus_verify]
@@ -64,7 +63,7 @@ pub proof fn lemma_level_shift_monotone<A: ArchPagingMeta>(level: PageLevel)
     requires
         level_geometry_wf::<A>(),
     ensures
-        level_shift::<A>(level.depth() as nat) == page_offset_width::<A>() + level.depth() as nat
+        level_shift::<A>(level.depth() as nat) == PAGE_OFFSET_WIDTH + level.depth() as nat
             * level_index_width::<A>(),
         level_shift::<A>(level.depth() as nat) <= level_shift::<A>(PageLevel::Level4.depth() as nat)
             < usize::BITS,

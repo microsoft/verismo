@@ -3,14 +3,14 @@ use vstd::arithmetic::power2::pow2;
 use vstd::prelude::*;
 
 use crate::address::{Address, PhysAddr};
-use crate::sizes::{PageOffset, PageSize};
+use crate::structs::sizes::{MinPageSize, PageOffset, PageSize, PAGE_OFFSET_WIDTH, PAGE_SIZE};
 use bitflags::Flags;
 use bitflags_verus::FlagsSpec;
 use builtin_macros::verus_verify;
 
 use crate::structs::entry::PTEntry;
 use crate::structs::level::PageLevel;
-use crate::structs::ptpage::{ENTRY_COUNT, PTPage};
+use crate::structs::ptpage::{PTPage, ENTRY_COUNT};
 
 /// Executable interface to a page table entry's flag word.
 ///
@@ -106,10 +106,6 @@ verus! {
 /// specifications can be stated against it without depending on the executable
 /// entry-manipulation half of that trait.
 pub trait ArchPagingGeometry: Sized {
-    /// Smallest page this architecture can map. Its shift is the width of the
-    /// in-page byte offset.
-    type MinPageSize: PageSize;
-
     spec fn phys_addr_width() -> nat;
 
     /// Where the platform maps a physical frame.
@@ -138,24 +134,8 @@ pub trait ArchPagingGeometry: Sized {
     /// need not carry it as a precondition.
     proof fn lemma_geometry_wf()
         ensures
-            <Self::MinPageSize as PageOffset>::SHIFT < Self::phys_addr_width() <= 64,
+            PAGE_OFFSET_WIDTH < Self::phys_addr_width() <= 64,
     ;
-}
-
-/// Width of the in-page byte offset, in bits.
-#[verifier::inline]
-pub open spec fn page_offset_width<A: ArchPagingGeometry>() -> nat {
-    <A::MinPageSize as PageOffset>::SHIFT as nat
-}
-
-#[verifier::inline]
-pub open spec fn page_offset_mask<A: ArchPagingGeometry>() -> usize {
-    (page_size::<A>() - 1) as usize
-}
-
-#[verifier::inline]
-pub open spec fn page_size<A: ArchPagingGeometry>() -> usize {
-    A::MinPageSize::SIZE
 }
 
 /// Number of virtual-address bits one paging level consumes: enough to index
@@ -167,7 +147,7 @@ pub open spec fn level_index_width<A: ArchPagingMeta>() -> nat {
 /// Shift of the page a level maps: `depth` levels above the leaf, each level
 /// covering `level_index_width` more address bits.
 pub open spec fn level_shift<A: ArchPagingMeta>(depth: nat) -> nat {
-    (page_offset_width::<A>() + depth * level_index_width::<A>()) as nat
+    (PAGE_OFFSET_WIDTH + depth * level_index_width::<A>()) as nat
 }
 
 /// Which entry of a level's table page an address selects: the address bits

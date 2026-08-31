@@ -11,6 +11,7 @@ use crate::structs::arch_contract::ArchPagingGeometry;
 use crate::structs::entry::{lemma_pgtbl_idx_step, lemma_pgtbl_idx_zero, pgtbl_idx};
 use crate::structs::level::PageLevel;
 use crate::structs::ptpage::PTPage;
+use crate::structs::sizes::{MinPageSize, PAGE_SIZE};
 use crate::util::{align_down_integer_ens, align_up_integer_ens, proof_align_down, proof_align_up};
 use vstd::arithmetic::div_mod::lemma_div_by_multiple;
 use vstd::raw_ptr::{ptr_from_data, ptr_mut_from_data, PtrData};
@@ -131,7 +132,7 @@ pub proof fn lemma_pt_idx_spec_is_pgtbl_idx_x86<P: X86PagingParams>(addr: InnerA
         pt_idx_spec(addr, l) == pgtbl_idx::<X86Paging<P>>(addr, PageLevel::from_nat(l as nat)),
 {
     lemma_size_4k();
-    assert(<<X86Paging<P> as ArchPagingGeometry>::MinPageSize as PageSize>::SIZE == 4096usize);
+    assert(PAGE_SIZE == 4096usize);
     assert(PTPage::<X86Paging<P>>::count() == 512);
     let page_size = 4096usize;
     let entry_count = 512usize;

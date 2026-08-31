@@ -17,6 +17,9 @@ concurrent_rw = { path = "../concurrent_rw" }
 
 [features]
 verification-test = []
+# The smallest page this build maps. None selected means 4 KiB.
+min-page-2mib = []
+min-page-1gib = []
 
 [package.metadata.verus]
 verify = true

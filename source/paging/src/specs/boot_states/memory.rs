@@ -35,6 +35,7 @@ use crate::specs::points_to::{page_start_of, Mapping, PhysPointsTo, VirtAddrTok}
 use crate::structs::arch_contract::*;
 use crate::structs::frame::PhysFrame;
 use crate::structs::ptpage::{PTPage, ENTRY_COUNT};
+use crate::structs::sizes::{MinPageSize, PAGE_SIZE};
 use crate::ArchPagingMeta;
 use vstd::arithmetic::power2::pow2;
 use vstd::prelude::*;
@@ -55,8 +56,7 @@ verus! {
 /// it *once*: two handovers covering one address would give two permissions
 /// over the same pointer, and [`crate::specs::points_to::GeneralPointsTo::is_disjoint`] would then prove those
 /// pointers disjoint, which is to say prove `false`.
-#[verifier::reject_recursive_types(A)]
-pub tracked struct InitialVirtMappings<A: ArchPagingMeta> {
+pub tracked struct InitialVirtMappings {
     /// The pages handed over. Not a range: what the firmware leaves usable need
     /// not be contiguous, so the set is the only honest description.
     pub ghost vpages: Set<int>,
@@ -65,12 +65,12 @@ pub tracked struct InitialVirtMappings<A: ArchPagingMeta> {
     /// The half of each page's record that the permissions share out, per page.
     /// A permission carved from this takes the part of it that matches the bytes
     /// it owns; see [`Mapping::share_of`].
-    pub tracked records: Map<int, Mapping<A>>,
+    pub tracked records: Map<int, Mapping>,
     /// The half of each page's record the page table keeps.
-    pub tracked auths: Map<int, Mapping<A>>,
+    pub tracked auths: Map<int, Mapping>,
 }
 
-impl<A: ArchPagingMeta> InitialVirtMappings<A> {
+impl InitialVirtMappings {
     /// The pages this covers.
     pub open spec fn dom(&self) -> Set<int> {
         self.vpages
@@ -95,12 +95,12 @@ impl<A: ArchPagingMeta> InitialVirtMappings<A> {
         &&& forall|vpage: int| #[trigger]
             self.dom().contains(vpage) ==> self.auths[vpage].vpage_addr() == vpage
         &&& forall|vpage: int| #[trigger]
-            self.dom().contains(vpage) ==> self.records[vpage].share() == Mapping::<A>::share_of(
-                page_size::<A>() as int,
+            self.dom().contains(vpage) ==> self.records[vpage].share() == Mapping::share_of(
+                PAGE_SIZE as int,
             )
         &&& forall|vpage: int| #[trigger]
-            self.dom().contains(vpage) ==> self.auths[vpage].share() == Mapping::<A>::share_of(
-                page_size::<A>() as int,
+            self.dom().contains(vpage) ==> self.auths[vpage].share() == Mapping::share_of(
+                PAGE_SIZE as int,
             )
     }
 }
@@ -119,9 +119,7 @@ pub open spec fn slot_region_size<A: ArchPagingMeta>(level: PageLevel) -> nat {
 /// The starts of the pages covering `[start, end)`, whose ends are both page
 /// aligned.
 pub open spec fn pages_in<A: ArchPagingMeta>(start: int, end: int) -> Set<int> {
-    Set::range(start / page_size::<A>() as int, end / page_size::<A>() as int).map(
-        |i: int| i * page_size::<A>() as int,
-    )
+    Set::range(start / PAGE_SIZE as int, end / PAGE_SIZE as int).map(|i: int| i * PAGE_SIZE as int)
 }
 
 pub open spec fn self_map_base<A: ArchPagingMeta>(k: usize, level: PageLevel) -> nat
@@ -156,7 +154,7 @@ pub type TableEntries<A> = [PTEntry<A>; ENTRY_COUNT];
 /// handover does not account for, and at least one, or the page could not be
 /// read at all.
 pub open spec fn table_page_wf<A: ArchPagingMeta>(
-    page: PhysPointsTo<TableEntries<A>, A>,
+    page: PhysPointsTo<TableEntries<A>>,
     frame: usize,
     vaddr: int,
 ) -> bool {
@@ -179,7 +177,7 @@ pub tracked struct SelfMap<A: ArchPagingMeta> {
     pub ghost slot: nat,
     /// The root table. Pinned: the MMU walks the table by physical address, so
     /// a table page whose frame could move is not a table page.
-    pub tracked table: PhysPointsTo<TableEntries<A>, A>,
+    pub tracked table: PhysPointsTo<TableEntries<A>>,
 }
 
 impl<A: ArchPagingMeta> SelfMap<A> {
@@ -191,7 +189,7 @@ impl<A: ArchPagingMeta> SelfMap<A> {
     /// The one virtual page the root table occupies. The self map exposes the
     /// whole table at [`Self::base`], and a table is exactly one page.
     pub open spec fn vpage(&self, max_level: PageLevel) -> int {
-        page_start_of::<A>(self.base(max_level) as int)
+        page_start_of(self.base(max_level) as int)
     }
 
     /// First address of the slot the self map spends.
@@ -217,7 +215,7 @@ impl<A: ArchPagingMeta> SelfMap<A> {
     /// The root table is well formed at the address the self map exposes it at,
     /// and it maps itself and nothing else: the self slot holds a table entry
     /// pointing at the root frame, and every other slot is absent.
-    pub open spec fn wf(&self, root: PhysFrame<A::MinPageSize>, max_level: PageLevel) -> bool {
+    pub open spec fn wf(&self, root: PhysFrame<MinPageSize>, max_level: PageLevel) -> bool {
         &&& self.slot < ENTRY_COUNT
         &&& table_page_wf::<A>(self.table, root@, self.base(max_level) as int)
         &&& self.table.value()[self.slot as int].is_table_spec(max_level)
@@ -252,7 +250,7 @@ pub tracked struct DirectMap<A: ArchPagingMeta> {
     pub ghost pa_to_va: spec_fn(usize) -> usize,
     /// The table pages this map holds, keyed by frame. Empty for a direct map
     /// of ordinary memory, whose domain is then the set of no frames.
-    pub tracked tables: Map<usize, PhysPointsTo<TableEntries<A>, A>>,
+    pub tracked tables: Map<usize, PhysPointsTo<TableEntries<A>>>,
 }
 
 impl<A: ArchPagingMeta> DirectMap<A> {
@@ -266,7 +264,7 @@ impl<A: ArchPagingMeta> DirectMap<A> {
     /// Every byte, not just the ends: with no contiguity to appeal to, a table
     /// straddling a hole would be unreadable in the middle.
     pub open spec fn covers_frame(&self, frame: usize) -> bool {
-        forall|off: int| 0 <= off < page_size::<A>() ==> #[trigger] self.covers(frame + off)
+        forall|off: int| 0 <= off < PAGE_SIZE ==> #[trigger] self.covers(frame + off)
     }
 
     /// Where the direct map exposes the table in `frame`.
@@ -276,7 +274,7 @@ impl<A: ArchPagingMeta> DirectMap<A> {
 
     /// The one virtual page a table page occupies.
     pub open spec fn vpage(&self, frame: usize) -> int {
-        page_start_of::<A>(self.base(frame) as int)
+        page_start_of(self.base(frame) as int)
     }
 
     /// Whichever table pages this map does hold are mapped through in full, and
@@ -340,7 +338,7 @@ impl<A: ArchPagingMeta> DirectMap<A> {
     /// because the tables proving it live in the self map.
     pub open spec fn wf_with_root(
         &self,
-        root: PhysFrame<A::MinPageSize>,
+        root: PhysFrame<MinPageSize>,
         max_level: PageLevel,
     ) -> bool {
         &&& self.map_pts()
@@ -355,7 +353,7 @@ impl<A: ArchPagingMeta> DirectMap<A> {
     /// The whole region, not just the tables': firmware mapped all of it, so
     /// all of it is readable and none of it is the OS's to hand out.
     pub open spec fn vpages(&self) -> Set<int> {
-        self.pa_set.map(|pa: int| page_start_of::<A>((self.pa_to_va)(pa as usize) as int))
+        self.pa_set.map(|pa: int| page_start_of((self.pa_to_va)(pa as usize) as int))
     }
 }
 
@@ -368,7 +366,7 @@ impl<A: ArchPagingMeta> DirectMap<A> {
 #[verifier::accept_recursive_types(P)]
 pub tracked struct InitialPermissions<A: ArchPagingMeta, P> {
     /// The frame the paging root lives in.
-    pub ghost root: PhysFrame<A::MinPageSize>,
+    pub ghost root: PhysFrame<MinPageSize>,
     /// Level the walk starts at.
     pub ghost max_level: PageLevel,
     /// The self map, if the firmware left one.
@@ -377,11 +375,11 @@ pub tracked struct InitialPermissions<A: ArchPagingMeta, P> {
     pub tracked direct_map: Option<DirectMap<A>>,
     /// One permission per frame the OS owns but cannot yet reach, keyed by the
     /// frame's physical address.
-    pub tracked free_frames: Map<usize, PhysPointsTo<P, A>>,
+    pub tracked free_frames: Map<usize, PhysPointsTo<P>>,
     /// What the firmware handed over and nothing has claimed yet. The
     /// permissions above were carved from a handover; this is the remainder, and
     /// it is the only source of address tokens for anything mapped later.
-    pub tracked init_toks: InitialVirtMappings<A>,
+    pub tracked init_toks: InitialVirtMappings,
 }
 
 impl<A: ArchPagingMeta, P> InitialPermissions<A, P> {
@@ -389,7 +387,7 @@ impl<A: ArchPagingMeta, P> InitialPermissions<A, P> {
     /// translates to it, so its alias set is empty and its contents are not the
     /// OS's to assume anything about.
     pub open spec fn free_frames_wf(&self) -> bool {
-        &&& vstd::layout::size_of::<P>() == page_size::<A>()
+        &&& vstd::layout::size_of::<P>() == PAGE_SIZE
         &&& forall|pa: usize| #[trigger]
             self.free_frames.dom().contains(pa) ==> {
                 let frame = self.free_frames[pa];
