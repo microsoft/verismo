@@ -109,9 +109,9 @@ impl<T: PageOffset> PageSize for T {
 /// alongside the target itself. Deliberately not a cargo feature: features are
 /// additive, so any crate in the graph that depended on `paging` could enable a
 /// larger page for everyone. A cfg value is chosen by whoever chooses the
-/// target, and by nobody else. Unset means 4 KiB, which every architecture this
-/// models supports.
-#[cfg(not(any(target_min_page = "2mib", target_min_page = "1gib")))]
+/// target, and by nobody else. There is no default: a build that leaves it unset
+/// is one whose machine nobody has stated, and it fails to compile.
+#[cfg(target_min_page = "4kib")]
 pub type MinPageSize = Size4KiB;
 
 #[cfg(target_min_page = "2mib")]
@@ -119,6 +119,11 @@ pub type MinPageSize = Size2MiB;
 
 #[cfg(target_min_page = "1gib")]
 pub type MinPageSize = Size1GiB;
+
+#[cfg(not(any(target_min_page = "4kib", target_min_page = "2mib", target_min_page = "1gib")))]
+compile_error!(
+    "no target_min_page: set --cfg target_min_page=\"4kib\"|\"2mib\"|\"1gib\" in .cargo/config.toml"
+);
 
 #[cfg(any(
     all(target_min_page = "4kib", any(target_min_page = "2mib", target_min_page = "1gib")),
@@ -131,7 +136,7 @@ compile_error!("target_min_page was given more than one value");
 /// Spelled out rather than written `<MinPageSize as PageOffset>::SHIFT`, which
 /// Verus cannot evaluate in a `const`. [`lemma_min_page_wf`] proves the
 /// geometry facts consumers need from the spelled-out numbers.
-#[cfg(not(any(target_min_page = "2mib", target_min_page = "1gib")))]
+#[cfg(target_min_page = "4kib")]
 pub const PAGE_OFFSET_WIDTH: usize = 12;
 
 #[cfg(target_min_page = "2mib")]
@@ -142,7 +147,7 @@ pub const PAGE_OFFSET_WIDTH: usize = 30;
 
 /// Bytes in the smallest page. Also spelled out, because Verus checks a `const`
 /// body for overflow and cannot be given a proof to do it with.
-#[cfg(not(any(target_min_page = "2mib", target_min_page = "1gib")))]
+#[cfg(target_min_page = "4kib")]
 pub const PAGE_SIZE: usize = 0x1000;
 
 #[cfg(target_min_page = "2mib")]
