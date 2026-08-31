@@ -320,6 +320,60 @@ impl<A: ArchPagingMeta> DirectMap<A> {
             )
     }
 
+    /// Where a walk of the tables this map holds sends `vaddr`, starting in
+    /// `frame` at `level`, or `None` if it runs off a missing entry or off a
+    /// table this map does not hold.
+    ///
+    /// A concrete walk rather than an appeal to
+    /// [`crate::specs::page_table::PageTableHandle::translates`]: there is no
+    /// handle yet at handover time, and the entries are right here.
+    pub open spec fn walk(&self, frame: usize, level: PageLevel, vaddr: usize) -> Option<int>
+        decreases level.depth(),
+    {
+        let index = spec_entry_index::<A>(vaddr, level);
+        if !self.entries.dom().contains((frame, index)) {
+            None
+        } else {
+            let entry = self.entries[(frame, index)].value();
+            if !entry.present_spec() {
+                None
+            } else if entry.is_table_spec(level) {
+                match level.spec_child() {
+                    Some(child) => self.walk(entry.page_frame_spec(), child, vaddr),
+                    None => None,
+                }
+            } else {
+                Some(
+                    entry.page_frame_spec() + vaddr as nat % pow2(
+                        level_shift::<A>(level.depth() as nat),
+                    ),
+                )
+            }
+        }
+    }
+
+    /// The tables are readable, and they say what this map claims: every
+    /// address it covers translates, through the tree rooted at `root`, back to
+    /// the physical address its own `pa_to_va` derived it from.
+    ///
+    /// [`Self::map_pts`] alone is a claim about permissions only -- it says the
+    /// entries can be read, not that reading them leads anywhere in particular.
+    /// This is what makes "mapped straight through" mean something, and it is
+    /// only statable when the map holds the tables the walk needs: a direct map
+    /// of ordinary memory alongside a self map cannot prove its own translation,
+    /// because the tables proving it live in the self map.
+    pub open spec fn wf_with_root(
+        &self,
+        root: PhysFrame<A::MinPageSize>,
+        max_level: PageLevel,
+    ) -> bool {
+        &&& self.map_pts()
+        &&& self.tables.contains(root@)
+        &&& forall|pa: int| #[trigger]
+            self.pa_set.contains(pa) ==> self.walk(root@, max_level, (self.pa_to_va)(pa as usize))
+                == Some(pa)
+    }
+
     /// Every page the direct map exposes.
     ///
     /// The whole region, not just the tables': firmware mapped all of it, so
@@ -413,7 +467,12 @@ impl<A: ArchPagingMeta, P> InitialPermissions<A, P> {
 
     pub open spec fn wf(&self) -> bool {
         &&& self.self_map is Some ==> self.self_map->Some_0.wf(self.root, self.max_level)
-        &&& self.direct_map is Some ==> self.direct_map->Some_0.map_pts()
+        &&& self.direct_map is Some
+            ==> self.direct_map->Some_0.map_pts()
+        // When the direct map is the way in, it also has to translate: the walk
+        // that reaches the root through it walks these very entries.
+        &&& self.direct_map is Some && self.direct_map->Some_0.tables.contains(self.root@)
+            ==> self.direct_map->Some_0.wf_with_root(self.root, self.max_level)
         &&& self.root_is_reachable()
         &&& self.free_frames_wf()
         &&& self.init_toks.init_wf()
