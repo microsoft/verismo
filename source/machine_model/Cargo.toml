@@ -18,4 +18,10 @@ reject-sync = []
 verify = true
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(verus)'] }
+# Verus sets `verus_only` during verification and `verus_keep_ghost` itself;
+# declaring them keeps a plain `cargo build` warning-free.
+unexpected_cfgs = { level = "warn", check-cfg = [
+    'cfg(verus_only)',
+    'cfg(verus_keep_ghost)',
+    'cfg(verus_keep_ghost_body)',
+] }

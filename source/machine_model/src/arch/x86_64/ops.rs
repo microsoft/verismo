@@ -1,10 +1,12 @@
 use super::control::ControlReg;
-use super::flags::{
-    lemma_same_control_flags_preserves_df, lemma_with_alignment_check_preserves_df, Cr0Value,
-    Cr3Value, Cr4Value, RflagsValue,
-};
+use super::flags::{Cr0Value, Cr3Value, Cr4Value, RflagsValue};
+use super::spec::{Cr0, Cr3, Cr4, Cs, Msr, Rflags};
 
-use super::spec::{cpl, Cr0, Cr3, Cr4, Cs, Msr, Rflags};
+// Ghost-only, and so absent from a plain `cargo build`.
+#[cfg(verus_only)]
+use super::flags::{lemma_same_control_flags_preserves_df, lemma_with_alignment_check_preserves_df};
+#[cfg(verus_only)]
+use super::spec::cpl;
 use crate::register::points_to::{AsmRegisterPointsTo, RustRegisterPointsTo};
 use crate::register::reg_trait::ReadableReg;
 use core::arch::asm;

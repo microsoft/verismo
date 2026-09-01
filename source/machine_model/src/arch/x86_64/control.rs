@@ -7,7 +7,9 @@ use vstd::prelude::*;
 verus! {
 
 use super::flags::RflagsValue;
-use super::spec::{cpl, Cs, Rflags};
+use super::spec::{Cs, Rflags};
+#[cfg(verus_only)]
+use super::spec::cpl;
 use crate::register::points_to::{AsmRegisterPointsTo, RustRegisterPointsTo};
 use crate::register::reg_trait::RegSpec;
 

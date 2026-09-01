@@ -6,8 +6,14 @@ pub mod x86_64;
 
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{
-    lemma_same_control_flags_preserves_df, lemma_with_alignment_check_preserves_df, ControlReg,
-    cpl, Cr0, Cr0Value, Cr1, Cr2, Cr3, Cr3Value, Cr4, Cr4Value, Cs, DescriptorTableValue, Ds,
-    EferValue, Es, GdtrBaseLimit, Gs, IdtrBaseLimit, Msr, Pkru, Rax, Rflags, RflagsValue, Rsp,
+    ControlReg, Cr0, Cr0Value, Cr1, Cr2, Cr3, Cr3Value, Cr4, Cr4Value, Cs, DescriptorTableValue,
+    Ds, EferValue, Es, GdtrBaseLimit, Gs, IdtrBaseLimit, Msr, Pkru, Rax, Rflags, RflagsValue, Rsp,
     Ss, Xcr0,
+};
+
+// Ghost-only: `verus!` erases spec and proof functions, so a plain `cargo build`
+// has nothing to re-export.
+#[cfg(all(target_arch = "x86_64", verus_only))]
+pub use x86_64::{
+    cpl, lemma_same_control_flags_preserves_df, lemma_with_alignment_check_preserves_df,
 };
