@@ -13,21 +13,25 @@
 use machine_model::arch::x86_64::Cr3;
 use machine_model::register::RustRegisterPointsTo;
 
+#[cfg(verus_only)]
 use crate::arch::x86_64::reg_contract::cr3_phys_addr;
 use core::marker::PhantomData;
 
 use vstd::prelude::*;
 
+#[cfg(verus_only)]
 use crate::structs::address::lemma_phys_addr_from_bits;
 use crate::structs::address::{Address, PhysAddr, VirtAddr};
-use crate::structs::arch_contract::{level_geometry_wf, ArchPagingMeta, GenericPageTableFlags};
+#[cfg(verus_only)]
+use crate::structs::arch_contract::level_geometry_wf;
+use crate::structs::arch_contract::{ArchPagingMeta, GenericPageTableFlags};
 use crate::structs::concurrent_pt::PTPageSharedPerm;
 use crate::structs::entry::PTEntry;
 use crate::structs::free::free_page_tree;
 use crate::structs::geometry::shift_at;
 use crate::structs::level::{PageLevel, PagingLevel};
 use crate::structs::map::map_at;
-use crate::structs::os_contract::{PTPageInit, PageLock, PagingError, OSPagingContract};
+use crate::structs::os_contract::{OSPagingContract, PTPageInit, PageLock, PagingError};
 use crate::structs::ptpage::PTPage;
 use crate::structs::range::{leaf_entry, level_flags, range_at, RangeOp};
 use crate::structs::region::map_region;
@@ -161,7 +165,7 @@ impl<A: ArchPagingMeta, P: OSPagingContract<A>, L: PagingLevel> GenericPageTable
                     requires
                         shift < 64,
                 ;
-                let offset = vaddr.bits() & sub(1usize << shift, 1);
+                let offset = vaddr.bits() & ((1usize << shift) - 1);
                 let frame_bits = frame.bits();
                 proof {
                     lemma_phys_addr_from_bits(frame_bits | offset);

@@ -23,6 +23,7 @@ use machine_model::arch::x86_64::Cr3;
 use machine_model::register::RustRegisterPointsTo;
 use vstd::prelude::*;
 
+#[cfg(verus_only)]
 use crate::arch::x86_64::reg_contract::cr3_phys_addr;
 use crate::structs::address::{Address, PhysAddr};
 use crate::structs::arch_contract::ArchPagingMeta;

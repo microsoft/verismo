@@ -11,14 +11,20 @@
 use vstd::prelude::*;
 
 use crate::structs::address::PhysAddr;
+#[cfg(verus_only)]
+use crate::structs::arch_contract::level_geometry_wf;
 use crate::structs::arch_contract::{
-    level_geometry_wf, ArchPagingGeometry, ArchPagingMeta, GenericPageTableFlagsSpec,
+    ArchPagingGeometry, ArchPagingMeta, GenericPageTableFlagsSpec,
 };
 use crate::structs::entry::PTEntry;
 use crate::structs::level::PageLevel;
 use crate::structs::ptpage::PTPage;
-use crate::structs::sizes::{lemma_size_4k, PageOffset, Size4KiB};
+#[cfg(verus_only)]
+use crate::structs::sizes::lemma_size_4k;
+use crate::structs::sizes::{PageOffset, Size4KiB};
+#[cfg(verus_only)]
 use vstd::arithmetic::logarithm::log;
+#[cfg(verus_only)]
 use vstd::arithmetic::power2::pow2;
 
 use super::pt_flags::PTEntryFlags;

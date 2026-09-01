@@ -10,7 +10,11 @@ pub mod boot_states;
 pub mod concurrent_entry;
 #[cfg(verus_only)]
 pub mod entry;
+// Vendored specs for types we do not own; nothing but ghost, and they name
+// vstd items that a plain `cargo build` erases.
+#[cfg(verus_only)]
 pub mod external;
+#[cfg(verus_only)]
 pub mod nonnull;
 pub mod page_table;
 pub mod points_to;

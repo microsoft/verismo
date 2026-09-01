@@ -5,6 +5,7 @@ use bitflags::bitflags;
 use bitflags_verus::bitflags_verus as bitflags;
 
 use bitflags::Flags;
+#[cfg(verus_only)]
 use bitflags_verus::FlagsSpec;
 use builtin_macros::{proof, verus, verus_spec, verus_verify};
 use vstd::prelude::*;

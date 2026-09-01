@@ -12,7 +12,9 @@ use concurrent_rw::{PayloadTicket, RWContract, RWWithPublishPayloadContract, Wit
 use vstd::prelude::*;
 
 use crate::structs::arch_contract::ArchPagingMeta;
-use crate::structs::concurrent_pt::{lemma_ids_match, PTPageSharedPerm, PTPageWritePerm};
+#[cfg(verus_only)]
+use crate::structs::concurrent_pt::lemma_ids_match;
+use crate::structs::concurrent_pt::{PTPageSharedPerm, PTPageWritePerm};
 use crate::structs::entry::PTEntry;
 use crate::structs::os_contract::PagingError;
 use crate::structs::ptpage::{entry_ptr, PTPage};
@@ -52,7 +54,13 @@ pub fn set_leaf_slot<A: ArchPagingMeta>(
     }
     let ghost before = *writers;
     let tracked writer = writers.slots.tracked_borrow_mut(i);
-    let Tracked(_observed) = PTEntry::write(ptr, entry, Tracked(reader), Tracked(writer), Tracked(&()));
+    let Tracked(_observed) = PTEntry::write(
+        ptr,
+        entry,
+        Tracked(reader),
+        Tracked(writer),
+        Tracked(&()),
+    );
     proof {
         lemma_ids_unchanged::<A>(before, *writers, i);
     }
@@ -151,7 +159,13 @@ pub fn replace_leaf_slot<A: ArchPagingMeta>(
     }
     let ghost before = *writers;
     let tracked writer = writers.slots.tracked_borrow_mut(i);
-    let Tracked(_observed) = PTEntry::write(ptr, entry, Tracked(reader), Tracked(writer), Tracked(&()));
+    let Tracked(_observed) = PTEntry::write(
+        ptr,
+        entry,
+        Tracked(reader),
+        Tracked(writer),
+        Tracked(&()),
+    );
     proof {
         lemma_ids_unchanged::<A>(before, *writers, i);
     }
@@ -239,7 +253,12 @@ pub fn read_slot_exact<A: ArchPagingMeta>(
         ret == writers.slots[index as int]@,
 {
     let tracked writer = writers.slots.tracked_borrow(index as int);
-    let (value, Tracked(_observed)) = PTEntry::read_exact(ptr, Tracked(reader), Tracked(writer), Tracked(&()));
+    let (value, Tracked(_observed)) = PTEntry::read_exact(
+        ptr,
+        Tracked(reader),
+        Tracked(writer),
+        Tracked(&()),
+    );
     value
 }
 

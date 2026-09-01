@@ -16,11 +16,15 @@ use vstd::prelude::*;
 use vstd::raw_ptr::with_exposed_provenance;
 
 use crate::structs::address::{Address, VirtAddr};
-use crate::structs::arch_contract::{slot_addr, ArchPagingMeta};
+#[cfg(verus_only)]
+use crate::structs::arch_contract::slot_addr;
+use crate::structs::arch_contract::ArchPagingMeta;
 use crate::structs::concurrent_pt::PTPageSharedPerm;
 use crate::structs::entry::PTEntry;
+#[cfg(verus_only)]
+use crate::structs::sizes::lemma_min_page_wf;
 use crate::structs::sizes::PageSize;
-use crate::structs::sizes::{lemma_min_page_wf, MinPageSize, PAGE_SIZE};
+use crate::structs::sizes::{MinPageSize, PAGE_SIZE};
 
 verus! {
 

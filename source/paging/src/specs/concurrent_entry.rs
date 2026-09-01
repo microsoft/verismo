@@ -10,10 +10,13 @@ use concurrent_rw::{IsValidAtomicType, PublishPayload, RWModel, Snapshot, WithPa
 use vstd::prelude::*;
 use vstd::raw_ptr::PointsTo;
 
+#[cfg(verus_only)]
 use crate::specs::entry::{lemma_entry_from_usize, lemma_usize_from_entry};
 use crate::structs::arch_contract::ArchPagingMeta;
 use crate::structs::concurrent_pt::PTPageSharedPerm;
-use crate::structs::entry::{entry_step, PTEntry};
+#[cfg(verus_only)]
+use crate::structs::entry::entry_step;
+use crate::structs::entry::PTEntry;
 
 verus! {
 

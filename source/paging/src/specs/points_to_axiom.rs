@@ -1,9 +1,12 @@
 //! Everything this crate assumes in one place for GeneralPointsTo.
+#[cfg(verus_only)]
 use vstd::layout::{align_of, size_of};
 use vstd::prelude::*;
 use vstd::raw_ptr::{MemContents, PointsTo};
 
-use super::points_to::{array_element_ptr, GeneralPointsTo, PageWalkPath};
+#[cfg(verus_only)]
+use super::points_to::array_element_ptr;
+use super::points_to::{GeneralPointsTo, PageWalkPath};
 use crate::ArchPagingMeta;
 
 verus! {

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //
 // Copyright (c) 2022-2023 SUSE LLC
-use crate::sizes::{lemma_size_4k, PageOffset, PageSize, Size4KiB};
+#[cfg(verus_only)]
+use crate::sizes::lemma_size_4k;
+use crate::sizes::{PageOffset, PageSize, Size4KiB};
 use crate::util::{align_down, align_up, is_aligned};
 
 use core::fmt;

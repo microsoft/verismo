@@ -14,11 +14,12 @@ use concurrent_rw::RWWithPublishPayloadContract;
 use vstd::prelude::*;
 use vstd::raw_ptr::with_exposed_provenance;
 
+#[cfg(verus_only)]
 use crate::structs::address::lemma_phys_addr_from_bits;
 use crate::structs::address::{Address, PhysAddr, VirtAddr};
-use crate::structs::arch_contract::{
-    level_geometry_wf, slot_addr, spec_entry_index, ArchPagingMeta,
-};
+use crate::structs::arch_contract::ArchPagingMeta;
+#[cfg(verus_only)]
+use crate::structs::arch_contract::{level_geometry_wf, slot_addr, spec_entry_index};
 use crate::structs::concurrent_pt::PTPageSharedPerm;
 use crate::structs::entry::PTEntry;
 use crate::structs::geometry::entry_index;

@@ -1,10 +1,13 @@
+#[cfg(verus_only)]
 use vstd::arithmetic::logarithm::log;
+#[cfg(verus_only)]
 use vstd::arithmetic::power2::pow2;
 use vstd::prelude::*;
 
 use crate::address::{Address, PhysAddr};
 use crate::structs::sizes::{MinPageSize, PageOffset, PageSize, PAGE_OFFSET_WIDTH, PAGE_SIZE};
 use bitflags::Flags;
+#[cfg(verus_only)]
 use bitflags_verus::FlagsSpec;
 use builtin_macros::verus_verify;
 

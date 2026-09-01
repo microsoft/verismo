@@ -17,6 +17,7 @@ use crate::structs::arch_contract::{
 use crate::structs::level::PageLevel;
 use crate::structs::ptpage::PTPage;
 use bitflags::Flags;
+#[cfg(verus_only)]
 use bitflags_verus::FlagsSpec;
 
 use crate::structs::sizes::{MinPageSize, PageSize, PAGE_SIZE};

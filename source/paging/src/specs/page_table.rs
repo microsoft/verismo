@@ -30,10 +30,11 @@
 //!   paging: the token lives in the kernel's page metadata precisely because the
 //!   frame may be replaced later, which is exactly what a pinned permission
 //!   forbids.
+#[cfg(verus_only)]
+use crate::specs::points_to::page_offset_of;
+#[cfg(verus_only)]
 use crate::specs::points_to::page_start_of;
-use crate::specs::points_to::{
-    page_offset_of, GeneralPointsTo, PhysAddrTok, PhysPointsTo, VirtAddrTok,
-};
+use crate::specs::points_to::{GeneralPointsTo, PhysAddrTok, PhysPointsTo, VirtAddrTok};
 use crate::structs::frame::PhysFrame;
 use crate::structs::page::Page;
 use crate::structs::sizes::{MinPageSize, PAGE_SIZE};

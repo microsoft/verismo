@@ -31,12 +31,15 @@
 //! exactly what "not mapped" means.
 use crate::entry::PTEntry;
 use crate::level::PageLevel;
-use crate::specs::points_to::{page_start_of, Mapping, PhysPointsTo, VirtAddrTok};
+#[cfg(verus_only)]
+use crate::specs::points_to::page_start_of;
+use crate::specs::points_to::{Mapping, PhysPointsTo, VirtAddrTok};
 use crate::structs::arch_contract::*;
 use crate::structs::frame::PhysFrame;
 use crate::structs::ptpage::{PTPage, ENTRY_COUNT};
 use crate::structs::sizes::{MinPageSize, PAGE_SIZE};
 use crate::ArchPagingMeta;
+#[cfg(verus_only)]
 use vstd::arithmetic::power2::pow2;
 use vstd::prelude::*;
 

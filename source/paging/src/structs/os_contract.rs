@@ -27,7 +27,9 @@ use vstd::prelude::*;
 use vstd::raw_ptr::{IsExposed, PointsTo};
 
 use crate::structs::address::{Address, PhysAddr, VirtAddr};
-use crate::structs::arch_contract::{slot_addr, ArchPagingMeta};
+#[cfg(verus_only)]
+use crate::structs::arch_contract::slot_addr;
+use crate::structs::arch_contract::ArchPagingMeta;
 use crate::structs::concurrent_pt::{PTPageSharedPerm, PTPageWritePerm};
 use crate::structs::entry::PTEntry;
 use crate::structs::ptpage::PTPage;
@@ -179,10 +181,7 @@ pub trait OSPagingContract<A: ArchPagingMeta>: 'static + Sized {
     /// The address returned is *clean*: no confidentiality or shared tag is
     /// set, and callers apply `ArchPagingMeta::make_private_address` before
     /// storing it in an entry.
-    fn allocate_table_page() -> (ret: Result<
-        (PhysAddr, Tracked<PTPageInit<A>>),
-        PagingError,
-    >)
+    fn allocate_table_page() -> (ret: Result<(PhysAddr, Tracked<PTPageInit<A>>), PagingError>)
         ensures
             ret matches Ok((paddr, page)) ==> {
                 &&& page@.wf()
@@ -199,10 +198,7 @@ pub trait OSPagingContract<A: ArchPagingMeta>: 'static + Sized {
 
     /// Returns a frame to the allocator, taking back the ownership of its words
     /// that [`Self::allocate_table_page`] gave up.
-    fn deallocate_table_page(
-        paddr: PhysAddr,
-        Tracked(page): Tracked<PTPageInit<A>>,
-    )
+    fn deallocate_table_page(paddr: PhysAddr, Tracked(page): Tracked<PTPageInit<A>>)
         requires
             page.wf_owned(),
             page.base == A::spec_paddr_to_vaddr(paddr@),

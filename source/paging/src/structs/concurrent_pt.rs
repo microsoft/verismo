@@ -14,11 +14,13 @@ use vstd::prelude::*;
 use vstd::raw_ptr::IsExposed;
 use vstd::resource::Loc;
 
-use crate::structs::arch_contract::{slot_addr, ArchPagingMeta};
+#[cfg(verus_only)]
+use crate::structs::arch_contract::slot_addr;
+use crate::structs::arch_contract::ArchPagingMeta;
 use crate::structs::entry::PTEntry;
-use crate::structs::ptpage::PTPage;
 use crate::structs::level::PageLevel;
 use crate::structs::os_contract::SlotShared;
+use crate::structs::ptpage::PTPage;
 
 verus! {
 
@@ -53,7 +55,10 @@ impl<A: ArchPagingMeta> PTPageSharedPerm<A> {
         &&& self.slots.len() == PTPage::<A>::count()
         &&& forall|index: int|
             0 <= index < self.slots.len() ==> {
-                &&& (#[trigger] self.slots[index]).location()@.addr == slot_addr::<A>(self.base, index)
+                &&& (#[trigger] self.slots[index]).location()@.addr == slot_addr::<A>(
+                    self.base,
+                    index,
+                )
                 &&& self.slots[index].location()@.provenance == self.provenance@
             }
     }

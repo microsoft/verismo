@@ -7,8 +7,10 @@ use builtin_macros::{proof, verus_spec, verus_verify};
 use vstd::prelude::*;
 
 use crate::structs::address::{Address, VirtAddr};
+use crate::structs::arch_contract::ArchPagingMeta;
+#[cfg(verus_only)]
 use crate::structs::arch_contract::{
-    level_geometry_wf, level_index_width, level_shift, spec_entry_index, ArchPagingMeta,
+    level_geometry_wf, level_index_width, level_shift, spec_entry_index,
 };
 use crate::structs::entry::PTEntry;
 use crate::structs::level::PageLevel;

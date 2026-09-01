@@ -18,15 +18,18 @@
 use concurrent_rw::{RWContract, RWWithPublishPayloadContract};
 use vstd::prelude::*;
 
+#[cfg(verus_only)]
 use crate::structs::address::lemma_phys_addr_from_bits;
 use crate::structs::address::{Address, PhysAddr, VirtAddr};
-use crate::structs::arch_contract::{level_geometry_wf, ArchPagingMeta, GenericPageTableFlags};
+#[cfg(verus_only)]
+use crate::structs::arch_contract::level_geometry_wf;
+use crate::structs::arch_contract::{ArchPagingMeta, GenericPageTableFlags};
 use crate::structs::concurrent_pt::{PTPageSharedPerm, PTPageWritePerm};
 use crate::structs::entry::PTEntry;
 use crate::structs::geometry::{entry_index_bits, shift_at};
 use crate::structs::level::PageLevel;
 use crate::structs::map::create_and_link_child;
-use crate::structs::os_contract::{PageLock, PagingError, OSPagingContract};
+use crate::structs::os_contract::{OSPagingContract, PageLock, PagingError};
 use crate::structs::ptpage::{entry_ptr, page_from_vaddr, PTPage};
 
 use crate::structs::split::split_huge_at;
@@ -103,7 +106,7 @@ pub fn range_at<A: ArchPagingMeta, P: OSPagingContract<A>>(
         requires
             shift < 64,
     ;
-    let mask = sub(1usize << shift, 1);
+    let mask = (1usize << shift) - 1;
     let mut cur = vstart;
     while cur < vend
         invariant
@@ -188,8 +191,8 @@ fn range_step<A: ArchPagingMeta, P: OSPagingContract<A>>(
             requires
                 shift < 64,
         ;
-        let mask = sub(1usize << shift, 1);
-        if cur & mask == 0 && cur < next && sub(next, 1) == cur | mask {
+        let mask = (1usize << shift) - 1;
+        if cur & mask == 0 && cur < next && (next - 1) == cur | mask {
             // The range covers this entry whole, so it can be changed where it
             // is -- no need to break it into pieces only to change all of them.
             let lock = P::page_lock(page_ptr);
@@ -258,7 +261,7 @@ fn leaf_range<A: ArchPagingMeta, P: OSPagingContract<A>>(
         requires
             shift < 64,
     ;
-    let mask = sub(1usize << shift, 1);
+    let mask = (1usize << shift) - 1;
     let lock = P::page_lock(page_ptr);
     let Tracked(mut writers) = lock.lock::<A>(Tracked(page));
     let mut cur = vstart;

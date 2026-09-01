@@ -12,11 +12,13 @@
 use vstd::prelude::*;
 
 use crate::structs::address::VirtAddr;
-use crate::structs::arch_contract::{level_geometry_wf, ArchPagingMeta, GenericPageTableFlags};
+#[cfg(verus_only)]
+use crate::structs::arch_contract::level_geometry_wf;
+use crate::structs::arch_contract::{ArchPagingMeta, GenericPageTableFlags};
 use crate::structs::concurrent_pt::PTPageSharedPerm;
 use crate::structs::geometry::shift_at;
 use crate::structs::level::PageLevel;
-use crate::structs::os_contract::{PagingError, OSPagingContract};
+use crate::structs::os_contract::{OSPagingContract, PagingError};
 use crate::structs::ptpage::PTPage;
 use crate::structs::range::{level_flags, range_at, RangeOp};
 
@@ -53,7 +55,7 @@ pub fn map_region<A: ArchPagingMeta, P: OSPagingContract<A>>(
             shift < 64,
     ;
     let size = 1usize << shift;
-    let mask = sub(size, 1);
+    let mask = size - 1;
     let small_flags = level_flags::<A>(flags, small);
     let big_flags = level_flags::<A>(flags, big);
     let small_op = RangeOp::Map { paddr, flags: small_flags };

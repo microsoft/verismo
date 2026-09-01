@@ -15,26 +15,35 @@
 //! is trusted: disjointness follows from the address spaces, and splitting a
 //! permission -- [`MemOwn::split_at`], and [`GeneralPointsTo::into_elements`]
 //! on top of it -- is token arithmetic that creates nothing and loses nothing.
+#[cfg(verus_only)]
 use super::points_to_axiom::{axiom_array_layout, points_to_array_split};
+#[cfg(verus_only)]
 use crate::arch::x86_64::reg_contract::cr3_phys_addr;
 use crate::entry::PTEntry;
 use crate::level::PageLevel;
 use crate::structs::arch_contract::*;
 use crate::structs::frame::PhysFrame;
 use crate::structs::page::Page;
-use crate::structs::sizes::{lemma_min_page_wf, MinPageSize, PageSize, PAGE_SIZE};
+#[cfg(verus_only)]
+use crate::structs::sizes::lemma_min_page_wf;
+use crate::structs::sizes::{MinPageSize, PageSize, PAGE_SIZE};
 use crate::ArchPagingMeta;
 use crate::UniqueAddress;
 use machine_model::arch::Cr3;
 use machine_model::register::RustRegisterPointsTo;
+#[cfg(verus_only)]
 use vstd::arithmetic::power2::pow2;
+#[cfg(verus_only)]
 use vstd::layout::{align_of, size_of};
+#[cfg(verus_only)]
 use vstd::math::min;
 use vstd::prelude::*;
+#[cfg(verus_only)]
 use vstd::raw_ptr::spec_cast_ptr_to_thin_ptr;
 use vstd::raw_ptr::MemContents;
 use vstd::raw_ptr::PointsTo;
 use vstd::raw_ptr::PointsToRaw;
+#[cfg(verus_only)]
 use vstd::raw_ptr::{ptr_mut_from_data, PtrData};
 use vstd::resource::frac::FracGhost;
 use vstd::resource::Loc;

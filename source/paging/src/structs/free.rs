@@ -16,13 +16,18 @@ use concurrent_rw::{RWContract, WithPayload, WritePerm};
 use vstd::prelude::*;
 use vstd::raw_ptr::{with_exposed_provenance, IsExposed, PointsTo};
 
+#[cfg(verus_only)]
 use crate::structs::address::lemma_phys_addr_from_bits;
 use crate::structs::address::{Address, PhysAddr, VirtAddr};
-use crate::structs::arch_contract::{level_geometry_wf, slot_addr, ArchPagingMeta};
-use crate::structs::concurrent_pt::{lemma_ids_match, PTPageSharedPerm, PTPageWritePerm};
+use crate::structs::arch_contract::ArchPagingMeta;
+#[cfg(verus_only)]
+use crate::structs::arch_contract::{level_geometry_wf, slot_addr};
+#[cfg(verus_only)]
+use crate::structs::concurrent_pt::lemma_ids_match;
+use crate::structs::concurrent_pt::{PTPageSharedPerm, PTPageWritePerm};
 use crate::structs::entry::PTEntry;
 use crate::structs::level::PageLevel;
-use crate::structs::os_contract::{PTPageInit, PageLock, OSPagingContract, SlotShared};
+use crate::structs::os_contract::{OSPagingContract, PTPageInit, PageLock, SlotShared};
 use crate::structs::ptpage::{page_from_vaddr, PTPage};
 
 verus! {
@@ -57,8 +62,7 @@ pub fn free_page_tree<A: ArchPagingMeta, P: OSPagingContract<A>>(
         lemma_ids_match::<A>(writers, page);
     }
     let count = A::entries_per_page();
-    let tracked PTPageSharedPerm { slots: readers, provenance, base: page_base, level: _ } =
-        page;
+    let tracked PTPageSharedPerm { slots: readers, provenance, base: page_base, level: _ } = page;
     let tracked PTPageWritePerm { slots: writer_slots } = writers;
     let Tracked(points) = free_slots::<A, P>(
         page_ptr,

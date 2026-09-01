@@ -11,14 +11,17 @@
 use concurrent_rw::RWWithPublishPayloadContract;
 use vstd::prelude::*;
 
+#[cfg(verus_only)]
 use crate::structs::address::lemma_phys_addr_from_bits;
 use crate::structs::address::{Address, PhysAddr, VirtAddr};
-use crate::structs::arch_contract::{level_geometry_wf, ArchPagingMeta};
+#[cfg(verus_only)]
+use crate::structs::arch_contract::level_geometry_wf;
+use crate::structs::arch_contract::ArchPagingMeta;
 use crate::structs::concurrent_pt::PTPageSharedPerm;
 use crate::structs::entry::PTEntry;
 use crate::structs::geometry::entry_index;
 use crate::structs::level::PageLevel;
-use crate::structs::os_contract::{PageLock, PagingError, OSPagingContract};
+use crate::structs::os_contract::{OSPagingContract, PageLock, PagingError};
 use crate::structs::ptpage::{entry_ptr, page_from_vaddr, PTPage};
 
 use crate::structs::update::replace_leaf_slot;
