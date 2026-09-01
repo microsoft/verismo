@@ -24,21 +24,9 @@ use crate::structs::entry::PTEntry;
 #[cfg(verus_only)]
 use crate::structs::sizes::lemma_min_page_wf;
 use crate::structs::sizes::PageSize;
-use crate::structs::sizes::{MinPageSize, PAGE_SIZE};
+use crate::structs::sizes::{MinPageSize, ENTRY_COUNT, PAGE_SIZE};
 
 verus! {
-
-/// How many address bits one level indexes, for eight-byte entries in a page
-/// of `PAGE_SHIFT` bytes.
-pub const PTE_SHIFT: usize = 9;
-
-/// How many entries a table page holds.
-///
-/// Fixed here rather than derived from `MinPageSize`, because the type of a
-/// page has to have a size. An architecture whose smallest page is not four
-/// kibibytes cannot satisfy `level_geometry_wf`, which requires exactly this
-/// many entries.
-pub const ENTRY_COUNT: usize = 512;
 
 /// A page-table page: nothing but its entries.
 #[repr(C, align(4096))]
@@ -48,14 +36,14 @@ pub struct PTPage<A: ArchPagingMeta> {
 }
 
 impl<A: ArchPagingMeta> PTPage<A> {
-    /// How many entries a table page holds: one page of the architecture's smallest size, filled
-    /// with entries.
+    /// How many entries a table page holds: one page of the smallest size this
+    /// build maps, filled with entries.
     pub open spec fn count() -> nat {
-        (PAGE_SIZE as nat) / vstd::layout::size_of::<usize>()
+        ENTRY_COUNT as nat
     }
 
-    /// A table page holds at least one entry, because every architecture this models has a
-    /// smallest page of at least 4 KiB.
+    /// A table page holds at least one entry, because the smallest page this
+    /// build maps is at least 4 KiB.
     pub proof fn lemma_count_positive()
         ensures
             Self::count() > 0,

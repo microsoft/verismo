@@ -36,7 +36,8 @@ use crate::specs::points_to::page_start_of;
 use crate::specs::points_to::{Mapping, PhysPointsTo, VirtAddrTok};
 use crate::structs::arch_contract::*;
 use crate::structs::frame::PhysFrame;
-use crate::structs::ptpage::{PTPage, ENTRY_COUNT};
+use crate::structs::ptpage::PTPage;
+use crate::structs::sizes::ENTRY_COUNT;
 use crate::structs::sizes::{MinPageSize, PAGE_SIZE};
 use crate::ArchPagingMeta;
 #[cfg(verus_only)]
@@ -116,7 +117,7 @@ impl InitialVirtMappings {
 /// reach the root at when the root maps nothing else.
 /// Bytes of virtual address space one slot of `level` spans.
 pub open spec fn slot_region_size<A: ArchPagingMeta>(level: PageLevel) -> nat {
-    pow2(level_shift::<A>(level.depth() as nat))
+    pow2(level_shift(level.depth() as nat))
 }
 
 /// The starts of the pages covering `[start, end)`, whose ends are both page
@@ -128,7 +129,7 @@ pub open spec fn pages_in<A: ArchPagingMeta>(start: int, end: int) -> Set<int> {
 pub open spec fn self_map_base<A: ArchPagingMeta>(k: usize, level: PageLevel) -> nat
     decreases level.depth(),
 {
-    let here = k * pow2(level_shift::<A>(level.depth() as nat));
+    let here = k * pow2(level_shift(level.depth() as nat));
     match level.spec_child() {
         Some(child) => (here + self_map_base::<A>(k, child)) as nat,
         None => here as nat,
@@ -322,7 +323,7 @@ impl<A: ArchPagingMeta> DirectMap<A> {
             } else {
                 Some(
                     entry.page_frame_spec() + vaddr as nat % pow2(
-                        level_shift::<A>(level.depth() as nat),
+                        level_shift(level.depth() as nat),
                     ),
                 )
             }

@@ -21,6 +21,8 @@ use crate::structs::level::PageLevel;
 use crate::structs::ptpage::PTPage;
 #[cfg(verus_only)]
 use crate::structs::sizes::lemma_size_4k;
+#[cfg(verus_only)]
+use crate::structs::sizes::ENTRY_COUNT;
 use crate::structs::sizes::{PageOffset, Size4KiB};
 #[cfg(verus_only)]
 use vstd::arithmetic::logarithm::log;
@@ -83,14 +85,6 @@ impl<P: X86PagingParams> ArchPagingGeometry for X86Paging<P> {
         P::spec_paddr_to_vaddr(paddr)
     }
 
-    open spec fn spec_entries_per_page() -> nat {
-        512
-    }
-
-    open spec fn spec_index_width() -> nat {
-        9
-    }
-
     proof fn lemma_geometry_wf() {
         lemma_size_4k();
     }
@@ -98,14 +92,6 @@ impl<P: X86PagingParams> ArchPagingGeometry for X86Paging<P> {
 
 impl<P: X86PagingParams> ArchPagingMeta for X86Paging<P> {
     type PTFlags = PTEntryFlags;
-
-    fn entries_per_page() -> (ret: usize) {
-        512
-    }
-
-    fn index_width() -> (ret: usize) {
-        9
-    }
 
     open spec fn spec_private_mask() -> usize {
         P::spec_private_mask()
@@ -167,6 +153,7 @@ pub proof fn lemma_x86_geometry_wf<P: X86PagingParams>()
         level_geometry_wf::<X86Paging<P>>(),
 {
     lemma_size_4k();
+    assert(ENTRY_COUNT == 512) by (compute);
     assert(PTPage::<X86Paging<P>>::count() == 512);
     vstd::arithmetic::power2::lemma2_to64();
     vstd::arithmetic::power2::lemma_pow2(9);

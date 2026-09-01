@@ -29,6 +29,7 @@ use crate::structs::entry::PTEntry;
 use crate::structs::level::PageLevel;
 use crate::structs::os_contract::{OSPagingContract, PTPageInit, PageLock, SlotShared};
 use crate::structs::ptpage::{page_from_vaddr, PTPage};
+use crate::structs::sizes::ENTRY_COUNT;
 
 verus! {
 
@@ -61,7 +62,7 @@ pub fn free_page_tree<A: ArchPagingMeta, P: OSPagingContract<A>>(
     proof {
         lemma_ids_match::<A>(writers, page);
     }
-    let count = A::entries_per_page();
+    let count = ENTRY_COUNT;
     let tracked PTPageSharedPerm { slots: readers, provenance, base: page_base, level: _ } = page;
     let tracked PTPageWritePerm { slots: writer_slots } = writers;
     let Tracked(points) = free_slots::<A, P>(

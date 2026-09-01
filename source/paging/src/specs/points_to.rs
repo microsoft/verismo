@@ -1644,7 +1644,7 @@ impl<'a, A: ArchPagingMeta> PageWalkPath<'a, A> {
     /// level the walk stopped, so a huge-page leaf keeps the bits a leaf-level
     /// page would have consumed on the way down.
     spec fn leaf_page_offset(&self) -> nat {
-        self.vaddr as nat % pow2(level_shift::<A>(self.leaf_level().depth() as nat))
+        self.vaddr as nat % pow2(level_shift(self.leaf_level().depth() as nat))
     }
 
     /// The physical address the walk maps `vaddr` to -- the address itself, not

@@ -32,6 +32,7 @@ use crate::structs::level::PageLevel;
 use crate::structs::os_contract::{OSPagingContract, PageLock, PagingError};
 use crate::structs::ptpage::{entry_ptr, page_from_vaddr, PTPage};
 use crate::structs::range::leaf_entry;
+use crate::structs::sizes::ENTRY_COUNT;
 
 use crate::structs::update::{read_slot_exact, set_leaf_slot, split_leaf_slot};
 
@@ -165,7 +166,7 @@ fn fill_split_page<A: ArchPagingMeta>(
     proof {
         lemma_per_page_positive::<A>();
     }
-    let count = A::entries_per_page();
+    let count = ENTRY_COUNT;
     let mut i = 0;
     while i < count
         invariant
