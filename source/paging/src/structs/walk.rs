@@ -39,7 +39,7 @@ use crate::structs::arch_contract::ArchPagingMeta;
 use crate::structs::arch_contract::{level_geometry_wf, slot_addr, spec_entry_index};
 use crate::structs::concurrent_pt::PTPageSharedPerm;
 use crate::structs::entry::PTEntry;
-use crate::structs::geometry::entry_index;
+use crate::structs::geometry::entry_index_at;
 use crate::structs::level::PageLevel;
 use crate::structs::os_contract::OSPagingContract;
 use crate::structs::ptpage::{entry_ptr, page_from_vaddr, PTPage};
@@ -104,8 +104,8 @@ pub fn walk_level0<A: ArchPagingMeta, P: OSPagingContract<A>>(
     page: Tracked<&PTPageSharedPerm<A>>,
     vaddr: VirtAddr,
 ) -> WalkResult<A> {
-    let level = PageLevel::Level0;
-    let index = entry_index::<A>(vaddr, level);
+    let level = PageLevel::at::<0>();
+    let index = entry_index_at::<A, 0>(vaddr);
     let ptr = entry_ptr::<A>(page_ptr, index, page);
     let (entry, _observed, _ticket) = PTEntry::read_published(
         ptr,
@@ -140,8 +140,8 @@ pub fn walk_level1<A: ArchPagingMeta, P: OSPagingContract<A>>(
     page: Tracked<&PTPageSharedPerm<A>>,
     vaddr: VirtAddr,
 ) -> WalkResult<A> {
-    let level = PageLevel::Level1;
-    let index = entry_index::<A>(vaddr, level);
+    let level = PageLevel::at::<1>();
+    let index = entry_index_at::<A, 1>(vaddr);
     let ptr = entry_ptr::<A>(page_ptr, index, page);
     let (entry, _observed, ticket) = PTEntry::read_published(
         ptr,
@@ -188,8 +188,8 @@ pub fn walk_level2<A: ArchPagingMeta, P: OSPagingContract<A>>(
     page: Tracked<&PTPageSharedPerm<A>>,
     vaddr: VirtAddr,
 ) -> WalkResult<A> {
-    let level = PageLevel::Level2;
-    let index = entry_index::<A>(vaddr, level);
+    let level = PageLevel::at::<2>();
+    let index = entry_index_at::<A, 2>(vaddr);
     let ptr = entry_ptr::<A>(page_ptr, index, page);
     let (entry, _observed, ticket) = PTEntry::read_published(
         ptr,
@@ -236,8 +236,8 @@ pub fn walk_level3<A: ArchPagingMeta, P: OSPagingContract<A>>(
     page: Tracked<&PTPageSharedPerm<A>>,
     vaddr: VirtAddr,
 ) -> WalkResult<A> {
-    let level = PageLevel::Level3;
-    let index = entry_index::<A>(vaddr, level);
+    let level = PageLevel::at::<3>();
+    let index = entry_index_at::<A, 3>(vaddr);
     let ptr = entry_ptr::<A>(page_ptr, index, page);
     let (entry, _observed, ticket) = PTEntry::read_published(
         ptr,
@@ -284,8 +284,8 @@ pub fn walk_level4<A: ArchPagingMeta, P: OSPagingContract<A>>(
     page: Tracked<&PTPageSharedPerm<A>>,
     vaddr: VirtAddr,
 ) -> WalkResult<A> {
-    let level = PageLevel::Level4;
-    let index = entry_index::<A>(vaddr, level);
+    let level = PageLevel::at::<4>();
+    let index = entry_index_at::<A, 4>(vaddr);
     let ptr = entry_ptr::<A>(page_ptr, index, page);
     let (entry, _observed, ticket) = PTEntry::read_published(
         ptr,

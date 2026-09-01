@@ -137,6 +137,32 @@ impl PageLevel {
         }
     }
 
+    /// The level at depth `L`, named by a const parameter rather than passed as
+    /// a value.
+    ///
+    /// This is what lets a caller whose level is fixed at compile time -- an
+    /// unrolled walker, say -- carry the level in its type instead of in a
+    /// local, without giving up the shared `from_nat` specification.
+    pub const fn at<const L: usize>() -> (ret: PageLevel)
+        requires
+            L <= 4,
+        ensures
+            ret == PageLevel::from_nat(L as nat),
+            ret.depth() == L,
+    {
+        let ret = match L {
+            0 => PageLevel::Level0,
+            1 => PageLevel::Level1,
+            2 => PageLevel::Level2,
+            3 => PageLevel::Level3,
+            _ => PageLevel::Level4,
+        };
+        proof {
+            PageLevel::lemma_from_nat_depth(L as nat);
+        }
+        ret
+    }
+
     /// Depth and level name each other, so a specification may use whichever
     /// reads better without the two drifting apart.
     pub proof fn lemma_depth_roundtrip(level: PageLevel)
@@ -307,7 +333,6 @@ impl PageLevel {
             PageLevel::Level4 => {},
         }
     }
-
 }
 
 } // verus!
@@ -348,4 +373,3 @@ impl PagingLevel for PagingLevel1 {
 }
 
 } // verus!
-

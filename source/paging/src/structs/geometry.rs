@@ -2,7 +2,10 @@
 //!
 //! One function, used by every level: the level is a value, so the index
 //! arithmetic is ordinary arithmetic rather than a family of constants
-//! generated per level.
+//! generated per level. `entry_index_at` is the same function for a caller
+//! whose level is fixed when the crate is compiled; it takes the level as a
+//! const parameter and delegates, so there is still only one definition of
+//! what an entry index is.
 use builtin_macros::{proof, verus_spec, verus_verify};
 use vstd::prelude::*;
 
@@ -55,6 +58,24 @@ pub fn entry_index_bits<A: ArchPagingMeta>(vaddr: usize, level: PageLevel) -> us
 )]
 pub fn entry_index<A: ArchPagingMeta>(vaddr: VirtAddr, level: PageLevel) -> usize {
     entry_index_bits::<A>(vaddr.bits(), level)
+}
+
+/// The entry `vaddr` selects at the level fixed by `L`, counted from the leaf.
+///
+/// Unlike `VirtAddr::to_pgtbl_idx`, which spells out x86-64's shift and mask,
+/// this stays generic in the architecture: the geometry still comes from `A`,
+/// and only the level moves into the type.
+#[verus_verify]
+#[verus_spec(ret =>
+    requires
+        level_geometry_wf::<A>(),
+        L <= 4,
+    ensures
+        ret == spec_entry_index::<A>(vaddr@, PageLevel::from_nat(L as nat)),
+        ret < PTPage::<A>::count(),
+)]
+pub fn entry_index_at<A: ArchPagingMeta, const L: usize>(vaddr: VirtAddr) -> usize {
+    entry_index::<A>(vaddr, PageLevel::at::<L>())
 }
 
 verus! {
