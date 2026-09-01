@@ -9,7 +9,6 @@
 //! it. Swap `tokens_impl` for a different construction and this is the file that goes with it.
 use vstd::prelude::*;
 
-use crate::protocol::perm::AnyPointsTo;
 use crate::tokens_impl::payload_slot::PayloadTicket;
 use crate::tokens_impl::*;
 #[cfg(verus_only)]

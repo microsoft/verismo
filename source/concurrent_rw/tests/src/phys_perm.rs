@@ -191,6 +191,9 @@ impl From<Counter> for usize {
     }
 }
 
+// Ghost-only: `FromSpecImpl` lives behind vstd's `verus_keep_ghost` gate, so a
+// plain `cargo build` has no trait to implement.
+#[cfg(verus_only)]
 impl FromSpecImpl<usize> for Counter {
     open spec fn obeys_from_spec() -> bool {
         true
@@ -201,6 +204,7 @@ impl FromSpecImpl<usize> for Counter {
     }
 }
 
+#[cfg(verus_only)]
 impl FromSpecImpl<Counter> for usize {
     open spec fn obeys_from_spec() -> bool {
         true
