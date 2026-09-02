@@ -29,7 +29,7 @@ use crate::structs::concurrent_pt::PTPageSharedPerm;
 use crate::structs::entry::PTEntry;
 use crate::structs::free::free_page_tree;
 use crate::structs::geometry::shift_at;
-use crate::structs::level::{PageLevel, PagingLevel};
+use crate::structs::level::{LevelSpec, PageLevel};
 use crate::structs::map::map_at;
 use crate::structs::os_contract::{OSPagingContract, PTPageInit, PageLock, PagingError};
 use crate::structs::ptpage::PTPage;
@@ -49,14 +49,14 @@ verus! {
 /// The root page is adopted, never allocated here: whoever installs a table in
 /// hardware owns its lifetime, and this handle owns only the right to read and
 /// update its slots.
-pub struct GenericPageTable<A: ArchPagingMeta, P: OSPagingContract<A>, L: PagingLevel> {
+pub struct GenericPageTable<A: ArchPagingMeta, P: OSPagingContract<A>, L: LevelSpec> {
     root: *mut PTPage<A>,
     page: Tracked<PTPageSharedPerm<A>>,
     install: Tracked<PTInstallState<A>>,
     dummy: PhantomData<(A, P, L)>,
 }
 
-impl<A: ArchPagingMeta, P: OSPagingContract<A>, L: PagingLevel> GenericPageTable<A, P, L> {
+impl<A: ArchPagingMeta, P: OSPagingContract<A>, L: LevelSpec> GenericPageTable<A, P, L> {
     pub closed spec fn root_spec(&self) -> *mut PTPage<A> {
         self.root
     }
@@ -73,7 +73,7 @@ impl<A: ArchPagingMeta, P: OSPagingContract<A>, L: PagingLevel> GenericPageTable
     /// one level that is static: every level below it is a value the walk
     /// carries.
     pub open spec fn root_level(&self) -> PageLevel {
-        L::TOP_LEVEL
+        L::LEVEL
     }
 
     /// Whether the hardware may be walking this tree.
@@ -109,12 +109,12 @@ impl<A: ArchPagingMeta, P: OSPagingContract<A>, L: PagingLevel> GenericPageTable
             level_geometry_wf::<A>(),
             page.wf(),
             page.base == root@.addr,
-            page.level == L::TOP_LEVEL,
+            page.level == L::LEVEL,
             install.root_frame() == P::spec_vaddr_to_paddr(root@.addr),
         ensures
             ret.inv(),
             ret.root_spec() == root,
-            ret.root_level() == L::TOP_LEVEL,
+            ret.root_level() == L::LEVEL,
             ret.page_spec() == page,
             ret.install_spec() == install,
     {
@@ -139,7 +139,7 @@ impl<A: ArchPagingMeta, P: OSPagingContract<A>, L: PagingLevel> GenericPageTable
             ret.level.depth() as nat <= self.root_level().depth() as nat,
             ret.entry.is_table_spec(ret.level) ==> !ret.entry.escrows_spec(),
     {
-        crate::structs::walk::walk::<A, P>(self.root, L::TOP_LEVEL, self.borrow_page(), vaddr)
+        crate::structs::walk::walk::<A, P>(self.root, L::LEVEL, self.borrow_page(), vaddr)
     }
 
     /// The physical address `vaddr` maps to, or why it does not map.
@@ -219,7 +219,7 @@ impl<A: ArchPagingMeta, P: OSPagingContract<A>, L: PagingLevel> GenericPageTable
     {
         let leaf_flags = level_flags::<A>(flags, target);
         let entry = PTEntry::<A>::new_leaf(paddr, leaf_flags);
-        map_at::<A, P>(self.root, L::TOP_LEVEL, self.borrow_page(), vaddr, target, entry)
+        map_at::<A, P>(self.root, L::LEVEL, self.borrow_page(), vaddr, target, entry)
     }
 
     /// Removes the mapping `vaddr` leads to, returning the entry that was
@@ -234,13 +234,7 @@ impl<A: ArchPagingMeta, P: OSPagingContract<A>, L: PagingLevel> GenericPageTable
         ensures
             ret matches Ok(old) ==> !old.escrows_spec(),
     {
-        update_leaf_at::<A, P>(
-            self.root,
-            L::TOP_LEVEL,
-            self.borrow_page(),
-            vaddr,
-            LeafUpdate::Clear,
-        )
+        update_leaf_at::<A, P>(self.root, L::LEVEL, self.borrow_page(), vaddr, LeafUpdate::Clear)
     }
 
     /// Replaces the permissions of the mapping `vaddr` leads to, keeping the
@@ -257,7 +251,7 @@ impl<A: ArchPagingMeta, P: OSPagingContract<A>, L: PagingLevel> GenericPageTable
     {
         match update_leaf_at::<A, P>(
             self.root,
-            L::TOP_LEVEL,
+            L::LEVEL,
             self.borrow_page(),
             vaddr,
             LeafUpdate::SetFlags(flags),
@@ -288,7 +282,7 @@ impl<A: ArchPagingMeta, P: OSPagingContract<A>, L: PagingLevel> GenericPageTable
     {
         match update_leaf_at::<A, P>(
             self.root,
-            L::TOP_LEVEL,
+            L::LEVEL,
             self.borrow_page(),
             vaddr,
             LeafUpdate::SetSharing { shared },
@@ -370,7 +364,7 @@ impl<A: ArchPagingMeta, P: OSPagingContract<A>, L: PagingLevel> GenericPageTable
         let leaf_flags = level_flags::<A>(flags, target);
         range_at::<A, P>(
             self.root,
-            L::TOP_LEVEL,
+            L::LEVEL,
             self.borrow_page(),
             vstart,
             vend,
@@ -403,7 +397,7 @@ impl<A: ArchPagingMeta, P: OSPagingContract<A>, L: PagingLevel> GenericPageTable
     {
         map_region::<A, P>(
             self.root,
-            L::TOP_LEVEL,
+            L::LEVEL,
             self.borrow_page(),
             vstart,
             vend,
@@ -429,7 +423,7 @@ impl<A: ArchPagingMeta, P: OSPagingContract<A>, L: PagingLevel> GenericPageTable
     {
         match range_at::<A, P>(
             self.root,
-            L::TOP_LEVEL,
+            L::LEVEL,
             self.borrow_page(),
             vstart,
             vend,
@@ -457,7 +451,7 @@ impl<A: ArchPagingMeta, P: OSPagingContract<A>, L: PagingLevel> GenericPageTable
         let leaf_flags = level_flags::<A>(flags, target);
         match range_at::<A, P>(
             self.root,
-            L::TOP_LEVEL,
+            L::LEVEL,
             self.borrow_page(),
             vstart,
             vend,
@@ -526,7 +520,7 @@ impl<A: ArchPagingMeta, P: OSPagingContract<A>, L: PagingLevel> GenericPageTable
         let (root, page, install) = self.into_parts();
         let lock = P::page_lock(root);
         let writers = lock.lock::<A>(Tracked(page.borrow()));
-        let init = free_page_tree::<A, P>(root, L::TOP_LEVEL, page, writers);
+        let init = free_page_tree::<A, P>(root, L::LEVEL, page, writers);
         (init, install)
     }
 

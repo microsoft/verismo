@@ -6,8 +6,11 @@
 //! entries are level 0, and the root of a 4-level tree is level 3.
 //!
 //! The level of a page is *ghost*: it is carried by the page's tracked tokens
-//! (`PTPageSharedPerm`), not by its type. That is what lets one walk function
-//! serve every level instead of a macro-generated family of them.
+//! (`PTPageSharedPerm`), not by its type. `PageLevel` is that value form.
+//! Alongside it, `Lvl<L>` names a level as a *type*, for code whose level is
+//! fixed when the crate is compiled -- the unrolled walkers, and the root a
+//! handle is generic over. `LevelSpec::level` is the bridge, so a
+//! specification may be written against whichever form reads better.
 use builtin_macros::verus;
 use vstd::prelude::*;
 
@@ -338,38 +341,119 @@ impl PageLevel {
 } // verus!
 verus! {
 
-/// The level a page table is rooted at, as a type.
+/// A level of the tree, as a type: `L` is the depth above the leaf, so `Lvl<0>`
+/// is the leaf and `Lvl<4>` the root of a five-level tree.
 ///
-/// Only the root level is static. Every level *below* it is a value carried by
-/// the walk, so this fixes how deep the tree is without generating a family of
-/// per-level functions -- which is the whole reason the level of an interior
-/// page is ghost state instead of a type parameter.
-pub trait PagingLevel: 'static {
-    const TOP_LEVEL: PageLevel;
+/// The numbering matches `PageLevel::spec_depth` and the shift in
+/// `geometry::shift_at`, both of which count from the leaf, so a marker's `L`
+/// is directly the number of index widths its entries shift by.
+///
+/// Only levels the architecture defines get an impl of [`LevelSpec`]: `Lvl<7>`
+/// is a type that names no level, and so cannot be used as one.
+pub struct Lvl<const L: usize>;
+
+/// What a level marker knows: its depth, and the same level as a value.
+///
+/// `LEVEL` is the bridge to [`PageLevel`], which stays the ghost and runtime
+/// form. A specification may be written against either without the two drifting
+/// apart, because `lemma_wf` ties them together.
+pub trait LevelSpec: 'static {
+    const DEPTH: usize;
+
+    const LEVEL: PageLevel;
+
+    proof fn lemma_wf()
+        ensures
+            Self::LEVEL.depth() == Self::DEPTH,
+            Self::DEPTH <= 4,
+    ;
 }
 
-pub struct PagingLevel4;
+/// A level with another level beneath it.
+///
+/// `Lvl<0>` has no impl, so descending below the leaf is a type error rather
+/// than a runtime check -- at the leaf the hardware reads bit 7 as PAT rather
+/// than PS, so an entry that looks there like a table pointer is a mapping.
+pub trait InnerLevel: LevelSpec {
+    type Child: LevelSpec;
 
-impl PagingLevel for PagingLevel4 {
-    const TOP_LEVEL: PageLevel = PageLevel::Level4;
+    proof fn lemma_child_wf()
+        ensures
+            Self::LEVEL.spec_child() == Some(<Self::Child as LevelSpec>::LEVEL),
+    ;
 }
 
-pub struct PagingLevel3;
+impl LevelSpec for Lvl<0> {
+    const DEPTH: usize = 0;
 
-impl PagingLevel for PagingLevel3 {
-    const TOP_LEVEL: PageLevel = PageLevel::Level3;
+    const LEVEL: PageLevel = PageLevel::Level0;
+
+    proof fn lemma_wf() {
+    }
 }
 
-pub struct PagingLevel2;
+impl LevelSpec for Lvl<1> {
+    const DEPTH: usize = 1;
 
-impl PagingLevel for PagingLevel2 {
-    const TOP_LEVEL: PageLevel = PageLevel::Level2;
+    const LEVEL: PageLevel = PageLevel::Level1;
+
+    proof fn lemma_wf() {
+    }
 }
 
-pub struct PagingLevel1;
+impl InnerLevel for Lvl<1> {
+    type Child = Lvl<0>;
 
-impl PagingLevel for PagingLevel1 {
-    const TOP_LEVEL: PageLevel = PageLevel::Level1;
+    proof fn lemma_child_wf() {
+    }
+}
+
+impl LevelSpec for Lvl<2> {
+    const DEPTH: usize = 2;
+
+    const LEVEL: PageLevel = PageLevel::Level2;
+
+    proof fn lemma_wf() {
+    }
+}
+
+impl InnerLevel for Lvl<2> {
+    type Child = Lvl<1>;
+
+    proof fn lemma_child_wf() {
+    }
+}
+
+impl LevelSpec for Lvl<3> {
+    const DEPTH: usize = 3;
+
+    const LEVEL: PageLevel = PageLevel::Level3;
+
+    proof fn lemma_wf() {
+    }
+}
+
+impl InnerLevel for Lvl<3> {
+    type Child = Lvl<2>;
+
+    proof fn lemma_child_wf() {
+    }
+}
+
+impl LevelSpec for Lvl<4> {
+    const DEPTH: usize = 4;
+
+    const LEVEL: PageLevel = PageLevel::Level4;
+
+    proof fn lemma_wf() {
+    }
+}
+
+impl InnerLevel for Lvl<4> {
+    type Child = Lvl<3>;
+
+    proof fn lemma_child_wf() {
+    }
 }
 
 } // verus!
