@@ -14,6 +14,7 @@ pub mod page;
 pub mod ptpage;
 pub mod range;
 pub mod region;
+pub mod slot;
 pub mod sizes;
 pub mod split;
 pub mod state;

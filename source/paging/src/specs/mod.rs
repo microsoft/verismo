@@ -18,4 +18,6 @@ pub mod external;
 pub mod nonnull;
 pub mod page_table;
 pub mod points_to;
+#[cfg(verus_only)]
+pub mod slot;
 pub mod points_to_axiom;
