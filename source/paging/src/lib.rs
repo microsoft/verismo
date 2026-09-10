@@ -20,6 +20,7 @@ pub use structs::arch_contract::{ArchPagingMeta, GenericPageTableFlags};
 pub use structs::entry;
 pub use structs::geometry;
 pub use structs::level;
+pub use structs::mapping;
 pub use structs::os_contract;
 pub use structs::ptpage;
 pub use structs::sizes;

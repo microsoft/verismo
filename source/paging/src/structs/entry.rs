@@ -138,6 +138,41 @@ impl<A: ArchPagingMeta> PTEntry<A> {
     pub fn set(&mut self, addr: PhysAddr, flags: A::PTFlags) {
         *self = Self::new(addr, flags);
     }
+
+    /// Retags the mapped frame as shared, keeping the flags. The address the
+    /// entry reports already has the private tag stripped.
+    pub fn make_shared(&mut self) {
+        let flags = self.flags();
+        let addr = PhysAddr::from(self.address());
+        self.set(A::make_shared_address(addr), flags);
+    }
+
+    /// Retags the mapped frame as private, keeping the flags.
+    pub fn make_private(&mut self) {
+        let flags = self.flags();
+        let addr = PhysAddr::from(self.address());
+        self.set(A::make_private_address(addr), flags);
+    }
+
+    /// Reads an entry out of a live table.
+    ///
+    /// # Safety
+    /// `entry` must point at an entry of a mapped table page.
+    pub unsafe fn read_pte(entry: *const Self) -> Self {
+        // SAFETY: the caller vouches for the pointer. The read is volatile
+        // because the MMU writes the accessed and dirty bits under us, and an
+        // aligned word-sized access sees the entry whole.
+        unsafe { entry.read_volatile() }
+    }
+
+    /// Writes an entry into a live table.
+    ///
+    /// # Safety
+    /// `entry` must point at an entry of a mapped table page.
+    pub unsafe fn write_pte(entry: *mut Self, value: Self) {
+        // SAFETY: as in `read_pte`.
+        unsafe { entry.write_volatile(value) }
+    }
 }
 
 impl<A: ArchPagingMeta> Clone for PTEntry<A> {

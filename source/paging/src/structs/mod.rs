@@ -3,6 +3,7 @@ pub mod arch_contract;
 pub mod entry;
 pub mod geometry;
 pub mod level;
+pub mod mapping;
 pub mod os_contract;
 pub mod ptpage;
 pub mod sizes;
