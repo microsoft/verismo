@@ -1,31 +1,12 @@
-#[cfg(verus_only)]
-use vstd::arithmetic::logarithm::log;
-#[cfg(verus_only)]
-use vstd::arithmetic::power2::pow2;
-use vstd::prelude::*;
-
-use crate::address::{Address, PhysAddr};
-use crate::structs::sizes::{
-    MinPageSize, PageOffset, PageSize, ENTRY_COUNT, PAGE_OFFSET_WIDTH, PAGE_SIZE,
-    PAGE_TABLE_INDEX_WIDTH,
-};
+//! What an architecture owes the page table: the layout of an entry's flag
+//! word, and where in an entry's address field the confidentiality tags sit.
 use bitflags::Flags;
-#[cfg(verus_only)]
-use bitflags_verus::FlagsSpec;
-use builtin_macros::verus_verify;
 
-use crate::structs::entry::PTEntry;
-use crate::structs::level::PageLevel;
-use crate::structs::ptpage::PTPage;
+use crate::structs::address::{Address, PhysAddr};
 
-/// Executable interface to a page table entry's flag word.
-///
-/// Kept in plain Rust, annotated rather than rewritten, so the flag types can
-/// be shared with unverified code. Its ghost half is
-/// [`GenericPageTableFlagsSpec`].
-#[verus_verify]
+/// A page table entry's flag word.
 pub trait GenericPageTableFlags:
-    bitflags::Flags<Bits = usize>
+    Flags<Bits = usize>
     + core::ops::BitAnd<Output = Self>
     + core::ops::BitOr<Output = Self>
     + Copy
@@ -39,309 +20,98 @@ pub trait GenericPageTableFlags:
 
     const HUGE: Self;
 
-    /// Default flags for newly created parent page table entries.
-    ///
-    /// These flags must be permissive enough to form a superset of all
-    /// possible descendant leaf entry permissions, since effective access
-    /// rights are constrained by both parent and leaf entries.
+    /// Flags for a newly created parent entry. They must be permissive enough
+    /// to cover every descendant leaf, since effective access rights are the
+    /// intersection of a leaf's and its ancestors'.
     fn parent_flags() -> Self;
 
-    /// Flags for the self-map entry itself. This may differ from `parent_flags`
+    /// Flags for the self-map entry itself, which may differ from
+    /// [`Self::parent_flags`].
     fn self_map_table_flags() -> Self;
 
     /// The union of two flag words.
-    ///
-    /// Written out rather than using `|` so that the trait need not name a
-    /// verification-only operator specification: `BitOr` on a generic type
-    /// carries a precondition that nothing here can discharge.
-    #[verus_spec(ret =>
-        ensures
-            Self::obeys_bitflags_spec() ==> ret.bits_spec() == self.bits_spec() | other.bits_spec(),
-    )]
     fn with(self, other: Self) -> Self {
-        proof! {
-            broadcast use bitflags_verus::traits::axiom_from_bits_retain;
-        }
         Self::from_bits_retain(self.bits() | other.bits())
     }
 
-    /// `self` with every flag of `other` cleared.
-    ///
-    /// The counterpart of [`Self::with`], and written the same way and for the
-    /// same reason. Splitting a large mapping needs it: the pieces inherit the
-    /// permissions of the entry they came from, but not its size bit.
-    #[verus_spec(ret =>
-        ensures
-            Self::obeys_bitflags_spec() ==> ret.bits_spec() == self.bits_spec() & !other.bits_spec(),
-    )]
+    /// `self` with every flag of `other` cleared. Splitting a large mapping
+    /// needs it: the pieces inherit the permissions of the entry they came
+    /// from, but not its size bit.
     fn without(self, other: Self) -> Self {
-        proof! {
-            broadcast use bitflags_verus::traits::axiom_from_bits_retain;
-        }
         Self::from_bits_retain(self.bits() & !other.bits())
     }
 
-    #[verus_spec(ret =>
-        ensures
-            Self::obeys_bitflags_spec() ==> ret == self.contains_spec(Self::HUGE),
-    )]
     fn huge(&self) -> bool {
         self.contains(Self::HUGE)
     }
 
-    #[verus_spec(ret =>
-        ensures
-            Self::obeys_bitflags_spec() ==> ret == self.contains_spec(Self::PRESENT),
-    )]
     fn present(&self) -> bool {
         self.contains(Self::PRESENT)
     }
 
-    #[verus_spec(ret =>
-        ensures
-            Self::obeys_bitflags_spec() ==> ret == self.contains_spec(Self::USER),
-    )]
     fn user(&self) -> bool {
         self.contains(Self::USER)
     }
+
+    fn present_bit() -> usize {
+        Self::PRESENT.bits()
+    }
+
+    fn huge_bit() -> usize {
+        Self::HUGE.bits()
+    }
+
+    fn writable_bit() -> usize {
+        Self::WRITABLE.bits()
+    }
+
+    fn user_bit() -> usize {
+        Self::USER.bits()
+    }
 }
 
-verus! {
+/// Architecture-specific page table metadata for confidential computing: which
+/// address bits mark a page private or shared, both zero where memory is not
+/// encrypted. Implementers are markers that are never instantiated.
+pub trait ArchPagingMeta: 'static + Copy {
+    type PTFlags: GenericPageTableFlags;
 
-/// The address geometry a host supplies. Split out of `ArchPagingMeta` so that
-/// specifications can be stated against it without depending on the executable
-/// entry-manipulation half of that trait.
-pub trait ArchPagingGeometry: Sized {
-    spec fn phys_addr_width() -> nat;
+    /// The bits ORed into a physical address for a private (encrypted) entry.
+    fn private_pte_mask() -> usize;
 
-    /// Where the platform maps a physical frame.
-    ///
-    /// The executable translation is the OS's (`OSPagingContract::paddr_to_vaddr`),
-    /// and this is what ties the two together. It is specified here because a
-    /// page's tracked tokens have to state it -- a walker that has just
-    /// computed a child page's address must know that the tokens it borrowed
-    /// describe that page -- and those tokens are indexed by the platform, not
-    /// by the embedder. Making the embedder reachable from this trait instead
-    /// is a cycle Verus rejects.
-    spec fn spec_paddr_to_vaddr(paddr: usize) -> usize;
+    /// The bits ORed into a physical address for a shared (plaintext) entry.
+    fn shared_pte_mask() -> usize;
 
-    /// Sanity condition on the geometry, discharged by the host so that callers
-    /// need not carry it as a precondition.
-    proof fn lemma_geometry_wf()
-        ensures
-            PAGE_OFFSET_WIDTH < Self::phys_addr_width() <= 64,
-    ;
-}
+    /// Physical address mask; x86-64 supports 52-bit addresses, so this is
+    /// usually `0x000f_ffff_ffff_f000`.
+    fn address_mask() -> usize;
 
-/// Shift of the page a level maps: `depth` levels above the leaf, each level
-/// covering [`PAGE_TABLE_INDEX_WIDTH`] more address bits.
-///
-/// Not indexed by the architecture: how wide a level's index is follows from
-/// the page size, which this build fixes for every architecture at once.
-pub open spec fn level_shift(depth: nat) -> nat {
-    (PAGE_OFFSET_WIDTH + depth * PAGE_TABLE_INDEX_WIDTH) as nat
-}
+    /// Flags the hardware supports. Override to silently clear bits that are
+    /// not yet legal, such as `GLOBAL` before CR4.PGE is enabled.
+    fn supported_flags() -> Self::PTFlags {
+        Self::PTFlags::all()
+    }
 
-/// Which entry of a level's table page an address selects: the address bits
-/// just above the region that level maps.
-pub open spec fn spec_entry_index<A: ArchPagingMeta>(vaddr: usize, level: PageLevel) -> nat {
-    ((vaddr >> level_shift(level.depth() as nat)) as nat) % PTPage::<A>::count()
-}
-
-/// Address of a table page's entry `index`. Stated once here so that no
-/// specification has to spell out the entry stride.
-pub open spec fn slot_addr<A: ArchPagingMeta>(base: usize, index: int) -> int {
-    base as int + index * vstd::layout::size_of::<usize>()
-}
-
-/// Whether the level geometry fits the address width: the tree spans no more
-/// bits than an address has.
-///
-/// Stated as a predicate rather than a trait obligation because it is defined
-/// in terms of `PTEntry<A>`, which is itself indexed by `A`: naming it
-/// inside `ArchPagingMeta` would be a cyclic definition. Each architecture
-/// instantiates and discharges it.
-pub open spec fn level_geometry_wf<A: ArchPagingMeta>() -> bool {
-    // The deepest tree the level type can describe still shifts by less than a
-    // word, so every index a walk computes is a legal shift.
-    &&& level_shift(PageLevel::Level4.depth() as nat)
-        < usize::BITS
-    // A page of entries is a `PTPage`, whose size is fixed by its type.
-    &&& PTPage::<A>::count() == ENTRY_COUNT
-}
-
-/// The ghost half of [`GenericPageTableFlags`]: which bit each named flag
-/// occupies, and the well-formedness the entry encoding relies on.
-///
-/// Separate from the exec trait so that a flag type can be defined -- and used
-/// by unverified code -- without carrying proofs, and so that the bit positions
-/// are named in one place that specifications can refer to.
-pub trait GenericPageTableFlagsSpec: GenericPageTableFlags {
-    /// Every bit a named flag can occupy. Bits outside the address field may
-    /// fall outside this too, since a flag whose position the machine reports
-    /// at runtime -- the C-bit -- cannot be a constant of the architecture.
-    spec fn spec_all_bits() -> usize;
-
-    spec fn spec_present_bit() -> usize;
-
-    spec fn spec_huge_bit() -> usize;
-
-    spec fn spec_writable_bit() -> usize;
-
-    spec fn spec_user_bit() -> usize;
-
-    /// A bit the hardware ignores in every kind of entry, which this crate uses
-    /// to mark an entry that points at a table page *this crate built*.
-    ///
-    /// The hardware bits cannot say that on their own: at the leaf level a
-    /// present entry with the large-page bit clear maps a 4K page, and at every
-    /// other level the same two bits mean "points at a table". The tokens of a
-    /// child page are escrowed in the entry that points at it, so which entries
-    /// carry them has to be readable from the entry alone, at any level. Marking
-    /// them explicitly is what makes that possible.
-    spec fn spec_escrow_bit() -> usize;
-
-    /// Executable mirrors of the bit positions above. The associated consts of
-    /// [`GenericPageTableFlags`] cannot serve here: Verus gives an associated
-    /// const no ghost value unless its initializer is a bare name, which a
-    /// `bitflags`-generated flag never is.
-    fn present_bit() -> (ret: usize)
-        ensures
-            ret == Self::spec_present_bit(),
-    ;
-
-    fn huge_bit() -> (ret: usize)
-        ensures
-            ret == Self::spec_huge_bit(),
-    ;
-
-    fn writable_bit() -> (ret: usize)
-        ensures
-            ret == Self::spec_writable_bit(),
-    ;
-
-    fn user_bit() -> (ret: usize)
-        ensures
-            ret == Self::spec_user_bit(),
-    ;
-
-    fn escrow_bit() -> (ret: usize)
-        ensures
-            ret == Self::spec_escrow_bit(),
-    ;
-
-    proof fn lemma_flag_bits_wf()
-        ensures
-            Self::obeys_bitflags_spec(),
-            Self::spec_present_bit() != 0,
-            Self::spec_huge_bit() != 0,
-            Self::spec_present_bit() & Self::spec_huge_bit() == 0,
-            Self::spec_present_bit() & Self::spec_all_bits() == Self::spec_present_bit(),
-            Self::spec_huge_bit() & Self::spec_all_bits() == Self::spec_huge_bit(),
-            Self::spec_user_bit() & Self::spec_all_bits() == Self::spec_user_bit(),
-            Self::spec_escrow_bit() != 0,
-            Self::spec_escrow_bit() & Self::spec_present_bit() == 0,
-            Self::spec_escrow_bit() & Self::spec_huge_bit() == 0,
-            Self::spec_escrow_bit() & Self::spec_all_bits() == Self::spec_escrow_bit(),
-            Self::spec_writable_bit() != 0,
-            Self::spec_writable_bit() & Self::spec_present_bit() == 0,
-            Self::spec_writable_bit() & Self::spec_huge_bit() == 0,
-            Self::spec_writable_bit() & Self::spec_escrow_bit() == 0,
-            Self::spec_writable_bit() & Self::spec_all_bits() == Self::spec_writable_bit(),
-    ;
-}
-
-pub trait ArchPagingMeta: 'static + Copy + ArchPagingGeometry {
-    type PTFlags: GenericPageTableFlagsSpec;
-
-    /// Spec-level mirror of `private_pte_mask()`.
-    spec fn spec_private_mask() -> usize;
-
-    /// Spec-level mirror of `shared_pte_mask()`.
-    spec fn spec_shared_mask() -> usize;
-
-    /// Spec-level mirror of `address_mask()`.
-    spec fn spec_address_mask() -> usize;
-
-    /// Sanity conditions relating the masks above, discharged once per
-    /// architecture rather than carried as a precondition by every caller.
-    proof fn lemma_pte_masks_wf()
-        ensures
-            Self::PTFlags::spec_present_bit() != 0,
-            Self::PTFlags::spec_huge_bit() != 0,
-            Self::PTFlags::spec_present_bit() & Self::PTFlags::spec_huge_bit() == 0,
-            Self::spec_address_mask() & Self::PTFlags::spec_present_bit() == 0,
-            Self::spec_address_mask() & Self::PTFlags::spec_huge_bit() == 0,
-            Self::spec_address_mask() & Self::PTFlags::spec_escrow_bit() == 0,
-            Self::spec_address_mask() & Self::PTFlags::spec_writable_bit() == 0,
-            Self::spec_private_mask() & Self::spec_shared_mask() == 0,
-            // Both tags live inside the address field, so tagging an address
-            // keeps it a legal entry payload.
-            Self::spec_private_mask() & !Self::spec_address_mask() == 0,
-            Self::spec_shared_mask() & !Self::spec_address_mask() == 0,
-            // No named flag overlaps the address field, so assembling an
-            // entry from an address and flags loses neither.
-            Self::PTFlags::spec_all_bits() & !Self::spec_address_mask()
-                == Self::PTFlags::spec_all_bits(),
-    ;
-
-    /// Returns the bitmask ORed into physical addresses for private
-    /// (encrypted) page table entries.
-    fn private_pte_mask() -> (ret: usize)
-        ensures
-            ret == Self::spec_private_mask(),
-    ;
-
-    /// Returns the bitmask ORed into physical addresses for shared
-    /// (plaintext) page table entries.
-    fn shared_pte_mask() -> (ret: usize)
-        ensures
-            ret == Self::spec_shared_mask(),
-    ;
-
-    /// Physical address mask.
-    /// x64 supports 52-bit physical addresses, so the mask is usually 0x000f_ffff_ffff_f000.
-    fn address_mask() -> (ret: usize)
-        ensures
-            ret == Self::spec_address_mask(),
-    ;
-
-    /// Returns a bitmask of PTEntryFlags that the hardware supports.
-    ///
-    /// Override this method to filter unsupported bits (e.g., `GLOBAL` before CR4.PGE is enabled)
-    /// so that they are silently cleared. The default allows all flags.
-    fn supported_flags() -> Self::PTFlags;
-
-    /// Clears the private encryption bit(s) from `paddr`.
     fn strip_confidentiality_bits(paddr: PhysAddr) -> PhysAddr {
         (paddr.bits() & !Self::private_pte_mask()).into()
     }
 
-    /// Clears the shared bit(s) from `paddr`.
     fn strip_shared_address_bits(paddr: PhysAddr) -> PhysAddr {
         (paddr.bits() & !Self::shared_pte_mask()).into()
     }
 
-    /// Returns `paddr` with the private encryption mask applied.
-    ///
-    /// Any shared bits are stripped first so the result is exclusively
-    /// private.
+    /// `paddr` marked private. Shared bits are stripped first, so the result is
+    /// exclusively private.
     fn make_private_address(paddr: PhysAddr) -> PhysAddr {
         (Self::strip_shared_address_bits(paddr).bits() | Self::private_pte_mask()).into()
     }
 
-    /// Returns `paddr` with the shared mask applied.
-    ///
-    /// Any confidentiality (private) bits are stripped first so the result
-    /// is exclusively shared.
+    /// `paddr` marked shared, private bits stripped first.
     fn make_shared_address(paddr: PhysAddr) -> PhysAddr {
         (Self::strip_confidentiality_bits(paddr).bits() | Self::shared_pte_mask()).into()
     }
 
-    /// Returns `true` if `paddr` already has the shared mask applied.
     fn is_shared_address(paddr: PhysAddr) -> bool {
         paddr == Self::make_shared_address(paddr)
     }
 }
-
-} // verus!
