@@ -28,7 +28,7 @@ pub enum PagingError {
 ///   inverts `vaddr_to_paddr`. Addresses passed to it are always clean.
 /// * `allocate_table_page` returns a unique, page-aligned, zeroed frame with a
 ///   clean address that `paddr_to_vaddr` can map.
-/// * `flush_range` reaches every processor that may be walking this table.
+/// * `deallocate_table_page` is given only frames that no table links to.
 pub unsafe trait PagingHandler: 'static {
     fn paddr_to_vaddr(paddr: PhysAddr) -> VirtAddr;
 
@@ -41,7 +41,4 @@ pub unsafe trait PagingHandler: 'static {
     /// `paddr` must come from [`Self::allocate_table_page`] and be linked into
     /// no tree.
     unsafe fn deallocate_table_page(paddr: PhysAddr);
-
-    /// Invalidates the cached translations of `[start, end)`.
-    fn flush_range(start: usize, end: usize);
 }

@@ -3,6 +3,7 @@
 use bitflags::Flags;
 
 use crate::structs::address::{Address, PhysAddr};
+use crate::structs::tlb::TlbFlush;
 
 /// A page table entry's flag word.
 pub trait GenericPageTableFlags:
@@ -75,6 +76,9 @@ pub trait GenericPageTableFlags:
 /// encrypted. Implementers are markers that are never instantiated.
 pub trait ArchPagingMeta: 'static + Copy {
     type PTFlags: GenericPageTableFlags;
+
+    /// What a mutation of this architecture's tables owes the TLB.
+    type TlbFlushTok: TlbFlush;
 
     /// The bits ORed into a physical address for a private (encrypted) entry.
     fn private_pte_mask() -> usize;

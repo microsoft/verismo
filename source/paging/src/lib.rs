@@ -13,6 +13,8 @@ pub mod util;
 pub use arch::x86_64::paging::{X86Paging, X86PagingParams};
 #[cfg(target_arch = "x86_64")]
 pub use arch::x86_64::pt_flags::PTEntryFlags;
+#[cfg(target_arch = "x86_64")]
+pub use arch::x86_64::tlb::{FlushScope, X86TlbFlushTok};
 pub use structs::address;
 pub use structs::arch_contract::{ArchPagingMeta, GenericPageTableFlags};
 pub use structs::entry;

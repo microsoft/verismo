@@ -1,6 +1,7 @@
 //! Which level of the tree a table page sits at, as a value ([`PageLevel`]) and
 //! as a type ([`Lvl`]). Level 0 is the leaf; the root of a four-level tree is
 //! level 3.
+use crate::structs::geometry::level_size;
 
 /// The level of a page-table page, counted from the leaf. x86 walks at most
 /// five levels.
@@ -48,6 +49,11 @@ impl PageLevel {
             PageLevel::Level3 => PageLevel::Level4,
             PageLevel::Level4 => PageLevel::Level4,
         }
+    }
+
+    /// How much address space one entry at this level covers.
+    pub fn size(&self) -> usize {
+        level_size(*self)
     }
 
     pub fn is_leaf(&self) -> bool {

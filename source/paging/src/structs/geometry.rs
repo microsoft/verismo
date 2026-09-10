@@ -15,6 +15,11 @@ pub fn shift_at(level: PageLevel) -> usize {
     PAGE_OFFSET_WIDTH + level.depth() * PAGE_TABLE_INDEX_WIDTH
 }
 
+/// How much address space one entry at `level` covers.
+pub fn level_size(level: PageLevel) -> usize {
+    1usize << shift_at(level)
+}
+
 pub fn entry_index_bits(vaddr: usize, level: PageLevel) -> usize {
     (vaddr >> shift_at(level)) & INDEX_MASK
 }

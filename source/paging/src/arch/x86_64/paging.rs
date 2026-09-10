@@ -3,12 +3,31 @@
 //! so the type is generic over a marker that supplies it.
 
 use super::pt_flags::PTEntryFlags;
+use super::tlb::{FlushScope, X86TlbFlushTok};
 use crate::structs::arch_contract::ArchPagingMeta;
 
-/// Which address bit encrypts a page, as reported by the platform. Zero when
-/// memory is not encrypted.
-pub trait X86PagingParams: 'static {
+/// What the platform tells the page table: which address bit encrypts a page
+/// (zero when memory is not encrypted), and how to invalidate translations.
+pub trait X86PagingParams: 'static + Copy + core::fmt::Debug + PartialEq + Eq {
     fn private_mask() -> usize;
+
+    /// Invalidate `scope` on every processor, including global pages.
+    fn flush_tlb_global_sync(scope: FlushScope);
+
+    /// Invalidate `scope` on this processor only, including global pages.
+    fn flush_tlb_global_percpu(scope: FlushScope) {
+        Self::flush_tlb_global_sync(scope)
+    }
+
+    /// Invalidate `scope` on every processor, ignoring global pages.
+    fn flush_tlb_ignore_global_sync(scope: FlushScope) {
+        Self::flush_tlb_global_sync(scope)
+    }
+
+    /// Invalidate `scope` on this processor only, ignoring global pages.
+    fn flush_tlb_ignore_global_percpu(scope: FlushScope) {
+        Self::flush_tlb_global_percpu(scope)
+    }
 }
 
 /// x86_64 paging with 4 KiB pages and 512-entry tables.
@@ -26,6 +45,8 @@ impl<P: X86PagingParams> Copy for X86Paging<P> {}
 
 impl<P: X86PagingParams> ArchPagingMeta for X86Paging<P> {
     type PTFlags = PTEntryFlags;
+
+    type TlbFlushTok = X86TlbFlushTok<P>;
 
     fn private_pte_mask() -> usize {
         P::private_mask()

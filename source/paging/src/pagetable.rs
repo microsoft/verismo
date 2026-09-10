@@ -7,7 +7,7 @@ use core::marker::PhantomData;
 use crate::structs::address::{Address, PhysAddr, VirtAddr};
 use crate::structs::arch_contract::{ArchPagingMeta, GenericPageTableFlags};
 use crate::structs::entry::PTEntry;
-use crate::structs::geometry::{entry_index, shift_at};
+use crate::structs::geometry::entry_index;
 use crate::structs::level::{LevelSpec, PageLevel};
 use crate::structs::os_contract::{PagingError, PagingHandler};
 use crate::structs::ptpage::PTPage;
@@ -78,7 +78,7 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
         if !walk.entry.is_leaf(walk.level) {
             return Err(PagingError::NotMapped);
         }
-        let offset = vaddr.bits() & (page_size(walk.level) - 1);
+        let offset = vaddr.bits() & (walk.level.size() - 1);
         Ok(PhysAddr::from(walk.entry.address() + offset))
     }
 
@@ -146,15 +146,17 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
     /// Removes the mapping of `vaddr`, whatever its page size, and returns the
     /// entry that was there. Tables emptied by the removal are left in place:
     /// reclaiming one means knowing that no walker stands in it.
-    pub fn unmap(&mut self, vaddr: VirtAddr) -> (Option<PTEntry<A>>, MayNeedFlush) {
+    pub fn unmap(
+        &mut self,
+        vaddr: VirtAddr,
+    ) -> (Option<PTEntry<A>>, MayNeedFlush<A::TlbFlushTok>) {
         let walk = self.walk(vaddr);
         if !walk.entry.is_leaf(walk.level) {
             return (None, MayNeedFlush::none());
         }
         write_slot(walk.slot, PTEntry::<A>::empty());
-        let size = page_size(walk.level);
-        let start = vaddr.bits() & !(size - 1);
-        (Some(walk.entry), MayNeedFlush::range(start, start + size))
+        let start = VirtAddr::from(vaddr.bits() & !(walk.level.size() - 1));
+        (Some(walk.entry), MayNeedFlush::new(start, walk.level))
     }
 }
 
@@ -174,9 +176,4 @@ fn write_slot<A: ArchPagingMeta>(slot: *mut usize, entry: PTEntry<A>) {
     // SAFETY: as in `read_slot`, and an aligned word-sized store is what the
     // hardware requires to see the entry whole.
     unsafe { slot.write_volatile(entry.raw()) }
-}
-
-/// How much address space a page at `level` covers.
-fn page_size(level: PageLevel) -> usize {
-    1usize << shift_at(level)
 }
