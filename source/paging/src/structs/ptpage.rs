@@ -26,9 +26,9 @@ impl<A: ArchPagingMeta, P: PagingHandler> PTPage<A, P> {
     pub const COUNT: usize = ENTRY_COUNT;
 
     /// A zeroed table page, and its clean physical address.
-    pub fn alloc() -> Result<(*mut Self, PhysAddr), PagingError> {
-        let paddr = P::allocate_table_page()?;
-        Ok((P::paddr_to_vaddr(paddr).as_mut_ptr::<Self>(), paddr))
+    pub fn alloc(handler: &P) -> Result<(*mut Self, PhysAddr), PagingError> {
+        let paddr = handler.allocate_table_page()?;
+        Ok((handler.paddr_to_vaddr(paddr).as_mut_ptr::<Self>(), paddr))
     }
 
     /// The table page mapped at `vaddr`.
@@ -42,11 +42,11 @@ impl<A: ArchPagingMeta, P: PagingHandler> PTPage<A, P> {
     /// The child table `entry` points at, or `None` if it maps a page or maps
     /// nothing. Whether an entry may be followed also depends on its level,
     /// which is the caller's business.
-    pub fn child_of(entry: &PTEntry<A>) -> Option<*mut Self> {
+    pub fn child_of(handler: &P, entry: &PTEntry<A>) -> Option<*mut Self> {
         if !entry.present() || entry.huge() {
             return None;
         }
-        Some(P::paddr_to_vaddr(PhysAddr::from(entry.address())).as_mut_ptr::<Self>())
+        Some(handler.paddr_to_vaddr(PhysAddr::from(entry.address())).as_mut_ptr::<Self>())
     }
 
     /// The entry at `index` of `page`.
@@ -84,22 +84,22 @@ impl<A: ArchPagingMeta, P: PagingHandler> PTPage<A, P> {
     /// # Safety
     /// `page` must point at a mapped table page at `level` that no processor is
     /// walking and no other tree links to.
-    pub unsafe fn free_lvl(page: *mut Self, level: PageLevel) {
+    pub unsafe fn free_lvl(handler: &P, page: *mut Self, level: PageLevel) {
         let Some(child_level) = level.child() else {
             return;
         };
         for idx in 0..Self::COUNT {
             // SAFETY: the caller vouches for `page`.
             let entry = unsafe { Self::read_entry(page, idx) };
-            let Some(child) = Self::child_of(&entry) else {
+            let Some(child) = Self::child_of(handler, &entry) else {
                 continue;
             };
             // SAFETY: `child` belongs to this tree, which the caller says no
             // one is walking, so it too may be torn down.
-            unsafe { Self::free_lvl(child, child_level) };
+            unsafe { Self::free_lvl(handler, child, child_level) };
             // SAFETY: nothing reaches `child` any more, and it came from
             // `allocate_table_page`.
-            unsafe { P::deallocate_table_page(PhysAddr::from(entry.address())) };
+            unsafe { handler.deallocate_table_page(PhysAddr::from(entry.address())) };
         }
     }
 }
@@ -160,11 +160,21 @@ impl<A: ArchPagingMeta> PageFrame<A> {
     }
 }
 
+/// What a mapping is made of: the flags of the leaf, whether the frame is
+/// shared, and the flags of any table created to reach it.
+#[derive(Clone, Copy, Debug)]
+pub struct MapSpec<A: ArchPagingMeta> {
+    pub flags: A::PTFlags,
+    pub shared: bool,
+    pub parent_flags: A::PTFlags,
+}
+
 impl<A: ArchPagingMeta, P: PagingHandler> PTPage<A, P> {
     /// Builds tables from `map` down towards `target`, stopping early at a
     /// present entry or a failed allocation. Every page it creates is filled
     /// before it is linked, so no walker sees a half-built table.
     fn alloc_pte_down<'a>(
+        handler: &P,
         map: Mapping<'a, A>,
         vaddr: VirtAddr,
         target: PageLevel,
@@ -178,7 +188,7 @@ impl<A: ArchPagingMeta, P: PagingHandler> PTPage<A, P> {
             let Some(child_level) = map.level.child() else {
                 return map;
             };
-            let Ok((page, paddr)) = Self::alloc() else {
+            let Ok((page, paddr)) = Self::alloc(handler) else {
                 return map;
             };
             map.entry.set(A::make_private_address(paddr), parent_flags);
@@ -194,12 +204,16 @@ impl<A: ArchPagingMeta, P: PagingHandler> PTPage<A, P> {
     /// Breaks the large page `entry` maps at `level` into a table one level
     /// down. The pieces inherit the flags of the entry they came from, less the
     /// size bit where the level below is the leaf.
-    fn do_split(entry: &mut PTEntry<A>, level: PageLevel) -> Result<*mut Self, PagingError> {
+    fn do_split(
+        handler: &P,
+        entry: &mut PTEntry<A>,
+        level: PageLevel,
+    ) -> Result<*mut Self, PagingError> {
         let Some(child_level) = level.child() else {
             return Err(PagingError::InvalidLevel);
         };
         assert!(entry.huge());
-        let (page, paddr) = Self::alloc()?;
+        let (page, paddr) = Self::alloc(handler)?;
         let base = entry.address() & !(level.size() - 1);
         let child_size = child_level.size();
         let child_flags = if child_level.is_leaf() {
@@ -220,6 +234,7 @@ impl<A: ArchPagingMeta, P: PagingHandler> PTPage<A, P> {
 
     /// Splits `map` until `vaddr` is described by an entry at `target`.
     fn split_to<'a>(
+        handler: &P,
         map: Mapping<'a, A>,
         vaddr: VirtAddr,
         target: PageLevel,
@@ -230,7 +245,7 @@ impl<A: ArchPagingMeta, P: PagingHandler> PTPage<A, P> {
                 return Err(PagingError::NotMapped);
             }
             let level = map.level;
-            let page = Self::do_split(map.entry, level)?;
+            let page = Self::do_split(handler, map.entry, level)?;
             let child_level = level.child().ok_or(PagingError::InvalidLevel)?;
             let index = entry_index(vaddr, child_level);
             // SAFETY: `page` is the table just split out of `map.entry`, which
@@ -242,24 +257,26 @@ impl<A: ArchPagingMeta, P: PagingHandler> PTPage<A, P> {
     }
 
     /// Maps `vaddr` to `paddr` at `target`, building the tables above it.
-    pub fn do_map_with_parent_flags(
+    pub fn do_map(
+        handler: &P,
         map: Mapping<'_, A>,
         vaddr: VirtAddr,
         paddr: PhysAddr,
         target: PageLevel,
-        flags: A::PTFlags,
-        shared: bool,
-        parent_flags: A::PTFlags,
+        spec: MapSpec<A>,
     ) -> Result<(), PagingError> {
         assert!(vaddr.is_aligned(target.size()));
         assert!(paddr.is_aligned(target.size()));
-        let map = Self::alloc_pte_down(map, vaddr, target, parent_flags);
+        let map = Self::alloc_pte_down(handler, map, vaddr, target, spec.parent_flags);
         if map.level != target {
             return Err(PagingError::AllocFrame);
         }
-        let addr =
-            if shared { A::make_shared_address(paddr) } else { A::make_private_address(paddr) };
-        let flags = if target.is_leaf() { flags } else { flags.with(A::PTFlags::HUGE) };
+        let addr = if spec.shared {
+            A::make_shared_address(paddr)
+        } else {
+            A::make_private_address(paddr)
+        };
+        let flags = if target.is_leaf() { spec.flags } else { spec.flags.with(A::PTFlags::HUGE) };
         map.entry.set(addr, flags);
         Ok(())
     }
@@ -287,22 +304,24 @@ impl<A: ArchPagingMeta, P: PagingHandler> PTPage<A, P> {
     /// Retags the page holding `vaddr` as shared, splitting larger pages so
     /// that only a page of `target`'s size is retagged.
     pub fn do_set_shared(
+        handler: &P,
         map: Mapping<'_, A>,
         vaddr: VirtAddr,
         target: PageLevel,
     ) -> Result<(), PagingError> {
-        Self::split_to(map, vaddr, target)?.entry.make_shared();
+        Self::split_to(handler, map, vaddr, target)?.entry.make_shared();
         Ok(())
     }
 
     /// Retags the page holding `vaddr` as private, splitting as
     /// [`Self::do_set_shared`] does.
     pub fn do_set_encrypted(
+        handler: &P,
         map: Mapping<'_, A>,
         vaddr: VirtAddr,
         target: PageLevel,
     ) -> Result<(), PagingError> {
-        Self::split_to(map, vaddr, target)?.entry.make_private();
+        Self::split_to(handler, map, vaddr, target)?.entry.make_private();
         Ok(())
     }
 }

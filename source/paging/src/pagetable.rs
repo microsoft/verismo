@@ -12,7 +12,7 @@ use crate::structs::geometry::entry_index;
 use crate::structs::level::{LevelSpec, PageLevel};
 use crate::structs::mapping::{MappingMut, MappingMutOps, MappingRef, MappingRefOps};
 use crate::structs::os_contract::{PagingError, PagingHandler};
-use crate::structs::ptpage::{PTPage, PageFrame};
+use crate::structs::ptpage::{MapSpec, PTPage, PageFrame};
 use crate::structs::tlb::MayNeedFlush;
 
 /// A page table rooted at a page of level `L`: `Lvl<3>` is four-level x86-64
@@ -20,50 +20,57 @@ use crate::structs::tlb::MayNeedFlush;
 /// dropped, so a table installed in a control register must be handed to
 /// [`PageTable::leak`] rather than dropped.
 pub struct PageTable<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> {
-    root: VirtAddr,
-    marker: PhantomData<(A, P, L)>,
+    // The root is held as a physical address because that is what the hardware
+    // is given; where it can be reached is the handler's business.
+    root_pa: PhysAddr,
+    handler: P,
+    marker: PhantomData<(A, L)>,
 }
 
 impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
     /// A table over an existing root page, taking ownership of it.
     ///
     /// # Safety
-    /// `root` must be a level `L` table page from
+    /// `root_pa` must be a level `L` table page from
     /// [`PagingHandler::allocate_table_page`], written by no one else, and no
     /// other owner may free it.
-    pub unsafe fn from_root(root: VirtAddr) -> Self {
-        Self { root, marker: PhantomData }
-    }
-
-    /// A table over an existing root page, taking ownership of it.
-    ///
-    /// # Safety
-    /// As for [`Self::from_root`].
-    pub unsafe fn from_ptr(root: *mut PTPage<A, P>) -> Self {
-        Self { root: VirtAddr::from(root), marker: PhantomData }
-    }
-
-    /// Gives up ownership of the root page and returns it. What a table
-    /// installed in a control register needs: dropping it would free a page the
-    /// hardware still walks.
-    pub fn leak(self) -> VirtAddr {
-        let root = self.root;
-        core::mem::forget(self);
-        root
+    pub unsafe fn from_root(handler: P, root_pa: PhysAddr) -> Self {
+        Self { root_pa, handler, marker: PhantomData }
     }
 
     /// A table over a freshly allocated, empty root page.
-    pub fn alloc() -> Result<Self, PagingError> {
-        let (page, _paddr) = PTPage::<A, P>::alloc()?;
-        Ok(Self { root: VirtAddr::from(page), marker: PhantomData })
+    pub fn alloc(handler: P) -> Result<Self, PagingError> {
+        let (_page, root_pa) = PTPage::<A, P>::alloc(&handler)?;
+        Ok(Self { root_pa, handler, marker: PhantomData })
     }
 
-    pub fn root_vaddr(&self) -> VirtAddr {
-        self.root
+    /// Gives up ownership of the root page, returning it and the handler. What
+    /// a table installed in a control register needs: dropping it would free a
+    /// page the hardware still walks.
+    pub fn leak(self) -> (P, PhysAddr) {
+        let this = core::mem::ManuallyDrop::new(self);
+        let root_pa = this.root_pa;
+        // SAFETY: `this` is never dropped, so the handler is moved out once.
+        let handler = unsafe { core::ptr::read(&this.handler) };
+        (handler, root_pa)
+    }
+
+    /// What the table calls to reach memory and to allocate.
+    pub fn handler(&self) -> &P {
+        &self.handler
     }
 
     pub fn root_paddr(&self) -> PhysAddr {
-        P::vaddr_to_paddr(self.root)
+        self.root_pa
+    }
+
+    /// Where the root page is reachable, as the handler maps it.
+    pub fn root_vaddr(&self) -> VirtAddr {
+        self.handler.paddr_to_vaddr(self.root_pa)
+    }
+
+    fn root_page(&self) -> *mut PTPage<A, P> {
+        self.root_vaddr().as_mut_ptr::<PTPage<A, P>>()
     }
 
     /// Where `vaddr` comes to rest: a handle on the first entry the hardware
@@ -71,7 +78,7 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
     /// at the leaf level, where bit 7 is PAT rather than PS.
     pub fn walk(&self, vaddr: VirtAddr) -> MappingRef<'_, A> {
         let mut level = L::LEVEL;
-        let mut page = self.root.as_ptr::<PTPage<A, P>>();
+        let mut page = self.root_page().cast_const();
         loop {
             let entry_ptr = PTPage::<A, P>::entry_ptr(page, entry_index(vaddr, level));
             // SAFETY: `page` is a table page of this tree, reached either from
@@ -79,7 +86,7 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
             let entry = unsafe { PTEntry::<A>::read_pte(entry_ptr) };
             match level.child() {
                 Some(child) if entry.is_table(level) => {
-                    page = PTPage::<A, P>::child_of(&entry).unwrap().cast_const();
+                    page = PTPage::<A, P>::child_of(&self.handler, &entry).unwrap().cast_const();
                     level = child;
                 }
                 // SAFETY: as above; the handle borrows the table for `'_`.
@@ -92,14 +99,14 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
     /// exclusive borrow of the table is what keeps the entry unaliased.
     pub fn walk_mut(&mut self, vaddr: VirtAddr) -> MappingMut<'_, A> {
         let mut level = L::LEVEL;
-        let mut page = self.root.as_mut_ptr::<PTPage<A, P>>();
+        let mut page = self.root_page();
         loop {
             let entry_ptr = PTPage::<A, P>::entry_ptr_mut(page, entry_index(vaddr, level));
             // SAFETY: as in `walk`.
             let entry = unsafe { PTEntry::<A>::read_pte(entry_ptr) };
             match level.child() {
                 Some(child) if entry.is_table(level) => {
-                    page = PTPage::<A, P>::child_of(&entry).unwrap();
+                    page = PTPage::<A, P>::child_of(&self.handler, &entry).unwrap();
                     level = child;
                 }
                 // SAFETY: as in `walk`, and `&mut self` means no other handle
@@ -145,16 +152,12 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
         if target.depth() > L::DEPTH {
             return Err(PagingError::InvalidLevel);
         }
+        let spec = MapSpec { flags, shared, parent_flags };
+        let handler: *const P = &self.handler;
         self.walk_mut(vaddr).commit_no_flush(|map| {
-            PTPage::<A, P>::do_map_with_parent_flags(
-                map,
-                vaddr,
-                paddr,
-                target,
-                flags,
-                shared,
-                parent_flags,
-            )
+            // SAFETY: the handler lives in this table, which the walk borrows
+            // for the whole call.
+            PTPage::<A, P>::do_map(unsafe { &*handler }, map, vaddr, paddr, target, spec)
         })
     }
 
@@ -198,7 +201,7 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> Drop for PageTable<A, P,
         // SAFETY: the table owns its root page, and every constructor requires
         // it to have come from `allocate_table_page`. The tables below it are
         // not freed here: see `free_children`.
-        unsafe { P::deallocate_table_page(self.root_paddr()) };
+        unsafe { self.handler.deallocate_table_page(self.root_pa) };
     }
 }
 
@@ -255,8 +258,10 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
         &mut self,
         vaddr: VirtAddr,
     ) -> Result<MayNeedFlush<A::TlbFlushTok>, PagingError> {
+        let handler: *const P = &self.handler;
         let mut mapping = self.walk_mut(vaddr);
-        PTPage::<A, P>::do_set_shared(mapping.staged(), vaddr, Self::SMALL)?;
+        // SAFETY: the handler lives in this table, which the walk borrows.
+        PTPage::<A, P>::do_set_shared(unsafe { &*handler }, mapping.staged(), vaddr, Self::SMALL)?;
         Ok(mapping.commit())
     }
 
@@ -266,15 +271,22 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
         &mut self,
         vaddr: VirtAddr,
     ) -> Result<MayNeedFlush<A::TlbFlushTok>, PagingError> {
+        let handler: *const P = &self.handler;
         let mut mapping = self.walk_mut(vaddr);
-        PTPage::<A, P>::do_set_encrypted(mapping.staged(), vaddr, Self::SMALL)?;
+        // SAFETY: the handler lives in this table, which the walk borrows.
+        PTPage::<A, P>::do_set_encrypted(
+            unsafe { &*handler },
+            mapping.staged(),
+            vaddr,
+            Self::SMALL,
+        )?;
         Ok(mapping.commit())
     }
 
     /// The table entry `idx` of the root points at, or `None` if it points at
     /// no table.
     pub fn next_table_pa(&self, idx: usize) -> Option<PhysAddr> {
-        let entry_ptr = PTPage::<A, P>::entry_ptr(self.root.as_ptr::<PTPage<A, P>>(), idx);
+        let entry_ptr = PTPage::<A, P>::entry_ptr(self.root_page().cast_const(), idx);
         // SAFETY: `idx` indexes the root page, which this table owns.
         let entry = unsafe { MappingRef::<A>::new(L::LEVEL, entry_ptr) }.read();
         if !entry.is_table(L::LEVEL) {
@@ -289,7 +301,7 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
     pub fn populate(&mut self, idx: usize, subpage_pa: PhysAddr) -> Result<bool, PagingError> {
         let desired =
             PTEntry::<A>::new(A::make_private_address(subpage_pa), A::PTFlags::parent_flags());
-        let entry_ptr = PTPage::<A, P>::entry_ptr_mut(self.root.as_mut_ptr::<PTPage<A, P>>(), idx);
+        let entry_ptr = PTPage::<A, P>::entry_ptr_mut(self.root_page(), idx);
         // SAFETY: `idx` indexes the root page, which this table owns, and
         // `&mut self` means no other handle on it exists.
         let mut mapping = unsafe { MappingMut::<A>::new(None, L::LEVEL, entry_ptr) };
@@ -443,6 +455,7 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
     /// No processor may be walking the subtree, which is the case only after
     /// the range has been unmapped and the flush discharged.
     unsafe fn free_pt_after_unmap(
+        handler: &P,
         page: *mut PTPage<A, P>,
         level: PageLevel,
         start: VirtAddr,
@@ -461,18 +474,20 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
             // handle on the subtree being torn down.
             let mut mapping = unsafe { MappingMut::<A>::new(None, level, entry_ptr) };
             let entry = mapping.read();
-            let Some(child) = PTPage::<A, P>::child_of(&entry) else {
+            let Some(child) = PTPage::<A, P>::child_of(handler, &entry) else {
                 continue;
             };
             // SAFETY: `child` belongs to the subtree the caller vouched for.
-            if unsafe { Self::free_pt_after_unmap(child, child_level, child_start, child_end) } {
+            if unsafe {
+                Self::free_pt_after_unmap(handler, child, child_level, child_start, child_end)
+            } {
                 mapping.staged().entry.clear();
                 // SAFETY: the entry mapped no page, only an empty table, so no
                 // translation went stale.
                 unsafe { mapping.commit().ignore() };
                 // SAFETY: nothing links to `child` any more, and it came from
                 // `allocate_table_page`.
-                unsafe { P::deallocate_table_page(PhysAddr::from(entry.address())) };
+                unsafe { handler.deallocate_table_page(PhysAddr::from(entry.address())) };
             }
             child_start = child_end;
             child_end = min(child_end + child_size, end);
@@ -488,9 +503,9 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
     /// processor is walking the tables being freed.
     pub unsafe fn free_page_table_by_range(&mut self, start: VirtAddr, end: VirtAddr) {
         // SAFETY: the caller's obligation is this function's.
-        unsafe {
-            Self::free_pt_after_unmap(self.root.as_mut_ptr::<PTPage<A, P>>(), L::LEVEL, start, end)
-        };
+        let page = self.root_page();
+        // SAFETY: the caller's obligation is this function's.
+        unsafe { Self::free_pt_after_unmap(&self.handler, page, L::LEVEL, start, end) };
     }
 
     /// Frees every table below the root, leaving the root itself empty but
@@ -501,6 +516,8 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
     /// its subtrees.
     pub unsafe fn free_children(&mut self) {
         // SAFETY: the caller's obligation is this function's.
-        unsafe { PTPage::<A, P>::free_lvl(self.root.as_mut_ptr::<PTPage<A, P>>(), L::LEVEL) };
+        let page = self.root_page();
+        // SAFETY: the caller's obligation is this function's.
+        unsafe { PTPage::<A, P>::free_lvl(&self.handler, page, L::LEVEL) };
     }
 }

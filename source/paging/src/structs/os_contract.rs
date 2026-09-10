@@ -19,8 +19,8 @@ pub enum PagingError {
     NotLeafEntry,
 }
 
-/// OS-level page table services. Implementers are markers that are never
-/// instantiated, so every method is an associated function.
+/// OS-level page table services, provided by a value the table holds: an
+/// embedder that needs allocator or address-space state can keep it there.
 ///
 /// # Safety
 ///
@@ -30,15 +30,15 @@ pub enum PagingError {
 ///   clean address that `paddr_to_vaddr` can map.
 /// * `deallocate_table_page` is given only frames that no table links to.
 pub unsafe trait PagingHandler: 'static {
-    fn paddr_to_vaddr(paddr: PhysAddr) -> VirtAddr;
+    fn paddr_to_vaddr(&self, paddr: PhysAddr) -> VirtAddr;
 
-    fn vaddr_to_paddr(vaddr: VirtAddr) -> PhysAddr;
+    fn vaddr_to_paddr(&self, vaddr: VirtAddr) -> PhysAddr;
 
-    fn allocate_table_page() -> Result<PhysAddr, PagingError>;
+    fn allocate_table_page(&self) -> Result<PhysAddr, PagingError>;
 
     /// # Safety
     ///
     /// `paddr` must come from [`Self::allocate_table_page`] and be linked into
     /// no tree.
-    unsafe fn deallocate_table_page(paddr: PhysAddr);
+    unsafe fn deallocate_table_page(&self, paddr: PhysAddr);
 }
