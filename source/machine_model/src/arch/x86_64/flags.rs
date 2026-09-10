@@ -89,9 +89,8 @@ bitflags! {
         const PWT = 0x8;
         /// Page-level cache disable.
         const PCD = 0x10;
-        /// No-flush control. Write-only: consumed by the write itself, so it
-        /// never persists and always reads back clear.
-        const NOFLUSH = 0x8000_0000_0000_0000;
+        /// Physical frame of the root page table.
+        const PFN = 0x000f_ffff_ffff_f000;
     }
 }
 

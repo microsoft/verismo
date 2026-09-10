@@ -4,7 +4,9 @@ use super::spec::{Cr0, Cr3, Cr4, Cs, Msr, Rflags};
 
 // Ghost-only, and so absent from a plain `cargo build`.
 #[cfg(verus_only)]
-use super::flags::{lemma_same_control_flags_preserves_df, lemma_with_alignment_check_preserves_df};
+use super::flags::{
+    lemma_same_control_flags_preserves_df, lemma_with_alignment_check_preserves_df,
+};
 #[cfg(verus_only)]
 use super::spec::cpl;
 use crate::register::points_to::{AsmRegisterPointsTo, RustRegisterPointsTo};
@@ -121,9 +123,8 @@ macro_rules! control_reg_impl {
 
 // CR0.ET is fixed to 1, so it reads back set regardless of the written value.
 control_reg_impl!(Cr0, Cr0Value, "mov {}, cr0", "mov cr0, {}", |value| value.union(Cr0Value::ET));
-// CR3 bit 63 is the write-only "no-flush" control and never persists.
-control_reg_impl!(Cr3, Cr3Value, "mov {}, cr3", "mov cr3, {}", |value| value
-    .difference(Cr3Value::NOFLUSH));
+// Every CR3 bit modeled here is retained as written.
+control_reg_impl!(Cr3, Cr3Value, "mov {}, cr3", "mov cr3, {}", |value| value);
 // Every CR4 bit modeled here is retained as written.
 control_reg_impl!(Cr4, Cr4Value, "mov {}, cr4", "mov cr4, {}", |value| value);
 
