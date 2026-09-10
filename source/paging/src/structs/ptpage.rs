@@ -211,7 +211,8 @@ impl<A: ArchPagingMeta, P: PagingHandler> PTPage<A, P> {
             // SAFETY: `page` was just allocated and is linked into no tree, so
             // its entries are exclusively ours.
             let child = unsafe { &mut *Self::entry_ptr_mut(page, idx) };
-            child.set(A::make_private_address(PhysAddr::from(base + idx * child_size)), child_flags);
+            child
+                .set(A::make_private_address(PhysAddr::from(base + idx * child_size)), child_flags);
         }
         entry.set(A::make_private_address(paddr), entry.flags().without(A::PTFlags::HUGE));
         Ok(page)

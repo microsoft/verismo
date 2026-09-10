@@ -2,6 +2,7 @@
 //! comes to rest, `map` installs one mapping and `unmap` takes one away. Reads
 //! and writes of a live entry are volatile and word-sized, since the MMU writes
 //! entries too, and every mutation hands back a TLB obligation.
+use core::cmp::min;
 use core::marker::PhantomData;
 
 use crate::structs::address::{Address, PhysAddr, VirtAddr};
@@ -15,20 +16,40 @@ use crate::structs::ptpage::{PTPage, PageFrame};
 use crate::structs::tlb::MayNeedFlush;
 
 /// A page table rooted at a page of level `L`: `Lvl<3>` is four-level x86-64
-/// paging, `Lvl<4>` five-level. The table does not own its root frame -- an
-/// address space outlives the handle that walks it.
+/// paging, `Lvl<4>` five-level. The table owns its root page and frees it when
+/// dropped, so a table installed in a control register must be handed to
+/// [`PageTable::leak`] rather than dropped.
 pub struct PageTable<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> {
     root: VirtAddr,
     marker: PhantomData<(A, P, L)>,
 }
 
 impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
-    /// A table over an existing root page.
+    /// A table over an existing root page, taking ownership of it.
     ///
     /// # Safety
-    /// `root` must be a live level `L` table page, written by no one else.
+    /// `root` must be a level `L` table page from
+    /// [`PagingHandler::allocate_table_page`], written by no one else, and no
+    /// other owner may free it.
     pub unsafe fn from_root(root: VirtAddr) -> Self {
         Self { root, marker: PhantomData }
+    }
+
+    /// A table over an existing root page, taking ownership of it.
+    ///
+    /// # Safety
+    /// As for [`Self::from_root`].
+    pub unsafe fn from_ptr(root: *mut PTPage<A, P>) -> Self {
+        Self { root: VirtAddr::from(root), marker: PhantomData }
+    }
+
+    /// Gives up ownership of the root page and returns it. What a table
+    /// installed in a control register needs: dropping it would free a page the
+    /// hardware still walks.
+    pub fn leak(self) -> VirtAddr {
+        let root = self.root;
+        core::mem::forget(self);
+        root
     }
 
     /// A table over a freshly allocated, empty root page.
@@ -147,23 +168,13 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
         flags: A::PTFlags,
         shared: bool,
     ) -> Result<(), PagingError> {
-        self.map_with_parent_flags(
-            vaddr,
-            paddr,
-            target,
-            flags,
-            shared,
-            A::PTFlags::parent_flags(),
-        )
+        self.map_with_parent_flags(vaddr, paddr, target, flags, shared, A::PTFlags::parent_flags())
     }
 
     /// Removes the mapping of `vaddr`, whatever its page size, and reports the
     /// level it was mapped at. Tables emptied by the removal are left in place:
     /// reclaiming one means knowing that no walker stands in it.
-    pub fn unmap(
-        &mut self,
-        vaddr: VirtAddr,
-    ) -> (Option<PageLevel>, MayNeedFlush<A::TlbFlushTok>) {
+    pub fn unmap(&mut self, vaddr: VirtAddr) -> (Option<PageLevel>, MayNeedFlush<A::TlbFlushTok>) {
         let mut mapping = self.walk_mut(vaddr);
         let level = PTPage::<A, P>::do_unmap(mapping.staged());
         (level, mapping.commit())
@@ -179,5 +190,317 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
         let mut mapping = self.walk_mut(vaddr);
         let entry = PTPage::<A, P>::do_unmap_at(mapping.staged(), target);
         (entry, mapping.commit())
+    }
+}
+
+impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> Drop for PageTable<A, P, L> {
+    fn drop(&mut self) {
+        // SAFETY: the table owns its root page, and every constructor requires
+        // it to have come from `allocate_table_page`. The tables below it are
+        // not freed here: see `free_children`.
+        unsafe { P::deallocate_table_page(self.root_paddr()) };
+    }
+}
+
+/// The operations whose page size is fixed: mapping a smallest page or the one
+/// large page above it, and everything a range of them is built from.
+impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
+    /// The size of the smallest page this build maps.
+    pub const SMALL: PageLevel = PageLevel::Level0;
+
+    /// The size of the large page one level up.
+    pub const LARGE: PageLevel = PageLevel::Level1;
+
+    /// Maps one smallest page.
+    pub fn map_4k(
+        &mut self,
+        vaddr: VirtAddr,
+        paddr: PhysAddr,
+        flags: A::PTFlags,
+        shared: bool,
+    ) -> Result<(), PagingError> {
+        self.map(vaddr, paddr, Self::SMALL, flags, shared)
+    }
+
+    /// Maps one large page.
+    pub fn map_2m(
+        &mut self,
+        vaddr: VirtAddr,
+        paddr: PhysAddr,
+        flags: A::PTFlags,
+        shared: bool,
+    ) -> Result<(), PagingError> {
+        self.map(vaddr, paddr, Self::LARGE, flags, shared)
+    }
+
+    /// Unmaps one smallest page, and returns the entry that mapped it.
+    pub fn unmap_4k(
+        &mut self,
+        vaddr: VirtAddr,
+    ) -> (Option<PTEntry<A>>, MayNeedFlush<A::TlbFlushTok>) {
+        self.unmap_at(vaddr, Self::SMALL)
+    }
+
+    /// Unmaps one large page, and returns the entry that mapped it.
+    pub fn unmap_2m(
+        &mut self,
+        vaddr: VirtAddr,
+    ) -> (Option<PTEntry<A>>, MayNeedFlush<A::TlbFlushTok>) {
+        self.unmap_at(vaddr, Self::LARGE)
+    }
+
+    /// Retags the smallest page holding `vaddr` as shared, splitting any larger
+    /// page it lies in.
+    pub fn set_shared_4k(
+        &mut self,
+        vaddr: VirtAddr,
+    ) -> Result<MayNeedFlush<A::TlbFlushTok>, PagingError> {
+        let mut mapping = self.walk_mut(vaddr);
+        PTPage::<A, P>::do_set_shared(mapping.staged(), vaddr, Self::SMALL)?;
+        Ok(mapping.commit())
+    }
+
+    /// Retags the smallest page holding `vaddr` as private, splitting as
+    /// [`Self::set_shared_4k`] does.
+    pub fn set_encrypted_4k(
+        &mut self,
+        vaddr: VirtAddr,
+    ) -> Result<MayNeedFlush<A::TlbFlushTok>, PagingError> {
+        let mut mapping = self.walk_mut(vaddr);
+        PTPage::<A, P>::do_set_encrypted(mapping.staged(), vaddr, Self::SMALL)?;
+        Ok(mapping.commit())
+    }
+
+    /// The table entry `idx` of the root points at, or `None` if it points at
+    /// no table.
+    pub fn next_table_pa(&self, idx: usize) -> Option<PhysAddr> {
+        let entry_ptr = PTPage::<A, P>::entry_ptr(self.root.as_ptr::<PTPage<A, P>>(), idx);
+        // SAFETY: `idx` indexes the root page, which this table owns.
+        let entry = unsafe { MappingRef::<A>::new(L::LEVEL, entry_ptr) }.read();
+        if !entry.is_table(L::LEVEL) {
+            return None;
+        }
+        Some(PhysAddr::from(entry.address()))
+    }
+
+    /// Points root entry `idx` at `subpage_pa`, a subtree the caller owns.
+    /// Returns whether the entry changed. No flush is owed: the entry it
+    /// replaces must have been absent.
+    pub fn populate(&mut self, idx: usize, subpage_pa: PhysAddr) -> Result<bool, PagingError> {
+        let desired =
+            PTEntry::<A>::new(A::make_private_address(subpage_pa), A::PTFlags::parent_flags());
+        let entry_ptr = PTPage::<A, P>::entry_ptr_mut(self.root.as_mut_ptr::<PTPage<A, P>>(), idx);
+        // SAFETY: `idx` indexes the root page, which this table owns, and
+        // `&mut self` means no other handle on it exists.
+        let mut mapping = unsafe { MappingMut::<A>::new(None, L::LEVEL, entry_ptr) };
+        if mapping.staged().entry.raw() == desired.raw() {
+            return Ok(false);
+        }
+        mapping.commit_no_flush(|map| {
+            *map.entry = desired;
+            Ok(true)
+        })
+    }
+
+    /// Maps `[start, end)` with smallest pages, starting at `phys`.
+    pub fn map_region_4k(
+        &mut self,
+        start: VirtAddr,
+        end: VirtAddr,
+        phys: PhysAddr,
+        flags: A::PTFlags,
+        shared: bool,
+    ) -> Result<(), PagingError> {
+        self.map_region_at(start, end, phys, Self::SMALL, flags, shared)
+    }
+
+    /// Maps `[start, end)` with large pages, starting at `phys`.
+    pub fn map_region_2m(
+        &mut self,
+        start: VirtAddr,
+        end: VirtAddr,
+        phys: PhysAddr,
+        flags: A::PTFlags,
+        shared: bool,
+    ) -> Result<(), PagingError> {
+        self.map_region_at(start, end, phys, Self::LARGE, flags, shared)
+    }
+
+    /// Maps `[start, end)` with pages of one size, starting at `phys`.
+    pub fn map_region_at(
+        &mut self,
+        start: VirtAddr,
+        end: VirtAddr,
+        phys: PhysAddr,
+        target: PageLevel,
+        flags: A::PTFlags,
+        shared: bool,
+    ) -> Result<(), PagingError> {
+        let size = target.size();
+        let mut vaddr = start;
+        while vaddr < end {
+            self.map(vaddr, phys + (vaddr - start), target, flags, shared)?;
+            vaddr = vaddr + size;
+        }
+        Ok(())
+    }
+
+    /// Maps `[start, end)` starting at `phys`, preferring large pages where
+    /// alignment and size allow and falling back to smallest ones.
+    pub fn map_region(
+        &mut self,
+        start: VirtAddr,
+        end: VirtAddr,
+        phys: PhysAddr,
+        flags: A::PTFlags,
+    ) -> Result<(), PagingError> {
+        let large = Self::LARGE.size();
+        let small = Self::SMALL.size();
+        let mut vaddr = start;
+        let mut paddr = phys;
+        while vaddr < end {
+            if vaddr.is_aligned(large)
+                && paddr.is_aligned(large)
+                && vaddr + large <= end
+                && self.map_2m(vaddr, paddr, flags, false).is_ok()
+            {
+                vaddr = vaddr + large;
+                paddr = paddr + large;
+                continue;
+            }
+            self.map_4k(vaddr, paddr, flags, false)?;
+            vaddr = vaddr + small;
+            paddr = paddr + small;
+        }
+        Ok(())
+    }
+
+    /// Unmaps `[start, end)`, which must be mapped with smallest pages.
+    pub fn unmap_region_4k(
+        &mut self,
+        start: VirtAddr,
+        end: VirtAddr,
+    ) -> MayNeedFlush<A::TlbFlushTok> {
+        self.unmap_region_at(start, end, Self::SMALL)
+    }
+
+    /// Unmaps `[start, end)`, which must be mapped with large pages.
+    pub fn unmap_region_2m(
+        &mut self,
+        start: VirtAddr,
+        end: VirtAddr,
+    ) -> MayNeedFlush<A::TlbFlushTok> {
+        self.unmap_region_at(start, end, Self::LARGE)
+    }
+
+    /// Unmaps `[start, end)`, which must be mapped with pages of one size.
+    pub fn unmap_region_at(
+        &mut self,
+        start: VirtAddr,
+        end: VirtAddr,
+        target: PageLevel,
+    ) -> MayNeedFlush<A::TlbFlushTok> {
+        let size = target.size();
+        let mut flush = MayNeedFlush::none();
+        let mut vaddr = start;
+        while vaddr < end {
+            let (_, pending) = self.unmap_at(vaddr, target);
+            flush = flush.and(pending);
+            vaddr = vaddr + size;
+        }
+        flush
+    }
+
+    /// Unmaps `[start, end)` whatever the sizes of the pages mapping it, and
+    /// reports whether every page in the range was mapped. Mapped pages are
+    /// unmapped either way.
+    pub fn unmap_region(
+        &mut self,
+        start: VirtAddr,
+        end: VirtAddr,
+    ) -> (bool, MayNeedFlush<A::TlbFlushTok>) {
+        let mut flush = MayNeedFlush::none();
+        let mut all_mapped = true;
+        let mut vaddr = start;
+        while vaddr < end {
+            let (level, pending) = self.unmap(vaddr);
+            flush = flush.and(pending);
+            vaddr = match level {
+                Some(level) => vaddr + level.size(),
+                None => {
+                    all_mapped = false;
+                    vaddr + Self::SMALL.size()
+                }
+            };
+        }
+        (all_mapped, flush)
+    }
+
+    /// Frees the tables that `[start, end)` no longer needs, and reports
+    /// whether `page` is left empty.
+    ///
+    /// # Safety
+    /// No processor may be walking the subtree, which is the case only after
+    /// the range has been unmapped and the flush discharged.
+    unsafe fn free_pt_after_unmap(
+        page: *mut PTPage<A, P>,
+        level: PageLevel,
+        start: VirtAddr,
+        end: VirtAddr,
+    ) -> bool {
+        let Some(child_level) = level.child() else {
+            // SAFETY: the caller vouches for `page`.
+            return unsafe { PTPage::<A, P>::is_empty(page) };
+        };
+        let child_size = child_level.size();
+        let mut child_start = start;
+        let mut child_end = min((start + child_size).align_down(child_size), end);
+        for index in entry_index(start, level)..=entry_index(end, level) {
+            let entry_ptr = PTPage::<A, P>::entry_ptr_mut(page, index);
+            // SAFETY: the caller vouches for `page`, and nothing else holds a
+            // handle on the subtree being torn down.
+            let mut mapping = unsafe { MappingMut::<A>::new(None, level, entry_ptr) };
+            let entry = mapping.read();
+            let Some(child) = PTPage::<A, P>::child_of(&entry) else {
+                continue;
+            };
+            // SAFETY: `child` belongs to the subtree the caller vouched for.
+            if unsafe { Self::free_pt_after_unmap(child, child_level, child_start, child_end) } {
+                mapping.staged().entry.clear();
+                // SAFETY: the entry mapped no page, only an empty table, so no
+                // translation went stale.
+                unsafe { mapping.commit().ignore() };
+                // SAFETY: nothing links to `child` any more, and it came from
+                // `allocate_table_page`.
+                unsafe { P::deallocate_table_page(PhysAddr::from(entry.address())) };
+            }
+            child_start = child_end;
+            child_end = min(child_end + child_size, end);
+        }
+        // SAFETY: the caller vouches for `page`.
+        unsafe { PTPage::<A, P>::is_empty(page) }
+    }
+
+    /// Frees the tables left empty by unmapping `[start, end)`.
+    ///
+    /// # Safety
+    /// The range must already be unmapped and the flush discharged, so that no
+    /// processor is walking the tables being freed.
+    pub unsafe fn free_page_table_by_range(&mut self, start: VirtAddr, end: VirtAddr) {
+        // SAFETY: the caller's obligation is this function's.
+        unsafe {
+            Self::free_pt_after_unmap(self.root.as_mut_ptr::<PTPage<A, P>>(), L::LEVEL, start, end)
+        };
+    }
+
+    /// Frees every table below the root, leaving the root itself empty but
+    /// allocated.
+    ///
+    /// # Safety
+    /// No processor may be walking this table, and no other tree may link to
+    /// its subtrees.
+    pub unsafe fn free_children(&mut self) {
+        // SAFETY: the caller's obligation is this function's.
+        unsafe { PTPage::<A, P>::free_lvl(self.root.as_mut_ptr::<PTPage<A, P>>(), L::LEVEL) };
     }
 }

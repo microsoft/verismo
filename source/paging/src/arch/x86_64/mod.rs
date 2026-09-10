@@ -1,3 +1,3 @@
 pub mod paging;
-pub mod tlb;
 pub mod pt_flags;
+pub mod tlb;

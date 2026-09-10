@@ -51,11 +51,9 @@ impl<P: X86PagingParams> TlbFlush for X86TlbFlushTok<P> {
             (
                 FlushScope::Range { start: s1, end: e1, level: l1 },
                 FlushScope::Range { start: s2, end: e2, level: l2 },
-            ) if l1 == l2 && (s2 <= e1 && s1 <= e2) => Self::range(
-                if s1 < s2 { s1 } else { s2 },
-                if e1 > e2 { e1 } else { e2 },
-                l1,
-            ),
+            ) if l1 == l2 && (s2 <= e1 && s1 <= e2) => {
+                Self::range(if s1 < s2 { s1 } else { s2 }, if e1 > e2 { e1 } else { e2 }, l1)
+            }
             _ => Self::all(),
         }
     }
