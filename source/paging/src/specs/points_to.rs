@@ -2210,14 +2210,14 @@ impl GeneralPointsToRaw {
             assert forall|a: int| #[trigger] new_addrs.contains(a) implies old_addrs.contains(
                 a,
             ) by {
-                let q = choose|q: *mut T| new_ptrs.contains(q) && q@.addr as int == a;
-                let p = choose|p: *mut u8| ptrs.contains(p) && retype_ptr::<u8, T>(p) == q;
+                let q = choose|q: *mut T| #[trigger]new_ptrs.contains(q) && q@.addr as int == a;
+                let p = choose|p: *mut u8| #[trigger]ptrs.contains(p) && #[trigger]retype_ptr::<u8, T>(p) == q;
                 assert(old_addrs.contains(p@.addr as int));
             }
             assert forall|a: int| #[trigger] old_addrs.contains(a) implies new_addrs.contains(
                 a,
             ) by {
-                let p = choose|p: *mut u8| ptrs.contains(p) && p@.addr as int == a;
+                let p = choose|p: *mut u8| #[trigger]ptrs.contains(p) && p@.addr as int == a;
                 assert(new_ptrs.contains(retype_ptr::<u8, T>(p)));
                 assert(new_addrs.contains(a));
             }

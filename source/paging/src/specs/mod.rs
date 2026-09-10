@@ -7,7 +7,6 @@
 //! treats an impl block as one recursion node: an impl that names another is
 //! grouped with it and cannot see its definitions.
 pub mod boot_states;
-pub mod concurrent_entry;
 #[cfg(verus_only)]
 pub mod entry;
 // Vendored specs for types we do not own; nothing but ghost, and they name
