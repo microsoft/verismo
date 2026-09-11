@@ -16,6 +16,10 @@ use crate::structs::os_contract::{DirectMappedPagingHandler, PagingError, Paging
 use crate::structs::ptpage::{MapSpec, PTPage, Translation};
 use crate::structs::tlb::MayNeedFlush;
 
+/// How many pages [`PageTable::to_mapped`] maps before giving up on the tree
+/// ever being reachable through the handler taking it over.
+const HANDOVER_ROUNDS: usize = 64;
+
 /// A page table rooted at a page of level `L`: `Lvl<3>` is four-level x86-64
 /// paging, `Lvl<4>` five-level. The table owns its root page and frees it when
 /// dropped, so a table installed in a control register must be handed to
@@ -155,33 +159,87 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
 
     /// The same tree, reached through `handler` from now on: what a bootstrap
     /// wants when the early mapping it was built through gives way to the real
-    /// direct map.
+    /// one.
     ///
-    /// The new handler's region is mapped first, since a tree that does not
-    /// map it could not be walked through it, and the result is validated.
+    /// Every table page of the tree is mapped where `handler` expects it,
+    /// which the tree has to do before it can be walked that way. Those
+    /// mappings allocate table pages of their own, so this repeats until a
+    /// pass finds nothing left to map, and gives up where that never happens.
     ///
     /// # Safety
     /// `handler` must allocate from the same pool as the one it replaces,
     /// since it is what frees the tree's pages from now on.
-    pub unsafe fn to_mapped<Q: DirectMappedPagingHandler>(
+    pub unsafe fn to_mapped<Q: PagingHandler>(
         mut self,
         handler: Q,
         flags: A::PTFlags,
     ) -> Result<PageTable<A, Q, L>, PagingError> {
-        let phys = handler.direct_map();
-        let start = handler.paddr_to_vaddr(phys.start);
-        let end = handler.paddr_to_vaddr(phys.end);
-        self.map_region_if_absent(start, end, phys.start, flags)?;
-        let (_old, root_pa) = self.leak();
-        // SAFETY: the root came from this tree, which gave up ownership of it
-        // just now, and the caller vouches for the allocator being the same.
-        unsafe { PageTable::<A, Q, L>::from_root(handler, root_pa) }
+        for _ in 0..HANDOVER_ROUNDS {
+            let mut mapped = self.map_page_under(&handler, self.root_pa, flags)?;
+            let page = self.root_page().cast_const();
+            // SAFETY: the root page is a level `L` table page of this tree.
+            mapped += unsafe { self.map_children_under(&handler, page, L::LEVEL, flags) }?;
+            if mapped == 0 {
+                let (_old, root_pa) = self.leak();
+                // SAFETY: the root came from this tree, which gave up
+                // ownership of it just now, and the caller vouches for the
+                // allocator being the same.
+                return unsafe { PageTable::<A, Q, L>::from_root(handler, root_pa) };
+            }
+        }
+        Err(PagingError::TablePageNotSelfMapped)
+    }
+
+    /// Maps `paddr` where `handler` expects it, and says whether it had to.
+    fn map_page_under<Q: PagingHandler>(
+        &mut self,
+        handler: &Q,
+        paddr: PhysAddr,
+        flags: A::PTFlags,
+    ) -> Result<usize, PagingError> {
+        let vaddr = handler.paddr_to_vaddr(paddr);
+        if self.phys_addr(vaddr) == Ok(paddr) {
+            return Ok(0);
+        }
+        self.map(vaddr, paddr, Self::SMALL, flags, false)?;
+        Ok(1)
+    }
+
+    /// [`Self::map_page_under`] for every table page below `page`.
+    ///
+    /// # Safety
+    /// `page` must be a table page of this tree, sitting at `level`.
+    unsafe fn map_children_under<Q: PagingHandler>(
+        &mut self,
+        handler: &Q,
+        page: *const PTPage<A, P>,
+        level: PageLevel,
+        flags: A::PTFlags,
+    ) -> Result<usize, PagingError> {
+        let Some(child_level) = level.child() else {
+            return Ok(0);
+        };
+        let mut mapped = 0;
+        for idx in 0..PTPage::<A, P>::COUNT {
+            // SAFETY: the caller vouches for `page`, and `idx` is in range.
+            let entry = unsafe { PTPage::<A, P>::read_entry(page, idx) };
+            if !entry.is_table(level) {
+                continue;
+            }
+            mapped += self.map_page_under(handler, PhysAddr::from(entry.address()), flags)?;
+            let child = PTPage::<A, P>::child_of(&self.handler, &entry).unwrap();
+            // SAFETY: `child` is the table `entry` points at, one level down.
+            mapped += unsafe {
+                self.map_children_under(handler, child.cast_const(), child_level, flags)
+            }?;
+        }
+        Ok(mapped)
     }
 
     /// [`Self::map_region`] over what the region does not already map, leaving
-    /// mappings that are already the wanted ones alone. Overlapping an old
-    /// direct map with a wider new one needs it.
-    fn map_region_if_absent(
+    /// mappings that are already the wanted ones alone. Widening an old direct
+    /// map into a larger new one needs it, the two overlapping.
+    pub fn map_region_if_absent(
         &mut self,
         start: VirtAddr,
         end: VirtAddr,
