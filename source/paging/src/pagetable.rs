@@ -643,6 +643,59 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
         unsafe { Self::free_pt_after_unmap(&self.handler, page, L::LEVEL, start, end) };
     }
 
+    /// Frees the tables left empty by unmapping `vaddr`, walking the one path
+    /// down to it rather than a range, and reports how many it freed. What
+    /// still holds a mapping stays, so this is safe to call after any unmap.
+    ///
+    /// # Safety
+    /// `vaddr` must already be unmapped and the flush discharged, so that no
+    /// processor is walking the tables being freed.
+    pub unsafe fn free_page_table_by_addr(&mut self, vaddr: VirtAddr) -> usize {
+        let page = self.root_page();
+        let mut freed = 0;
+        // SAFETY: the caller's obligation is this function's.
+        unsafe { Self::free_pt_along(&self.handler, page, L::LEVEL, vaddr, &mut freed) };
+        freed
+    }
+
+    /// Frees the empty tables on the path from `page` to `vaddr`, and reports
+    /// whether `page` is left empty.
+    ///
+    /// # Safety
+    /// As in [`Self::free_page_table_by_addr`], for the subtree under `page`.
+    unsafe fn free_pt_along(
+        handler: &P,
+        page: *mut PTPage<A, P>,
+        level: PageLevel,
+        vaddr: VirtAddr,
+        freed: &mut usize,
+    ) -> bool {
+        let Some(child_level) = level.child() else {
+            // SAFETY: the caller vouches for `page`.
+            return unsafe { PTPage::<A, P>::is_empty(page) };
+        };
+        let entry_ptr = PTPage::<A, P>::entry_ptr_mut(page, entry_index(vaddr, level));
+        // SAFETY: the caller vouches for `page`, and nothing else holds a
+        // handle on the subtree being torn down.
+        let mut mapping = unsafe { MappingMut::<A>::new(None, level, entry_ptr) };
+        let entry = mapping.read();
+        if let Some(child) = PTPage::<A, P>::child_of(handler, &entry) {
+            // SAFETY: `child` belongs to the subtree the caller vouched for.
+            if unsafe { Self::free_pt_along(handler, child, child_level, vaddr, freed) } {
+                mapping.staged().entry.clear();
+                // SAFETY: the entry mapped no page, only an empty table, so no
+                // translation went stale.
+                unsafe { mapping.commit().ignore() };
+                // SAFETY: nothing links to `child` any more, and it came from
+                // `allocate_table_page`.
+                unsafe { handler.deallocate_table_page(PhysAddr::from(entry.address())) };
+                *freed += 1;
+            }
+        }
+        // SAFETY: the caller vouches for `page`.
+        unsafe { PTPage::<A, P>::is_empty(page) }
+    }
+
     /// Frees every table below the root, leaving the root itself empty but
     /// allocated.
     ///
