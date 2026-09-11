@@ -29,10 +29,21 @@ pub struct PageTable<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> {
 }
 
 impl<A: ArchPagingMeta, P: DirectMappedPagingHandler, L: LevelSpec> PageTable<A, P, L> {
-    /// [`Self::new`] over the region the handler reports.
-    pub fn new_direct_mapped(handler: P, flags: A::PTFlags) -> Result<Self, PagingError> {
+    /// A table that direct-maps the region the handler allocates from, at the
+    /// addresses the handler gives for it.
+    ///
+    /// Mapping the whole region up front is what the tree needs to describe
+    /// itself: its own pages come out of that region, as does every table it
+    /// allocates later, so all of them are mapped before they exist. The
+    /// result is checked with [`Self::validate_page_table`].
+    pub fn new(handler: P, flags: A::PTFlags) -> Result<Self, PagingError> {
         let phys = handler.direct_map();
-        Self::new(handler, phys, flags)
+        let mut this = Self::empty(handler)?;
+        let start = this.handler.paddr_to_vaddr(phys.start);
+        let end = this.handler.paddr_to_vaddr(phys.end);
+        this.map_region(start, end, phys.start, flags)?;
+        this.validate_page_table()?;
+        Ok(this)
     }
 }
 
@@ -112,22 +123,6 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
             }
         }
         None
-    }
-
-    /// A table that direct-maps `phys`, the region the handler allocates from,
-    /// at the addresses [`PagingHandler::paddr_to_vaddr`] gives for it.
-    ///
-    /// Mapping the whole region up front is what the tree needs to describe
-    /// itself: its own pages come out of `phys`, as does every table it
-    /// allocates later, so all of them are mapped before they exist. The
-    /// result is checked with [`Self::validate_page_table`].
-    pub fn new(handler: P, phys: Range<PhysAddr>, flags: A::PTFlags) -> Result<Self, PagingError> {
-        let mut this = Self::empty(handler)?;
-        let start = this.handler.paddr_to_vaddr(phys.start);
-        let end = this.handler.paddr_to_vaddr(phys.end);
-        this.map_region(start, end, phys.start, flags)?;
-        this.validate_page_table()?;
-        Ok(this)
     }
 
     /// A table over a freshly allocated root page, mapping nothing at all.
