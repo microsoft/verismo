@@ -12,7 +12,7 @@ use crate::structs::entry::PTEntry;
 use crate::structs::geometry::entry_index;
 use crate::structs::level::{LevelSpec, PageLevel};
 use crate::structs::mapping::{MappingMut, MappingMutOps, MappingRef, MappingRefOps};
-use crate::structs::os_contract::{PagingError, PagingHandler};
+use crate::structs::os_contract::{DirectMappedPagingHandler, PagingError, PagingHandler};
 use crate::structs::ptpage::{MapSpec, PTPage, Translation};
 use crate::structs::tlb::MayNeedFlush;
 
@@ -26,6 +26,14 @@ pub struct PageTable<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> {
     root_pa: PhysAddr,
     handler: P,
     marker: PhantomData<(A, L)>,
+}
+
+impl<A: ArchPagingMeta, P: DirectMappedPagingHandler, L: LevelSpec> PageTable<A, P, L> {
+    /// [`Self::new`] over the region the handler reports.
+    pub fn new_direct_mapped(handler: P, flags: A::PTFlags) -> Result<Self, PagingError> {
+        let phys = handler.direct_map();
+        Self::new(handler, phys, flags)
+    }
 }
 
 impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
