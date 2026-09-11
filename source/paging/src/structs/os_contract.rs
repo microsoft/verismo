@@ -14,6 +14,9 @@ pub enum PagingError {
     EntryAlreadyPresent,
     /// The tree is not deep enough for the requested page size.
     InvalidLevel,
+    /// The tree does not map one of its own table pages at the address the
+    /// handler hands out for that page.
+    TablePageNotSelfMapped,
     /// A table pointer sits where a mapping was expected. Overwriting one would
     /// strand the subtree below it, so no operation on a leaf will.
     NotLeafEntry,

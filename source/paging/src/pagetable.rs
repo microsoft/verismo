@@ -30,12 +30,68 @@ pub struct PageTable<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> {
 impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
     /// A table over an existing root page, taking ownership of it.
     ///
+    /// The tree must pass [`Self::check_self_mapped`]; one that does not is
+    /// rejected and its root page left alone.
+    ///
     /// # Safety
     /// `root_pa` must be a level `L` table page from
     /// [`PagingHandler::allocate_table_page`], written by no one else, and no
     /// other owner may free it.
-    pub unsafe fn from_root(handler: P, root_pa: PhysAddr) -> Self {
-        Self { root_pa, handler, marker: PhantomData }
+    pub unsafe fn from_root(handler: P, root_pa: PhysAddr) -> Result<Self, PagingError> {
+        let this = Self { root_pa, handler, marker: PhantomData };
+        match this.check_self_mapped() {
+            Ok(()) => Ok(this),
+            Err(err) => {
+                // Ownership was never taken, so the root must not be freed.
+                let _ = this.leak();
+                Err(err)
+            }
+        }
+    }
+
+    /// Confirms the tree maps each of its own table pages, the root included,
+    /// at the address the handler hands out for it.
+    ///
+    /// This is what makes the tree walkable once it is installed: a walk
+    /// reaches a child page through [`PagingHandler::paddr_to_vaddr`], so that
+    /// address has to keep translating to the page under this very tree.
+    pub fn check_self_mapped(&self) -> Result<(), PagingError> {
+        self.check_page_mapped(self.root_pa)?;
+        // SAFETY: the root page is a level `L` table page of this tree.
+        unsafe { self.check_children(self.root_page().cast_const(), L::LEVEL) }
+    }
+
+    fn check_page_mapped(&self, paddr: PhysAddr) -> Result<(), PagingError> {
+        match self.phys_addr(self.handler.paddr_to_vaddr(paddr)) {
+            Ok(mapped) if mapped == paddr => Ok(()),
+            _ => Err(PagingError::TablePageNotSelfMapped),
+        }
+    }
+
+    /// [`Self::check_page_mapped`] for every table page below `page`.
+    ///
+    /// # Safety
+    /// `page` must be a table page of this tree, sitting at `level`.
+    unsafe fn check_children(
+        &self,
+        page: *const PTPage<A, P>,
+        level: PageLevel,
+    ) -> Result<(), PagingError> {
+        let Some(child_level) = level.child() else {
+            return Ok(());
+        };
+        for idx in 0..PTPage::<A, P>::COUNT {
+            // SAFETY: the caller vouches for `page`, and `idx` is in range.
+            let entry = unsafe { PTPage::<A, P>::read_entry(page, idx) };
+            if !entry.is_table(level) {
+                continue;
+            }
+            self.check_page_mapped(PhysAddr::from(entry.address()))?;
+            let child = PTPage::<A, P>::child_of(&self.handler, &entry).unwrap();
+            // SAFETY: `child` is the table `entry` points at, one level down.
+            unsafe { self.check_children(child.cast_const(), child_level) }?;
+        }
+        Ok(())
     }
 
     /// A table over a freshly allocated, empty root page.
