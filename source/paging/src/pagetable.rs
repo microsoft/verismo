@@ -153,6 +153,23 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
         (handler, root_pa)
     }
 
+    /// The same tree, reached through another handler: what a bootstrap wants
+    /// when the early mapping it was built through gives way to the real
+    /// direct map. The tree is validated against the new handler.
+    ///
+    /// # Safety
+    /// `handler` must allocate from the same pool as the one it replaces,
+    /// since it is what frees the tree's pages from now on.
+    pub unsafe fn with_handler<Q: PagingHandler>(
+        self,
+        handler: Q,
+    ) -> Result<PageTable<A, Q, L>, PagingError> {
+        let (_old, root_pa) = self.leak();
+        // SAFETY: the root came from this tree, which gave up ownership of it
+        // just now, and the caller vouches for the allocator being the same.
+        unsafe { PageTable::<A, Q, L>::from_root(handler, root_pa) }
+    }
+
     /// What the table calls to reach memory and to allocate.
     pub fn handler(&self) -> &P {
         &self.handler
