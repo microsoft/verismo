@@ -4,6 +4,7 @@
 //! entries too, and every mutation hands back a TLB obligation.
 use core::cmp::min;
 use core::marker::PhantomData;
+use core::ops::Range;
 
 use crate::structs::address::{Address, PhysAddr, VirtAddr};
 use crate::structs::arch_contract::{ArchPagingMeta, GenericPageTableFlags};
@@ -92,9 +93,35 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
     }
 
     /// A table over a freshly allocated, empty root page.
+    ///
+    /// Such a table maps nothing, its own pages included, so it does not yet
+    /// pass [`Self::validate_page_table`]. See [`Self::new_from_sharing_top`].
     pub fn new(handler: P) -> Result<Self, PagingError> {
         let (_page, root_pa) = PTPage::<A, P>::alloc(&handler)?;
         Ok(Self { root_pa, handler, marker: PhantomData })
+    }
+
+    /// A new table that shares root entries `top` with `other`, and so
+    /// inherits whatever those subtrees map -- the direct map among them,
+    /// which is what makes the result pass [`Self::validate_page_table`]
+    /// straight away, and keeps it passing as it allocates further pages.
+    ///
+    /// The shared subtrees stay owned by `other`. Dropping the new table frees
+    /// only its root page, but [`Self::free_children`] and
+    /// [`Self::free_page_table_by_range`] must be kept off `top`.
+    pub fn new_from_sharing_top(
+        handler: P,
+        other: &Self,
+        top: Range<usize>,
+    ) -> Result<Self, PagingError> {
+        let mut this = Self::new(handler)?;
+        for idx in top {
+            if let Some(subpage_pa) = other.next_table_pa(idx) {
+                this.populate(idx, subpage_pa)?;
+            }
+        }
+        this.validate_page_table()?;
+        Ok(this)
     }
 
     /// Gives up ownership of the root page, returning it and the handler. What
