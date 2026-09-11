@@ -191,6 +191,7 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
     }
 
     /// Maps `paddr` where `handler` expects it, and says whether it had to.
+    /// A mapping already there for another frame is left alone and refused.
     fn map_page_under<Q: PagingHandler>(
         &mut self,
         handler: &Q,
@@ -198,11 +199,16 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
         flags: A::PTFlags,
     ) -> Result<usize, PagingError> {
         let vaddr = handler.paddr_to_vaddr(paddr);
-        if self.phys_addr(vaddr) == Ok(paddr) {
-            return Ok(0);
+        match self.phys_addr(vaddr) {
+            // Mapping over the old address of some other page would cut the
+            // handover off from it, so refuse rather than replace.
+            Ok(found) if found != paddr => Err(PagingError::EntryAlreadyPresent),
+            Ok(_) => Ok(0),
+            Err(_) => {
+                self.map(vaddr, paddr, Self::SMALL, flags, false)?;
+                Ok(1)
+            }
         }
-        self.map(vaddr, paddr, Self::SMALL, flags, false)?;
-        Ok(1)
     }
 
     /// [`Self::map_page_under`] for every table page below `page`.
