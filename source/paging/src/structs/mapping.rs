@@ -3,7 +3,7 @@
 //! half-written entry, and the commit is what produces the flush obligation.
 use core::marker::PhantomData;
 
-use crate::structs::address::VirtAddr;
+use crate::structs::address::{Address, PhysAddr, VirtAddr};
 use crate::structs::arch_contract::ArchPagingMeta;
 use crate::structs::entry::PTEntry;
 use crate::structs::level::PageLevel;
@@ -127,9 +127,14 @@ impl<'a, A: ArchPagingMeta> MappingMutOps<'a, A> for MappingMut<'a, A> {
     where
         F: FnOnce(Mapping<'_, A>) -> Result<O, PagingError>,
     {
+        let (vaddr, level) = (self.vaddr, self.level);
         let staged = self.staged();
         if staged.entry.present() {
-            return Err(PagingError::EntryAlreadyPresent);
+            let offset = vaddr.map_or(0, |v| v.bits() & (level.size() - 1));
+            return Err(PagingError::EntryAlreadyPresent {
+                frame: PhysAddr::from(staged.entry.address() + offset),
+                level,
+            });
         }
         let ret = update(staged)?;
         let entry = *self.staged().entry;

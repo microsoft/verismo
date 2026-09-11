@@ -4,6 +4,7 @@
 use core::ops::Range;
 
 use crate::structs::address::{Address, PhysAddr, VirtAddr};
+use crate::structs::level::PageLevel;
 
 /// Why an operation could not be carried out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -12,8 +13,10 @@ pub enum PagingError {
     AllocFrame,
     /// The walk found no mapping for the address.
     NotMapped,
-    /// A mapping is already installed where one was asked for.
-    EntryAlreadyPresent,
+    /// A mapping is already installed where one was asked for, of `level` and
+    /// onto `frame`. A caller that wanted that very mapping can tell from the
+    /// frame that it has nothing to do.
+    EntryAlreadyPresent { frame: PhysAddr, level: PageLevel },
     /// The tree is not deep enough for the requested page size.
     InvalidLevel,
     /// The tree does not map one of its own table pages at the address the

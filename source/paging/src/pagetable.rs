@@ -181,8 +181,9 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
         unsafe { PageTable::<A, Q, L>::from_root(handler, root_pa) }
     }
 
-    /// Maps `paddr` where `handler` expects it, unless it already does. An
-    /// address held by another page is left alone: [`Self::map`] refuses it.
+    /// Maps `paddr` where `handler` expects it, and takes an address that
+    /// already maps it for done. An address held by another page is left
+    /// alone: [`Self::map`] refuses it.
     fn map_page_under<Q: PagingHandler>(
         &mut self,
         handler: &Q,
@@ -190,10 +191,10 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
         flags: A::PTFlags,
     ) -> Result<(), PagingError> {
         let vaddr = handler.paddr_to_vaddr(paddr);
-        if self.phys_addr(vaddr) == Ok(paddr) {
-            return Ok(());
+        match self.map(vaddr, paddr, Self::SMALL, flags, false) {
+            Err(PagingError::EntryAlreadyPresent { frame, .. }) if frame == paddr => Ok(()),
+            result => result,
         }
-        self.map(vaddr, paddr, Self::SMALL, flags, false)
     }
 
     /// [`Self::map_page_under`] for every table page below `page`.
@@ -239,14 +240,6 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
         let mut vaddr = start;
         while vaddr < end {
             let paddr = phys + (vaddr - start);
-            if let Ok(found) = self.translate(vaddr) {
-                if found.address() != paddr {
-                    return Err(PagingError::EntryAlreadyPresent);
-                }
-                let size = found.size();
-                vaddr = VirtAddr::from((vaddr.bits() & !(size - 1)) + size);
-                continue;
-            }
             if vaddr.is_aligned(large)
                 && paddr.is_aligned(large)
                 && vaddr + large <= end
@@ -255,8 +248,16 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
                 vaddr = vaddr + large;
                 continue;
             }
-            self.map_4k(vaddr, paddr, flags, false)?;
-            vaddr = vaddr + small;
+            match self.map_4k(vaddr, paddr, flags, false) {
+                Ok(()) => vaddr = vaddr + small,
+                // Already the mapping we wanted: step over the whole page it
+                // is part of, however large that page is.
+                Err(PagingError::EntryAlreadyPresent { frame, level }) if frame == paddr => {
+                    let size = level.size();
+                    vaddr = VirtAddr::from((vaddr.bits() & !(size - 1)) + size);
+                }
+                Err(err) => return Err(err),
+            }
         }
         Ok(())
     }
