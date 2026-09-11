@@ -97,6 +97,11 @@ impl<A: ArchPagingMeta, P: PagingHandler> PTPage<A, P> {
             // SAFETY: `child` belongs to this tree, which the caller says no
             // one is walking, so it too may be torn down.
             unsafe { Self::free_lvl(handler, child, child_level) };
+            let mut cleared = entry;
+            cleared.clear();
+            // SAFETY: the caller vouches for `page`, and the entry is about to
+            // point at a freed page, so it may not be left behind.
+            unsafe { PTEntry::write_pte(Self::entry_ptr_mut(page, idx), cleared) };
             // SAFETY: nothing reaches `child` any more, and it came from
             // `allocate_table_page`.
             unsafe { handler.deallocate_table_page(PhysAddr::from(entry.address())) };
