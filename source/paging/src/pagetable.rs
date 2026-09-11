@@ -30,7 +30,7 @@ pub struct PageTable<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> {
 impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
     /// A table over an existing root page, taking ownership of it.
     ///
-    /// The tree must pass [`Self::check_self_mapped`]; one that does not is
+    /// The tree must pass [`Self::validate_page_table`]; one that does not is
     /// rejected and its root page left alone.
     ///
     /// # Safety
@@ -39,7 +39,7 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
     /// other owner may free it.
     pub unsafe fn from_root(handler: P, root_pa: PhysAddr) -> Result<Self, PagingError> {
         let this = Self { root_pa, handler, marker: PhantomData };
-        match this.check_self_mapped() {
+        match this.validate_page_table() {
             Ok(()) => Ok(this),
             Err(err) => {
                 // Ownership was never taken, so the root must not be freed.
@@ -55,7 +55,7 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
     /// This is what makes the tree walkable once it is installed: a walk
     /// reaches a child page through [`PagingHandler::paddr_to_vaddr`], so that
     /// address has to keep translating to the page under this very tree.
-    pub fn check_self_mapped(&self) -> Result<(), PagingError> {
+    pub fn validate_page_table(&self) -> Result<(), PagingError> {
         self.check_page_mapped(self.root_pa)?;
         // SAFETY: the root page is a level `L` table page of this tree.
         unsafe { self.check_children(self.root_page().cast_const(), L::LEVEL) }
