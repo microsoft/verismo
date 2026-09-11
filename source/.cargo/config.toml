@@ -4,6 +4,8 @@ incremental = true
 # The smallest page the kernel maps; see `paging::structs::sizes::MinPageSize`.
 # Belongs with the target, because it describes the machine, not the code.
 rustflags = ["--cfg", 'target_min_page="4kib"']
+# rustdoc does not inherit the flags above, and doctests need the same cfg.
+rustdocflags = ["--cfg", 'target_min_page="4kib"']
 
 [env]
 RUSTC_BOOTSTRAP = { value = "1", force = true }
