@@ -118,15 +118,15 @@ impl<'a, A: ArchPagingMeta> Mapping<'a, A> {
     }
 }
 
-/// A physical address, and the size of the page it was found in.
+/// What a walk found: a physical address, and the size of the page it sits in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PageFrame<A: ArchPagingMeta> {
+pub struct Translation<A: ArchPagingMeta> {
     paddr: PhysAddr,
     level: PageLevel,
     dummy: PhantomData<A>,
 }
 
-impl<A: ArchPagingMeta> PageFrame<A> {
+impl<A: ArchPagingMeta> Translation<A> {
     pub fn new(paddr: PhysAddr, level: PageLevel) -> Self {
         Self { paddr, level, dummy: PhantomData }
     }

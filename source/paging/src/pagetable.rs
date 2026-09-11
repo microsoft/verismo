@@ -12,7 +12,7 @@ use crate::structs::geometry::entry_index;
 use crate::structs::level::{LevelSpec, PageLevel};
 use crate::structs::mapping::{MappingMut, MappingMutOps, MappingRef, MappingRefOps};
 use crate::structs::os_contract::{PagingError, PagingHandler};
-use crate::structs::ptpage::{MapSpec, PTPage, PageFrame};
+use crate::structs::ptpage::{MapSpec, PTPage, Translation};
 use crate::structs::tlb::MayNeedFlush;
 
 /// A page table rooted at a page of level `L`: `Lvl<3>` is four-level x86-64
@@ -170,7 +170,7 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
     }
 
     /// The frame `vaddr` translates to, at whatever page size maps it.
-    pub fn translate(&self, vaddr: VirtAddr) -> Result<PageFrame<A>, PagingError> {
+    pub fn translate(&self, vaddr: VirtAddr) -> Result<Translation<A>, PagingError> {
         let mapping = self.walk(vaddr);
         let entry = mapping.read();
         let level = mapping.level();
@@ -178,7 +178,7 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
             return Err(PagingError::NotMapped);
         }
         let offset = vaddr.bits() & (level.size() - 1);
-        Ok(PageFrame::new(PhysAddr::from(entry.paddr_field() + offset), level))
+        Ok(Translation::new(PhysAddr::from(entry.paddr_field() + offset), level))
     }
 
     /// The clean physical address `vaddr` translates to.
