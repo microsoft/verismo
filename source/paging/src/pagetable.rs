@@ -92,7 +92,7 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
     }
 
     /// A table over a freshly allocated, empty root page.
-    pub fn alloc(handler: P) -> Result<Self, PagingError> {
+    pub fn new(handler: P) -> Result<Self, PagingError> {
         let (_page, root_pa) = PTPage::<A, P>::alloc(&handler)?;
         Ok(Self { root_pa, handler, marker: PhantomData })
     }
