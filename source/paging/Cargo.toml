@@ -5,12 +5,16 @@ edition = "2021"
 
 [dependencies]
 bitflags = { workspace = true }
+# Verus deps: the specs and proofs are ghost, and a plain build erases them.
+vstd = { workspace = true, default-features = false }
+builtin_macros = { workspace = true }
+verus_state_machines_macros = { workspace = true }
 
 [features]
 verification-test = []
 
 [package.metadata.verus]
-verify = false
+verify = true
 
 [lints.rust]
 # Verus sets these itself; declaring them keeps a plain `cargo build`

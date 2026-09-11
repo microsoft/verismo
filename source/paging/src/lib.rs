@@ -4,8 +4,15 @@
 #![no_std]
 #![allow(unused_braces)]
 
+#[cfg(verus_only)]
+use vstd::prelude::*;
+
 mod arch;
 pub mod pagetable;
+#[cfg(verus_only)]
+mod proofs;
+#[cfg(verus_only)]
+mod specs;
 mod structs;
 pub mod util;
 
