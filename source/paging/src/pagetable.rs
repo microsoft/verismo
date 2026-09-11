@@ -16,6 +16,11 @@ use crate::structs::os_contract::{PagingError, PagingHandler};
 use crate::structs::ptpage::{MapSpec, PTPage, Translation};
 use crate::structs::tlb::MayNeedFlush;
 
+/// How many pages [`PageTable::new`] maps before giving up on the tree ever
+/// describing itself: a handler whose pages cluster needs a handful, one that
+/// scatters them never settles.
+const SELF_MAP_ROUNDS: usize = 64;
+
 /// A page table rooted at a page of level `L`: `Lvl<3>` is four-level x86-64
 /// paging, `Lvl<4>` five-level. The table owns its root page and frees it when
 /// dropped, so a table installed in a control register must be handed to
@@ -54,51 +59,96 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
     /// at the address the handler hands out for it, so that a walk still
     /// reaches them once the tree is installed.
     pub fn validate_page_table(&self) -> Result<(), PagingError> {
-        self.check_page_mapped(self.root_pa)?;
-        // SAFETY: the root page is a level `L` table page of this tree.
-        unsafe { self.check_children(self.root_page().cast_const(), L::LEVEL) }
-    }
-
-    fn check_page_mapped(&self, paddr: PhysAddr) -> Result<(), PagingError> {
-        match self.phys_addr(self.handler.paddr_to_vaddr(paddr)) {
-            Ok(mapped) if mapped == paddr => Ok(()),
-            _ => Err(PagingError::TablePageNotSelfMapped),
+        match self.first_unmapped_page() {
+            None => Ok(()),
+            Some(_) => Err(PagingError::TablePageNotSelfMapped),
         }
     }
 
-    /// [`Self::check_page_mapped`] for every table page below `page`.
+    /// The first table page, the root before its children, that the tree does
+    /// not map at the address the handler hands out for it.
+    fn first_unmapped_page(&self) -> Option<PhysAddr> {
+        if !self.maps_itself(self.root_pa) {
+            return Some(self.root_pa);
+        }
+        // SAFETY: the root page is a level `L` table page of this tree.
+        unsafe { self.first_unmapped_child(self.root_page().cast_const(), L::LEVEL) }
+    }
+
+    /// Whether the tree maps `paddr` at the address the handler gives for it.
+    fn maps_itself(&self, paddr: PhysAddr) -> bool {
+        self.phys_addr(self.handler.paddr_to_vaddr(paddr)) == Ok(paddr)
+    }
+
+    /// [`Self::first_unmapped_page`] over the table pages below `page`.
     ///
     /// # Safety
     /// `page` must be a table page of this tree, sitting at `level`.
-    unsafe fn check_children(
+    unsafe fn first_unmapped_child(
         &self,
         page: *const PTPage<A, P>,
         level: PageLevel,
-    ) -> Result<(), PagingError> {
-        let Some(child_level) = level.child() else {
-            return Ok(());
-        };
+    ) -> Option<PhysAddr> {
+        let child_level = level.child()?;
         for idx in 0..PTPage::<A, P>::COUNT {
             // SAFETY: the caller vouches for `page`, and `idx` is in range.
             let entry = unsafe { PTPage::<A, P>::read_entry(page, idx) };
             if !entry.is_table(level) {
                 continue;
             }
-            self.check_page_mapped(PhysAddr::from(entry.address()))?;
+            let paddr = PhysAddr::from(entry.address());
+            if !self.maps_itself(paddr) {
+                return Some(paddr);
+            }
             let child = PTPage::<A, P>::child_of(&self.handler, &entry).unwrap();
             // SAFETY: `child` is the table `entry` points at, one level down.
-            unsafe { self.check_children(child.cast_const(), child_level) }?;
+            if let Some(found) =
+                unsafe { self.first_unmapped_child(child.cast_const(), child_level) }
+            {
+                return Some(found);
+            }
         }
-        Ok(())
+        None
     }
 
-    /// A table over a freshly allocated, empty root page.
+    /// A table over a freshly allocated root page, holding nothing but the
+    /// mappings of its own table pages, so that it passes
+    /// [`Self::validate_page_table`].
     ///
-    /// Such a table maps nothing, its own pages included, so it does not yet
-    /// pass [`Self::validate_page_table`]. See [`Self::new_from_sharing_top`].
+    /// This settles only where the handler draws its pages from a small enough
+    /// region, and mapping anything afterwards calls for another
+    /// [`Self::map_own_pages`]. A table meant to sit beside an existing one is
+    /// better built with [`Self::new_from_sharing_top`], whose inherited
+    /// direct map covers whatever it allocates later.
     pub fn new(handler: P) -> Result<Self, PagingError> {
+        let mut this = Self::empty(handler)?;
+        this.map_own_pages()?;
+        Ok(this)
+    }
+
+    /// A table over a freshly allocated root page, mapping nothing at all.
+    fn empty(handler: P) -> Result<Self, PagingError> {
         let (_page, root_pa) = PTPage::<A, P>::alloc(&handler)?;
         Ok(Self { root_pa, handler, marker: PhantomData })
+    }
+
+    /// Maps each table page of the tree where the handler says it lives.
+    ///
+    /// Mapping one page allocates further table pages needing the same
+    /// treatment, so this repeats. It settles once those allocations land in
+    /// pages the tree already maps, and gives up if they never do.
+    ///
+    /// Every later mapping may allocate tables of its own, which this has to
+    /// be run again to cover.
+    pub fn map_own_pages(&mut self) -> Result<(), PagingError> {
+        for _ in 0..SELF_MAP_ROUNDS {
+            let Some(paddr) = self.first_unmapped_page() else {
+                return Ok(());
+            };
+            let vaddr = self.handler.paddr_to_vaddr(paddr);
+            self.map(vaddr, paddr, PageLevel::Level0, A::PTFlags::self_map_table_flags(), false)?;
+        }
+        Err(PagingError::TablePageNotSelfMapped)
     }
 
     /// A new table that shares root entries `top` with `other`, and so
@@ -114,7 +164,7 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
         other: &Self,
         top: Range<usize>,
     ) -> Result<Self, PagingError> {
-        let mut this = Self::new(handler)?;
+        let mut this = Self::empty(handler)?;
         for idx in top {
             if let Some(subpage_pa) = other.next_table_pa(idx) {
                 this.populate(idx, subpage_pa)?;
