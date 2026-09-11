@@ -257,6 +257,8 @@ impl<A: ArchPagingMeta, P: PagingHandler> PTPage<A, P> {
     }
 
     /// Maps `vaddr` to `paddr` at `target`, building the tables above it.
+    /// Whatever is already mapped there stays: a page in the way, at `target`
+    /// or above it, is reported rather than replaced.
     pub fn do_map(
         handler: &P,
         map: Mapping<'_, A>,
@@ -268,6 +270,9 @@ impl<A: ArchPagingMeta, P: PagingHandler> PTPage<A, P> {
         assert!(vaddr.is_aligned(target.size()));
         assert!(paddr.is_aligned(target.size()));
         let map = Self::alloc_pte_down(handler, map, vaddr, target, spec.parent_flags);
+        if map.entry.flags().contains(A::PTFlags::PRESENT) {
+            return Err(PagingError::EntryAlreadyPresent);
+        }
         if map.level != target {
             return Err(PagingError::AllocFrame);
         }
