@@ -73,20 +73,11 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
     /// at the address the handler hands out for it, so that a walk still
     /// reaches them once the tree is installed.
     pub fn validate_page_table(&self) -> Result<(), PagingError> {
-        match self.first_unmapped_page() {
-            None => Ok(()),
-            Some(_) => Err(PagingError::TablePageNotSelfMapped),
-        }
-    }
-
-    /// The first table page, the root before its children, that the tree does
-    /// not map at the address the handler hands out for it.
-    fn first_unmapped_page(&self) -> Option<PhysAddr> {
         if !self.maps_itself(self.root_pa) {
-            return Some(self.root_pa);
+            return Err(PagingError::TablePageNotSelfMapped);
         }
         // SAFETY: the root page is a level `L` table page of this tree.
-        unsafe { self.first_unmapped_child(self.root_page().cast_const(), L::LEVEL) }
+        unsafe { self.validate_children(self.root_page().cast_const(), L::LEVEL) }
     }
 
     /// Whether the tree maps `paddr` at the address the handler gives for it.
@@ -94,35 +85,32 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
         self.phys_addr(self.handler.paddr_to_vaddr(paddr)) == Ok(paddr)
     }
 
-    /// [`Self::first_unmapped_page`] over the table pages below `page`.
+    /// [`Self::validate_page_table`] over the table pages below `page`.
     ///
     /// # Safety
     /// `page` must be a table page of this tree, sitting at `level`.
-    unsafe fn first_unmapped_child(
+    unsafe fn validate_children(
         &self,
         page: *const PTPage<A, P>,
         level: PageLevel,
-    ) -> Option<PhysAddr> {
-        let child_level = level.child()?;
+    ) -> Result<(), PagingError> {
+        let Some(child_level) = level.child() else {
+            return Ok(());
+        };
         for idx in 0..PTPage::<A, P>::COUNT {
             // SAFETY: the caller vouches for `page`, and `idx` is in range.
             let entry = unsafe { PTPage::<A, P>::read_entry(page, idx) };
             if !entry.is_table(level) {
                 continue;
             }
-            let paddr = PhysAddr::from(entry.address());
-            if !self.maps_itself(paddr) {
-                return Some(paddr);
+            if !self.maps_itself(PhysAddr::from(entry.address())) {
+                return Err(PagingError::TablePageNotSelfMapped);
             }
             let child = PTPage::<A, P>::child_of(&self.handler, &entry).unwrap();
             // SAFETY: `child` is the table `entry` points at, one level down.
-            if let Some(found) =
-                unsafe { self.first_unmapped_child(child.cast_const(), child_level) }
-            {
-                return Some(found);
-            }
+            unsafe { self.validate_children(child.cast_const(), child_level) }?;
         }
-        None
+        Ok(())
     }
 
     /// A table over a freshly allocated root page, mapping nothing at all.
