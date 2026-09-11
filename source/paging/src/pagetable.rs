@@ -16,11 +16,6 @@ use crate::structs::os_contract::{PagingError, PagingHandler};
 use crate::structs::ptpage::{MapSpec, PTPage, Translation};
 use crate::structs::tlb::MayNeedFlush;
 
-/// How many pages [`PageTable::new`] maps before giving up on the tree ever
-/// describing itself: a handler whose pages cluster needs a handful, one that
-/// scatters them never settles.
-const SELF_MAP_ROUNDS: usize = 64;
-
 /// A page table rooted at a page of level `L`: `Lvl<3>` is four-level x86-64
 /// paging, `Lvl<4>` five-level. The table owns its root page and frees it when
 /// dropped, so a table installed in a control register must be handed to
@@ -111,18 +106,19 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
         None
     }
 
-    /// A table over a freshly allocated root page, holding nothing but the
-    /// mappings of its own table pages, so that it passes
-    /// [`Self::validate_page_table`].
+    /// A table that direct-maps `phys`, the region the handler allocates from,
+    /// at the addresses [`PagingHandler::paddr_to_vaddr`] gives for it.
     ///
-    /// This settles only where the handler draws its pages from a small enough
-    /// region, and mapping anything afterwards calls for another
-    /// [`Self::map_own_pages`]. A table meant to sit beside an existing one is
-    /// better built with [`Self::new_from_sharing_top`], whose inherited
-    /// direct map covers whatever it allocates later.
-    pub fn new(handler: P) -> Result<Self, PagingError> {
+    /// Mapping the whole region up front is what the tree needs to describe
+    /// itself: its own pages come out of `phys`, as does every table it
+    /// allocates later, so all of them are mapped before they exist. The
+    /// result is checked with [`Self::validate_page_table`].
+    pub fn new(handler: P, phys: Range<PhysAddr>, flags: A::PTFlags) -> Result<Self, PagingError> {
         let mut this = Self::empty(handler)?;
-        this.map_own_pages()?;
+        let start = this.handler.paddr_to_vaddr(phys.start);
+        let end = this.handler.paddr_to_vaddr(phys.end);
+        this.map_region(start, end, phys.start, flags)?;
+        this.validate_page_table()?;
         Ok(this)
     }
 
@@ -130,25 +126,6 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
     fn empty(handler: P) -> Result<Self, PagingError> {
         let (_page, root_pa) = PTPage::<A, P>::alloc(&handler)?;
         Ok(Self { root_pa, handler, marker: PhantomData })
-    }
-
-    /// Maps each table page of the tree where the handler says it lives.
-    ///
-    /// Mapping one page allocates further table pages needing the same
-    /// treatment, so this repeats. It settles once those allocations land in
-    /// pages the tree already maps, and gives up if they never do.
-    ///
-    /// Every later mapping may allocate tables of its own, which this has to
-    /// be run again to cover.
-    pub fn map_own_pages(&mut self) -> Result<(), PagingError> {
-        for _ in 0..SELF_MAP_ROUNDS {
-            let Some(paddr) = self.first_unmapped_page() else {
-                return Ok(());
-            };
-            let vaddr = self.handler.paddr_to_vaddr(paddr);
-            self.map(vaddr, paddr, PageLevel::Level0, A::PTFlags::self_map_table_flags(), false)?;
-        }
-        Err(PagingError::TablePageNotSelfMapped)
     }
 
     /// A new table that shares root entries `top` with `other`, and so
