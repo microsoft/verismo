@@ -50,11 +50,8 @@ impl<A: ArchPagingMeta, P: PagingHandler, L: LevelSpec> PageTable<A, P, L> {
     }
 
     /// Confirms the tree maps each of its own table pages, the root included,
-    /// at the address the handler hands out for it.
-    ///
-    /// This is what makes the tree walkable once it is installed: a walk
-    /// reaches a child page through [`PagingHandler::paddr_to_vaddr`], so that
-    /// address has to keep translating to the page under this very tree.
+    /// at the address the handler hands out for it, so that a walk still
+    /// reaches them once the tree is installed.
     pub fn validate_page_table(&self) -> Result<(), PagingError> {
         self.check_page_mapped(self.root_pa)?;
         // SAFETY: the root page is a level `L` table page of this tree.
