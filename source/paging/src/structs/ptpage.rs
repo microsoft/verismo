@@ -4,6 +4,8 @@ mod node;
 mod node_pointer;
 mod tree;
 
+#[cfg(feature = "concurrent")]
+pub(crate) use node::FlushFootprint;
 pub(crate) use node::LeafUpdate;
 pub use node::{MapSpec, Mapping, PTPage, Translation};
 pub(crate) use node_pointer::PTPagePointer;

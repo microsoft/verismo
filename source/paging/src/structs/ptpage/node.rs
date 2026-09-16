@@ -431,6 +431,7 @@ impl CanonicalRangeCursor {
 impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
     fn sweep_page<'tree, E>(
         page: &PTPagePointer<'tree, A, P>,
+        page_paddr: Option<PhysAddr>,
         start: usize,
         end: usize,
         visit: &mut impl FnMut(
@@ -453,7 +454,6 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
             (entry_index(VirtAddr::from(start), level), entry_index(VirtAddr::from(end - 1), level))
         };
         debug_assert!(first_index <= last_index);
-        let page_paddr = page.paddr();
         let mut cursor = start;
         let mut slot_end = (start & !(span - 1)).saturating_add(span).min(end);
         for index in first_index..=last_index {
@@ -464,8 +464,21 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
                     Ok(child) => child,
                     Err(_) => unreachable!("observed table entry must resolve as a child"),
                 };
-                Self::sweep_page(&child, cursor, slot_end, visit)?;
-            } else if let Err(error) = visit(page_paddr, slot, entry, level, cursor, slot_end) {
+                Self::sweep_page(
+                    &child,
+                    Some(PhysAddr::from(entry.address())),
+                    cursor,
+                    slot_end,
+                    visit,
+                )?;
+            } else if let Err(error) = visit(
+                page_paddr.unwrap_or_else(|| page.paddr()),
+                slot,
+                entry,
+                level,
+                cursor,
+                slot_end,
+            ) {
                 return Err((cursor, error));
             }
             cursor = slot_end;
@@ -489,7 +502,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
     ) -> Result<usize, (usize, E)> {
         let mut range = CanonicalRangeCursor::new(start, end);
         while let Some((cursor, segment_end)) = range.current() {
-            Self::sweep_page(root, cursor, segment_end, visit)?;
+            Self::sweep_page(root, None, cursor, segment_end, visit)?;
             range.advance(segment_end);
         }
         Ok(range.position())
@@ -584,16 +597,14 @@ impl<A: ArchPagingMeta, P: PagingAllocator> Drop for InvalidatedPteRollbackGuard
 }
 
 /// Conservative TLB coverage accumulated from the leaves changed by a range update.
-#[cfg(any(not(feature = "concurrent"), test))]
 #[derive(Default)]
-struct FlushFootprint {
+pub(crate) struct FlushFootprint {
     range: Option<(usize, usize, PageLevel)>,
     all: bool,
 }
 
-#[cfg(any(not(feature = "concurrent"), test))]
 impl FlushFootprint {
-    fn include(&mut self, vaddr: VirtAddr, level: PageLevel) {
+    pub(crate) fn include(&mut self, vaddr: VirtAddr, level: PageLevel) {
         let start = vaddr.bits() & !(level.size() - 1);
         let Some(end) = start.checked_add(level.size()) else {
             self.all = true;
@@ -611,7 +622,7 @@ impl FlushFootprint {
         });
     }
 
-    fn token<T: TlbFlush>(&self) -> MayNeedFlush<T> {
+    pub(crate) fn token<T: TlbFlush>(&self) -> MayNeedFlush<T> {
         if self.all {
             MayNeedFlush::all()
         } else if let Some((start, end, level)) = self.range {

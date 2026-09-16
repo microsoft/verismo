@@ -15,8 +15,8 @@ use crate::structs::mapping::UnmapEntryResult;
 use crate::structs::os_contract::{DirectMappedAllocator, PagingAllocator, PagingError};
 use crate::structs::policy::{KernelPolicy, PagingOwnershipPolicy, UserPolicy};
 use crate::structs::ptpage::{
-    free_children, reclaim_path, reclaim_range, LeafUpdate, PTPage, PTPagePointer, PTPageTree,
-    Translation, WalkResult,
+    free_children, reclaim_path, reclaim_range, FlushFootprint, LeafUpdate, PTPage, PTPagePointer,
+    PTPageTree, Translation, WalkResult,
 };
 use crate::structs::sizes::{entry_index, next_boundary};
 use crate::structs::tlb::MayNeedFlush;
@@ -632,22 +632,68 @@ where
     ) -> (Result<(), PagingError>, MayNeedFlush<A::TlbFlushTok>) {
         let mut cursor = start;
         let mut flush = Some(MayNeedFlush::none());
+        let mut footprint = FlushFootprint::default();
         let mut retries_left = L::LEVEL.depth();
         let mut splits_left = 2;
         loop {
+            let mapping = self.root_view().walk(VirtAddr::from(cursor));
+            if mapping.page.level() == Self::SMALL {
+                let page = mapping.page_paddr();
+                let _guard = self.wperms.lock(page);
+                let run_start = cursor;
+                let count = ((end - cursor) / Self::SMALL.size())
+                    .min(PTPage::<A, P>::COUNT - mapping.index);
+                let mut changed = false;
+                for index in mapping.index..mapping.index + count {
+                    let slot = mapping.page.entry(index);
+                    let current = slot.load();
+                    if !current.is_leaf(Self::SMALL) {
+                        if changed {
+                            footprint.include(VirtAddr::from(run_start), Self::SMALL);
+                            footprint.include(
+                                VirtAddr::from(
+                                    run_start + (index - mapping.index - 1) * Self::SMALL.size(),
+                                ),
+                                Self::SMALL,
+                            );
+                        }
+                        let pending = flush.take().unwrap().and(footprint.token());
+                        return (Err(PagingError::NotMapped), pending);
+                    }
+                    let desired = current.with_leaf_flags(Self::SMALL, flags);
+                    if desired.raw() != current.raw() {
+                        slot.update_preserving_ad(current, desired);
+                        changed = true;
+                    }
+                }
+                cursor += count * Self::SMALL.size();
+                if changed {
+                    footprint.include(VirtAddr::from(run_start), Self::SMALL);
+                    footprint.include(VirtAddr::from(cursor - Self::SMALL.size()), Self::SMALL);
+                }
+                cursor = VirtAddr::from(cursor).bits();
+                if cursor == end {
+                    let pending = flush.take().unwrap().and(footprint.token());
+                    return (Ok(()), pending);
+                }
+                continue;
+            }
+
             let mut locked_page = None;
             let mut guard: Option<W::Guard<'_>> = None;
             let result = PTPage::<A, P>::sweep_range(
                 &self.root_view(),
                 cursor,
                 end,
-                &mut |page, slot, _, level, entry_start, entry_end| {
-                    if locked_page != Some(page) {
+                &mut |page, slot, observed, level, entry_start, entry_end| {
+                    let current = if locked_page != Some(page) {
                         guard = None;
                         guard = Some(self.wperms.lock(page));
                         locked_page = Some(page);
-                    }
-                    let current = slot.load();
+                        slot.load()
+                    } else {
+                        observed
+                    };
                     if current.is_table(level) {
                         return Err(RangeUpdateError::Retry);
                     }
@@ -664,15 +710,17 @@ where
                     let desired = current.with_leaf_flags(level, flags);
                     if desired.raw() != current.raw() {
                         slot.update_preserving_ad(current, desired);
-                        let pending = MayNeedFlush::new(VirtAddr::from(entry_start), level);
-                        flush = Some(flush.take().unwrap().and(pending));
+                        footprint.include(VirtAddr::from(entry_start), level);
                     }
                     Ok(())
                 },
             );
             drop(guard);
             match result {
-                Ok(_) => return (Ok(()), flush.take().unwrap()),
+                Ok(_) => {
+                    let pending = flush.take().unwrap().and(footprint.token());
+                    return (Ok(()), pending);
+                }
                 Err((retry, RangeUpdateError::Retry)) => {
                     if retries_left == 0 {
                         unreachable!("page-table range update exceeded its retry bound");
@@ -695,11 +743,15 @@ where
                             flush = Some(flush.take().unwrap().and(pending));
                             cursor = retry;
                         }
-                        Err(error) => return (Err(error), flush.take().unwrap()),
+                        Err(error) => {
+                            let pending = flush.take().unwrap().and(footprint.token());
+                            return (Err(error), pending);
+                        }
                     }
                 }
                 Err((_, RangeUpdateError::Paging(error))) => {
-                    return (Err(error), flush.take().unwrap())
+                    let pending = flush.take().unwrap().and(footprint.token());
+                    return (Err(error), pending);
                 }
             }
         }
