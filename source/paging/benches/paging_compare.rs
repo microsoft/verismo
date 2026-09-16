@@ -24,7 +24,9 @@ const GIB: u64 = 1 << 30;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 /// One page-table operation measured by the harness.
 enum Workload {
-    Map,
+    MapMixed,
+    MapLeafOnly,
+    MapIntermediate,
     Unmap,
     Walk,
     Protect,
@@ -33,8 +35,10 @@ enum Workload {
     Mixed,
 }
 
-const WORKLOADS: [Workload; 7] = [
-    Workload::Map,
+const WORKLOADS: [Workload; 9] = [
+    Workload::MapMixed,
+    Workload::MapLeafOnly,
+    Workload::MapIntermediate,
     Workload::Unmap,
     Workload::Walk,
     Workload::Protect,
@@ -46,7 +50,9 @@ const WORKLOADS: [Workload; 7] = [
 impl Workload {
     fn name(self) -> &'static str {
         match self {
-            Workload::Map => "map_4k",
+            Workload::MapMixed => "map_mixed_4k",
+            Workload::MapLeafOnly => "map_leaf_only_4k",
+            Workload::MapIntermediate => "map_intermediate_4k",
             Workload::Unmap => "unmap_4k",
             Workload::Walk => "walk_translate",
             Workload::Protect => "protect_4k",
@@ -78,7 +84,9 @@ struct Config {
 #[derive(Clone, Copy)]
 /// Per-thread item counts for each workload.
 struct WorkItems {
-    map: usize,
+    map_mixed: usize,
+    map_leaf_only: usize,
+    map_intermediate: usize,
     unmap: usize,
     walk: usize,
     protect: usize,
@@ -90,7 +98,9 @@ struct WorkItems {
 impl WorkItems {
     fn get(self, workload: Workload) -> usize {
         match workload {
-            Workload::Map => self.map,
+            Workload::MapMixed => self.map_mixed,
+            Workload::MapLeafOnly => self.map_leaf_only,
+            Workload::MapIntermediate => self.map_intermediate,
             Workload::Unmap => self.unmap,
             Workload::Walk => self.walk,
             Workload::Protect => self.protect,
@@ -110,10 +120,20 @@ impl Config {
         let base_work_per_thread = env_usize("PAGING_BENCH_WORK_PER_THREAD", 128);
         assert!(base_work_per_thread > 0);
         let items = WorkItems {
-            map: env_workload_items(
+            map_mixed: env_workload_items(
                 "PAGING_BENCH_MAP_ITEMS_PER_THREAD",
                 base_work_per_thread,
                 2048,
+            ),
+            map_leaf_only: env_workload_items(
+                "PAGING_BENCH_MAP_LEAF_ONLY_ITEMS_PER_THREAD",
+                base_work_per_thread,
+                2048,
+            ),
+            map_intermediate: env_workload_items(
+                "PAGING_BENCH_MAP_INTERMEDIATE_ITEMS_PER_THREAD",
+                base_work_per_thread,
+                4,
             ),
             unmap: env_workload_items(
                 "PAGING_BENCH_UNMAP_ITEMS_PER_THREAD",
@@ -164,6 +184,7 @@ impl Config {
     fn arena_pages(&self, workload: Workload, threads: usize) -> usize {
         let items = self.items.get(workload);
         let table_pages = match workload {
+            Workload::MapIntermediate => threads.saturating_mul(items),
             Workload::Split => threads.saturating_mul(items),
             Workload::ProtectRange => {
                 threads.saturating_mul(items).saturating_mul(self.range_pages).div_ceil(512)
@@ -186,15 +207,17 @@ impl Plan {
     fn new(config: &Config) -> Self {
         let point_items = config
             .items
-            .map
+            .map_mixed
+            .max(config.items.map_leaf_only)
             .max(config.items.unmap)
             .max(config.items.walk)
             .max(config.items.protect)
             .max(config.items.mixed);
         let point_span = point_items as u64 * PAGE_SIZE;
         let split_span = config.items.split as u64 * HUGE_SIZE;
+        let intermediate_span = config.items.map_intermediate as u64 * HUGE_SIZE;
         let range_span = config.items.protect_range as u64 * config.range_pages as u64 * PAGE_SIZE;
-        let span = point_span.max(split_span).max(range_span).max(GIB);
+        let span = point_span.max(split_span).max(intermediate_span).max(range_span).max(GIB);
         let stride = span.div_ceil(GIB) * GIB;
         let max_thread = *config.threads.iter().max().unwrap() as u64;
         assert!(VIRTUAL_BASE + max_thread * stride < (1u64 << 47));
@@ -215,6 +238,10 @@ impl Plan {
     }
 
     fn huge(&self, thread: usize, item: usize) -> u64 {
+        self.thread_base(thread) + item as u64 * HUGE_SIZE
+    }
+
+    fn intermediate(&self, thread: usize, item: usize) -> u64 {
         self.thread_base(thread) + item as u64 * HUGE_SIZE
     }
 
@@ -270,7 +297,16 @@ fn env_workload_items(name: &str, base: usize, multiplier: usize) -> usize {
 fn prepare<A: PagingAdapter>(adapter: &A, workload: Workload, threads: usize, plan: &Plan) {
     let items = plan.items(workload);
     match workload {
-        Workload::Map => {}
+        Workload::MapMixed | Workload::MapIntermediate => {}
+        Workload::MapLeafOnly => {
+            for thread in 0..threads {
+                for item in 0..items {
+                    let address = plan.point(thread, item);
+                    adapter.map_4k(address, plan.frame(address));
+                    adapter.unmap_4k(address);
+                }
+            }
+        }
         Workload::Unmap | Workload::Walk | Workload::Protect | Workload::Mixed => {
             for thread in 0..threads {
                 for item in 0..items {
@@ -305,8 +341,12 @@ fn prepare<A: PagingAdapter>(adapter: &A, workload: Workload, threads: usize, pl
 fn execute_thread<A: PagingAdapter>(adapter: &A, workload: Workload, thread: usize, plan: &Plan) {
     for item in 0..plan.items(workload) {
         match workload {
-            Workload::Map => {
+            Workload::MapMixed | Workload::MapLeafOnly => {
                 let address = plan.point(thread, item);
+                adapter.map_4k(address, plan.frame(address));
+            }
+            Workload::MapIntermediate => {
+                let address = plan.intermediate(thread, item);
                 adapter.map_4k(address, plan.frame(address));
             }
             Workload::Unmap => adapter.unmap_4k(plan.point(thread, item)),
@@ -365,8 +405,14 @@ fn validate<A: PagingAdapter>(adapter: &A, workload: Workload, threads: usize, p
                     assert_mapping(observation, plan.frame(address), PAGE_SIZE, false);
                     hash_observation(&mut fingerprint, observation);
                 }
-                Workload::Map | Workload::Walk | Workload::Mixed => {
+                Workload::MapMixed | Workload::MapLeafOnly | Workload::Walk | Workload::Mixed => {
                     let address = plan.point(thread, item);
+                    let observation = adapter.observe(address);
+                    assert_mapping(observation, plan.frame(address), PAGE_SIZE, true);
+                    hash_observation(&mut fingerprint, observation);
+                }
+                Workload::MapIntermediate => {
+                    let address = plan.intermediate(thread, item);
                     let observation = adapter.observe(address);
                     assert_mapping(observation, plan.frame(address), PAGE_SIZE, true);
                     hash_observation(&mut fingerprint, observation);
@@ -561,8 +607,10 @@ fn print_results(config: &Config, records: &[Record]) {
         config.stripes
     );
     println!(
-        "effective_items_per_thread: map={} unmap={} walk={} protect={} split={} protect_range={} mixed={}",
-        config.items.map,
+        "effective_items_per_thread: map_mixed={} map_leaf_only={} map_intermediate={} unmap={} walk={} protect={} split={} protect_range={} mixed={}",
+        config.items.map_mixed,
+        config.items.map_leaf_only,
+        config.items.map_intermediate,
         config.items.unmap,
         config.items.walk,
         config.items.protect,

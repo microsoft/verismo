@@ -29,8 +29,9 @@ runtime loop.
 The pinned verios repository must be reachable by the invoking Git
 credentials.
 
-The harness measures map, unmap, walk/translate, protect, 2 MiB-to-4 KiB
-split, `protect_range`, and a mixed read/protect/unmap/map sequence. Each
+The harness measures mixed-cost map, leaf-only map, map with intermediate-table
+allocation, unmap, walk/translate, protect, 2 MiB-to-4 KiB split,
+`protect_range`, and a mixed read/protect/unmap/map sequence. Each
 thread gets a disjoint address region and a fixed number of work items. Worker
 threads announce readiness and spin on a shared start flag. The coordinator
 takes the start timestamp only after every worker is ready; elapsed time ends
@@ -76,7 +77,9 @@ Environment variables:
 `PAGING_BENCH_WORK_PER_THREAD` is a base used to derive workload-specific
 defaults. The default effective item counts per thread are:
 
-- map: `base * 2048` (`262144`)
+- mixed-cost map: `base * 2048` (`262144`)
+- leaf-only map: `base * 2048` (`262144`)
+- map with intermediate allocation: `base * 4` (`512`)
 - unmap: `base * 4096` (`524288`)
 - walk/translate: `base * 8192` (`1048576`)
 - protect: `base * 4096` (`524288`)
@@ -86,6 +89,8 @@ defaults. The default effective item counts per thread are:
 
 Each effective count can be replaced directly with
 `PAGING_BENCH_MAP_ITEMS_PER_THREAD`,
+`PAGING_BENCH_MAP_LEAF_ONLY_ITEMS_PER_THREAD`,
+`PAGING_BENCH_MAP_INTERMEDIATE_ITEMS_PER_THREAD`,
 `PAGING_BENCH_UNMAP_ITEMS_PER_THREAD`,
 `PAGING_BENCH_WALK_ITEMS_PER_THREAD`,
 `PAGING_BENCH_PROTECT_ITEMS_PER_THREAD`,

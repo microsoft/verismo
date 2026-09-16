@@ -30,6 +30,10 @@ pub struct ControllerMemory {
     pub auxiliary_bytes: usize,
 }
 
+/// One page lock isolated from locks used by unrelated table pages.
+#[repr(align(64))]
+struct PageLock(AtomicBool);
+
 /// Common operation surface implemented by every compared page table.
 pub trait PagingAdapter: Send + Sync + Sized + 'static {
     const NAME: &'static str;
@@ -57,7 +61,7 @@ pub struct Arena {
     live: AtomicUsize,
     peak: AtomicUsize,
     states: Box<[AtomicU8]>,
-    page_locks: Box<[AtomicBool]>,
+    page_locks: Box<[PageLock]>,
 }
 
 // SAFETY: allocation lifetime is shared through Arc and all mutable state is atomic.
@@ -85,7 +89,7 @@ impl Arena {
             live: AtomicUsize::new(0),
             peak: AtomicUsize::new(0),
             states: (0..capacity).map(|_| AtomicU8::new(0)).collect(),
-            page_locks: (0..capacity).map(|_| AtomicBool::new(false)).collect(),
+            page_locks: (0..capacity).map(|_| PageLock(AtomicBool::new(false))).collect(),
         })
     }
 
@@ -131,18 +135,21 @@ impl Arena {
 
     pub fn lock_page(&self, address: usize) {
         let lock = &self.page_locks[self.index_of(address)];
-        while lock.compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed).is_err()
+        while lock
+            .0
+            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
         {
             std::hint::spin_loop();
         }
     }
 
     pub fn unlock_page(&self, address: usize) {
-        self.page_locks[self.index_of(address)].store(false, Ordering::Release);
+        self.page_locks[self.index_of(address)].0.store(false, Ordering::Release);
     }
 
     pub fn reset_page_lock(&self, address: usize) {
-        self.page_locks[self.index_of(address)].store(false, Ordering::Release);
+        self.page_locks[self.index_of(address)].0.store(false, Ordering::Release);
     }
 
     pub fn reset_peak(&self) {
