@@ -76,7 +76,7 @@ pub struct VeriosAdapter {
 impl PagingAdapter for VeriosAdapter {
     const NAME: &'static str = "verios-b21b173";
 
-    fn new(arena_pages: usize, _stripes: usize) -> Self {
+    fn new(arena_pages: usize) -> Self {
         let arena = Arena::new(arena_pages);
         let host = VeriosHost { arena };
         let root = host.arena.allocate_page().expect("verios root") as *mut u64;

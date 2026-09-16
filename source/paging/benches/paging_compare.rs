@@ -78,7 +78,6 @@ struct Config {
     range_pages: usize,
     warmups: usize,
     repetitions: usize,
-    stripes: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -173,11 +172,9 @@ impl Config {
             range_pages: env_usize("PAGING_BENCH_RANGE_PAGES", 16),
             warmups: env_usize("PAGING_BENCH_WARMUPS", 2),
             repetitions: env_usize("PAGING_BENCH_REPETITIONS", 9),
-            stripes: env_usize("PAGING_BENCH_STRIPES", 256),
         };
         assert!(config.range_pages > 0);
         assert!(config.repetitions > 0);
-        assert!(config.stripes > 0);
         config
     }
 
@@ -454,7 +451,7 @@ fn run_once<A: PagingAdapter>(
     workload: Workload,
     threads: usize,
 ) -> Sample {
-    let adapter = A::new(config.arena_pages(workload, threads), config.stripes);
+    let adapter = A::new(config.arena_pages(workload, threads));
     prepare(&adapter, workload, threads, plan);
     adapter.reset_peak();
     let before = adapter.memory();
@@ -598,13 +595,12 @@ fn check_fingerprints(records: &[Record]) {
 
 fn print_results(config: &Config, records: &[Record]) {
     println!(
-        "configuration: threads={:?} base_work_per_thread={} range_pages={} warmups={} repetitions={} stripes={}",
+        "configuration: threads={:?} base_work_per_thread={} range_pages={} warmups={} repetitions={}",
         config.threads,
         config.base_work_per_thread,
         config.range_pages,
         config.warmups,
-        config.repetitions,
-        config.stripes
+        config.repetitions
     );
     println!(
         "effective_items_per_thread: map_mixed={} map_leaf_only={} map_intermediate={} unmap={} walk={} protect={} split={} protect_range={} mixed={}",

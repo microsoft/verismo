@@ -48,17 +48,15 @@ synthetic virtual addresses, frames, and permissions. Setup is outside the
 timed interval. Final observations cover every affected 4 KiB mapping,
 including all 512 leaves produced by each split.
 
-The current adapter uses `X86Paging`, a `DirectMappedAllocator`, hashed content
-mutexes, per-stripe reader counts, and a whole-domain writer gate implementing
-`LockSpec` plus `LockAllSpec`. Reader counts are cache-line isolated, so
-disjoint point operations do not contend on one shared reader word. The verios
-adapter uses its public `PageTable<L4>`/`PtPageOps` surface and calls
-`pt_ops::split::split_l4`. Its page locks are injective, as required by that
-host contract. The `x86_64` adapter uses `MappedPageTable` behind one mutex
-because its mutation API takes `&mut self`; its protect-range and split
-operations are implemented locally with the crate's public page table
-representation. The split preserves the benchmark's frame and flag semantics
-and clears the 2 MiB huge-page bit on generated 4 KiB leaves.
+The current and verios adapters use the same cache-line-isolated, arena-indexed
+spin lock for each table page. The current adapter uses `X86Paging` and a
+`DirectMappedAllocator`; the verios adapter uses its public
+`PageTable<L4>`/`PtPageOps` surface and calls `pt_ops::split::split_l4`. The
+`x86_64` adapter uses `MappedPageTable` behind one mutex because its mutation
+API takes `&mut self`; its protect-range and split operations are implemented
+locally with the crate's public page table representation. The split preserves
+the benchmark's frame and flag semantics and clears the 2 MiB huge-page bit on
+generated 4 KiB leaves.
 
 No table is installed in CR3 and the benchmark executes no real TLB
 instructions. Paging flush callbacks are no-ops, and flush receipts from
@@ -72,7 +70,6 @@ Environment variables:
 - `PAGING_BENCH_RANGE_PAGES` (default `16`)
 - `PAGING_BENCH_WARMUPS` (default `2`)
 - `PAGING_BENCH_REPETITIONS` (default `9`)
-- `PAGING_BENCH_STRIPES` (default `256`)
 
 `PAGING_BENCH_WORK_PER_THREAD` is a base used to derive workload-specific
 defaults. The default effective item counts per thread are:

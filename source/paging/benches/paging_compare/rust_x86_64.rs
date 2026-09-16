@@ -104,7 +104,7 @@ impl RustX86Adapter {
 impl PagingAdapter for RustX86Adapter {
     const NAME: &'static str = "x86_64-0.15.2";
 
-    fn new(arena_pages: usize, _stripes: usize) -> Self {
+    fn new(arena_pages: usize) -> Self {
         let arena = Arena::new(arena_pages);
         let root = arena.allocate_page().expect("x86_64 root") as *mut PageTable;
         // SAFETY: the root allocation is aligned, zeroed, and retained by `arena`.

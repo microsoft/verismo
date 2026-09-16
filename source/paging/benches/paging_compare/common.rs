@@ -38,7 +38,7 @@ struct PageLock(AtomicBool);
 pub trait PagingAdapter: Send + Sync + Sized + 'static {
     const NAME: &'static str;
 
-    fn new(arena_pages: usize, stripes: usize) -> Self;
+    fn new(arena_pages: usize) -> Self;
     fn map_4k(&self, virtual_address: u64, physical_address: u64);
     fn map_2m(&self, virtual_address: u64, physical_address: u64);
     fn unmap_4k(&self, virtual_address: u64);

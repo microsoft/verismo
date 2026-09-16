@@ -1,12 +1,12 @@
 use std::mem::size_of;
 use std::ops::{Deref, DerefMut};
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::Arc;
 
 use paging::address::{Address, PhysAddr, VirtAddr};
 use paging::level::{Lvl, PageLevel};
 use paging::os_contract::{DirectMappedAllocator, PagingError};
-use paging::pagetable::{KernelPageTable, LockAllSpec, LockSpec};
+use paging::pagetable::{KernelPageTable, LockSpec};
 use paging::{FlushScope, PTEntryFlags, X86Paging, X86PagingParams};
 
 use super::common::{Arena, ControllerMemory, MemorySnapshot, Observation, PagingAdapter};
@@ -59,168 +59,62 @@ unsafe impl DirectMappedAllocator for ArenaAllocator {
     }
 }
 
-/// One cache-line-isolated reader count for a lock stripe.
-#[repr(align(64))]
-struct Stripe<T> {
-    readers: AtomicUsize,
-    content: Mutex<T>,
-}
+/// Arena-indexed page locks matching the VeriOS benchmark host.
+struct ArenaPageLock(Arc<Arena>);
 
-/// Sharded reader state plus the writer flag used by whole-table operations.
-struct DomainGate {
-    writer: AtomicBool,
-}
-
-impl DomainGate {
-    fn read<'a, T>(&'a self, stripe: &'a Stripe<T>) -> DomainRead<'a, T> {
-        loop {
-            while self.writer.load(Ordering::SeqCst) {
-                std::hint::spin_loop();
-            }
-            stripe.readers.fetch_add(1, Ordering::SeqCst);
-            if !self.writer.load(Ordering::SeqCst) {
-                return DomainRead(stripe);
-            }
-            stripe.readers.fetch_sub(1, Ordering::SeqCst);
-        }
-    }
-
-    fn write<'a, T>(&'a self, stripes: &'a [Stripe<T>]) -> DomainWrite<'a> {
-        while self
-            .writer
-            .compare_exchange_weak(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .is_err()
-        {
-            std::hint::spin_loop();
-        }
-        for stripe in stripes {
-            while stripe.readers.load(Ordering::SeqCst) != 0 {
-                std::hint::spin_loop();
-            }
-        }
-        DomainWrite(self)
-    }
-}
-
-/// Reader ownership of one page-lock stripe.
-struct DomainRead<'a, T>(&'a Stripe<T>);
-
-impl<T> Drop for DomainRead<'_, T> {
-    fn drop(&mut self) {
-        self.0.readers.fetch_sub(1, Ordering::SeqCst);
-    }
-}
-
-/// Exclusive ownership of the complete page-lock domain.
-struct DomainWrite<'a>(&'a DomainGate);
-
-impl Drop for DomainWrite<'_> {
-    fn drop(&mut self) {
-        self.0.writer.store(false, Ordering::SeqCst);
-    }
-}
-
-/// Shared state backing point and whole-domain content locks.
-struct StripeDomain<T> {
-    gate: DomainGate,
-    stripes: Vec<Stripe<T>>,
-}
-
-/// Cloneable striped content lock used by the concurrent paging controller.
-struct StripedLock<T>(Arc<StripeDomain<T>>);
-
-impl<T> Clone for StripedLock<T> {
+impl Clone for ArenaPageLock {
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
 }
 
-impl<T: Default> StripedLock<T> {
-    fn new(stripes: usize) -> Self {
-        assert!(stripes > 0);
-        Self(Arc::new(StripeDomain {
-            gate: DomainGate { writer: AtomicBool::new(false) },
-            stripes: (0..stripes)
-                .map(|_| Stripe { readers: AtomicUsize::new(0), content: Mutex::new(T::default()) })
-                .collect(),
-        }))
+/// Exclusive ownership of one arena page lock.
+struct ArenaPageGuard<'a> {
+    arena: &'a Arena,
+    address: usize,
+    content: (),
+}
+
+impl Deref for ArenaPageGuard<'_> {
+    type Target = ();
+
+    fn deref(&self) -> &() {
+        &self.content
     }
 }
 
-impl<T> StripedLock<T> {
-    fn auxiliary_bytes(&self) -> usize {
-        2 * size_of::<usize>()
-            + size_of::<StripeDomain<T>>()
-            + self.0.stripes.capacity() * size_of::<Stripe<T>>()
-    }
-
-    fn stripe_index(&self, page: PhysAddr) -> usize {
-        let mut key = page.bits() / 4096;
-        key ^= key >> 16;
-        key = key.wrapping_mul(0x21f0_aaad);
-        key ^= key >> 15;
-        key = key.wrapping_mul(0x735a_2d97);
-        key ^= key >> 15;
-        key % self.0.stripes.len()
+impl DerefMut for ArenaPageGuard<'_> {
+    fn deref_mut(&mut self) -> &mut () {
+        &mut self.content
     }
 }
 
-/// Point lock guard that retains both stripe and domain ownership.
-pub struct PointGuard<'a, T> {
-    stripe: MutexGuard<'a, T>,
-    _domain: DomainRead<'a, T>,
-}
-
-impl<T> Deref for PointGuard<'_, T> {
-    type Target = T;
-
-    fn deref(&self) -> &T {
-        &self.stripe
+impl Drop for ArenaPageGuard<'_> {
+    fn drop(&mut self) {
+        self.arena.unlock_page(self.address);
     }
 }
 
-impl<T> DerefMut for PointGuard<'_, T> {
-    fn deref_mut(&mut self) -> &mut T {
-        &mut self.stripe
-    }
-}
-
-// SAFETY: each key has a stable stripe, and its reader count excludes lock_all.
-unsafe impl<T> LockSpec<T> for StripedLock<T> {
+// SAFETY: each arena page has one stable lock shared by all users of the arena.
+unsafe impl LockSpec<()> for ArenaPageLock {
     type Guard<'a>
-        = PointGuard<'a, T>
+        = ArenaPageGuard<'a>
     where
-        Self: 'a,
-        T: 'a;
+        Self: 'a;
 
     fn lock(&self, page: PhysAddr) -> Self::Guard<'_> {
-        let stripe = &self.0.stripes[self.stripe_index(page)];
-        let domain = self.0.gate.read(stripe);
-        let stripe = stripe.content.lock().unwrap();
-        PointGuard { stripe, _domain: domain }
+        let address = page.bits();
+        self.0.lock_page(address);
+        ArenaPageGuard { arena: &self.0, address, content: () }
     }
 }
 
-// SAFETY: the writer waits for every stripe's readers and excludes new point guards.
-unsafe impl<T> LockAllSpec<T> for StripedLock<T> {
-    type AllGuard<'a>
-        = DomainWrite<'a>
-    where
-        Self: 'a,
-        T: 'a;
-
-    fn lock_all(&self) -> Self::AllGuard<'_> {
-        self.0.gate.write(&self.0.stripes)
-    }
-}
-
-type Table = KernelPageTable<X86Paging<BenchmarkHost>, ArenaAllocator, Lvl<3>, StripedLock<()>>;
+type Table = KernelPageTable<X86Paging<BenchmarkHost>, ArenaAllocator, Lvl<3>, ArenaPageLock>;
 
 /// Current paging implementation with benchmark-owned allocation and locking.
 pub struct CurrentAdapter {
     table: Table,
     arena: Arc<Arena>,
-    lock_bytes: usize,
 }
 
 // SAFETY: the concurrent controller uses atomic entries and the adapter's content-lock domain.
@@ -240,13 +134,12 @@ fn flags(writable: bool) -> PTEntryFlags {
 impl PagingAdapter for CurrentAdapter {
     const NAME: &'static str = "paging-current";
 
-    fn new(arena_pages: usize, stripes: usize) -> Self {
+    fn new(arena_pages: usize) -> Self {
         let arena = Arena::new(arena_pages);
         CURRENT_ARENA.store(Arc::as_ptr(&arena).cast_mut(), Ordering::Relaxed);
-        let lock = StripedLock::new(stripes);
-        let lock_bytes = lock.auxiliary_bytes();
+        let lock = ArenaPageLock(arena.clone());
         let table = Table::new(lock, PTEntryFlags::data()).expect("create current page table");
-        Self { table, arena, lock_bytes }
+        Self { table, arena }
     }
 
     fn map_4k(&self, virtual_address: u64, physical_address: u64) {
@@ -346,6 +239,6 @@ impl PagingAdapter for CurrentAdapter {
     }
 
     fn controller_memory(&self) -> ControllerMemory {
-        ControllerMemory { inline_bytes: size_of::<Self>(), auxiliary_bytes: self.lock_bytes }
+        ControllerMemory { inline_bytes: size_of::<Self>(), auxiliary_bytes: 0 }
     }
 }
