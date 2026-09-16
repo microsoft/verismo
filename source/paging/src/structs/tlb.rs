@@ -1,11 +1,14 @@
-//! Telling the processor that a translation has changed. The page table changes
-//! memory; the TLB is not memory, so every mutation hands back a
-//! [`MayNeedFlush`] token that the OS decides how and when to discharge.
+//! Translation invalidation. Page-size transitions flush synchronously before
+//! publishing replacements; [`MayNeedFlush`] records any remaining obligation
+//! for the caller to discharge.
 use crate::structs::address::VirtAddr;
 use crate::structs::level::PageLevel;
 
-/// An opaque flush token: which TLB entries a page-table mutation may have made
-/// stale. The crate never flushes itself; it builds tokens and hands them back.
+/// An opaque description of translations to invalidate.
+///
+/// Hooks must complete invalidation before returning. Publication barriers call
+/// them with the content write guard held: they must not re-enter that domain
+/// or wait for software that needs the guard. Walks remain lock-free.
 pub trait TlbFlush: Sized {
     /// A token covering `[start, end)`, whose mapping changed at `level`.
     fn range(start: VirtAddr, end: VirtAddr, level: PageLevel) -> Self;
@@ -14,7 +17,7 @@ pub trait TlbFlush: Sized {
     /// mutation is unknown or when merging two disjoint tokens.
     fn all() -> Self;
 
-    /// Flush on all processors, including global pages.
+    /// Flush on all processors, including global pages, waiting for completion.
     fn flush_tlb_global_sync(self);
 
     /// A token covering both. Widening to [`TlbFlush::all`] is always correct;
@@ -23,7 +26,7 @@ pub trait TlbFlush: Sized {
         Self::all()
     }
 
-    /// Flush on this processor only, including global pages.
+    /// Complete a flush on this processor only, including global pages.
     fn flush_tlb_global_percpu(self) {
         self.flush_tlb_global_sync()
     }
@@ -58,7 +61,13 @@ impl<T: TlbFlush> MayNeedFlush<T> {
 
     /// An obligation to flush the single page at `vaddr` mapped at `level`.
     pub fn new(vaddr: VirtAddr, level: PageLevel) -> Self {
-        MayNeedFlush { tok: Some(T::range(vaddr, vaddr + level.size(), level)) }
+        let start = vaddr.as_usize() & !(level.size() - 1);
+        match start.checked_add(level.size()) {
+            Some(end) if VirtAddr::from(end).as_usize() == end => {
+                Self::new_range(start.into(), end.into(), level)
+            }
+            _ => Self::all(),
+        }
     }
 
     /// An obligation to flush `[start, end)`, every entry of which was mapped
@@ -100,7 +109,8 @@ impl<T: TlbFlush> MayNeedFlush<T> {
         self.tok.unwrap().flush_tlb_ignore_global_sync();
     }
 
-    /// Discharge by flushing everything on all processors.
+    /// Discharge by flushing the affected translations on all processors,
+    /// including global pages.
     ///
     /// # Panics
     /// Panics if the obligation is already discharged.
@@ -108,8 +118,9 @@ impl<T: TlbFlush> MayNeedFlush<T> {
         self.tok.unwrap().flush_tlb_global_sync();
     }
 
-    /// Discharge by flushing everything on this processor only. Correct only if
-    /// the changed mapping cannot be live elsewhere.
+    /// Discharge by flushing the affected translations on this processor only,
+    /// including global pages. Correct only if the changed mapping cannot be
+    /// live elsewhere.
     ///
     /// # Panics
     /// Panics if the obligation is already discharged.

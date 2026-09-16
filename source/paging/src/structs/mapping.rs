@@ -1,15 +1,19 @@
 //! Handles on one entry of a live table. A mutable handle stages its edit in a
-//! copy and commits it with a single volatile write, so a walker never sees a
+//! copy and commits it with a single atomic store, so a walker never sees a
 //! half-written entry, and the commit is what produces the flush obligation.
 use core::marker::PhantomData;
 
 use crate::structs::address::{Address, PhysAddr, VirtAddr};
 use crate::structs::arch_contract::ArchPagingMeta;
-use crate::structs::entry::PTEntry;
+use crate::structs::entry::{PTEntry, PTEntryRef};
 use crate::structs::level::PageLevel;
 use crate::structs::os_contract::PagingError;
 use crate::structs::ptpage::Mapping;
 use crate::structs::tlb::MayNeedFlush;
+
+/// A removed entry paired with any TLB invalidation it leaves outstanding.
+pub type UnmapEntryResult<A> =
+    Result<(Option<PTEntry<A>>, MayNeedFlush<<A as ArchPagingMeta>::TlbFlushTok>), PagingError>;
 
 /// What a read handle offers.
 pub trait MappingRefOps<'a, A: ArchPagingMeta>: Sized {
@@ -30,6 +34,7 @@ pub trait MappingMutOps<'a, A: ArchPagingMeta>: Sized {
     fn staged(&mut self) -> Mapping<'_, A>;
 
     /// Installs the staged entry and reports what it may have made stale.
+    /// Present leaf/table transitions require an architecture-aware operation.
     fn commit(self) -> MayNeedFlush<A::TlbFlushTok>;
 
     /// Installs an entry that owes no flush, because the entry it replaces was
@@ -43,17 +48,21 @@ pub trait MappingMutOps<'a, A: ArchPagingMeta>: Sized {
 #[derive(Debug)]
 pub struct MappingRef<'a, A: ArchPagingMeta> {
     level: PageLevel,
-    entry: *const PTEntry<A>,
-    lifetime: PhantomData<&'a PTEntry<A>>,
+    entry: PTEntryRef<'a, A>,
 }
 
 impl<'a, A: ArchPagingMeta> MappingRef<'a, A> {
     /// A handle on `entry`, which sits at `level`.
     ///
     /// # Safety
-    /// `entry` must point at an entry of a mapped table page that outlives `'a`.
+    /// `entry` must satisfy [`PTEntry::load_entry`] for all of `'a`, including
+    /// initialized, writable storage and atomic access without ordinary entry references.
     pub unsafe fn new(level: PageLevel, entry: *const PTEntry<A>) -> Self {
-        Self { level, entry, lifetime: PhantomData }
+        Self::from_view(level, unsafe { PTEntryRef::from_raw(entry.cast_mut()) })
+    }
+
+    pub(crate) fn from_view(level: PageLevel, entry: PTEntryRef<'a, A>) -> Self {
+        Self { level, entry }
     }
 }
 
@@ -63,9 +72,7 @@ impl<'a, A: ArchPagingMeta> MappingRefOps<'a, A> for MappingRef<'a, A> {
     }
 
     fn read(&self) -> PTEntry<A> {
-        // SAFETY: the constructor's caller vouched for the pointer, and `'a`
-        // keeps the table alive.
-        unsafe { PTEntry::read_pte(self.entry) }
+        self.entry.load()
     }
 }
 
@@ -74,9 +81,10 @@ impl<'a, A: ArchPagingMeta> MappingRefOps<'a, A> for MappingRef<'a, A> {
 pub struct MappingMut<'a, A: ArchPagingMeta> {
     vaddr: Option<VirtAddr>,
     level: PageLevel,
-    entry: *mut PTEntry<A>,
+    entry: PTEntryRef<'a, A>,
+    original: Option<PTEntry<A>>,
     staged: Option<PTEntry<A>>,
-    lifetime: PhantomData<&'a mut PTEntry<A>>,
+    lifetime: PhantomData<&'a mut ()>,
 }
 
 impl<'a, A: ArchPagingMeta> MappingMut<'a, A> {
@@ -85,10 +93,22 @@ impl<'a, A: ArchPagingMeta> MappingMut<'a, A> {
     /// the commit cannot name what went stale and asks for a full flush.
     ///
     /// # Safety
-    /// `entry` must point at an entry of a mapped table page that outlives `'a`
-    /// and that no other handle writes meanwhile.
+    /// `entry` must satisfy [`PTEntry::load_entry`] for all of `'a`, and other
+    /// software writers must be excluded throughout this handle's lifetime.
+    /// Every committed value must preserve the containing tree's level and
+    /// ownership invariants. This handle cannot replace a present leaf with a
+    /// table or a present table with a leaf. Commits preserve hardware A/D
+    /// updates when the staged entry keeps the original leaf/table kind.
     pub unsafe fn new(vaddr: Option<VirtAddr>, level: PageLevel, entry: *mut PTEntry<A>) -> Self {
-        Self { vaddr, level, entry, staged: None, lifetime: PhantomData }
+        Self::from_view(vaddr, level, unsafe { PTEntryRef::from_raw(entry) })
+    }
+
+    pub(crate) fn from_view(
+        vaddr: Option<VirtAddr>,
+        level: PageLevel,
+        entry: PTEntryRef<'a, A>,
+    ) -> Self {
+        Self { vaddr, level, entry, original: None, staged: None, lifetime: PhantomData }
     }
 }
 
@@ -98,15 +118,16 @@ impl<'a, A: ArchPagingMeta> MappingMutOps<'a, A> for MappingMut<'a, A> {
     }
 
     fn read(&self) -> PTEntry<A> {
-        // SAFETY: as in `MappingRef::read`.
-        unsafe { PTEntry::read_pte(self.entry) }
+        self.entry.load()
     }
 
     fn staged(&mut self) -> Mapping<'_, A> {
-        let entry = self.entry;
-        // SAFETY: as in `MappingRef::read`; the first stage seeds the copy from
-        // the live entry.
-        let staged = self.staged.get_or_insert_with(|| unsafe { PTEntry::read_pte(entry) });
+        if self.staged.is_none() {
+            let original = self.entry.load();
+            self.original = Some(original);
+            self.staged = Some(original);
+        }
+        let staged = self.staged.as_mut().unwrap();
         Mapping::new(self.level, staged)
     }
 
@@ -114,9 +135,21 @@ impl<'a, A: ArchPagingMeta> MappingMutOps<'a, A> for MappingMut<'a, A> {
         let Some(staged) = self.staged else {
             return MayNeedFlush::none();
         };
-        // SAFETY: as in `MappingRef::read`, and a word-sized store is what the
-        // hardware needs to see the entry whole.
-        unsafe { PTEntry::write_pte(self.entry, staged) };
+        let original = self.original.unwrap();
+        assert!(
+            !original.present()
+                || !staged.present()
+                || original.is_leaf(self.level) == staged.is_leaf(self.level),
+            "present leaf/table transitions require architecture-aware publication"
+        );
+        let preserve_ad = original.present()
+            && staged.present()
+            && original.is_leaf(self.level) == staged.is_leaf(self.level);
+        if preserve_ad {
+            self.entry.update_preserving_ad(original, staged);
+        } else {
+            self.entry.store(staged);
+        }
         match self.vaddr {
             Some(vaddr) => MayNeedFlush::new(vaddr, self.level),
             None => MayNeedFlush::all(),
@@ -132,14 +165,13 @@ impl<'a, A: ArchPagingMeta> MappingMutOps<'a, A> for MappingMut<'a, A> {
         if staged.entry.present() {
             let offset = vaddr.map_or(0, |v| v.bits() & (level.size() - 1));
             return Err(PagingError::EntryAlreadyPresent {
-                frame: PhysAddr::from(staged.entry.address() + offset),
+                frame: PhysAddr::from((staged.entry.address() & !(level.size() - 1)) + offset),
                 level,
             });
         }
         let ret = update(staged)?;
         let entry = *self.staged().entry;
-        // SAFETY: as in `commit`.
-        unsafe { PTEntry::write_pte(self.entry, entry) };
+        self.entry.store(entry);
         Ok(ret)
     }
 }

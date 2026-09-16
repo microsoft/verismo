@@ -1,7 +1,7 @@
 //! Which level of the tree a table page sits at, as a value ([`PageLevel`]) and
 //! as a type ([`Lvl`]). Level 0 is the leaf; the root of a four-level tree is
 //! level 3.
-use crate::structs::geometry::level_size;
+use crate::structs::sizes::level_size;
 
 /// The level of a page-table page, counted from the leaf. x86 walks at most
 /// five levels.
@@ -16,6 +16,7 @@ pub enum PageLevel {
 
 impl PageLevel {
     /// How many levels lie below this one. The leaf level is 0.
+    #[inline(always)]
     pub fn depth(&self) -> usize {
         match self {
             PageLevel::Level0 => 0,
@@ -30,6 +31,7 @@ impl PageLevel {
     /// level 0 is not a convenience: there the hardware reads bit 7 as PAT
     /// rather than PS, so an entry that looks like a table pointer is a
     /// mapping.
+    #[inline(always)]
     pub fn child(&self) -> Option<PageLevel> {
         match self {
             PageLevel::Level0 => None,
@@ -52,10 +54,12 @@ impl PageLevel {
     }
 
     /// How much address space one entry at this level covers.
+    #[inline(always)]
     pub fn size(&self) -> usize {
         level_size(*self)
     }
 
+    #[inline(always)]
     pub fn is_leaf(&self) -> bool {
         matches!(self, PageLevel::Level0)
     }
@@ -75,7 +79,7 @@ impl PageLevel {
 
 /// A level of the tree as a type: `L` is the depth above the leaf, so `Lvl<0>`
 /// is the leaf and `Lvl<4>` the root of a five-level tree. The numbering
-/// matches `PageLevel::depth` and the shift in `geometry::shift_at`.
+/// matches `PageLevel::depth` and the shift in `sizes::shift_at`.
 pub struct Lvl<const L: usize>;
 
 /// What a level marker knows: its depth, and the same level as a value.
@@ -88,6 +92,7 @@ pub trait LevelSpec: 'static {
 /// A level with another level beneath it. `Lvl<0>` has no impl, so descending
 /// below the leaf is a type error.
 pub trait InnerLevel: LevelSpec {
+    /// The statically known level immediately below this one.
     type Child: LevelSpec;
 }
 

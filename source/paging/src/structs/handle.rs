@@ -28,7 +28,7 @@ use crate::structs::arch_contract::{ArchPagingMeta, GenericPageTableFlags};
 use crate::structs::concurrent_pt::PTPageSharedPerm;
 use crate::structs::entry::PTEntry;
 use crate::structs::free::free_page_tree;
-use crate::structs::geometry::shift_at;
+use crate::structs::sizes::shift_at;
 use crate::structs::level::{LevelSpec, PageLevel};
 use crate::structs::map::map_at;
 use crate::structs::os_contract::{OSPagingContract, PTPageInit, PageLock, PagingError};

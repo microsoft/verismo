@@ -13,6 +13,7 @@ use core::slice;
 type InnerAddr = usize;
 
 const SIGN_BIT: usize = 47;
+pub(crate) const LOW_CANONICAL_END: usize = 1usize << SIGN_BIT;
 
 #[inline]
 const fn sign_extend(addr: InnerAddr) -> InnerAddr {
@@ -24,6 +25,7 @@ const fn sign_extend(addr: InnerAddr) -> InnerAddr {
     }
 }
 
+/// Common checked arithmetic and alignment operations for paging addresses.
 pub trait Address: Copy + From<InnerAddr> + Into<InnerAddr> + Ord {
     /// Transform the address into its inner representation for easier
     /// arithmetic manipulation
@@ -106,6 +108,7 @@ pub trait Address: Copy + From<InnerAddr> + Into<InnerAddr> + Ord {
     }
 }
 
+/// A physical byte address.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct PhysAddr(InnerAddr);
@@ -197,6 +200,7 @@ impl ops::Add<InnerAddr> for PhysAddr {
 
 impl Address for PhysAddr {}
 
+/// A canonical virtual byte address.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct VirtAddr(InnerAddr);
@@ -363,6 +367,7 @@ impl ops::Sub<usize> for VirtAddr {
 impl ops::Add<InnerAddr> for VirtAddr {
     type Output = VirtAddr;
 
+    #[inline(always)]
     fn add(self, other: InnerAddr) -> Self {
         VirtAddr::from(self.0 + other)
     }

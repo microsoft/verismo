@@ -1,10 +1,10 @@
 pub mod address;
 pub mod arch_contract;
 pub mod entry;
-pub mod geometry;
 pub mod level;
 pub mod mapping;
 pub mod os_contract;
+pub mod policy;
 pub mod ptpage;
 pub mod sizes;
 pub mod tlb;

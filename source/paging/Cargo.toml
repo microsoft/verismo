@@ -11,6 +11,9 @@ builtin_macros = { workspace = true }
 verus_state_machines_macros = { workspace = true }
 
 [features]
+default = ["use_ad", "concurrent"]
+use_ad = []
+concurrent = []
 verification-test = []
 
 [package.metadata.verus]

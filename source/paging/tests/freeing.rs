@@ -2,14 +2,19 @@
 
 mod common;
 
+use std::collections::BTreeSet;
+use std::sync::Arc;
+
 use common::*;
 use paging::address::{Address, PhysAddr, VirtAddr};
-use paging::level::PageLevel;
+use paging::level::{LevelSpec, Lvl, PageLevel};
 use paging::os_contract::PagingError;
+use paging::pagetable::PageTable;
+use paging::X86Paging;
 
 /// Unmaps `vaddr` and discharges the flush, which the freeing needs.
 fn unmap(table: &mut Table, vaddr: VirtAddr) {
-    let (level, flush) = table.unmap(vaddr);
+    let (level, flush) = table.unmap(vaddr).unwrap();
     assert_eq!(level, Some(PageLevel::Level0));
     // SAFETY: nothing runs on these tables but this test.
     unsafe { flush.ignore() };
@@ -86,7 +91,7 @@ fn freeing_a_path_leaves_the_arena_alone() {
 }
 
 #[test]
-fn the_root_is_never_freed() {
+fn path_reclamation_keeps_the_root() {
     let (arena, mut table) = table();
     let root = table.root_paddr();
     let frame = PhysAddr::from(arena.base());
@@ -109,7 +114,7 @@ fn a_range_gives_back_the_tables_that_held_it() {
     let end = start + (2 * 1024 * 1024usize);
 
     assert_eq!(table.map_region_4k(start, end, frame, flags(), false), Ok(()));
-    let (all_mapped, flush) = table.unmap_region(start, end);
+    let (all_mapped, flush) = table.unmap_region(start, end).unwrap();
     assert!(all_mapped);
     // SAFETY: nothing runs on these tables but this test.
     unsafe { flush.ignore() };
@@ -141,6 +146,77 @@ fn a_range_still_mapped_keeps_its_tables() {
 }
 
 #[test]
+fn range_cleanup_reaches_sparse_paths_across_one_gib_boundaries() {
+    let (arena, mut table) = table();
+    let first = VirtAddr::from(0x4c80_0000usize);
+    let second = first + 2 * PageLevel::Level2.size();
+    let frame = PhysAddr::from(arena.base());
+    let before = arena.allocated();
+    for addr in [first, second] {
+        table.map_4k(addr, frame, flags(), false).unwrap();
+        unmap(&mut table, addr);
+    }
+    let built = arena.allocated() - before;
+    // SAFETY: these unaliased tables are inactive and their leaf flushes discharged.
+    unsafe { table.free_page_table_by_range(first, second + 4096) };
+    assert_eq!(arena.freed().len(), built);
+    assert_eq!(table.validate_page_table(), Ok(()));
+}
+
+#[test]
+fn range_cleanup_keeps_its_exclusive_end_and_ignores_empty_ranges() {
+    let (arena, mut table) = table();
+    let first = VirtAddr::from(0x4000_0000usize);
+    let second = first + PageLevel::Level1.size();
+    for addr in [first, second] {
+        table.map_4k(addr, PhysAddr::from(arena.base()), flags(), false).unwrap();
+        unmap(&mut table, addr);
+    }
+    // SAFETY: these inactive paths are unaliased and all leaf flushes discharged.
+    unsafe { table.free_page_table_by_range(first, first) };
+    assert!(arena.freed().is_empty());
+    unsafe { table.free_page_table_by_range(first, second) };
+    assert_eq!(arena.freed().len(), 1);
+    assert_eq!(unsafe { table.free_page_table_by_addr(second) }, 3);
+    assert_eq!(table.validate_page_table(), Ok(()));
+}
+
+#[test]
+fn five_level_range_cleanup_uses_high_canonical_offsets_without_wrapping() {
+    use paging::level::Lvl;
+    use paging::pagetable::PageTable;
+    use paging::X86Paging;
+
+    let arena = Arena::new(ARENA);
+    #[cfg(feature = "concurrent")]
+    let mut table = PageTable::<X86Paging<Host>, Allocator, Lvl<4>, WholeTreeLock>::new(
+        Allocator(arena.clone()),
+        WholeTreeLock::default(),
+        flags(),
+    )
+    .unwrap();
+    #[cfg(not(feature = "concurrent"))]
+    let mut table =
+        PageTable::<X86Paging<Host>, Allocator, Lvl<4>>::new(Allocator(arena.clone()), flags())
+            .unwrap();
+    let first = VirtAddr::from(0xffff_8000_4000_0000usize);
+    let second = first + 2 * PageLevel::Level2.size();
+    let before = arena.allocated();
+    for addr in [first, second] {
+        table.map_4k(addr, PhysAddr::from(arena.base()), flags(), false).unwrap();
+        let (level, pending) = table.unmap(addr).unwrap();
+        assert_eq!(level, Some(PageLevel::Level0));
+        // SAFETY: these host-backed tables are never installed.
+        unsafe { pending.ignore() };
+    }
+    let built = arena.allocated() - before;
+    // SAFETY: the empty paths belong solely to this inactive tree.
+    unsafe { table.free_page_table_by_range(first, second + 4096) };
+    assert_eq!(arena.freed().len(), built);
+    assert_eq!(table.validate_page_table(), Ok(()));
+}
+
+#[test]
 fn tearing_down_the_children_gives_every_page_back_but_the_root() {
     let (arena, mut table) = table();
     let root = table.root_paddr();
@@ -157,16 +233,150 @@ fn tearing_down_the_children_gives_every_page_back_but_the_root() {
 }
 
 #[test]
-fn dropping_a_table_frees_its_root() {
+fn dropping_a_table_frees_its_root_and_descendants() {
     let (arena, table) = table();
     let root = table.root_paddr();
     drop(table);
-    assert_eq!(arena.freed(), vec![root.bits()]);
+    assert_all_tables_freed_once(&arena);
+    assert_eq!(arena.freed().last(), Some(&root.bits()));
 }
 
 #[test]
 fn a_leaked_table_frees_nothing() {
     let (arena, table) = table();
-    let (_handler, _root) = table.leak();
+    #[cfg(feature = "concurrent")]
+    let (_allocator, _content, _root) = table.leak();
+    #[cfg(not(feature = "concurrent"))]
+    let (_allocator, _root) = table.leak();
     assert!(arena.freed().is_empty());
 }
+
+fn assert_all_tables_freed_once(arena: &Arena) {
+    let freed = arena.freed();
+    let expected: BTreeSet<_> =
+        (0..arena.allocated()).map(|index| arena.base() + index * 4096).collect();
+    assert_eq!(freed.len(), expected.len());
+    assert_eq!(freed.into_iter().collect::<BTreeSet<_>>(), expected);
+}
+
+#[cfg(not(feature = "concurrent"))]
+type Owned<L> = PageTable<X86Paging<Host>, Allocator, L>;
+#[cfg(feature = "concurrent")]
+type Owned<L> = PageTable<X86Paging<Host>, Allocator, L, WholeTreeLock>;
+#[cfg(not(feature = "concurrent"))]
+type Content = ();
+#[cfg(feature = "concurrent")]
+type Content = WholeTreeLock;
+
+fn owned<L: LevelSpec>() -> (Arc<Arena>, Owned<L>) {
+    let arena = Arena::new(ARENA);
+    #[cfg(not(feature = "concurrent"))]
+    let table = Owned::new(Allocator(arena.clone()), flags()).unwrap();
+    #[cfg(feature = "concurrent")]
+    let table = Owned::new(Allocator(arena.clone()), WholeTreeLock::default(), flags()).unwrap();
+    (arena, table)
+}
+
+fn parts<L: LevelSpec>(table: Owned<L>) -> (Allocator, Content, PhysAddr) {
+    #[cfg(not(feature = "concurrent"))]
+    {
+        let (allocator, root) = table.leak();
+        (allocator, (), root)
+    }
+    #[cfg(feature = "concurrent")]
+    {
+        table.leak()
+    }
+}
+
+#[cfg(not(feature = "concurrent"))]
+unsafe fn adopt<L: LevelSpec>(allocator: Allocator, (): Content, root: PhysAddr) -> Owned<L> {
+    unsafe { Owned::from_root(allocator, root) }.unwrap()
+}
+
+#[cfg(feature = "concurrent")]
+unsafe fn adopt<L: LevelSpec>(allocator: Allocator, content: Content, root: PhysAddr) -> Owned<L> {
+    unsafe { Owned::from_root(allocator, content, root) }.unwrap()
+}
+
+macro_rules! owned_drop_tests {
+    ($module:ident, $fixture:ident, $parts:ident, $adopt:ident, $level:ty) => {
+        #[allow(unused_mut)]
+        mod $module {
+            use super::*;
+
+            #[test]
+            fn drop_recursively_frees_tables_but_not_small_or_huge_data_frames() {
+                let (arena, mut table) = $fixture::<$level>();
+                let root = table.root_paddr();
+                let small_frame = PhysAddr::from(0x1000usize);
+                let huge_frame = PhysAddr::from(0x8000_0000usize);
+                for address in [0x4000_0000usize, 0xffff_8000_4000_0000] {
+                    table.map_4k(VirtAddr::from(address), small_frame, flags(), false).unwrap();
+                    assert_eq!(table.phys_addr(VirtAddr::from(address)), Ok(small_frame));
+                }
+                table.map_2m(VirtAddr::from(0x8000_0000usize), huge_frame, flags(), false).unwrap();
+                assert!(arena.allocated() > <$level>::DEPTH + 1);
+                assert!(arena.freed().is_empty());
+                drop(table);
+                assert_all_tables_freed_once(&arena);
+                assert_eq!(arena.freed().last(), Some(&root.bits()));
+                assert!(!arena.freed().contains(&small_frame.bits()));
+                assert!(!arena.freed().contains(&huge_frame.bits()));
+                assert_eq!(Arc::strong_count(&arena), 1);
+            }
+
+            #[test]
+            fn leak_transfers_the_allocator_and_tree_without_freeing_then_adoption_owns_all_pages()
+            {
+                let (arena, mut table) = $fixture::<$level>();
+                let address = VirtAddr::from(0xffff_8000_4000_0000usize);
+                let frame = PhysAddr::from(0x1000usize);
+                table.map_4k(address, frame, flags(), false).unwrap();
+                let root = table.root_paddr();
+                assert_eq!(Arc::strong_count(&arena), 2);
+                let (allocator, content, leaked_root) = $parts(table);
+                assert_eq!(leaked_root, root);
+                assert!(Arc::ptr_eq(&allocator.0, &arena));
+                assert_eq!(Arc::strong_count(&arena), 2);
+                assert!(arena.freed().is_empty());
+                // SAFETY: leak transfers this allocator-owned, inactive tree without aliases.
+                let adopted = unsafe { $adopt::<$level>(allocator, content, leaked_root) };
+                assert_eq!(adopted.root_paddr(), root);
+                assert_eq!(adopted.phys_addr(address), Ok(frame));
+                assert_eq!(adopted.validate_page_table(), Ok(()));
+                drop(adopted);
+                assert_all_tables_freed_once(&arena);
+                assert_eq!(arena.freed().last(), Some(&root.bits()));
+                assert_eq!(Arc::strong_count(&arena), 1);
+            }
+
+            #[test]
+            fn explicit_child_teardown_then_drop_never_frees_a_table_twice() {
+                let (arena, mut table) = $fixture::<$level>();
+                table
+                    .map_4k(
+                        VirtAddr::from(0x4000_0000usize),
+                        PhysAddr::from(0x1000usize),
+                        flags(),
+                        false,
+                    )
+                    .unwrap();
+                let root = table.root_paddr();
+                let allocated = arena.allocated();
+                // SAFETY: this inactive tree exclusively owns all of its table pages.
+                unsafe { table.free_children() };
+                assert_eq!(arena.freed().len(), allocated - 1);
+                assert!(!arena.freed().contains(&root.bits()));
+                unsafe { table.free_children() };
+                assert_eq!(arena.freed().len(), allocated - 1);
+                drop(table);
+                assert_all_tables_freed_once(&arena);
+                assert_eq!(arena.freed().last(), Some(&root.bits()));
+            }
+        }
+    };
+}
+
+owned_drop_tests!(selected_four_level, owned, parts, adopt, Lvl<3>);
+owned_drop_tests!(selected_five_level, owned, parts, adopt, Lvl<4>);

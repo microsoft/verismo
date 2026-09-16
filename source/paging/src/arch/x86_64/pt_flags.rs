@@ -23,12 +23,16 @@ bitflags! {
 
 impl GenericPageTableFlags for PTEntryFlags {
     const PRESENT: Self = Self::PRESENT;
+    const PRESENT_BIT: usize = 0x1;
 
     const WRITABLE: Self = Self::WRITABLE;
+    const WRITABLE_BIT: usize = 0x2;
 
     const USER: Self = Self::USER;
+    const USER_BIT: usize = 0x4;
 
     const HUGE: Self = Self::HUGE;
+    const HUGE_BIT: usize = 0x80;
 
     /// Present, writable, user-accessible, and already accessed and dirty, so
     /// that the hardware never needs to write the entry back.

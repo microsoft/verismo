@@ -2,6 +2,7 @@
 //! level an entry is read at: at the leaf bit 7 is PAT rather than PS, so it is
 //! the walk layer that must refuse to descend below the leaf.
 use core::marker::PhantomData;
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 use bitflags::Flags;
 
@@ -12,6 +13,7 @@ use crate::structs::level::PageLevel;
 /// A single hardware page-table entry: a raw machine word, typed by the
 /// architecture whose bit layout it follows. Any word is a well-formed value,
 /// so the type carries no invariant of its own.
+/// One architecture-typed page-table entry word.
 #[repr(transparent)]
 #[derive(Debug)]
 pub struct PTEntry<A: ArchPagingMeta> {
@@ -34,33 +36,50 @@ impl<A: ArchPagingMeta> PTEntry<A> {
         self.val = 0;
     }
 
-    /// The entry a raw word denotes. The layer above stores entries as plain
-    /// words, so it needs both directions of this correspondence.
+    /// The exact entry a raw word denotes, without publication-time A/D normalization.
+    #[inline(always)]
     pub fn from_bits(val: usize) -> Self {
         Self { val, dummy: PhantomData }
     }
 
+    pub(crate) fn for_publication(self) -> Self {
+        #[cfg(not(feature = "use_ad"))]
+        if self.present() {
+            return Self::from_bits(self.val | A::accessed_dirty_mask());
+        }
+        self
+    }
+
     /// The address-field bits, *including* any confidentiality or shared tag
     /// stored alongside the physical address.
+    #[inline(always)]
     pub fn paddr_field(&self) -> usize {
         self.val & A::address_mask()
     }
 
     /// [`Self::paddr_field`] with the private bit cleared: the frame a table
     /// walk should follow.
+    #[inline(always)]
     pub fn page_frame(&self) -> usize {
         self.paddr_field() & !A::private_pte_mask()
     }
 
-    /// [`Self::page_frame`] with the shared bit cleared too: the clean physical
-    /// frame, every architecture-specific tag stripped.
+    /// The address field without confidentiality tags. Huge-page attributes
+    /// may remain; use [`Self::leaf_address`] for a leaf's clean frame base.
+    #[inline(always)]
     pub fn address(&self) -> usize {
         self.page_frame() & !A::shared_pte_mask()
     }
 
+    /// The clean frame base of a leaf at `level`, without size-dependent
+    /// attributes such as huge-page PAT.
+    pub fn leaf_address(&self, level: PageLevel) -> PhysAddr {
+        PhysAddr::from(self.address() & !(level.size() - 1))
+    }
+
     /// Whether the stored address carries the shared (plaintext) tag.
     pub fn is_shared(&self) -> bool {
-        self.paddr_field() & A::shared_pte_mask() == A::shared_pte_mask()
+        A::is_shared_address(PhysAddr::from(self.paddr_field()))
     }
 
     /// The whole word as flags. Every bit is kept, including any the
@@ -70,6 +89,7 @@ impl<A: ArchPagingMeta> PTEntry<A> {
         A::PTFlags::from_bits_retain(self.val)
     }
 
+    #[inline(always)]
     pub fn present(&self) -> bool {
         self.val & A::PTFlags::present_bit() != 0
     }
@@ -77,6 +97,7 @@ impl<A: ArchPagingMeta> PTEntry<A> {
     /// Hardware huge (large-page) bit. At the leaf level the hardware reads it
     /// as PAT instead, so only a caller that knows the level may read it as
     /// "maps a large page".
+    #[inline(always)]
     pub fn huge(&self) -> bool {
         self.val & A::PTFlags::huge_bit() != 0
     }
@@ -91,11 +112,13 @@ impl<A: ArchPagingMeta> PTEntry<A> {
 
     /// An entry a walker may follow down to a child table. The bits alone
     /// cannot say this, which is why the level is an argument.
+    #[inline(always)]
     pub fn is_table(&self, level: PageLevel) -> bool {
         self.present() && !level.is_leaf() && !self.huge()
     }
 
     /// A present entry that maps a page rather than pointing at a table.
+    #[inline(always)]
     pub fn is_leaf(&self, level: PageLevel) -> bool {
         self.present() && (self.huge() || level.is_leaf())
     }
@@ -107,18 +130,19 @@ impl<A: ArchPagingMeta> PTEntry<A> {
 
     /// An entry holding `addr` with `flags`. Flag bits that fall inside the
     /// address field are dropped, so the address survives whatever the caller
-    /// passes.
+    /// passes. Without `use_ad`, present entries also have A/D preset.
     pub fn new(addr: PhysAddr, flags: A::PTFlags) -> Self {
         let val = (addr.bits() & A::address_mask()) | (flags.bits() & !A::address_mask());
-        Self { val, dummy: PhantomData }
+        Self::from_bits(val).for_publication()
     }
 
     /// An entry pointing at a table page: present and not huge, whatever
     /// `flags` says, since those two bits are what "points at a table" means.
+    /// Without `use_ad`, A/D bits are preset.
     pub fn new_table(addr: PhysAddr, flags: A::PTFlags) -> Self {
         let flag_bits = flags.bits() & !A::address_mask() & !A::PTFlags::huge_bit();
         let val = (addr.bits() & A::address_mask()) | flag_bits | A::PTFlags::present_bit();
-        Self { val, dummy: PhantomData }
+        Self::from_bits(val).for_publication()
     }
 
     /// An entry mapping a page rather than pointing at a table. The large-page
@@ -133,6 +157,21 @@ impl<A: ArchPagingMeta> PTEntry<A> {
     /// caller who does not know the level would not.
     pub fn set_huge(self) -> Self {
         Self { val: self.val | A::PTFlags::huge_bit(), dummy: PhantomData }
+    }
+
+    pub(crate) fn with_leaf_flags(self, level: PageLevel, flags: A::PTFlags) -> Self {
+        let keep = A::address_mask() | A::leaf_attribute_mask(level) | A::accessed_dirty_mask();
+        let size = if level.is_leaf() { 0 } else { A::PTFlags::huge_bit() };
+        Self::from_bits((self.val & keep) | (flags.bits() & !keep & !A::PTFlags::huge_bit()) | size)
+    }
+
+    pub(crate) fn split_child(self, level: PageLevel, index: usize) -> Self {
+        let child = level.child().expect("cannot split a smallest leaf");
+        let base = self.paddr_field() & !(level.size() - 1);
+        let flags =
+            if child.is_leaf() { self.flags().without(A::PTFlags::HUGE) } else { self.flags() };
+        let entry = Self::new(PhysAddr::from(base + index * child.size()), flags);
+        Self::from_bits(entry.raw() | A::split_leaf_attributes(self.raw(), level))
     }
 
     pub fn set(&mut self, addr: PhysAddr, flags: A::PTFlags) {
@@ -154,24 +193,140 @@ impl<A: ArchPagingMeta> PTEntry<A> {
         self.set(A::make_private_address(addr), flags);
     }
 
-    /// Reads an entry out of a live table.
-    ///
+    /// Acquires an entry and the initialized subtree it publishes.
     /// # Safety
-    /// `entry` must point at an entry of a mapped table page.
-    pub unsafe fn read_pte(entry: *const Self) -> Self {
-        // SAFETY: the caller vouches for the pointer. The read is volatile
-        // because the MMU writes the accessed and dirty bits under us, and an
-        // aligned word-sized access sees the entry whole.
-        unsafe { entry.read_volatile() }
+    /// The pointer must address initialized, writable, `AtomicUsize`-aligned storage.
+    /// All concurrent accesses must be atomic; no live Rust entry references.
+    pub unsafe fn load_entry(entry: *const Self) -> Self {
+        unsafe { PTEntryRef::from_raw(entry.cast_mut()) }.load()
     }
 
-    /// Writes an entry into a live table.
+    /// Release-publishes an entry and its initialized subtree.
+    /// # Safety
+    /// As in [`Self::load_entry`].
+    pub unsafe fn store_entry(entry: *mut Self, value: Self) {
+        unsafe { PTEntryRef::from_raw(entry) }.store(value);
+    }
+
+    /// Replaces an entry and returns what it held.
     ///
     /// # Safety
-    /// `entry` must point at an entry of a mapped table page.
-    pub unsafe fn write_pte(entry: *mut Self, value: Self) {
-        // SAFETY: as in `read_pte`.
-        unsafe { entry.write_volatile(value) }
+    /// As in [`Self::load_entry`].
+    pub unsafe fn swap_entry(entry: *mut Self, value: Self) -> Self {
+        unsafe { PTEntryRef::from_raw(entry) }.swap(value)
+    }
+
+    /// Updates an entry only if its complete word is unchanged.
+    /// # Safety
+    /// As in [`Self::load_entry`].
+    pub unsafe fn compare_exchange_entry(
+        entry: *mut Self,
+        current: Self,
+        value: Self,
+    ) -> Result<Self, Self> {
+        unsafe { PTEntryRef::from_raw(entry) }.compare_exchange(current, value)
+    }
+}
+
+/// Borrowed atomic access to a live page-table entry.
+/// Without `use_ad`, every successful write presets A/D if the result is present.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PTEntryRef<'tree, A: ArchPagingMeta> {
+    word: &'tree AtomicUsize,
+    // Preserve the raw handles' thread affinity independently of the atomic word.
+    marker: PhantomData<*mut A>,
+}
+
+impl<'tree, A: ArchPagingMeta> PTEntryRef<'tree, A> {
+    /// # Safety
+    /// The initialized, writable slot must be atomic-aligned and remain allocated
+    /// for `'tree`. Conflicting accesses must be atomic, with no ordinary entry references.
+    pub(crate) unsafe fn from_raw(entry: *mut PTEntry<A>) -> Self {
+        let word = unsafe { AtomicUsize::from_ptr(entry.cast::<usize>()) };
+        Self { word, marker: PhantomData }
+    }
+
+    #[inline(always)]
+    pub(crate) fn load(self) -> PTEntry<A> {
+        PTEntry::from_bits(self.word.load(Ordering::Acquire))
+    }
+
+    pub(crate) fn store(self, value: PTEntry<A>) {
+        self.word.store(value.for_publication().raw(), Ordering::Release);
+    }
+
+    pub(crate) fn swap(self, value: PTEntry<A>) -> PTEntry<A> {
+        PTEntry::from_bits(self.word.swap(value.for_publication().raw(), Ordering::AcqRel))
+    }
+
+    pub(crate) fn fetch_and(self, mask: usize) -> PTEntry<A> {
+        #[cfg(feature = "use_ad")]
+        {
+            PTEntry::from_bits(self.word.fetch_and(mask, Ordering::AcqRel))
+        }
+        #[cfg(not(feature = "use_ad"))]
+        {
+            self.update(|word| word & mask)
+        }
+    }
+
+    pub(crate) fn fetch_or(self, mask: usize) -> PTEntry<A> {
+        #[cfg(feature = "use_ad")]
+        {
+            PTEntry::from_bits(self.word.fetch_or(mask, Ordering::AcqRel))
+        }
+        #[cfg(not(feature = "use_ad"))]
+        {
+            self.update(|word| word | mask)
+        }
+    }
+
+    #[cfg(not(feature = "use_ad"))]
+    fn update(self, update: impl Fn(usize) -> usize) -> PTEntry<A> {
+        let previous = self
+            .word
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |word| {
+                Some(PTEntry::<A>::from_bits(update(word)).for_publication().raw())
+            })
+            .unwrap();
+        PTEntry::from_bits(previous)
+    }
+
+    pub(crate) fn compare_exchange(
+        self,
+        current: PTEntry<A>,
+        value: PTEntry<A>,
+    ) -> Result<PTEntry<A>, PTEntry<A>> {
+        self.word
+            .compare_exchange(
+                current.raw(),
+                value.for_publication().raw(),
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .map(PTEntry::from_bits)
+            .map_err(PTEntry::from_bits)
+    }
+
+    pub(crate) fn update_preserving_ad(self, current: PTEntry<A>, value: PTEntry<A>) {
+        #[cfg(feature = "use_ad")]
+        {
+            let ad_mask = A::accessed_dirty_mask();
+            let mut observed = current;
+            loop {
+                let desired =
+                    PTEntry::from_bits((value.raw() & !ad_mask) | (observed.raw() & ad_mask));
+                match self.compare_exchange(observed, desired) {
+                    Ok(_) => return,
+                    Err(latest) => observed = latest,
+                }
+            }
+        }
+        #[cfg(not(feature = "use_ad"))]
+        {
+            let _ = current;
+            self.store(value);
+        }
     }
 }
 
