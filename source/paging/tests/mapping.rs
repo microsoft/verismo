@@ -19,39 +19,31 @@ use paging::pagetable::PageTable;
 use paging::{level::Lvl, X86Paging};
 #[cfg(not(feature = "concurrent"))]
 use std::sync::atomic::{AtomicUsize, Ordering};
-#[cfg(not(feature = "concurrent"))]
-use std::sync::Arc;
 
 const SMALL: PageLevel = PageLevel::Level0;
 const LARGE: PageLevel = PageLevel::Level1;
 
 #[cfg(not(feature = "concurrent"))]
-#[derive(Clone)]
-struct BudgetAllocator {
-    inner: Allocator,
-    remaining: Arc<AtomicUsize>,
-}
+struct BudgetAllocator;
+#[cfg(not(feature = "concurrent"))]
+static ALLOCATION_BUDGET: AtomicUsize = AtomicUsize::new(usize::MAX);
 
 #[cfg(not(feature = "concurrent"))]
 unsafe impl DirectMappedAllocator for BudgetAllocator {
-    fn direct_map(&self) -> Range<PhysAddr> {
-        self.inner.direct_map()
+    fn direct_map() -> (Range<PhysAddr>, VirtAddr) {
+        Allocator::direct_map()
     }
 
-    fn direct_map_base(&self) -> VirtAddr {
-        self.inner.direct_map_base()
-    }
-
-    fn allocate_table_page(&self) -> Result<PhysAddr, PagingError> {
-        self.remaining
+    fn allocate_table_page() -> Result<PhysAddr, PagingError> {
+        ALLOCATION_BUDGET
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |left| left.checked_sub(1))
             .map_err(|_| PagingError::AllocFrame)?;
-        self.inner.allocate_table_page()
+        <Allocator as DirectMappedAllocator>::allocate_table_page()
     }
 
-    unsafe fn deallocate_table_page(&self, page: PhysAddr) {
+    unsafe fn deallocate_table_page(page: PhysAddr) {
         // SAFETY: ownership is forwarded unchanged to the original allocator.
-        unsafe { self.inner.deallocate_table_page(page) };
+        unsafe { <Allocator as DirectMappedAllocator>::deallocate_table_page(page) };
     }
 }
 
@@ -181,24 +173,21 @@ fn a_region_maps_in_the_largest_pages_it_can() {
 #[cfg(not(feature = "concurrent"))]
 fn failed_mapping_growth_reclaims_its_private_preparation() {
     let arena = Arena::new(ARENA);
-    let remaining = Arc::new(AtomicUsize::new(usize::MAX));
-    let allocator =
-        BudgetAllocator { inner: Allocator(arena.clone()), remaining: remaining.clone() };
-    let mut table =
-        PageTable::<X86Paging<Host>, BudgetAllocator, Lvl<3>>::new(allocator, flags()).unwrap();
+    ALLOCATION_BUDGET.store(usize::MAX, Ordering::Relaxed);
+    let mut table = PageTable::<X86Paging<Host>, BudgetAllocator, Lvl<3>>::new(flags()).unwrap();
     let vaddr = VirtAddr::from(0x4000_0000usize);
     let frame = PhysAddr::from(arena.base());
     let before = arena.allocated();
     let original_level = table.walk(vaddr).level();
 
-    remaining.store(1, Ordering::Relaxed);
+    ALLOCATION_BUDGET.store(1, Ordering::Relaxed);
     assert_eq!(table.map_4k(vaddr, frame, flags(), false), Err(PagingError::AllocFrame));
     assert_eq!(table.phys_addr(vaddr), Err(PagingError::NotMapped));
     assert_eq!(table.walk(vaddr).level(), original_level);
     assert_eq!(arena.allocated(), before + 1);
     assert_eq!(arena.freed().len(), 1);
 
-    remaining.store(3, Ordering::Relaxed);
+    ALLOCATION_BUDGET.store(3, Ordering::Relaxed);
     assert_eq!(table.map_4k(vaddr, frame, flags(), false), Ok(()));
     assert_eq!(table.phys_addr(vaddr), Ok(frame));
     assert_eq!(table.validate_page_table(), Ok(()));

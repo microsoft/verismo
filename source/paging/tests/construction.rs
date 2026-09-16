@@ -10,35 +10,28 @@ use paging::ptpage::PTPage;
 use paging::{PTEntryFlags, X86Paging};
 
 #[test]
-fn direct_mapped_allocator_clones_share_the_allocation_and_deallocation_domain() {
+fn direct_mapped_allocator_has_no_instance_storage() {
     let arena = Arena::new(ARENA);
-    let allocator = Allocator(arena.clone());
-    let clone = allocator.clone();
-    assert_eq!(allocator.direct_map(), clone.direct_map());
-    assert_eq!(allocator.direct_map_base(), clone.direct_map_base());
-    let first = allocator.allocate_table_page().unwrap();
-    let second = clone.allocate_table_page().unwrap();
+    assert_eq!(std::mem::size_of::<Allocator>(), 0);
+    assert_eq!(Allocator::direct_map().1, VirtAddr::from(arena.base()));
+    let first = Allocator::allocate_table_page().unwrap();
+    let second = Allocator::allocate_table_page().unwrap();
     assert_eq!(second, first + 4096);
     assert_eq!(arena.allocated(), 2);
-    // SAFETY: neither frame is linked, and both handles share the allocating arena.
+    // SAFETY: neither frame is linked.
     unsafe {
-        clone.deallocate_table_page(first);
-        allocator.deallocate_table_page(second);
+        Allocator::deallocate_table_page(first);
+        Allocator::deallocate_table_page(second);
     }
     assert_eq!(arena.freed(), vec![first.bits(), second.bits()]);
-    drop(allocator);
-    assert_eq!(clone.direct_map_base(), VirtAddr::from(arena.base()));
-    drop(clone);
-    assert_eq!(std::sync::Arc::strong_count(&arena), 1);
 }
 
 #[test]
 fn page_allocation_clears_dirty_memory_without_changing_adjacent_frames() {
     let arena = Arena::new(ARENA);
-    let allocator = Allocator(arena.clone());
-    let before = allocator.allocate_table_page().unwrap();
-    let (page, initialized) = PTPage::<X86Paging<Host>, _>::alloc(&allocator).unwrap();
-    let after = allocator.allocate_table_page().unwrap();
+    let before = Allocator::allocate_table_page().unwrap();
+    let (page, initialized) = PTPage::<X86Paging<Host>, Allocator>::alloc().unwrap();
+    let after = Allocator::allocate_table_page().unwrap();
     assert_eq!(initialized, before + 4096);
     assert_eq!(after, initialized + 4096);
     for index in 0..4096 {
@@ -51,7 +44,7 @@ fn page_allocation_clears_dirty_memory_without_changing_adjacent_frames() {
     }
     for frame in [before, initialized, after] {
         // SAFETY: these frames were never linked into a tree.
-        unsafe { allocator.deallocate_table_page(frame) };
+        unsafe { Allocator::deallocate_table_page(frame) };
     }
     assert_eq!(arena.freed().len(), arena.allocated());
 }
@@ -96,15 +89,14 @@ fn a_table_stays_valid_as_it_grows() {
 fn a_leaked_root_can_be_adopted_again() {
     let (arena, table) = table();
     #[cfg(feature = "concurrent")]
-    let (allocator, content, root) = table.leak();
+    let (content, root) = table.leak();
     #[cfg(not(feature = "concurrent"))]
-    let (allocator, root) = table.leak();
-    // SAFETY: the root came from the table just leaked, and the allocator is the
-    // one that allocated it.
+    let root = table.leak();
+    // SAFETY: the root came from the table just leaked.
     #[cfg(feature = "concurrent")]
-    let table = unsafe { Table::from_root(allocator, content, root) }.expect("its own root");
+    let table = unsafe { Table::from_root(content, root) }.expect("its own root");
     #[cfg(not(feature = "concurrent"))]
-    let table = unsafe { Table::from_root(allocator, root) }.expect("its own root");
+    let table = unsafe { Table::from_root(root) }.expect("its own root");
     assert_eq!(table.root_paddr(), root);
     assert_eq!(table.validate_page_table(), Ok(()));
     drop(table);
@@ -115,14 +107,13 @@ fn a_leaked_root_can_be_adopted_again() {
 #[test]
 fn a_root_that_maps_nothing_is_refused() {
     let arena = Arena::new(ARENA);
-    let allocator = Allocator(arena.clone());
-    let (_, root) = PTPage::<X86Paging<Host>, _>::alloc(&allocator).unwrap();
+    let (_, root) = PTPage::<X86Paging<Host>, Allocator>::alloc().unwrap();
     // SAFETY: the page was just allocated from this allocator and nothing else
     // holds it. It maps nothing, so the adoption must fail.
     #[cfg(feature = "concurrent")]
-    let refused = unsafe { Table::from_root(allocator, WholeTreeLock::default(), root) };
+    let refused = unsafe { Table::from_root(WholeTreeLock::default(), root) };
     #[cfg(not(feature = "concurrent"))]
-    let refused = unsafe { Table::from_root(allocator, root) };
+    let refused = unsafe { Table::from_root(root) };
     assert!(matches!(refused, Err(PagingError::TablePageNotSelfMapped)));
     // The root was not freed on rejection: the caller still owns it.
     assert!(arena.freed().is_empty());
@@ -140,14 +131,14 @@ fn a_tree_missing_one_of_its_pages_is_refused() {
 
     assert_eq!(table.validate_page_table(), Err(PagingError::TablePageNotSelfMapped));
     #[cfg(feature = "concurrent")]
-    let (allocator, content, root) = table.leak();
+    let (content, root) = table.leak();
     #[cfg(not(feature = "concurrent"))]
-    let (allocator, root) = table.leak();
+    let root = table.leak();
     // SAFETY: as above; the tree no longer reaches `child`, so it is refused.
     #[cfg(feature = "concurrent")]
-    let refused = unsafe { Table::from_root(allocator, content, root) };
+    let refused = unsafe { Table::from_root(content, root) };
     #[cfg(not(feature = "concurrent"))]
-    let refused = unsafe { Table::from_root(allocator, root) };
+    let refused = unsafe { Table::from_root(root) };
     assert!(matches!(refused, Err(PagingError::TablePageNotSelfMapped)));
     assert!(arena.freed().is_empty());
 }
@@ -157,17 +148,10 @@ fn a_table_can_share_another_ones_top_entries() {
     let (arena, table) = table();
     // SAFETY: both controllers remain alive, only read, and never reclaim shared pages.
     #[cfg(feature = "concurrent")]
-    let shared = unsafe {
-        Table::new_from_sharing_top::<0, 512>(
-            Allocator(arena.clone()),
-            WholeTreeLock::default(),
-            &table,
-        )
-    }
-    .expect("valid tree");
-    #[cfg(not(feature = "concurrent"))]
-    let shared = unsafe { Table::new_from_sharing_top::<0, 512>(Allocator(arena.clone()), &table) }
+    let shared = unsafe { Table::new_from_sharing_top::<0, 512>(WholeTreeLock::default(), &table) }
         .expect("valid tree");
+    #[cfg(not(feature = "concurrent"))]
+    let shared = unsafe { Table::new_from_sharing_top::<0, 512>(&table) }.expect("valid tree");
     for offset in [0, ARENA - 4096] {
         let addr = arena.base() + offset;
         assert_eq!(shared.phys_addr(VirtAddr::from(addr)), Ok(PhysAddr::from(addr)));
@@ -183,7 +167,7 @@ fn populate_reports_what_was_already_there() {
     let (arena, mut table) = table();
     let idx = (0..512).find(|idx| table.next_table_pa(*idx).is_none()).unwrap();
     let addr = VirtAddr::from(idx * PageLevel::Level3.size());
-    let (_, child) = PTPage::<X86Paging<Host>, _>::alloc(&Allocator(arena.clone())).unwrap();
+    let (_, child) = PTPage::<X86Paging<Host>, Allocator>::alloc().unwrap();
     // SAFETY: this zeroed subtree is direct-mapped, unlinked, and transferred to the table.
     assert_eq!(unsafe { table.populate(idx, child) }, Ok(true));
     assert_eq!(table.next_table_pa(idx), Some(child));
@@ -224,17 +208,12 @@ fn a_five_level_tree_is_deeper_than_a_four_level_one() {
     let arena = Arena::new(ARENA);
     #[cfg(feature = "concurrent")]
     let five = PageTable::<X86Paging<Host>, Allocator, Lvl<4>, WholeTreeLock>::new(
-        Allocator(arena.clone()),
         WholeTreeLock::default(),
         PTEntryFlags::data(),
     )
     .unwrap();
     #[cfg(not(feature = "concurrent"))]
-    let five = PageTable::<X86Paging<Host>, Allocator, Lvl<4>>::new(
-        Allocator(arena.clone()),
-        PTEntryFlags::data(),
-    )
-    .unwrap();
+    let five = PageTable::<X86Paging<Host>, Allocator, Lvl<4>>::new(PTEntryFlags::data()).unwrap();
     assert_eq!(five.validate_page_table(), Ok(()));
     let addr = arena.base();
     assert_eq!(five.phys_addr(VirtAddr::from(addr)), Ok(PhysAddr::from(addr)));

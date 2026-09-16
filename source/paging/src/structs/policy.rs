@@ -15,7 +15,7 @@ mod sealed {
 }
 
 /// Authorizes address mutations and selects which top-level subtrees are owned.
-pub trait PagingPolicy: sealed::Sealed {
+pub trait PagingOwnershipPolicy: sealed::Sealed {
     fn check_address(&self, root: PageLevel, address: VirtAddr) -> Result<(), PagingError>;
     fn check_range(
         &self,
@@ -72,7 +72,7 @@ impl<const START: usize, const END: usize> UserPolicy<'_, START, END> {
 impl sealed::Sealed for KernelPolicy {}
 impl<const START: usize, const END: usize> sealed::Sealed for UserPolicy<'_, START, END> {}
 
-impl PagingPolicy for KernelPolicy {
+impl PagingOwnershipPolicy for KernelPolicy {
     fn check_address(&self, _root: PageLevel, _address: VirtAddr) -> Result<(), PagingError> {
         Ok(())
     }
@@ -96,7 +96,7 @@ impl PagingPolicy for KernelPolicy {
     }
 }
 
-impl<const START: usize, const END: usize> PagingPolicy for UserPolicy<'_, START, END> {
+impl<const START: usize, const END: usize> PagingOwnershipPolicy for UserPolicy<'_, START, END> {
     fn check_address(&self, root: PageLevel, address: VirtAddr) -> Result<(), PagingError> {
         if self.kernel_top().contains(&entry_index(address, root)) {
             Err(PagingError::PermissionDenied)

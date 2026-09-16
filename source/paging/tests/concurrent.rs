@@ -12,7 +12,7 @@ use std::sync::{mpsc, Arc, Barrier, Mutex, MutexGuard, RwLock, TryLockError};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use common::{flags, Allocator, Arena, Host, ARENA};
+use common::{flags, Allocator, Arena, Host, RebasedAllocator, ARENA};
 use paging::address::{Address, PhysAddr, VirtAddr};
 use paging::entry::PTEntry;
 use paging::level::{Lvl, PageLevel};
@@ -136,7 +136,7 @@ unsafe impl<T> LockSpec<T> for Locks<T> {
 fn fixture(stripes: usize) -> (Arc<Arena>, Table, Locks) {
     let arena = Arena::new(ARENA);
     let locks = Locks::new(arena.base()..arena.base() + arena.len(), stripes);
-    let table = Table::new(Allocator(arena.clone()), locks.clone(), flags()).unwrap();
+    let table = Table::new(locks.clone(), flags()).unwrap();
     assert_eq!(locks.0.calls.load(Ordering::Relaxed), 0, "construction acquired a content lock");
     assert_eq!(locks.0.unlocks.load(Ordering::Relaxed), 0);
     (arena, table, locks)
@@ -205,7 +205,6 @@ fn nonunit_lock_metadata_is_mutably_accessible_and_survives_paging_operations() 
     let locks = Locks::<Metadata>::new(arena.base()..arena.base() + arena.len(), 1);
     let table = Arc::new(
         PageTable::<X86Paging<Host>, Allocator, Lvl<3>, Locks<Metadata>, Metadata>::new(
-            Allocator(arena.clone()),
             locks.clone(),
             flags(),
         )
@@ -570,17 +569,15 @@ fn splitting_a_gibibyte_exposes_only_complete_children_or_the_invalid_original_l
 
 #[test]
 fn split_parents_do_not_retain_restrictive_leaf_permissions() {
-    use paging::os_contract::PagingAllocator;
-
-    let (arena, table, locks) = fixture(1);
-    let allocator = Allocator(arena.clone());
+    let (_arena, table, locks) = fixture(1);
     let frame = PhysAddr::from(2 * HUGE);
     let address = VirtAddr::from(BASE + 3 * LARGE + PAGE);
     let original = PTEntryFlags::data_ro();
     table.map(VirtAddr::from(BASE), frame, HUGE_LEVEL, original, false).unwrap();
     discharge(table.split(address, SMALL_LEVEL, true).unwrap());
     let mut page =
-        allocator.paddr_to_vaddr(table.root_paddr()).as_ptr::<PTPage<X86Paging<Host>, Allocator>>();
+        <Allocator as paging::os_contract::PagingAllocator>::paddr_to_vaddr(table.root_paddr())
+            .as_ptr::<PTPage<X86Paging<Host>, Allocator>>();
     for level in [PageLevel::Level3, HUGE_LEVEL, LARGE_LEVEL] {
         let slot = PTPage::entry_ptr(page, entry_index(address, level));
         // SAFETY: the table borrow pins this path; the atomic load creates no live PTE reference.
@@ -589,7 +586,10 @@ fn split_parents_do_not_retain_restrictive_leaf_permissions() {
         assert!(entry.writable(), "a split parent retained the huge leaf's read-only bit");
         assert!(entry.user(), "a split parent retained the huge leaf's supervisor-only bit");
         assert!(!entry.flags().nx(), "a split parent retained the huge leaf's execute restriction");
-        page = allocator.paddr_to_vaddr(PhysAddr::from(entry.address())).as_ptr();
+        page = <Allocator as paging::os_contract::PagingAllocator>::paddr_to_vaddr(PhysAddr::from(
+            entry.address(),
+        ))
+        .as_ptr();
     }
     let mapped = frame + 3 * LARGE + PAGE;
     assert_eq!(table.walk(address).read().raw(), leaf_word(mapped.bits(), original, SMALL_LEVEL));
@@ -614,25 +614,26 @@ fn split_parents_do_not_retain_restrictive_leaf_permissions() {
 
 #[test]
 fn huge_pat_survives_both_split_steps_without_becoming_a_physical_address_bit() {
-    use paging::os_contract::PagingAllocator;
-
     const HUGE_PAT: usize = 1 << 12;
     const SMALL_PAT: usize = 1 << 7;
 
-    let (arena, table, locks) = fixture(1);
-    let allocator = Allocator(arena.clone());
+    let (_arena, table, locks) = fixture(1);
     let address = VirtAddr::from(BASE);
     let frame = PhysAddr::from(2 * HUGE);
     table.map(address, frame, HUGE_LEVEL, flags(), false).unwrap();
     let root_slot = PTPage::<X86Paging<Host>, Allocator>::entry_ptr(
-        allocator.paddr_to_vaddr(table.root_paddr()).as_ptr(),
+        <Allocator as paging::os_contract::PagingAllocator>::paddr_to_vaddr(table.root_paddr())
+            .as_ptr(),
         entry_index(address, PageLevel::Level3),
     );
     // SAFETY: this inactive tree is exclusively owned, and the root remains allocated.
     let parent = unsafe { PTEntry::load_entry(root_slot) };
     assert!(parent.is_table(PageLevel::Level3));
     let huge_slot = PTPage::<X86Paging<Host>, Allocator>::entry_ptr_mut(
-        allocator.paddr_to_vaddr(PhysAddr::from(parent.address())).as_mut_ptr(),
+        <Allocator as paging::os_contract::PagingAllocator>::paddr_to_vaddr(PhysAddr::from(
+            parent.address(),
+        ))
+        .as_mut_ptr(),
         entry_index(address, HUGE_LEVEL),
     );
     // SAFETY: Host identity-maps this child, and no other thread or hardware uses the tree.
@@ -686,16 +687,14 @@ fn huge_pat_survives_both_split_steps_without_becoming_a_physical_address_bit() 
 
 #[test]
 fn sharing_top_entries_preserves_their_complete_permission_bits() {
-    use paging::os_contract::PagingAllocator;
-
     let (arena, table, locks) = fixture(1);
-    let allocator = Allocator(arena.clone());
     let address = VirtAddr::from(BASE);
     let frame = PhysAddr::from(arena.base());
     table.map_4k(address, frame, flags(), false).unwrap();
     let index = entry_index(address, PageLevel::Level3);
     let original_slot = PTPage::<X86Paging<Host>, Allocator>::entry_ptr_mut(
-        allocator.paddr_to_vaddr(table.root_paddr()).as_mut_ptr(),
+        <Allocator as paging::os_contract::PagingAllocator>::paddr_to_vaddr(table.root_paddr())
+            .as_mut_ptr(),
         index,
     );
     // SAFETY: this inactive tree has no competing software or hardware users.
@@ -709,12 +708,10 @@ fn sharing_top_entries_preserves_their_complete_permission_bits() {
     };
     // SAFETY: both roots use identical virtual prefixes and the same lock domain.
     // The shared children remain allocated until both roots have been dropped.
-    let shared = unsafe {
-        Table::new_from_sharing_top::<0, 512>(Allocator(arena.clone()), locks.clone(), &table)
-    }
-    .unwrap();
+    let shared = unsafe { Table::new_from_sharing_top::<0, 512>(locks.clone(), &table) }.unwrap();
     let shared_slot = PTPage::<X86Paging<Host>, Allocator>::entry_ptr(
-        allocator.paddr_to_vaddr(shared.root_paddr()).as_ptr(),
+        <Allocator as paging::os_contract::PagingAllocator>::paddr_to_vaddr(shared.root_paddr())
+            .as_ptr(),
         index,
     );
     // SAFETY: the shared root is allocated and neither root has competing writers.
@@ -738,12 +735,9 @@ fn sharing_top_entries_preserves_their_complete_permission_bits() {
 fn mapping_a_five_level_path_finishes_within_the_depth_bound() {
     let arena = Arena::new(ARENA);
     let locks = Locks::<()>::new(arena.base()..arena.base() + arena.len(), 1);
-    let mut table = PageTable::<X86Paging<Host>, Allocator, Lvl<4>, Locks>::new(
-        Allocator(arena.clone()),
-        locks.clone(),
-        flags(),
-    )
-    .unwrap();
+    let mut table =
+        PageTable::<X86Paging<Host>, Allocator, Lvl<4>, Locks>::new(locks.clone(), flags())
+            .unwrap();
     let address = VirtAddr::from(0xffff_8000_4000_0000usize);
     let frame = PhysAddr::from(arena.base());
     assert_eq!(table.walk(address).level(), PageLevel::Level4);
@@ -879,7 +873,6 @@ fn splitting_preserves_confidentiality_tags_and_retagging_changes_only_one_leaf(
     let arena = Arena::new(ARENA);
     let locks = Locks::new(arena.base()..arena.base() + arena.len(), 7);
     let table = PageTable::<X86Paging<EncryptedHost>, Allocator, Lvl<3>, Locks>::new(
-        Allocator(arena.clone()),
         locks.clone(),
         flags(),
     )
@@ -1085,12 +1078,9 @@ fn five_level_range_cleanup_crosses_the_canonical_gap_without_wrapping() {
     let worker = spawn(|| {
         let arena = Arena::new(ARENA);
         let locks = Locks::new(arena.base()..arena.base() + arena.len(), 1);
-        let table = PageTable::<X86Paging<Host>, Allocator, Lvl<4>, Locks>::new(
-            Allocator(arena.clone()),
-            locks.clone(),
-            flags(),
-        )
-        .unwrap();
+        let table =
+            PageTable::<X86Paging<Host>, Allocator, Lvl<4>, Locks>::new(locks.clone(), flags())
+                .unwrap();
         let root = table.root_paddr();
         let protected = RwLock::new(Some(table));
         let start = VirtAddr::from(0x1000usize);
@@ -1133,32 +1123,25 @@ fn five_level_range_cleanup_crosses_the_canonical_gap_without_wrapping() {
     finish(worker);
 }
 
-#[derive(Clone)]
-struct BudgetAllocator {
-    inner: Allocator,
-    remaining: Arc<AtomicUsize>,
-}
+struct BudgetAllocator;
+static ALLOCATION_BUDGET: AtomicUsize = AtomicUsize::new(usize::MAX);
 
 // SAFETY: allocation and the direct map are the fixture's; only failure timing changes.
 unsafe impl DirectMappedAllocator for BudgetAllocator {
-    fn direct_map(&self) -> Range<PhysAddr> {
-        self.inner.direct_map()
+    fn direct_map() -> (Range<PhysAddr>, VirtAddr) {
+        Allocator::direct_map()
     }
 
-    fn direct_map_base(&self) -> VirtAddr {
-        self.inner.direct_map_base()
-    }
-
-    fn allocate_table_page(&self) -> Result<PhysAddr, PagingError> {
-        self.remaining
+    fn allocate_table_page() -> Result<PhysAddr, PagingError> {
+        ALLOCATION_BUDGET
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |left| left.checked_sub(1))
             .map_err(|_| PagingError::AllocFrame)?;
-        self.inner.allocate_table_page()
+        <Allocator as DirectMappedAllocator>::allocate_table_page()
     }
 
-    unsafe fn deallocate_table_page(&self, page: PhysAddr) {
+    unsafe fn deallocate_table_page(page: PhysAddr) {
         // SAFETY: ownership is forwarded unchanged to the original allocator.
-        unsafe { self.inner.deallocate_table_page(page) };
+        unsafe { <Allocator as DirectMappedAllocator>::deallocate_table_page(page) };
     }
 }
 
@@ -1169,11 +1152,8 @@ fn construction_failures_return_all_allocated_pages_without_locking_content() {
     for budget in 0..3 {
         let arena = Arena::new(ARENA);
         let locks = Locks::new(arena.base()..arena.base() + arena.len(), 1);
-        let allocator = BudgetAllocator {
-            inner: Allocator(arena.clone()),
-            remaining: Arc::new(AtomicUsize::new(budget)),
-        };
-        let result = BudgetTable::new(allocator, locks.clone(), flags()).map(drop);
+        ALLOCATION_BUDGET.store(budget, Ordering::Relaxed);
+        let result = BudgetTable::new(locks.clone(), flags()).map(drop);
         assert_eq!(result, Err(PagingError::AllocFrame));
         assert_eq!(arena.allocated(), budget);
         assert_freed_once(&arena, budget);
@@ -1185,10 +1165,9 @@ fn construction_failures_return_all_allocated_pages_without_locking_content() {
 #[test]
 fn constructor_self_mapping_checks_reject_absent_leaves_and_reclaim_the_tree() {
     let arena = Arena::new(ARENA);
-    let allocator = Allocator(arena.clone());
     let locks = Locks::new(arena.base()..arena.base() + arena.len(), 1);
     let absent = flags() & !PTEntryFlags::PRESENT;
-    let result = Table::new(allocator, locks.clone(), absent).map(drop);
+    let result = Table::new(locks.clone(), absent).map(drop);
     assert_eq!(result, Err(PagingError::TablePageNotSelfMapped));
     assert_eq!(arena.allocated(), 3);
     assert_freed_once(&arena, arena.allocated());
@@ -1198,16 +1177,14 @@ fn constructor_self_mapping_checks_reject_absent_leaves_and_reclaim_the_tree() {
 #[test]
 fn failed_growth_and_split_leave_retryable_mappings_and_release_content_guards() {
     let arena = Arena::new(ARENA);
-    let remaining = Arc::new(AtomicUsize::new(3));
+    ALLOCATION_BUDGET.store(3, Ordering::Relaxed);
     let locks = Locks::new(arena.base()..arena.base() + arena.len(), 1);
-    let allocator =
-        BudgetAllocator { inner: Allocator(arena.clone()), remaining: remaining.clone() };
-    let table = BudgetTable::new(allocator, locks.clone(), flags()).unwrap();
+    let table = BudgetTable::new(locks.clone(), flags()).unwrap();
     let vaddr = VirtAddr::from(BASE);
     let frame = PhysAddr::from(arena.base());
     let original = table.walk(vaddr);
     let before = arena.allocated();
-    remaining.store(1, Ordering::Relaxed);
+    ALLOCATION_BUDGET.store(1, Ordering::Relaxed);
     assert_eq!(table.map_4k(vaddr, frame, flags(), false), Err(PagingError::AllocFrame));
     assert_eq!(table.phys_addr(vaddr), Err(PagingError::NotMapped));
     assert_eq!(table.walk(vaddr).level(), original.level());
@@ -1216,14 +1193,14 @@ fn failed_growth_and_split_leave_retryable_mappings_and_release_content_guards()
     assert_freed_once(&arena, 1);
     assert_eq!(locks.0.calls.load(Ordering::Relaxed), 0);
     assert_eq!(locks.0.unlocks.load(Ordering::Relaxed), 0);
-    remaining.store(3, Ordering::Relaxed);
+    ALLOCATION_BUDGET.store(3, Ordering::Relaxed);
     table.map_4k(vaddr, frame, flags(), false).unwrap();
     assert_eq!(table.phys_addr(vaddr), Ok(frame));
     let huge = VirtAddr::from(BASE + HUGE);
     table.map(huge, PhysAddr::from(2 * HUGE), HUGE_LEVEL, flags(), false).unwrap();
     let old = table.walk(huge + PAGE).read().raw();
     let before = arena.allocated();
-    remaining.store(1, Ordering::Relaxed);
+    ALLOCATION_BUDGET.store(1, Ordering::Relaxed);
     assert!(matches!(table.split(huge + PAGE, SMALL_LEVEL, true), Err(PagingError::AllocFrame)));
     assert_eq!(arena.allocated(), before + 1);
     assert_freed_once(&arena, 2);
@@ -1231,7 +1208,7 @@ fn failed_growth_and_split_leave_retryable_mappings_and_release_content_guards()
     assert_eq!(table.walk(huge + PAGE).level(), HUGE_LEVEL);
     assert_eq!(table.phys_addr(huge + PAGE), Ok(PhysAddr::from(2 * HUGE + PAGE)));
     locks.assert_balanced();
-    remaining.store(2, Ordering::Relaxed);
+    ALLOCATION_BUDGET.store(2, Ordering::Relaxed);
     discharge(table.split(huge + PAGE, SMALL_LEVEL, true).unwrap());
     assert_eq!(table.walk(huge + PAGE).level(), SMALL_LEVEL);
     assert_eq!(table.phys_addr(huge + PAGE), Ok(PhysAddr::from(2 * HUGE + PAGE)));
@@ -1240,46 +1217,15 @@ fn failed_growth_and_split_leave_retryable_mappings_and_release_content_guards()
     locks.assert_balanced();
 }
 
-#[derive(Clone)]
-struct RebasedAllocator {
-    inner: Allocator,
-    physical_base: usize,
-}
-
-// SAFETY: clones share the arena and its alignment-preserving address bijection.
-unsafe impl DirectMappedAllocator for RebasedAllocator {
-    fn direct_map(&self) -> Range<PhysAddr> {
-        PhysAddr::from(self.physical_base)..PhysAddr::from(self.physical_base + self.inner.0.len())
-    }
-
-    fn direct_map_base(&self) -> VirtAddr {
-        self.inner.direct_map_base()
-    }
-
-    fn allocate_table_page(&self) -> Result<PhysAddr, PagingError> {
-        self.inner
-            .allocate_table_page()
-            .map(|page| PhysAddr::from(page.bits() - self.inner.0.base() + self.physical_base))
-    }
-
-    unsafe fn deallocate_table_page(&self, page: PhysAddr) {
-        let page = PhysAddr::from(page.bits() - self.physical_base + self.inner.0.base());
-        // SAFETY: undoing the address bijection recovers the original allocated page.
-        unsafe { self.inner.deallocate_table_page(page) };
-    }
-}
-
 #[test]
 fn constructor_covers_unaligned_direct_maps_without_content_locks() {
     let arena = Arena::new(ARENA);
     let physical_base = 0x2000_1000;
+    arena.rebase(physical_base);
     let locks = Locks::new(physical_base..physical_base + arena.len(), 1);
-    let table = PageTable::<X86Paging<Host>, RebasedAllocator, Lvl<3>, Locks>::new(
-        RebasedAllocator { inner: Allocator(arena.clone()), physical_base },
-        locks.clone(),
-        flags(),
-    )
-    .unwrap();
+    let table =
+        PageTable::<X86Paging<Host>, RebasedAllocator, Lvl<3>, Locks>::new(locks.clone(), flags())
+            .unwrap();
     for offset in (0..ARENA).step_by(PAGE) {
         let address = VirtAddr::from(arena.base() + offset);
         let expected = PhysAddr::from(physical_base + offset);
@@ -1293,22 +1239,21 @@ fn constructor_covers_unaligned_direct_maps_without_content_locks() {
 
 #[test]
 fn content_lock_keys_are_physical_even_with_a_nonidentity_direct_map() {
-    use paging::os_contract::PagingAllocator;
-
     let arena = Arena::new(ARENA);
     let physical_base = 0x2000_0000;
+    arena.rebase(physical_base);
     let locks = Locks::new(physical_base..physical_base + arena.len(), 7);
-    let allocator = RebasedAllocator { inner: Allocator(arena.clone()), physical_base };
     let table = Arc::new(
-        PageTable::<X86Paging<Host>, RebasedAllocator, Lvl<3>, Locks>::new(
-            allocator.clone(),
-            locks.clone(),
-            flags(),
-        )
-        .unwrap(),
+        PageTable::<X86Paging<Host>, RebasedAllocator, Lvl<3>, Locks>::new(locks.clone(), flags())
+            .unwrap(),
     );
     assert_eq!(table.root_paddr(), PhysAddr::from(physical_base));
-    assert_eq!(allocator.paddr_to_vaddr(table.root_paddr()), VirtAddr::from(arena.base()));
+    assert_eq!(
+        <RebasedAllocator as paging::os_contract::PagingAllocator>::paddr_to_vaddr(
+            table.root_paddr()
+        ),
+        VirtAddr::from(arena.base())
+    );
     race(8, {
         let table = table.clone();
         move |worker| {

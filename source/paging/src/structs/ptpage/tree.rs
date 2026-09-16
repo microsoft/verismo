@@ -1,5 +1,4 @@
 use core::marker::PhantomData;
-use core::mem::ManuallyDrop;
 
 use super::{PTPage, PTPagePointer};
 use crate::structs::address::{PhysAddr, VirtAddr};
@@ -7,7 +6,7 @@ use crate::structs::arch_contract::ArchPagingMeta;
 use crate::structs::entry::PTEntry;
 use crate::structs::level::{LevelSpec, PageLevel};
 use crate::structs::os_contract::{PagingAllocator, PagingError};
-use crate::structs::policy::{KernelPolicy, PagingPolicy};
+use crate::structs::policy::{KernelPolicy, PagingOwnershipPolicy};
 use crate::structs::sizes::entry_index;
 
 /// Supplies either a static type-level root level or a stored runtime level.
@@ -40,23 +39,24 @@ pub(crate) struct PTPageTree<
     A: ArchPagingMeta,
     P: PagingAllocator,
     L: TreeLevel = PageLevel,
-    S: PagingPolicy = KernelPolicy,
+    S: PagingOwnershipPolicy = KernelPolicy,
 > {
-    pub(crate) allocator: P,
     root: PhysAddr,
     level: L::State,
     policy: S,
-    marker: PhantomData<(A, L)>,
+    marker: PhantomData<(A, P, L)>,
 }
 
-impl<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, S: PagingPolicy> PTPageTree<A, P, L, S> {
-    pub(crate) fn new_root(allocator: P, policy: S) -> Result<Self, PagingError> {
-        let (_, root) = PTPage::<A, P>::alloc(&allocator)?;
-        Ok(Self { allocator, root, level: (), policy, marker: PhantomData })
+impl<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, S: PagingOwnershipPolicy>
+    PTPageTree<A, P, L, S>
+{
+    pub(crate) fn new_root(policy: S) -> Result<Self, PagingError> {
+        let (_, root) = PTPage::<A, P>::alloc()?;
+        Ok(Self { root, level: (), policy, marker: PhantomData })
     }
 
     /// # Safety
-    /// `root` must be a currently live allocation owned by `allocator`, and its
+    /// `root` must be a currently live allocation owned by `P`, and its
     /// exclusive ownership must be transferred to the returned tree. Drop
     /// always frees the root, so the caller must neither retain ownership nor
     /// deallocate it. The root must be initialized at `L::LEVEL`, with an
@@ -65,12 +65,14 @@ impl<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, S: PagingPolicy> PTPag
     /// Policy-selected tables must be allocator-allocated and exclusively owned,
     /// without other parent links, when reclaimed.
     /// Suppress Drop unless those tables are owned and all their users are quiesced.
-    pub(crate) unsafe fn from_root(allocator: P, root: PhysAddr, policy: S) -> Self {
-        Self { allocator, root, level: (), policy, marker: PhantomData }
+    pub(crate) unsafe fn from_root(root: PhysAddr, policy: S) -> Self {
+        Self { root, level: (), policy, marker: PhantomData }
     }
 }
 
-impl<A: ArchPagingMeta, P: PagingAllocator, L: TreeLevel, S: PagingPolicy> PTPageTree<A, P, L, S> {
+impl<A: ArchPagingMeta, P: PagingAllocator, L: TreeLevel, S: PagingOwnershipPolicy>
+    PTPageTree<A, P, L, S>
+{
     pub(crate) fn root_paddr(&self) -> PhysAddr {
         self.root
     }
@@ -80,7 +82,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator, L: TreeLevel, S: PagingPolicy> PTPag
     }
 
     pub(crate) fn page(&self) -> *mut PTPage<A, P> {
-        self.allocator.paddr_to_vaddr(self.root).as_mut_ptr()
+        P::paddr_to_vaddr(self.root).as_mut_ptr()
     }
 
     /// # Safety
@@ -92,28 +94,27 @@ impl<A: ArchPagingMeta, P: PagingAllocator, L: TreeLevel, S: PagingPolicy> PTPag
 
     pub(crate) fn root(&self) -> PTPagePointer<'_, A, P> {
         // SAFETY: the owner borrow pins the initialized tree and its reachable tables.
-        unsafe { PTPagePointer::from_root(&self.allocator, self.root, L::level(&self.level)) }
+        unsafe { PTPagePointer::from_root(self.root, L::level(&self.level)) }
     }
 
-    pub(crate) fn into_parts(self) -> (P, S, PhysAddr) {
-        let tree = ManuallyDrop::new(self);
-        // SAFETY: both fields are moved once; ManuallyDrop suppresses reclamation.
-        let (allocator, policy) =
-            unsafe { (core::ptr::read(&tree.allocator), core::ptr::read(&tree.policy)) };
-        (allocator, policy, tree.root)
+    pub(crate) fn into_parts(self) -> (S, PhysAddr) {
+        let root = self.root;
+        let policy = unsafe { core::ptr::read(&self.policy) };
+        core::mem::forget(self);
+        (policy, root)
     }
 }
 
 impl<A: ArchPagingMeta, P: PagingAllocator> PTPageTree<A, P> {
-    pub(crate) fn new(allocator: P, level: PageLevel) -> Result<Self, PagingError> {
-        let (_, root) = PTPage::<A, P>::alloc(&allocator)?;
-        Ok(Self { allocator, root, level, policy: KernelPolicy, marker: PhantomData })
+    pub(crate) fn new(level: PageLevel) -> Result<Self, PagingError> {
+        let (_, root) = PTPage::<A, P>::alloc()?;
+        Ok(Self { root, level, policy: KernelPolicy, marker: PhantomData })
     }
 
     /// Transfers ownership of the whole subtree without freeing it.
     /// The recipient must retain a compatible allocator for the released pages.
     pub(crate) fn release(self) -> PhysAddr {
-        let (_, _, root) = self.into_parts();
+        let (_, root) = self.into_parts();
         root
     }
 
@@ -128,16 +129,14 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPageTree<A, P> {
         if target > self.level {
             return Err(PagingError::InvalidLevel);
         }
-        let allocator = self.allocator.clone();
         let level = self.level;
         // SAFETY: runtime-level trees are private preparations until released.
-        unsafe { Self::grow_page(self.page_mut(), &allocator, level, vaddr, target, parent_flags) }
+        unsafe { Self::grow_page(self.page_mut(), level, vaddr, target, parent_flags) }
     }
 
     #[cfg(any(feature = "concurrent", test))]
     unsafe fn grow_page(
         page: &mut PTPage<A, P>,
-        allocator: &P,
         level: PageLevel,
         vaddr: VirtAddr,
         target: PageLevel,
@@ -151,18 +150,15 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPageTree<A, P> {
         if entry.is_table(level) {
             // SAFETY: every reachable child belongs to this unpublished tree.
             let child = unsafe {
-                &mut *allocator
-                    .paddr_to_vaddr(PhysAddr::from(entry.address()))
+                &mut *P::paddr_to_vaddr(PhysAddr::from(entry.address()))
                     .as_mut_ptr::<PTPage<A, P>>()
             };
-            return unsafe {
-                Self::grow_page(child, allocator, child_level, vaddr, target, parent_flags)
-            };
+            return unsafe { Self::grow_page(child, child_level, vaddr, target, parent_flags) };
         }
         if entry.present() {
             return Err(PagingError::NotLeafEntry);
         }
-        let mut child = Self::new(allocator.clone(), child_level)?;
+        let mut child = Self::new(child_level)?;
         child.grow(vaddr, target, parent_flags)?;
         *entry = PTEntry::new_table(A::make_private_address(child.root_paddr()), parent_flags);
         child.release();
@@ -170,14 +166,14 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPageTree<A, P> {
     }
 }
 
-impl<A: ArchPagingMeta, P: PagingAllocator, L: TreeLevel, S: PagingPolicy> Drop
+impl<A: ArchPagingMeta, P: PagingAllocator, L: TreeLevel, S: PagingOwnershipPolicy> Drop
     for PTPageTree<A, P, L, S>
 {
     fn drop(&mut self) {
         // SAFETY: owned tables are quiesced before Drop; shared subtrees are excluded.
         unsafe { free_children(&self.root(), |index| self.policy.owns_top_entry(index)) };
         // SAFETY: descendant references have ended and this root is exclusively owned.
-        unsafe { self.allocator.deallocate_table_page(self.root) };
+        unsafe { P::deallocate_table_page(self.root) };
     }
 }
 
@@ -216,7 +212,7 @@ unsafe fn reclaim_path_inner<A: ArchPagingMeta, P: PagingAllocator>(
     if let Some(paddr) = child_pa {
         root.swap(index, PTEntry::empty());
         // SAFETY: the child reference has ended and the parent no longer links it.
-        unsafe { root.allocator().deallocate_table_page(paddr) };
+        unsafe { P::deallocate_table_page(paddr) };
         count += 1;
     }
     (root.entries_satisfy(empty_entry), count)
@@ -272,7 +268,7 @@ unsafe fn reclaim_range_inner<A: ArchPagingMeta, P: PagingAllocator>(
         if let Some(paddr) = child_pa {
             root.swap(index, PTEntry::empty());
             // SAFETY: no child reference or link remains when the empty page is freed.
-            unsafe { root.allocator().deallocate_table_page(paddr) };
+            unsafe { P::deallocate_table_page(paddr) };
         }
     }
     root.entries_satisfy(empty_entry)
@@ -298,12 +294,8 @@ pub(crate) unsafe fn free_children<A: ArchPagingMeta, P: PagingAllocator>(
         let child_pa = if entry.is_table(root.level()) {
             let paddr = PhysAddr::from(entry.address());
             // SAFETY: selected descendants are exclusively owned and fully quiesced.
-            let child = unsafe {
-                &mut *root.allocator().paddr_to_vaddr(paddr).as_mut_ptr::<PTPage<A, P>>()
-            };
-            unsafe {
-                child.free_owned_children(root.allocator(), root.level().child().unwrap(), true)
-            };
+            let child = unsafe { &mut *P::paddr_to_vaddr(paddr).as_mut_ptr::<PTPage<A, P>>() };
+            unsafe { child.free_owned_children(root.level().child().unwrap(), true) };
             Some(paddr)
         } else {
             None
@@ -311,7 +303,7 @@ pub(crate) unsafe fn free_children<A: ArchPagingMeta, P: PagingAllocator>(
         root.swap(index, PTEntry::empty());
         if let Some(paddr) = child_pa {
             // SAFETY: the child reference has ended and its parent link is cleared.
-            unsafe { root.allocator().deallocate_table_page(paddr) };
+            unsafe { P::deallocate_table_page(paddr) };
         }
     }
 }

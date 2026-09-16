@@ -18,17 +18,16 @@ type Table = PageTable<X86Paging<Host>, RebasedAllocator, Lvl<3>>;
 #[cfg(feature = "concurrent")]
 type Table = PageTable<X86Paging<Host>, RebasedAllocator, Lvl<3>, WholeTreeLock>;
 
-fn new_table(allocator: RebasedAllocator) -> Table {
+fn new_table() -> Table {
     #[cfg(not(feature = "concurrent"))]
-    return Table::new(allocator, flags()).unwrap();
+    return Table::new(flags()).unwrap();
     #[cfg(feature = "concurrent")]
-    Table::new(allocator, WholeTreeLock::default(), flags()).unwrap()
+    Table::new(WholeTreeLock::default(), flags()).unwrap()
 }
 
-fn assert_deallocation_panics(arena: Arc<Arena>, page: PhysAddr) {
-    let allocator = Allocator(arena);
+fn assert_deallocation_panics(_arena: Arc<Arena>, page: PhysAddr) {
     assert!(catch_unwind(AssertUnwindSafe(|| unsafe {
-        allocator.deallocate_table_page(page);
+        Allocator::deallocate_table_page(page);
     }))
     .is_err());
 }
@@ -44,16 +43,14 @@ fn allocator_rejects_invalid_and_duplicate_deallocation() {
     assert_deallocation_panics(arena, PhysAddr::from(base + 1));
 
     let arena = Arena::new(ARENA);
-    let allocator = Allocator(arena.clone());
-    let allocated = allocator.allocate_table_page().unwrap();
+    let allocated = Allocator::allocate_table_page().unwrap();
     assert_deallocation_panics(arena, allocated + 4096);
 
-    let arena = Arena::new(ARENA);
-    let allocator = Allocator(arena);
-    let allocated = allocator.allocate_table_page().unwrap();
-    unsafe { allocator.deallocate_table_page(allocated) };
+    let _arena = Arena::new(ARENA);
+    let allocated = Allocator::allocate_table_page().unwrap();
+    unsafe { Allocator::deallocate_table_page(allocated) };
     assert!(catch_unwind(AssertUnwindSafe(|| unsafe {
-        allocator.deallocate_table_page(allocated);
+        Allocator::deallocate_table_page(allocated);
     }))
     .is_err());
 }
@@ -62,9 +59,9 @@ fn allocator_rejects_invalid_and_duplicate_deallocation() {
 fn nonidentity_direct_map_supports_construction_translation_and_drop() {
     let arena = Arena::new(ARENA);
     let physical_base = 0x2000_1000;
-    let allocator = RebasedAllocator { inner: Allocator(arena.clone()), physical_base };
+    arena.rebase(physical_base);
     #[cfg_attr(feature = "concurrent", allow(unused_mut))]
-    let mut table = new_table(allocator);
+    let mut table = new_table();
 
     assert_eq!(table.root_paddr(), PhysAddr::from(physical_base));
     for offset in [0, 4096, ARENA / 2, ARENA - 4096] {

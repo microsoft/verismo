@@ -86,23 +86,21 @@ Page sizes, level sizes and address-indexing helpers live together in
 `src/structs/sizes.rs`, exported through `paging::sizes`.
 
 Both implementations access live entries through an internal
-`PTPagePointer<'tree, A, P>`. The reference stores a raw pointer, an owned allocator
-clone and a runtime `level: PageLevel`, never an ordinary reference to live
-`PTPage` storage. A zero-sized lifetime marker retains the controlling tree
-borrow, so owning the allocator does not permit a reference to outlive that tree.
-There is no cached physical address: `paddr()` uses the allocator's
+`PTPagePointer<'tree, A, P>`. The reference stores a raw pointer and a runtime
+`level: PageLevel`, never an ordinary reference to live `PTPage` storage. A
+zero-sized lifetime and allocator marker retains the controlling tree borrow
+and provider type. There is no cached physical address: `paddr()` uses the provider's
 inverse address translation. Each controller constructs only a root view at
 its `L::LEVEL`, tying `'tree` to its
 tree-stabilizing borrow. Traversal derives child views from that root instead
 of constructing views from arbitrary physical addresses.
 
 `child(index)` atomically reads a checked slot. A present table pointer yields
-a reference with a cloned allocator and the same tree lifetime at the next lower level. Huge,
+a reference with the same tree lifetime at the next lower level. Huge,
 absent and level-zero entries return their observed value rather than a child.
 
 Walks and cleanup use ordinary recursion with a level-zero base case.
-The reference type needs neither `Copy` nor `Clone`: operations borrow it,
-and only its allocator is cloned when deriving or retaining node references. No level dispatch macros
+The reference type needs neither `Copy` nor `Clone`: operations borrow it. No level dispatch macros
 or traversal enum are needed. Root construction and raw entry access contain the pointer safety
 obligations, leaving walks and child traversal safe to call. Reclamation remains
 explicitly unsafe because it requires external exclusion as well as valid
@@ -130,11 +128,12 @@ It returns an unlocked target slot, which mapping
 locks and rechecks before publishing a leaf. Existing leaves above the target
 and finer subtrees are never replaced by path allocation.
 
-Both controllers contain a private `PTPageTree<A, P, L, S>` that stores the root,
-allocator and ownership policy. Its level type `L: LevelSpec` has zero-sized
+Both controllers contain a private `PTPageTree<A, P, L, S>` that stores the root
+and ownership policy. Its allocator parameter names a stateless global provider.
+Its level type `L: LevelSpec` has zero-sized
 storage: the root level comes from `L::LEVEL`, with no runtime level field.
 The concurrent controller additionally retains its content lock and metadata
-marker. Neither controller duplicates the root, allocator or policy.
+marker. Neither controller duplicates the root or policy.
 
 Private preparations use the same owner as `PTPageTree<A, P>`, defaulting to
 `PageLevel` and `KernelPolicy`. Their runtime root level is needed because a
@@ -142,15 +141,13 @@ walk discovers the missing subtree's level dynamically. A small internal
 `TreeLevel` trait selects zero-sized or runtime level storage; traversal still
 uses runtime node references without type-dispatch macros.
 
-The allocator is stored by value so a ZST allocator takes no space.
-Allocators require `Clone`, not `Copy`;
-all clones must share the same allocation and address-translation domain.
-Its `new` takes an allocator value and allocates a zeroed root rather than accepting
+The allocator is a stateless type-level provider backed by one global allocation
+and address-translation domain. `new` allocates a zeroed root rather than accepting
 a raw address. `grow` adds missing paths downward under an exclusive borrow,
 and `Drop` frees the root and its owned descendant tables, not mapped data frames.
-Consuming `release` uses `ManuallyDrop`, drops the stored allocator clone, and
-returns the root physical address without freeing the pages. The recipient
-must retain a compatible allocator; publication callers already do. This raw
+Consuming `release` uses `ManuallyDrop` and returns the root physical address
+without freeing the pages. The provider's global domain must remain active;
+publication callers already ensure that. This raw
 release is restricted to wholly owned private preparations. Typed controllers
 instead consume `into_parts`, retaining the ownership policy in user `leak`
 results so shared kernel borrows are not lost.
@@ -204,10 +201,10 @@ is zero-sized: it contains only the kernel lifetime marker, with no stored range
 or ownership bitmap. `owns_top_entry` is false for every reserved kernel slot.
 
 Select the bounds when sharing, for example
-`KernelPageTable::new_from_sharing_top::<256, 512>(allocator, &kernel)` for a
+`KernelPageTable::new_from_sharing_top::<256, 512>(&kernel)` for a
 sequential four-level root's upper half; the concurrent constructor also takes
 the content lock. The user aliases are `UserPageTable<'kernel, A, P, L, START, END>`
-and `UserPageTable<'kernel, A, P, L, K, START, END, T = ()>`, respectively.
+and `UserPageTable<'kernel, A, P, L, W, START, END, T = ()>`, respectively.
 The bounds are root-slot indexes, not virtual addresses. With the current
 48-bit address type, the upper half occupies `511..512` in a five-level root.
 
@@ -442,7 +439,7 @@ valid tag combination.
 `from_root` imports an already initialized tree without clearing it and validates
 self-mapping before constructing a controller. Rejection
 or validation unwinding leaves the root allocated and releases the supplied
-allocator and content-lock value normally.
+content-lock value normally.
 
 Dropping either controller recursively frees its root and every owned descendant
 table, never mapped data frames or reserved shared kernel subtrees. Explicit
@@ -452,14 +449,15 @@ quiesced, with no external parent links or hardware users. Drop does not acquire
 content locks or perform TLB invalidation.
 
 For an externally owned or still-active tree, wrap the result in `ManuallyDrop`
-to suppress reclamation. `ManuallyDrop::into_inner(table).leak()` can release the allocator
+to suppress reclamation. `ManuallyDrop::into_inner(table).leak()` can release
+the controller state
 and lock value without deallocating any table pages; simply abandoning a
 `ManuallyDrop` also skips those fields' destructors.
 
 The constructor is unsafe: a raw physical address cannot establish a Rust
 borrow of the original owner. The embedder must keep every linked page
 accessible for the controller's lifetime and coordinate all other users.
-New child pages still come from the supplied allocator. Cleanup may reclaim
+New child pages still come from the global allocator provider. Cleanup may reclaim
 only exclusively owned pages from that allocator, never foreign boot pages.
 Suppressing Drop does not extend any allocation's lifetime or grant ownership
 of foreign pages.
@@ -566,13 +564,12 @@ use paging::os_contract::PagingAllocator;
 use paging::pagetable::{KernelPageTable, LockSpec};
 use paging::ArchPagingMeta;
 
-fn retire<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, K: LockSpec<()>>(
-    kernel: KernelPageTable<A, P, L, K>,
-    allocator: P,
-    content: K,
+fn retire<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, W: LockSpec<()>>(
+    kernel: KernelPageTable<A, P, L, W>,
+    wperms: W,
 ) {
     let user = unsafe {
-        KernelPageTable::new_from_sharing_top::<256, 512>(allocator, content, &kernel)
+        KernelPageTable::new_from_sharing_top::<256, 512>(wperms, &kernel)
     }.unwrap();
     drop(kernel);
     drop(user);
@@ -587,15 +584,14 @@ use paging::os_contract::PagingAllocator;
 use paging::pagetable::{KernelPageTable, LockSpec};
 use paging::ArchPagingMeta;
 
-fn leak_user<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, K: LockSpec<()>>(
-    kernel: KernelPageTable<A, P, L, K>,
-    allocator: P,
-    content: K,
+fn leak_user<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, W: LockSpec<()>>(
+    kernel: KernelPageTable<A, P, L, W>,
+    wperms: W,
 ) {
     let user = unsafe {
-        KernelPageTable::new_from_sharing_top::<256, 512>(allocator, content, &kernel)
+        KernelPageTable::new_from_sharing_top::<256, 512>(wperms, &kernel)
     }.unwrap();
-    let (_allocator, _content, policy, _root) = user.leak();
+    let (_wperms, policy, _root) = user.leak();
     drop(kernel);
     drop(policy);
 }

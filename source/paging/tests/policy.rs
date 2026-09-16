@@ -17,7 +17,7 @@ use paging::os_contract::{DirectMappedAllocator, PagingError};
 #[cfg(feature = "concurrent")]
 use paging::pagetable::LockAllSpec;
 use paging::pagetable::{KernelPageTable, UserPageTable};
-use paging::policy::{KernelPolicy, PagingPolicy, UserPolicy};
+use paging::policy::{KernelPolicy, PagingOwnershipPolicy, UserPolicy};
 use paging::sizes::entry_index;
 use paging::tlb::{MayNeedFlush, TlbFlush};
 use paging::{PTEntryFlags, X86Paging};
@@ -53,7 +53,7 @@ fn fixture() -> (Arc<Arena>, Table, WholeTreeLock) {
     #[cfg(feature = "concurrent")]
     let locks = WholeTreeLock::default();
     #[cfg(feature = "concurrent")]
-    let table = Table::new(Allocator(arena.clone()), locks.clone(), common::flags()).unwrap();
+    let table = Table::new(locks.clone(), common::flags()).unwrap();
     #[cfg(feature = "concurrent")]
     (arena, table, locks)
 }
@@ -65,25 +65,21 @@ fn user<'kernel, const START: usize, const END: usize>(
 ) -> User<'kernel, START, END> {
     assert_direct_map_in::<START, END>(arena);
     #[cfg(feature = "concurrent")]
-    return unsafe {
-        Table::new_from_sharing_top::<START, END>(Allocator(arena.clone()), locks.clone(), kernel)
-    }
-    .unwrap();
+    return unsafe { Table::new_from_sharing_top::<START, END>(locks.clone(), kernel) }.unwrap();
     #[cfg(not(feature = "concurrent"))]
     {
         let _ = locks;
-        unsafe { Table::new_from_sharing_top::<START, END>(Allocator(arena.clone()), kernel) }
-            .unwrap()
+        unsafe { Table::new_from_sharing_top::<START, END>(kernel) }.unwrap()
     }
 }
 
 fn leak<const START: usize, const END: usize>(
     user: User<'_, START, END>,
-) -> (Allocator, UserPolicy<'_, START, END>, PhysAddr) {
+) -> (UserPolicy<'_, START, END>, PhysAddr) {
     #[cfg(feature = "concurrent")]
-    let (allocator, _locks, policy, root) = user.leak();
+    let (_locks, policy, root) = user.leak();
     #[cfg(feature = "concurrent")]
-    return (allocator, policy, root);
+    return (policy, root);
     #[cfg(not(feature = "concurrent"))]
     user.leak()
 }
@@ -664,7 +660,7 @@ macro_rules! policy_tests {
                 assert_eq!(kernel.walk(shared_address).read().raw(), shared_word);
                 assert_eq!(kernel.phys_addr(shared_address), Ok(frame));
                 assert_eq!(kernel.validate_page_table(), Ok(()));
-                assert_eq!(Arc::strong_count(&arena), 2);
+                assert_eq!(Arc::strong_count(&arena), 1);
                 drop(kernel);
                 assert_reclaimed(&arena);
                 assert_eq!(Arc::strong_count(&arena), 1);
@@ -755,7 +751,7 @@ macro_rules! policy_tests {
                     let top = kernel_top(&arena);
                     let user = $share::<KERNEL_START, KERNEL_END>(&arena, &kernel, &locks);
                     let root = user.root_paddr();
-                    let (allocator, policy, leaked_root) = $leak(user);
+                    let (policy, leaked_root) = $leak(user);
                     assert_eq!(leaked_root, root);
                     assert_eq!(policy.kernel_top(), top);
                     assert!(!policy.owns_top_entry(direct_map_index(&arena)));
@@ -770,7 +766,7 @@ macro_rules! policy_tests {
                         Ok(PhysAddr::from(arena.base()))
                     );
                     // SAFETY: this inactive root has no owned descendants and no remaining users.
-                    unsafe { allocator.deallocate_table_page(root) };
+                    unsafe { Allocator::deallocate_table_page(root) };
                 }
                 unsafe { kernel.free_children() };
                 drop(kernel);
@@ -813,27 +809,19 @@ fn const_generic_user_policies_and_controllers_have_no_storage_overhead() {
 
 #[cfg(feature = "concurrent")]
 #[test]
-fn concurrent_user_leak_returns_the_original_allocator_policy_and_content_domain() {
+fn concurrent_user_leak_returns_policy_and_content_domain() {
     type MetadataKernel = KernelPageTable<Arch, Allocator, Lvl<3>, WholeTreeLock<u64>, u64>;
     let arena = Arena::new(ARENA);
     let locks = WholeTreeLock::<u64>::default();
     *locks.lock_all() = 73;
-    let kernel =
-        MetadataKernel::new(Allocator(arena.clone()), locks.clone(), common::flags()).unwrap();
+    let kernel = MetadataKernel::new(locks.clone(), common::flags()).unwrap();
     // SAFETY: all subtrees remain borrowed from the inactive kernel in the same lock domain.
-    let user = unsafe {
-        MetadataKernel::new_from_sharing_top::<0, 512>(
-            Allocator(arena.clone()),
-            locks.clone(),
-            &kernel,
-        )
-    }
-    .unwrap();
+    let user =
+        unsafe { MetadataKernel::new_from_sharing_top::<0, 512>(locks.clone(), &kernel) }.unwrap();
     let expected_root = user.root_paddr();
-    let (allocator, content, policy, root) = user.leak();
+    let (content, policy, root) = user.leak();
     assert_eq!(root, expected_root);
-    assert!(Arc::ptr_eq(&allocator.0, &arena));
-    assert_eq!(Arc::strong_count(&arena), 3);
+    assert_eq!(Arc::strong_count(&arena), 1);
     assert_eq!(policy.kernel_top(), 0..512);
     assert!(!(0..512).any(|index| policy.owns_top_entry(index)));
     let acquired = locks.acquisitions();
@@ -846,8 +834,8 @@ fn concurrent_user_leak_returns_the_original_allocator_policy_and_content_domain
     assert_eq!(*locks.lock_all(), 89);
     assert!(arena.freed().is_empty());
     // SAFETY: this leaked, inactive root owns no descendants; the kernel retains all shared pages.
-    unsafe { allocator.deallocate_table_page(root) };
-    drop((policy, allocator, content));
+    unsafe { Allocator::deallocate_table_page(root) };
+    drop((policy, content));
     assert_eq!(kernel.validate_page_table(), Ok(()));
     drop(kernel);
     assert_reclaimed(&arena);

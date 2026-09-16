@@ -46,9 +46,9 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
     }
 
     /// A zeroed table page, and its clean physical address.
-    pub fn alloc(allocator: &P) -> Result<(*mut Self, PhysAddr), PagingError> {
-        let paddr = allocator.allocate_table_page()?;
-        let page = allocator.paddr_to_vaddr(paddr).as_mut_ptr::<Self>();
+    pub fn alloc() -> Result<(*mut Self, PhysAddr), PagingError> {
+        let paddr = P::allocate_table_page()?;
+        let page = P::paddr_to_vaddr(paddr).as_mut_ptr::<Self>();
         // SAFETY: the allocator supplies an exclusive, writable frame; no entry is live yet.
         unsafe { page.write_bytes(0, 1) };
         Ok((page, paddr))
@@ -56,24 +56,24 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
 
     /// Discards a wholly unpublished, exclusively owned tree, including its root.
     /// # Safety
-    /// Every table page must belong to `allocator`; no software or hardware may
+    /// Every table page must belong to `P`; no software or hardware may
     /// access the tree, and no child may be shared with another tree.
-    pub(crate) unsafe fn free_unpublished(allocator: &P, paddr: PhysAddr, level: PageLevel) {
+    pub(crate) unsafe fn free_unpublished(paddr: PhysAddr, level: PageLevel) {
         // SAFETY: every page in this tree is private and exclusively owned.
-        let page = unsafe { &mut *allocator.paddr_to_vaddr(paddr).as_mut_ptr::<Self>() };
-        unsafe { page.free_owned_children(allocator, level, false) };
+        let page = unsafe { &mut *P::paddr_to_vaddr(paddr).as_mut_ptr::<Self>() };
+        unsafe { page.free_owned_children(level, false) };
         // SAFETY: this private tree's children have been released.
-        unsafe { allocator.deallocate_table_page(paddr) };
+        unsafe { P::deallocate_table_page(paddr) };
     }
 
     /// The child table `entry` points at, or `None` if it maps a page or maps
     /// nothing. Whether an entry may be followed also depends on its level,
     /// which is the caller's business.
-    pub fn child_of(allocator: &P, entry: &PTEntry<A>) -> Option<*mut Self> {
+    pub fn child_of(entry: &PTEntry<A>) -> Option<*mut Self> {
         if !entry.present() || entry.huge() {
             return None;
         }
-        Some(allocator.paddr_to_vaddr(PhysAddr::from(entry.address())).as_mut_ptr::<Self>())
+        Some(P::paddr_to_vaddr(PhysAddr::from(entry.address())).as_mut_ptr::<Self>())
     }
 
     /// The entry at `index` of `page`.
@@ -99,12 +99,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
     /// # Safety
     /// All descendant tables must be exclusively owned, correctly leveled and
     /// quiesced, with no surviving references; mapped data frames are not freed.
-    pub(super) unsafe fn free_owned_children(
-        &mut self,
-        allocator: &P,
-        level: PageLevel,
-        clear_entries: bool,
-    ) {
+    pub(super) unsafe fn free_owned_children(&mut self, level: PageLevel, clear_entries: bool) {
         for idx in 0..Self::COUNT {
             let entry = *self.entry_mut(idx);
             if !entry.is_table(level) {
@@ -115,11 +110,11 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
             }
             let paddr = PhysAddr::from(entry.address());
             // SAFETY: this child is exclusively owned and has no concurrent users.
-            let child = unsafe { &mut *allocator.paddr_to_vaddr(paddr).as_mut_ptr::<Self>() };
-            unsafe { child.free_owned_children(allocator, level.child().unwrap(), clear_entries) };
+            let child = unsafe { &mut *P::paddr_to_vaddr(paddr).as_mut_ptr::<Self>() };
+            unsafe { child.free_owned_children(level.child().unwrap(), clear_entries) };
             *self.entry_mut(idx) = PTEntry::empty();
             // SAFETY: the child's borrow has ended and its parent no longer links it.
-            unsafe { allocator.deallocate_table_page(paddr) };
+            unsafe { P::deallocate_table_page(paddr) };
         }
     }
 
@@ -128,13 +123,9 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
     /// including shared subtrees, must exclude all software and hardware access
     /// and aliases for this traversal. Flush stale translations before resuming.
     #[cfg(not(feature = "use_ad"))]
-    pub(crate) unsafe fn normalize_ad_tree(
-        allocator: &P,
-        root_pa: PhysAddr,
-        root_level: PageLevel,
-    ) {
+    pub(crate) unsafe fn normalize_ad_tree(root_pa: PhysAddr, root_level: PageLevel) {
         // SAFETY: the caller quiesces every reachable page and excludes aliases.
-        let page = unsafe { &mut *allocator.paddr_to_vaddr(root_pa).as_mut_ptr::<Self>() };
+        let page = unsafe { &mut *P::paddr_to_vaddr(root_pa).as_mut_ptr::<Self>() };
         for index in 0..Self::COUNT {
             let entry = page.entry_mut(index);
             if !entry.present() {
@@ -144,7 +135,6 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
             if entry.is_table(root_level) {
                 unsafe {
                     Self::normalize_ad_tree(
-                        allocator,
                         PhysAddr::from(entry.address()),
                         root_level.child().unwrap(),
                     )
@@ -158,18 +148,17 @@ impl<A: ArchPagingMeta, P: DirectMappedAllocator> PTPage<A, P> {
     /// Builds and checks a private direct-mapped tree using ordinary memory
     /// accesses. The owner must publish it before allowing concurrent walkers.
     pub(crate) fn new_direct_mapped(
-        allocator: &P,
         level: PageLevel,
         flags: A::PTFlags,
     ) -> Result<PhysAddr, PagingError> {
-        let phys = allocator.direct_map();
-        let start = allocator.paddr_to_vaddr(phys.start);
-        let end = allocator.paddr_to_vaddr(phys.end);
+        let (phys, _) = P::direct_map();
+        let start = P::paddr_to_vaddr(phys.start);
+        let end = P::paddr_to_vaddr(phys.end);
         let small = PageLevel::Level0;
         let large = PageLevel::Level1;
         assert!(start <= end && start.is_aligned(small.size()) && end.is_aligned(small.size()));
         assert!(phys.start.is_aligned(small.size()));
-        let (page, root_pa) = Self::alloc(allocator)?;
+        let (page, root_pa) = Self::alloc()?;
         // SAFETY: this root has just been allocated and remains unpublished.
         let page = unsafe { &mut *page };
         let spec = MapSpec { flags, shared: false, parent_flags: A::PTFlags::parent_flags() };
@@ -187,24 +176,21 @@ impl<A: ArchPagingMeta, P: DirectMappedAllocator> PTPage<A, P> {
                     small
                 };
                 // SAFETY: all pages remain exclusively owned by this builder.
-                unsafe {
-                    Self::map_unpublished(allocator, page, level, vaddr, paddr, target, spec)
-                }?;
+                unsafe { Self::map_unpublished(page, level, vaddr, paddr, target, spec) }?;
                 vaddr = vaddr + target.size();
             }
             // SAFETY: neither the root nor any child has been published.
-            unsafe { Self::validate_tree(allocator, root_pa, level, |slot| slot.read()) }
+            unsafe { Self::validate_tree(root_pa, level, |slot| slot.read()) }
         })();
         if let Err(err) = result {
             // SAFETY: no page in this partial tree has escaped construction.
-            unsafe { Self::free_unpublished(allocator, root_pa, level) };
+            unsafe { Self::free_unpublished(root_pa, level) };
             return Err(err);
         }
         Ok(root_pa)
     }
 
     unsafe fn map_unpublished(
-        allocator: &P,
         mut page: &mut Self,
         mut level: PageLevel,
         vaddr: VirtAddr,
@@ -216,7 +202,7 @@ impl<A: ArchPagingMeta, P: DirectMappedAllocator> PTPage<A, P> {
             let entry = page.entry_mut(entry_index(vaddr, level));
             if entry.is_table(level) {
                 // SAFETY: this walk only follows private, exclusively owned pages.
-                page = unsafe { &mut *Self::child_of(allocator, entry).unwrap() };
+                page = unsafe { &mut *Self::child_of(entry).unwrap() };
                 level = level.child().unwrap();
             } else if entry.present() {
                 return Err(PagingError::EntryAlreadyPresent {
@@ -227,14 +213,7 @@ impl<A: ArchPagingMeta, P: DirectMappedAllocator> PTPage<A, P> {
                     level,
                 });
             } else {
-                return Self::do_map(
-                    allocator,
-                    Mapping::new(level, entry),
-                    vaddr,
-                    paddr,
-                    target,
-                    spec,
-                );
+                return Self::do_map(Mapping::new(level, entry), vaddr, paddr, target, spec);
             }
         }
     }
@@ -245,29 +224,27 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
     /// All followed table pages must stay accessible and correctly leveled.
     /// `read` must use the access protocol of this tree.
     pub(crate) unsafe fn validate_tree(
-        allocator: &P,
         root_pa: PhysAddr,
         root_level: PageLevel,
         read: impl Fn(*const PTEntry<A>) -> PTEntry<A> + Copy,
     ) -> Result<(), PagingError> {
-        unsafe { Self::validate_page(allocator, root_pa, root_level, root_pa, root_level, read) }
+        unsafe { Self::validate_page(root_pa, root_level, root_pa, root_level, read) }
     }
 
     unsafe fn validate_page(
-        allocator: &P,
         root_pa: PhysAddr,
         root_level: PageLevel,
         paddr: PhysAddr,
         level: PageLevel,
         read: impl Fn(*const PTEntry<A>) -> PTEntry<A> + Copy,
     ) -> Result<(), PagingError> {
-        let vaddr = allocator.paddr_to_vaddr(paddr);
-        let mut page = allocator.paddr_to_vaddr(root_pa).as_ptr::<Self>();
+        let vaddr = P::paddr_to_vaddr(paddr);
+        let mut page = P::paddr_to_vaddr(root_pa).as_ptr::<Self>();
         let mut at = root_level;
         loop {
             let entry = read(Self::entry_ptr(page, entry_index(vaddr, at)));
             if entry.is_table(at) {
-                page = Self::child_of(allocator, &entry).unwrap();
+                page = Self::child_of(&entry).unwrap();
                 at = at.child().unwrap();
             } else {
                 let translated =
@@ -285,7 +262,6 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
                 if entry.is_table(level) {
                     unsafe {
                         Self::validate_page(
-                            allocator,
                             root_pa,
                             root_level,
                             PhysAddr::from(entry.address()),
@@ -658,7 +634,6 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
     /// entry and propagating allocation failures. Every page it creates is filled
     /// before it is linked, so no walker sees a half-built table.
     fn alloc_pte_down<'a>(
-        allocator: &P,
         map: Mapping<'a, A>,
         vaddr: VirtAddr,
         target: PageLevel,
@@ -670,7 +645,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
                 return Ok(map);
             }
             let child_level = map.level.child().ok_or(PagingError::InvalidLevel)?;
-            let (page, paddr) = Self::alloc(allocator)?;
+            let (page, paddr) = Self::alloc()?;
             *map.entry = PTEntry::new_table(A::make_private_address(paddr), parent_flags);
             let index = entry_index(vaddr, child_level);
             // SAFETY: `page` was just allocated and is reachable only through
@@ -685,7 +660,6 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
     /// Prepares a complete split path without exposing any of its pages.
     /// Returns ownership of the privately initialized replacement.
     pub(crate) fn build_split(
-        allocator: &P,
         entry: PTEntry<A>,
         level: PageLevel,
         vaddr: VirtAddr,
@@ -693,7 +667,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
         update: LeafUpdate<A>,
     ) -> Result<PTPageTree<A, P>, PagingError> {
         let child_level = level.child().ok_or(PagingError::InvalidLevel)?;
-        let mut tree = PTPageTree::<A, P>::new(allocator.clone(), child_level)?;
+        let mut tree = PTPageTree::<A, P>::new(child_level)?;
         // SAFETY: this tree is newly allocated and remains wholly unpublished.
         let page = unsafe { tree.page_mut() };
         for idx in 0..Self::COUNT {
@@ -701,8 +675,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
             let mut prepared_subtree = None;
             if idx == entry_index(vaddr, child_level) {
                 if child_level > target {
-                    let subtree =
-                        Self::build_split(allocator, child, child_level, vaddr, target, update)?;
+                    let subtree = Self::build_split(child, child_level, vaddr, target, update)?;
                     child = PTEntry::new_table(
                         A::make_private_address(subtree.root_paddr()),
                         A::PTFlags::parent_flags(),
@@ -721,7 +694,6 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
     }
 
     fn prepare_update(
-        allocator: &P,
         entry: PTEntry<A>,
         level: PageLevel,
         vaddr: VirtAddr,
@@ -729,7 +701,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
         update: LeafUpdate<A>,
     ) -> Result<PTEntry<A>, PagingError> {
         if level > target {
-            let tree = Self::build_split(allocator, entry, level, vaddr, target, update)?;
+            let tree = Self::build_split(entry, level, vaddr, target, update)?;
             let desired = PTEntry::new_table(
                 A::make_private_address(tree.root_paddr()),
                 A::PTFlags::parent_flags(),
@@ -748,7 +720,6 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
     /// Exclusion must outlive unwinding. Local flushing also requires no stale
     /// remote translations and no migration through the entire transition.
     pub(crate) unsafe fn edit_leaf(
-        allocator: &P,
         slot: PTEntryRef<'_, A>,
         level: PageLevel,
         vaddr: VirtAddr,
@@ -768,7 +739,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
             });
         }
         if level > target {
-            let mut tree = Self::build_split(allocator, current, level, vaddr, target, update)?;
+            let mut tree = Self::build_split(current, level, vaddr, target, update)?;
             let root = tree.root_paddr();
             let replacement =
                 PTEntry::new_table(A::make_private_address(root), A::PTFlags::parent_flags());
@@ -779,7 +750,6 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
                 // SAFETY: the subtree remains private during the architecture's BBM barrier.
                 unsafe {
                     Self::refresh_split(
-                        allocator,
                         tree.page_mut(),
                         invalidated.snapshot(),
                         level,
@@ -799,7 +769,6 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
                             // SAFETY: the subtree is private until the compare-exchange publishes it.
                             unsafe {
                                 Self::refresh_split(
-                                    allocator,
                                     tree.page_mut(),
                                     current,
                                     level,
@@ -859,7 +828,6 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
     }
 
     unsafe fn refresh_split(
-        allocator: &P,
         page: &mut Self,
         entry: PTEntry<A>,
         level: PageLevel,
@@ -875,20 +843,11 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
                 if child_level > target {
                     let table = *slot;
                     let child_page = unsafe {
-                        &mut *allocator
-                            .paddr_to_vaddr(PhysAddr::from(table.address()))
+                        &mut *P::paddr_to_vaddr(PhysAddr::from(table.address()))
                             .as_mut_ptr::<Self>()
                     };
                     unsafe {
-                        Self::refresh_split(
-                            allocator,
-                            child_page,
-                            child,
-                            child_level,
-                            vaddr,
-                            target,
-                            update,
-                        )
+                        Self::refresh_split(child_page, child, child_level, vaddr, target, update)
                     };
                     child = table;
                 } else {
@@ -900,7 +859,6 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
     }
 
     fn build_range_split(
-        allocator: &P,
         entry: PTEntry<A>,
         level: PageLevel,
         from: usize,
@@ -908,7 +866,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
         flags: A::PTFlags,
     ) -> Result<PTPageTree<A, P>, PagingError> {
         let child_level = level.child().ok_or(PagingError::InvalidLevel)?;
-        let mut tree = PTPageTree::new(allocator.clone(), child_level)?;
+        let mut tree = PTPageTree::new(child_level)?;
         // SAFETY: this tree retains every initialized, unpublished table page.
         let page = unsafe { tree.page_mut() };
         for idx in 0..Self::COUNT {
@@ -919,14 +877,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
             let mut subtree = None;
             if first < last && !child_level.is_leaf() && (first != 0 || last != child_level.size())
             {
-                subtree = Some(Self::build_range_split(
-                    allocator,
-                    child,
-                    child_level,
-                    first,
-                    last,
-                    flags,
-                )?);
+                subtree = Some(Self::build_range_split(child, child_level, first, last, flags)?);
                 child = PTEntry::new_table(
                     A::make_private_address(subtree.as_ref().unwrap().root_paddr()),
                     A::PTFlags::parent_flags(),
@@ -943,7 +894,6 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
     }
 
     unsafe fn refresh_range_split(
-        allocator: &P,
         page: &mut Self,
         entry: PTEntry<A>,
         level: PageLevel,
@@ -961,20 +911,10 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
             let last = to.saturating_sub(offset).min(child_level.size());
             if table.is_table(child_level) {
                 let child_page = unsafe {
-                    &mut *allocator
-                        .paddr_to_vaddr(PhysAddr::from(table.address()))
-                        .as_mut_ptr::<Self>()
+                    &mut *P::paddr_to_vaddr(PhysAddr::from(table.address())).as_mut_ptr::<Self>()
                 };
                 unsafe {
-                    Self::refresh_range_split(
-                        allocator,
-                        child_page,
-                        child,
-                        child_level,
-                        first,
-                        last,
-                        flags,
-                    )
+                    Self::refresh_range_split(child_page, child, child_level, first, last, flags)
                 };
                 *slot = table.for_publication();
             } else {
@@ -1002,7 +942,6 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
         flags: A::PTFlags,
         all_cpus: bool,
     ) -> (Result<(), PagingError>, MayNeedFlush<A::TlbFlushTok>) {
-        let allocator = root.allocator();
         let flags = A::filter_flags(flags);
         let range_start = start.bits();
         let range_end = end.bits();
@@ -1036,14 +975,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
                     } else {
                         return Err(PagingError::InvalidRange);
                     };
-                    match Self::build_range_split(
-                        allocator,
-                        entry,
-                        level,
-                        cursor - base,
-                        next - base,
-                        flags,
-                    ) {
+                    match Self::build_range_split(entry, level, cursor - base, next - base, flags) {
                         Ok(tree) => {
                             boundary_splits[boundary] =
                                 Some(RangeSplit { base, level, original: entry, tree });
@@ -1100,7 +1032,6 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
                             // SAFETY: the tree remains private until this CAS publishes its root.
                             unsafe {
                                 Self::refresh_range_split(
-                                    allocator,
                                     split.tree.page_mut(),
                                     current,
                                     level,
@@ -1118,7 +1049,6 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
                                     // SAFETY: the tree remains private until this CAS publishes its root.
                                     unsafe {
                                         Self::refresh_range_split(
-                                            allocator,
                                             split.tree.page_mut(),
                                             current,
                                             level,
@@ -1209,7 +1139,6 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
                     // SAFETY: the barrier has completed; these pages are still wholly private.
                     unsafe {
                         Self::refresh_range_split(
-                            allocator,
                             plan.tree.page_mut(),
                             old,
                             level,
@@ -1236,7 +1165,6 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
     /// walk that got here reports an entry already present, so what this finds
     /// is either empty or a table it has to descend.
     pub fn do_map(
-        allocator: &P,
         map: Mapping<'_, A>,
         vaddr: VirtAddr,
         paddr: PhysAddr,
@@ -1245,13 +1173,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
     ) -> Result<(), PagingError> {
         assert!(vaddr.is_aligned(target.size()));
         assert!(paddr.is_aligned(target.size()));
-        let map = Self::alloc_pte_down(
-            allocator,
-            map,
-            vaddr,
-            target,
-            A::filter_flags(spec.parent_flags),
-        )?;
+        let map = Self::alloc_pte_down(map, vaddr, target, A::filter_flags(spec.parent_flags))?;
         if map.level != target {
             return Err(PagingError::AllocFrame);
         }
@@ -1289,7 +1211,6 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
     /// Retags the page holding `vaddr` as shared, splitting larger pages so
     /// that only a page of `target`'s size is retagged.
     pub fn do_set_shared(
-        allocator: &P,
         map: Mapping<'_, A>,
         vaddr: VirtAddr,
         target: PageLevel,
@@ -1298,7 +1219,6 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
             return Err(PagingError::NotMapped);
         }
         let prepared = Self::prepare_update(
-            allocator,
             *map.entry,
             map.level,
             vaddr,
@@ -1312,7 +1232,6 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
     /// Retags the page holding `vaddr` as private, splitting as
     /// [`Self::do_set_shared`] does.
     pub fn do_set_encrypted(
-        allocator: &P,
         map: Mapping<'_, A>,
         vaddr: VirtAddr,
         target: PageLevel,
@@ -1321,7 +1240,6 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
             return Err(PagingError::NotMapped);
         }
         let prepared = Self::prepare_update(
-            allocator,
             *map.entry,
             map.level,
             vaddr,

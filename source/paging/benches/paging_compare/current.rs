@@ -1,6 +1,6 @@
 use std::mem::size_of;
 use std::ops::{Deref, DerefMut};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use paging::address::{Address, PhysAddr, VirtAddr};
@@ -28,26 +28,34 @@ unsafe impl X86PagingParams for BenchmarkHost {
     fn flush_tlb_global_sync(_scope: FlushScope) {}
 }
 
-#[derive(Clone)]
 /// Adapter from the benchmark arena to the current page-table allocator contract.
-struct ArenaAllocator(Arc<Arena>);
+struct ArenaAllocator;
+
+static CURRENT_ARENA: AtomicPtr<Arena> = AtomicPtr::new(std::ptr::null_mut());
+
+impl ArenaAllocator {
+    fn arena() -> &'static Arena {
+        let arena = CURRENT_ARENA.load(Ordering::Relaxed);
+        assert!(!arena.is_null(), "benchmark arena is not installed");
+        // SAFETY: CurrentAdapter retains the Arc while its table can call the allocator.
+        unsafe { &*arena }
+    }
+}
 
 // SAFETY: Arena returns unique aligned pages and retains their direct identity mapping.
 unsafe impl DirectMappedAllocator for ArenaAllocator {
-    fn direct_map(&self) -> std::ops::Range<PhysAddr> {
-        PhysAddr::from(self.0.base())..PhysAddr::from(self.0.end())
+    #[inline(always)]
+    fn direct_map() -> (std::ops::Range<PhysAddr>, VirtAddr) {
+        let arena = Self::arena();
+        (PhysAddr::from(arena.base())..PhysAddr::from(arena.end()), VirtAddr::from(arena.base()))
     }
 
-    fn direct_map_base(&self) -> VirtAddr {
-        VirtAddr::from(self.0.base())
+    fn allocate_table_page() -> Result<PhysAddr, PagingError> {
+        Self::arena().allocate_page().map(PhysAddr::from).ok_or(PagingError::AllocFrame)
     }
 
-    fn allocate_table_page(&self) -> Result<PhysAddr, PagingError> {
-        self.0.allocate_page().map(PhysAddr::from).ok_or(PagingError::AllocFrame)
-    }
-
-    unsafe fn deallocate_table_page(&self, paddr: PhysAddr) {
-        self.0.deallocate_page(paddr.bits());
+    unsafe fn deallocate_table_page(paddr: PhysAddr) {
+        Self::arena().deallocate_page(paddr.bits());
     }
 }
 
@@ -234,10 +242,10 @@ impl PagingAdapter for CurrentAdapter {
 
     fn new(arena_pages: usize, stripes: usize) -> Self {
         let arena = Arena::new(arena_pages);
+        CURRENT_ARENA.store(Arc::as_ptr(&arena).cast_mut(), Ordering::Relaxed);
         let lock = StripedLock::new(stripes);
         let lock_bytes = lock.auxiliary_bytes();
-        let table = Table::new(ArenaAllocator(arena.clone()), lock, PTEntryFlags::data())
-            .expect("create current page table");
+        let table = Table::new(lock, PTEntryFlags::data()).expect("create current page table");
         Self { table, arena, lock_bytes }
     }
 

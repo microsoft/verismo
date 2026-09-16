@@ -29,8 +29,7 @@ fn fixture() -> (Arc<Arena>, Table) {
     #[cfg(feature = "concurrent")]
     let arena = Arena::new(ARENA);
     #[cfg(feature = "concurrent")]
-    let table =
-        Table::new(Allocator(arena.clone()), WholeTreeLock::default(), common::flags()).unwrap();
+    let table = Table::new(WholeTreeLock::default(), common::flags()).unwrap();
     #[cfg(feature = "concurrent")]
     (arena, table)
 }

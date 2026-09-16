@@ -9,7 +9,7 @@ use crate::structs::mapping::{
     MappingMut, MappingMutOps, MappingRef, MappingRefOps, UnmapEntryResult,
 };
 use crate::structs::os_contract::{DirectMappedAllocator, PagingAllocator, PagingError};
-use crate::structs::policy::{KernelPolicy, PagingPolicy, UserPolicy};
+use crate::structs::policy::{KernelPolicy, PagingOwnershipPolicy, UserPolicy};
 use crate::structs::ptpage::{
     free_children, reclaim_path, reclaim_range, LeafUpdate, MapSpec, PTPage, PTPagePointer,
     PTPageTree, Translation,
@@ -25,7 +25,7 @@ pub struct PageTable<
     A: ArchPagingMeta,
     P: PagingAllocator,
     L: LevelSpec,
-    S: PagingPolicy = KernelPolicy,
+    S: PagingOwnershipPolicy = KernelPolicy,
 > {
     tree: PTPageTree<A, P, L, S>,
 }
@@ -44,10 +44,10 @@ impl<A: ArchPagingMeta, P: DirectMappedAllocator, L: LevelSpec> PageTable<A, P, 
     /// itself: its own pages come out of that region, as does every table it
     /// allocates later. Initialization and self-mapping checks use ordinary
     /// accesses while the entire tree is still private.
-    pub fn new(allocator: P, flags: A::PTFlags) -> Result<Self, PagingError> {
-        let root_pa = PTPage::<A, P>::new_direct_mapped(&allocator, L::LEVEL, flags)?;
+    pub fn new(flags: A::PTFlags) -> Result<Self, PagingError> {
+        let root_pa = PTPage::<A, P>::new_direct_mapped(L::LEVEL, flags)?;
         // SAFETY: construction produced a validated, exclusively owned, unpublished tree.
-        let tree = unsafe { PTPageTree::from_root(allocator, root_pa, KernelPolicy) };
+        let tree = unsafe { PTPageTree::from_root(root_pa, KernelPolicy) };
         Ok(Self { tree })
     }
 }
@@ -67,36 +67,35 @@ impl<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec> PageTable<A, P, L> {
     /// Only allow Drop when the root and every descendant table are exclusively
     /// owned, allocator-allocated, and have no software or hardware users;
     /// otherwise use `ManuallyDrop` or [`Self::leak`].
-    pub unsafe fn from_root(allocator: P, root_pa: PhysAddr) -> Result<Self, PagingError> {
+    pub unsafe fn from_root(root_pa: PhysAddr) -> Result<Self, PagingError> {
         unsafe {
-            PTPage::<A, P>::validate_tree(&allocator, root_pa, L::LEVEL, |slot| {
+            PTPage::<A, P>::validate_tree(root_pa, L::LEVEL, |slot| {
                 PTEntryRef::from_raw(slot.cast_mut()).load()
             })
         }?;
         #[cfg(not(feature = "use_ad"))]
         // SAFETY: validation established shape; the caller excludes all users during import.
         unsafe {
-            PTPage::<A, P>::normalize_ad_tree(&allocator, root_pa, L::LEVEL);
+            PTPage::<A, P>::normalize_ad_tree(root_pa, L::LEVEL);
         }
         // SAFETY: validation establishes shape; ownership and quiescence are the caller's duty.
-        let tree = unsafe { PTPageTree::from_root(allocator, root_pa, KernelPolicy) };
+        let tree = unsafe { PTPageTree::from_root(root_pa, KernelPolicy) };
         Ok(Self { tree })
     }
 }
 
-impl<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, S: PagingPolicy> PageTable<A, P, L, S> {
+impl<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, S: PagingOwnershipPolicy>
+    PageTable<A, P, L, S>
+{
     /// Confirms the tree maps each of its own table pages, the root included,
     /// at the address the allocator hands out for it, so that a walk still
     /// reaches them once the tree is installed.
     pub fn validate_page_table(&self) -> Result<(), PagingError> {
         // SAFETY: this borrow keeps the tree accessible throughout validation.
         unsafe {
-            PTPage::<A, P>::validate_tree(
-                &self.tree.allocator,
-                self.tree.root_paddr(),
-                L::LEVEL,
-                |slot| PTEntryRef::from_raw(slot.cast_mut()).load(),
-            )
+            PTPage::<A, P>::validate_tree(self.tree.root_paddr(), L::LEVEL, |slot| {
+                PTEntryRef::from_raw(slot.cast_mut()).load()
+            })
         }
     }
 }
@@ -105,17 +104,16 @@ impl<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec> PageTable<A, P, L> {
     /// Borrows existing subtrees at `START..END`; the entire range becomes immutable.
     /// Initialize shared root slots before copying if later growth must be visible.
     /// # Safety
-    /// `allocator` must resolve shared physical addresses to the same table pages as `other`.
+    /// `P` must resolve shared physical addresses to the same table pages as `other`.
     /// Shared pages must remain allocated while either tree links to them.
     /// Exclude access through every alias during mutations and the entire
     /// lifetime of any mutable mapping handle. Cleanup through either tree
     /// requires removing all other parent links to every reclaimed page.
     pub unsafe fn new_from_sharing_top<'kernel, const START: usize, const END: usize>(
-        allocator: P,
         other: &'kernel Self,
     ) -> Result<UserPageTable<'kernel, A, P, L, START, END>, PagingError> {
         let policy = UserPolicy::<START, END>::new();
-        let mut tree = PTPageTree::new_root(allocator, policy)?;
+        let mut tree = PTPageTree::new_root(policy)?;
         {
             // SAFETY: the fresh destination has no software or hardware users.
             let page = unsafe { tree.page_mut() };
@@ -131,12 +129,12 @@ impl<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec> PageTable<A, P, L> {
         Ok(this)
     }
 
-    /// Gives up ownership of the tree, returning its root and allocator. What
+    /// Gives up ownership of the tree and returns its root. What
     /// a table installed in a control register needs: dropping it would free a
     /// page the hardware still walks. A borrowed root remains borrowed.
-    pub fn leak(self) -> (P, PhysAddr) {
-        let (allocator, _, root_pa) = self.leak_parts();
-        (allocator, root_pa)
+    pub fn leak(self) -> PhysAddr {
+        let (_, root_pa) = self.leak_parts();
+        root_pa
     }
 
     /// Raw staged edits are restricted to privileged controllers.
@@ -202,11 +200,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec> PageTable<A, P, L> {
         #[cfg(not(feature = "use_ad"))]
         // SAFETY: a new subtree is correctly leveled and quiesced by the caller.
         unsafe {
-            PTPage::<A, P>::normalize_ad_tree(
-                &self.tree.allocator,
-                subpage_pa,
-                L::LEVEL.child().unwrap(),
-            );
+            PTPage::<A, P>::normalize_ad_tree(subpage_pa, L::LEVEL.child().unwrap());
         }
         slot.store(desired);
         Ok(true)
@@ -223,13 +217,15 @@ impl<
     > PageTable<A, P, L, UserPolicy<'kernel, START, END>>
 {
     /// The returned policy retains the kernel borrow while the raw tree is used.
-    pub fn leak(self) -> (P, UserPolicy<'kernel, START, END>, PhysAddr) {
+    pub fn leak(self) -> (UserPolicy<'kernel, START, END>, PhysAddr) {
         self.leak_parts()
     }
 }
 
-impl<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, S: PagingPolicy> PageTable<A, P, L, S> {
-    fn leak_parts(self) -> (P, S, PhysAddr) {
+impl<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, S: PagingOwnershipPolicy>
+    PageTable<A, P, L, S>
+{
+    fn leak_parts(self) -> (S, PhysAddr) {
         self.tree.into_parts()
     }
 
@@ -365,12 +361,10 @@ impl<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, S: PagingPolicy> PageT
         let (entry, level) = self.walk_entry(vaddr);
         if level > target && !entry.load().present() {
             let child_level = level.child().ok_or(PagingError::InvalidLevel)?;
-            let prepared = PTPageTree::<A, P>::new(self.tree.allocator.clone(), child_level)?;
+            let prepared = PTPageTree::<A, P>::new(child_level)?;
             let observed = prepared.root().walk(vaddr);
             MappingMut::from_view(Some(vaddr), observed.page.level(), observed.entry())
-                .commit_no_flush(|map| {
-                    PTPage::<A, P>::do_map(&self.tree.allocator, map, vaddr, paddr, target, spec)
-                })?;
+                .commit_no_flush(|map| PTPage::<A, P>::do_map(map, vaddr, paddr, target, spec))?;
             entry.store(PTEntry::new_table(
                 A::make_private_address(prepared.root_paddr()),
                 A::filter_flags(parent_flags),
@@ -378,9 +372,8 @@ impl<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, S: PagingPolicy> PageT
             prepared.release();
             return Ok(());
         }
-        MappingMut::from_view(Some(vaddr), level, entry).commit_no_flush(|map| {
-            PTPage::<A, P>::do_map(&self.tree.allocator, map, vaddr, paddr, target, spec)
-        })
+        MappingMut::from_view(Some(vaddr), level, entry)
+            .commit_no_flush(|map| PTPage::<A, P>::do_map(map, vaddr, paddr, target, spec))
     }
 
     /// [`Self::map_with_parent_flags`] with the architecture's default flags
@@ -520,23 +513,15 @@ impl<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, S: PagingPolicy> PageT
         }
         let (entry, level) = self.walk_entry(vaddr);
         // SAFETY: the exclusive borrow pins the entry and excludes software writers.
-        unsafe {
-            PTPage::<A, P>::edit_leaf(
-                &self.tree.allocator,
-                entry,
-                level,
-                vaddr,
-                target,
-                update,
-                all_cpus,
-            )
-        }
+        unsafe { PTPage::<A, P>::edit_leaf(entry, level, vaddr, target, update, all_cpus) }
     }
 }
 
 /// The operations whose page size is fixed: mapping a smallest page or the one
 /// large page above it, and everything a range of them is built from.
-impl<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, S: PagingPolicy> PageTable<A, P, L, S> {
+impl<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, S: PagingOwnershipPolicy>
+    PageTable<A, P, L, S>
+{
     /// The size of the smallest page this build maps.
     pub const SMALL: PageLevel = PageLevel::Level0;
 

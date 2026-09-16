@@ -1,7 +1,8 @@
+use core::marker::PhantomData;
 use core::ptr::NonNull;
 
 use super::PTPage;
-use crate::structs::address::{Address, PhysAddr, VirtAddr};
+use crate::structs::address::{PhysAddr, VirtAddr};
 use crate::structs::arch_contract::ArchPagingMeta;
 use crate::structs::entry::{PTEntry, PTEntryRef};
 use crate::structs::level::PageLevel;
@@ -11,10 +12,8 @@ use crate::structs::sizes::entry_index;
 /// A non-owning page pointer; its lifetime pins memory, not entry contents.
 pub(crate) struct PTPagePointer<'tree, A: ArchPagingMeta, P: PagingAllocator> {
     page: NonNull<PTPage<A, P>>,
-    allocator: &'tree P,
-    mapping_offset: usize,
-    fixed_mapping: bool,
     level: PageLevel,
+    marker: PhantomData<&'tree PTPage<A, P>>,
 }
 
 /// The page and slot where a page-table walk stopped.
@@ -27,7 +26,6 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> WalkResult<'tree, A, P> {
     pub(crate) fn entry(&self) -> PTEntryRef<'tree, A> {
         self.page.entry(self.index)
     }
-
 }
 
 impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
@@ -38,36 +36,15 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
     /// Entries must be atomic-aligned; conflicting accesses must be atomic,
     /// without ordinary references into live pages. Exclusive, quiesced teardown
     /// may reclaim descendants only after ending their views and unlinking them.
-    pub(crate) unsafe fn from_root(
-        allocator: &'tree P,
-        root_pa: PhysAddr,
-        level: PageLevel,
-    ) -> Self {
-        Self::resolve(allocator, root_pa, level, allocator.fixed_mapping_offset())
+    pub(crate) unsafe fn from_root(root_pa: PhysAddr, level: PageLevel) -> Self {
+        Self::resolve(root_pa, level)
     }
 
     #[inline(always)]
-    fn resolve(
-        allocator: &'tree P,
-        paddr: PhysAddr,
-        level: PageLevel,
-        mapping_offset: Option<usize>,
-    ) -> Self {
-        let fixed_mapping = mapping_offset.is_some();
-        let mapping_offset = mapping_offset.unwrap_or(0);
-        let vaddr = if fixed_mapping {
-            VirtAddr::from(paddr.bits().wrapping_add(mapping_offset))
-        } else {
-            allocator.paddr_to_vaddr(paddr)
-        };
+    fn resolve(paddr: PhysAddr, level: PageLevel) -> Self {
+        let vaddr = P::paddr_to_vaddr(paddr);
         let page = vaddr.as_mut_ptr();
-        Self {
-            page: NonNull::new(page).expect("null page-table view"),
-            allocator,
-            mapping_offset,
-            fixed_mapping,
-            level,
-        }
+        Self { page: NonNull::new(page).expect("null page-table view"), level, marker: PhantomData }
     }
 
     #[inline(always)]
@@ -76,16 +53,7 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
     }
 
     pub(crate) fn paddr(&self) -> PhysAddr {
-        let vaddr = VirtAddr::from(self.page.as_ptr() as usize);
-        if self.fixed_mapping {
-            PhysAddr::from(vaddr.bits().wrapping_sub(self.mapping_offset))
-        } else {
-            self.allocator.vaddr_to_paddr(vaddr)
-        }
-    }
-
-    pub(crate) fn allocator(&self) -> &P {
-        self.allocator
+        P::vaddr_to_paddr(VirtAddr::from(self.page.as_ptr() as usize))
     }
 
     /// Spell out the five architectural depths so optimized callers get a
@@ -93,13 +61,7 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
     /// four-level benchmark median by about 4%, from 15.3 ns to 14.6 ns.
     #[inline(always)]
     pub(crate) fn walk(&self, vaddr: VirtAddr) -> WalkResult<'tree, A, P> {
-        let page = Self {
-            page: self.page,
-            allocator: self.allocator,
-            mapping_offset: self.mapping_offset,
-            fixed_mapping: self.fixed_mapping,
-            level: self.level,
-        };
+        let page = Self { page: self.page, level: self.level, marker: PhantomData };
 
         macro_rules! descend {
             ($page:expr) => {
@@ -115,9 +77,7 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
             PageLevel::Level1 => descend!(page).finish(vaddr),
             PageLevel::Level2 => descend!(descend!(page)).finish(vaddr),
             PageLevel::Level3 => descend!(descend!(descend!(page))).finish(vaddr),
-            PageLevel::Level4 => {
-                descend!(descend!(descend!(descend!(page)))).finish(vaddr)
-            }
+            PageLevel::Level4 => descend!(descend!(descend!(descend!(page)))).finish(vaddr),
         }
     }
 
@@ -145,12 +105,7 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
     #[inline(always)]
     pub(crate) fn child_from_observed(&self, entry: PTEntry<A>) -> Result<Self, PTEntry<A>> {
         if entry.is_table(self.level) {
-            Ok(Self::resolve(
-                self.allocator,
-                PhysAddr::from(entry.address()),
-                self.level.child().unwrap(),
-                self.fixed_mapping.then_some(self.mapping_offset),
-            ))
+            Ok(Self::resolve(PhysAddr::from(entry.address()), self.level.child().unwrap()))
         } else {
             Err(entry)
         }

@@ -51,20 +51,18 @@ type Table = PageTable<Arch, Allocator, Lvl<3>>;
 fn fixture() -> (Arc<Arena>, Table) {
     let arena = Arena::new(ARENA);
     #[cfg(feature = "concurrent")]
-    let table =
-        Table::new(Allocator(arena.clone()), WholeTreeLock::default(), PTEntryFlags::data())
-            .unwrap();
+    let table = Table::new(WholeTreeLock::default(), PTEntryFlags::data()).unwrap();
     #[cfg(not(feature = "concurrent"))]
-    let table = Table::new(Allocator(arena.clone()), PTEntryFlags::data()).unwrap();
+    let table = Table::new(PTEntryFlags::data()).unwrap();
     (arena, table)
 }
 
-unsafe fn adopt(allocator: Allocator, root: PhysAddr) -> Result<Table, PagingError> {
+unsafe fn adopt(root: PhysAddr) -> Result<Table, PagingError> {
     #[cfg(feature = "concurrent")]
-    return unsafe { Table::from_root(allocator, WholeTreeLock::default(), root) };
+    return unsafe { Table::from_root(WholeTreeLock::default(), root) };
     #[cfg(not(feature = "concurrent"))]
     unsafe {
-        Table::from_root(allocator, root)
+        Table::from_root(root)
     }
 }
 
@@ -154,18 +152,16 @@ macro_rules! feature_tests {
 
             #[test]
             fn splitting_does_not_refilter_inherited_flags_in_unedited_neighbors() {
-                let arena = Arena::new(ARENA);
+                let _arena = Arena::new(ARENA);
                 #[cfg(feature = "concurrent")]
                 let mut original =
                     PageTable::<X86Paging<Platform<true>>, Allocator, Lvl<3>, WholeTreeLock>::new(
-                        Allocator(arena.clone()),
                         WholeTreeLock::default(),
                         PTEntryFlags::data(),
                     )
                     .unwrap();
                 #[cfg(not(feature = "concurrent"))]
                 let mut original = PageTable::<X86Paging<Platform<true>>, Allocator, Lvl<3>>::new(
-                    Allocator(arena.clone()),
                     PTEntryFlags::data(),
                 )
                 .unwrap();
@@ -174,11 +170,11 @@ macro_rules! feature_tests {
                     .map_2m(base, PhysAddr::from(0x8000_0000usize), PTEntryFlags::data(), false)
                     .unwrap();
                 #[cfg(feature = "concurrent")]
-                let (allocator, _locks, root) = original.leak();
+                let (_locks, root) = original.leak();
                 #[cfg(not(feature = "concurrent"))]
-                let (allocator, root) = original.leak();
+                let root = original.leak();
                 // SAFETY: ownership transfers; only the requested-flag policy differs.
-                let mut table = unsafe { $adopt(allocator, root) }.unwrap();
+                let mut table = unsafe { $adopt(root) }.unwrap();
                 let target = base + 7 * 4096;
                 discharge(table.split(target, PageLevel::Level0, true).unwrap());
                 assert!(table.walk(target).read().flags().contains(PTEntryFlags::GLOBAL));

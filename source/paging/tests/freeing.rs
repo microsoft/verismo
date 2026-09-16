@@ -190,15 +190,12 @@ fn five_level_range_cleanup_uses_high_canonical_offsets_without_wrapping() {
     let arena = Arena::new(ARENA);
     #[cfg(feature = "concurrent")]
     let mut table = PageTable::<X86Paging<Host>, Allocator, Lvl<4>, WholeTreeLock>::new(
-        Allocator(arena.clone()),
         WholeTreeLock::default(),
         flags(),
     )
     .unwrap();
     #[cfg(not(feature = "concurrent"))]
-    let mut table =
-        PageTable::<X86Paging<Host>, Allocator, Lvl<4>>::new(Allocator(arena.clone()), flags())
-            .unwrap();
+    let mut table = PageTable::<X86Paging<Host>, Allocator, Lvl<4>>::new(flags()).unwrap();
     let first = VirtAddr::from(0xffff_8000_4000_0000usize);
     let second = first + 2 * PageLevel::Level2.size();
     let before = arena.allocated();
@@ -245,9 +242,9 @@ fn dropping_a_table_frees_its_root_and_descendants() {
 fn a_leaked_table_frees_nothing() {
     let (arena, table) = table();
     #[cfg(feature = "concurrent")]
-    let (_allocator, _content, _root) = table.leak();
+    let (_content, _root) = table.leak();
     #[cfg(not(feature = "concurrent"))]
-    let (_allocator, _root) = table.leak();
+    let _root = table.leak();
     assert!(arena.freed().is_empty());
 }
 
@@ -271,17 +268,16 @@ type Content = WholeTreeLock;
 fn owned<L: LevelSpec>() -> (Arc<Arena>, Owned<L>) {
     let arena = Arena::new(ARENA);
     #[cfg(not(feature = "concurrent"))]
-    let table = Owned::new(Allocator(arena.clone()), flags()).unwrap();
+    let table = Owned::new(flags()).unwrap();
     #[cfg(feature = "concurrent")]
-    let table = Owned::new(Allocator(arena.clone()), WholeTreeLock::default(), flags()).unwrap();
+    let table = Owned::new(WholeTreeLock::default(), flags()).unwrap();
     (arena, table)
 }
 
-fn parts<L: LevelSpec>(table: Owned<L>) -> (Allocator, Content, PhysAddr) {
+fn parts<L: LevelSpec>(table: Owned<L>) -> (Content, PhysAddr) {
     #[cfg(not(feature = "concurrent"))]
     {
-        let (allocator, root) = table.leak();
-        (allocator, (), root)
+        ((), table.leak())
     }
     #[cfg(feature = "concurrent")]
     {
@@ -290,13 +286,13 @@ fn parts<L: LevelSpec>(table: Owned<L>) -> (Allocator, Content, PhysAddr) {
 }
 
 #[cfg(not(feature = "concurrent"))]
-unsafe fn adopt<L: LevelSpec>(allocator: Allocator, (): Content, root: PhysAddr) -> Owned<L> {
-    unsafe { Owned::from_root(allocator, root) }.unwrap()
+unsafe fn adopt<L: LevelSpec>((): Content, root: PhysAddr) -> Owned<L> {
+    unsafe { Owned::from_root(root) }.unwrap()
 }
 
 #[cfg(feature = "concurrent")]
-unsafe fn adopt<L: LevelSpec>(allocator: Allocator, content: Content, root: PhysAddr) -> Owned<L> {
-    unsafe { Owned::from_root(allocator, content, root) }.unwrap()
+unsafe fn adopt<L: LevelSpec>(content: Content, root: PhysAddr) -> Owned<L> {
+    unsafe { Owned::from_root(content, root) }.unwrap()
 }
 
 macro_rules! owned_drop_tests {
@@ -327,21 +323,19 @@ macro_rules! owned_drop_tests {
             }
 
             #[test]
-            fn leak_transfers_the_allocator_and_tree_without_freeing_then_adoption_owns_all_pages()
-            {
+            fn leak_transfers_the_tree_without_freeing_then_adoption_owns_all_pages() {
                 let (arena, mut table) = $fixture::<$level>();
                 let address = VirtAddr::from(0xffff_8000_4000_0000usize);
                 let frame = PhysAddr::from(0x1000usize);
                 table.map_4k(address, frame, flags(), false).unwrap();
                 let root = table.root_paddr();
-                assert_eq!(Arc::strong_count(&arena), 2);
-                let (allocator, content, leaked_root) = $parts(table);
+                assert_eq!(Arc::strong_count(&arena), 1);
+                let (content, leaked_root) = $parts(table);
                 assert_eq!(leaked_root, root);
-                assert!(Arc::ptr_eq(&allocator.0, &arena));
-                assert_eq!(Arc::strong_count(&arena), 2);
+                assert_eq!(Arc::strong_count(&arena), 1);
                 assert!(arena.freed().is_empty());
                 // SAFETY: leak transfers this allocator-owned, inactive tree without aliases.
-                let adopted = unsafe { $adopt::<$level>(allocator, content, leaked_root) };
+                let adopted = unsafe { $adopt::<$level>(content, leaked_root) };
                 assert_eq!(adopted.root_paddr(), root);
                 assert_eq!(adopted.phys_addr(address), Ok(frame));
                 assert_eq!(adopted.validate_page_table(), Ok(()));

@@ -167,35 +167,28 @@ fn clear_flush_hook() {
     FLUSH_HOOK.with(|hook| *hook.borrow_mut() = None);
 }
 
-#[derive(Clone)]
-struct BudgetAllocator {
-    inner: Allocator,
-    remaining: Arc<AtomicUsize>,
-    #[cfg(feature = "concurrent")]
-    allocation_gate: Arc<Mutex<Option<Gate>>>,
-    #[cfg(feature = "concurrent")]
-    deallocation_hook: Arc<Mutex<Option<DeallocationHook>>>,
-}
+struct BudgetAllocator;
+static ALLOCATION_BUDGET: AtomicUsize = AtomicUsize::new(usize::MAX);
+#[cfg(feature = "concurrent")]
+static ALLOCATION_GATE: Mutex<Option<Gate>> = Mutex::new(None);
+#[cfg(feature = "concurrent")]
+static DEALLOCATION_HOOK: Mutex<Option<DeallocationHook>> = Mutex::new(None);
 
 // SAFETY: the existing host allocator owns the direct map and all allocated
 // pages; the budget and hooks only control allocation timing or observe reclamation.
 unsafe impl DirectMappedAllocator for BudgetAllocator {
-    fn direct_map(&self) -> Range<PhysAddr> {
-        self.inner.direct_map()
+    fn direct_map() -> (Range<PhysAddr>, VirtAddr) {
+        Allocator::direct_map()
     }
 
-    fn direct_map_base(&self) -> VirtAddr {
-        self.inner.direct_map_base()
-    }
-
-    fn allocate_table_page(&self) -> Result<PhysAddr, PagingError> {
-        self.remaining
+    fn allocate_table_page() -> Result<PhysAddr, PagingError> {
+        ALLOCATION_BUDGET
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| left.checked_sub(1))
             .map_err(|_| PagingError::AllocFrame)?;
-        let page = self.inner.allocate_table_page()?;
+        let page = Allocator::allocate_table_page()?;
         #[cfg(feature = "concurrent")]
         {
-            let gate = self.allocation_gate.lock().unwrap().take();
+            let gate = ALLOCATION_GATE.lock().unwrap().take();
             if let Some(gate) = gate {
                 gate.entered.send(()).unwrap();
                 gate.release.recv_timeout(WAIT).expect("paused allocation was not released");
@@ -204,39 +197,38 @@ unsafe impl DirectMappedAllocator for BudgetAllocator {
         Ok(page)
     }
 
-    unsafe fn deallocate_table_page(&self, paddr: PhysAddr) {
+    unsafe fn deallocate_table_page(paddr: PhysAddr) {
         #[cfg(feature = "concurrent")]
-        if let Some(hook) = self.deallocation_hook.lock().unwrap().as_mut() {
+        if let Some(hook) = DEALLOCATION_HOOK.lock().unwrap().as_mut() {
             hook(paddr);
         }
         // SAFETY: the caller supplies an unlinked page from this allocator.
-        unsafe { self.inner.deallocate_table_page(paddr) };
+        unsafe { Allocator::deallocate_table_page(paddr) };
     }
 }
 
 #[cfg(feature = "concurrent")]
-#[derive(Clone)]
-struct ResolutionCountingAllocator(BudgetAllocator);
+struct ResolutionCountingAllocator;
 
-// SAFETY: clones retain the same allocator domain; recording resolutions does not alter addresses.
+// SAFETY: recording resolutions does not alter the active allocator domain or addresses.
 #[cfg(feature = "concurrent")]
 unsafe impl paging::os_contract::PagingAllocator for ResolutionCountingAllocator {
-    fn paddr_to_vaddr(&self, paddr: PhysAddr) -> VirtAddr {
+    fn paddr_to_vaddr(paddr: PhysAddr) -> VirtAddr {
         RESOLVED_PAGES.with(|pages| pages.borrow_mut().push(paddr));
-        paging::os_contract::PagingAllocator::paddr_to_vaddr(&self.0, paddr)
+        <BudgetAllocator as paging::os_contract::PagingAllocator>::paddr_to_vaddr(paddr)
     }
 
-    fn vaddr_to_paddr(&self, vaddr: VirtAddr) -> PhysAddr {
-        paging::os_contract::PagingAllocator::vaddr_to_paddr(&self.0, vaddr)
+    fn vaddr_to_paddr(vaddr: VirtAddr) -> PhysAddr {
+        <BudgetAllocator as paging::os_contract::PagingAllocator>::vaddr_to_paddr(vaddr)
     }
 
-    fn allocate_table_page(&self) -> Result<PhysAddr, PagingError> {
-        DirectMappedAllocator::allocate_table_page(&self.0)
+    fn allocate_table_page() -> Result<PhysAddr, PagingError> {
+        <BudgetAllocator as DirectMappedAllocator>::allocate_table_page()
     }
 
-    unsafe fn deallocate_table_page(&self, paddr: PhysAddr) {
+    unsafe fn deallocate_table_page(paddr: PhysAddr) {
         // SAFETY: the caller transfers an unlinked page from this unchanged allocator domain.
-        unsafe { DirectMappedAllocator::deallocate_table_page(&self.0, paddr) };
+        unsafe { <BudgetAllocator as DirectMappedAllocator>::deallocate_table_page(paddr) };
     }
 }
 
@@ -342,56 +334,27 @@ unsafe impl LockAllSpec<()> for WholeTreeLock {
 
 struct Fixture {
     arena: Arc<Arena>,
-    remaining: Arc<AtomicUsize>,
-    #[cfg(feature = "concurrent")]
-    allocation_gate: Arc<Mutex<Option<Gate>>>,
-    #[cfg(feature = "concurrent")]
-    deallocation_hook: Arc<Mutex<Option<DeallocationHook>>>,
     locks: WholeTreeLock,
 }
 
 impl Fixture {
-    fn new() -> (Self, BudgetAllocator) {
+    fn new() -> Self {
         take_flushes();
         clear_flush_hook();
         let arena = Arena::new(ARENA);
-        let remaining = Arc::new(AtomicUsize::new(usize::MAX));
-        #[cfg(feature = "concurrent")]
-        let allocation_gate = Arc::new(Mutex::new(None));
-        #[cfg(feature = "concurrent")]
-        let deallocation_hook = Arc::new(Mutex::new(None));
-        let allocator = BudgetAllocator {
-            inner: Allocator(arena.clone()),
-            remaining: remaining.clone(),
-            #[cfg(feature = "concurrent")]
-            allocation_gate: allocation_gate.clone(),
-            #[cfg(feature = "concurrent")]
-            deallocation_hook: deallocation_hook.clone(),
-        };
-        (
-            Self {
-                arena,
-                remaining,
-                #[cfg(feature = "concurrent")]
-                allocation_gate,
-                #[cfg(feature = "concurrent")]
-                deallocation_hook,
-                locks: WholeTreeLock::default(),
-            },
-            allocator,
-        )
+        ALLOCATION_BUDGET.store(usize::MAX, Ordering::SeqCst);
+        Self { arena, locks: WholeTreeLock::default() }
     }
 
     fn allow_allocations(&self, count: usize) {
-        self.remaining.store(count, Ordering::SeqCst);
+        ALLOCATION_BUDGET.store(count, Ordering::SeqCst);
     }
 
     #[cfg(feature = "concurrent")]
     fn pause_next_allocation(&self) -> (mpsc::Receiver<()>, mpsc::Sender<()>) {
         let (entered, observed) = mpsc::channel();
         let (release, resumed) = mpsc::channel();
-        assert!(self
-            .allocation_gate
+        assert!(ALLOCATION_GATE
             .lock()
             .unwrap()
             .replace(Gate { entered, release: resumed })
@@ -408,39 +371,36 @@ impl Fixture {
     #[cfg(feature = "concurrent")]
     fn check_deallocation_is_unlocked(&self) {
         let locks = self.locks.clone();
-        *self.deallocation_hook.lock().unwrap() = Some(Box::new(move |_| {
+        *DEALLOCATION_HOOK.lock().unwrap() = Some(Box::new(move |_| {
             assert!(locks.0.content.try_lock().is_ok(), "staging was reclaimed under content lock");
         }));
     }
 }
 
 fn fixture() -> (Fixture, Table) {
-    let (fixture, allocator) = Fixture::new();
+    let fixture = Fixture::new();
     #[cfg(not(feature = "concurrent"))]
-    let table = Table::new(allocator, PTEntryFlags::data()).unwrap();
+    let table = Table::new(PTEntryFlags::data()).unwrap();
     #[cfg(feature = "concurrent")]
-    let table = Table::new(allocator, fixture.locks.clone(), PTEntryFlags::data()).unwrap();
+    let table = Table::new(fixture.locks.clone(), PTEntryFlags::data()).unwrap();
     (fixture, table)
 }
 
 fn bbm_fixture() -> (Fixture, BbmTable) {
-    let (fixture, allocator) = Fixture::new();
+    let fixture = Fixture::new();
     #[cfg(not(feature = "concurrent"))]
-    let table = BbmTable::new(allocator, PTEntryFlags::data()).unwrap();
+    let table = BbmTable::new(PTEntryFlags::data()).unwrap();
     #[cfg(feature = "concurrent")]
-    let table = BbmTable::new(allocator, fixture.locks.clone(), PTEntryFlags::data()).unwrap();
+    let table = BbmTable::new(fixture.locks.clone(), PTEntryFlags::data()).unwrap();
     (fixture, table)
 }
 
 #[cfg(feature = "concurrent")]
 fn resolution_counting_fixture() -> (Fixture, ResolutionCountingTable) {
     let (fixture, original) = fixture();
-    let (allocator, locks, root) = original.leak();
+    let (locks, root) = original.leak();
     // SAFETY: leak transfers the inactive tree; the wrapper preserves its allocator and lock domains.
-    let table = unsafe {
-        ResolutionCountingTable::from_root(ResolutionCountingAllocator(allocator), locks, root)
-    }
-    .unwrap();
+    let table = unsafe { ResolutionCountingTable::from_root(locks, root) }.unwrap();
     take_resolved_pages();
     (fixture, table)
 }

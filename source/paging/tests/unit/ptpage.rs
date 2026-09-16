@@ -1,8 +1,9 @@
 extern crate alloc;
+extern crate std;
 
 use alloc::rc::Rc;
-use core::cell::{Cell, UnsafeCell};
-use core::mem::{align_of, size_of};
+use core::cell::{Cell, RefCell, UnsafeCell};
+use core::mem::{align_of, size_of, size_of_val};
 use core::ops::Deref;
 #[cfg(any(feature = "use_ad", feature = "concurrent"))]
 use core::sync::atomic::AtomicUsize;
@@ -52,24 +53,23 @@ unsafe impl X86PagingParams for Host {
     fn flush_tlb_global_sync(_: FlushScope) {}
 }
 
-#[derive(Clone)]
 struct NoAllocator;
 
 // SAFETY: live addresses are identity-mapped; allocation is unsupported.
 unsafe impl PagingAllocator for NoAllocator {
-    fn paddr_to_vaddr(&self, paddr: PhysAddr) -> VirtAddr {
+    fn paddr_to_vaddr(paddr: PhysAddr) -> VirtAddr {
         VirtAddr::from(paddr.bits())
     }
 
-    fn vaddr_to_paddr(&self, vaddr: VirtAddr) -> PhysAddr {
+    fn vaddr_to_paddr(vaddr: VirtAddr) -> PhysAddr {
         PhysAddr::from(vaddr.bits())
     }
 
-    fn allocate_table_page(&self) -> Result<PhysAddr, PagingError> {
+    fn allocate_table_page() -> Result<PhysAddr, PagingError> {
         Err(PagingError::AllocFrame)
     }
 
-    unsafe fn deallocate_table_page(&self, _: PhysAddr) {
+    unsafe fn deallocate_table_page(_: PhysAddr) {
         panic!("no frame belongs to this allocator");
     }
 }
@@ -80,29 +80,22 @@ type View<'tree> = PTPagePointer<'tree, Arch, NoAllocator>;
 type Entry = PTEntry<Arch>;
 
 struct Owner {
-    allocator: NoAllocator,
     memory: UnsafeCell<Page>,
 }
 
 impl Owner {
     fn new() -> Self {
-        Self { allocator: NoAllocator, memory: UnsafeCell::new(test_page(Entry::empty())) }
+        Self { memory: UnsafeCell::new(test_page(Entry::empty())) }
     }
 
     fn view(&self) -> View<'_> {
         // SAFETY: this borrow pins initialized storage; shared entry accesses are atomic.
-        unsafe {
-            View::from_root(
-                &self.allocator,
-                PhysAddr::from(self.memory.get() as usize),
-                PageLevel::Level0,
-            )
-        }
+        unsafe { View::from_root(PhysAddr::from(self.memory.get() as usize), PageLevel::Level0) }
     }
 }
 
 #[test]
-fn owned_tree_with_zero_sized_allocator_stores_only_root_and_level() {
+fn owned_tree_stores_only_root_and_level() {
     assert_eq!(size_of::<PTPageTree<Arch, NoAllocator>>(), size_of::<(PhysAddr, PageLevel)>());
 }
 
@@ -110,19 +103,16 @@ fn owned_tree_with_zero_sized_allocator_stores_only_root_and_level() {
 fn typed_roots_and_controllers_store_no_runtime_level_or_duplicate_allocator() {
     fn check<L: LevelSpec>() {
         assert_eq!(size_of::<PTPageTree<Arch, NoAllocator, L>>(), size_of::<PhysAddr>());
-        assert_eq!(
-            size_of::<PTPageTree<TreeArch, AllocationOwner, L>>(),
-            size_of::<(AllocationOwner, PhysAddr)>()
-        );
+        assert_eq!(size_of::<PTPageTree<TreeArch, AllocationOwner, L>>(), size_of::<PhysAddr>());
         #[cfg(not(feature = "concurrent"))]
         assert_eq!(
             size_of::<crate::pagetable::PageTable<TreeArch, AllocationOwner, L>>(),
-            size_of::<(AllocationOwner, PhysAddr)>()
+            size_of::<PhysAddr>()
         );
         #[cfg(feature = "concurrent")]
         assert_eq!(
             size_of::<crate::pagetable::PageTable<TreeArch, AllocationOwner, L, ()>>(),
-            size_of::<(AllocationOwner, PhysAddr)>()
+            size_of::<PhysAddr>()
         );
     }
     check::<Lvl<0>>();
@@ -130,7 +120,7 @@ fn typed_roots_and_controllers_store_no_runtime_level_or_duplicate_allocator() {
     check::<Lvl<2>>();
     check::<Lvl<3>>();
     check::<Lvl<4>>();
-    assert_eq!(size_of::<AllocationTree>(), size_of::<(AllocationOwner, PhysAddr, PageLevel)>());
+    assert_eq!(size_of::<AllocationTree>(), size_of::<(PhysAddr, PageLevel)>());
 }
 
 #[test]
@@ -144,7 +134,7 @@ fn exclusive_private_entry_edits_preserve_layout_and_live_atomic_access() {
     *page.entry_mut(ENTRY_COUNT - 1) = Entry::from_bits(0xdead_0020);
     assert_eq!(page.entry_mut(0).raw(), published(0x1001));
     assert_eq!(page.entry_mut(ENTRY_COUNT - 1).raw(), 0xdead_0020);
-    let owner = Owner { allocator: NoAllocator, memory: UnsafeCell::new(page) };
+    let owner = Owner { memory: UnsafeCell::new(page) };
     let view = owner.view();
     assert_eq!(view.load(0).raw(), published(0x1001));
     assert_eq!(view.load(ENTRY_COUNT - 1).raw(), 0xdead_0020);
@@ -174,8 +164,7 @@ fn views_access_both_page_boundaries_and_return_snapshots() {
     assert!(view.is_empty());
     assert_eq!(view.level(), PageLevel::Level0);
     assert_eq!(view.paddr().bits(), owner.memory.get() as usize);
-    assert!(matches!(view.allocator(), NoAllocator));
-    assert_eq!(size_of::<View<'_>>(), 4 * size_of::<usize>());
+    assert_eq!(size_of::<View<'_>>(), 2 * size_of::<usize>());
     assert_eq!(size_of::<Page>(), 4096);
     assert_eq!(align_of::<Page>(), 4096);
 }
@@ -208,8 +197,8 @@ type AllocationPage = PTPage<TreeArch, AllocationOwner>;
 type AllocationTree = PTPageTree<TreeArch, AllocationOwner>;
 type AllocationView<'tree> = PTPagePointer<'tree, TreeArch, AllocationOwner>;
 
-#[derive(Clone)]
-struct AllocationOwner(Rc<AllocationState>);
+struct AllocationOwner;
+struct AllocationFixture(Rc<AllocationState>);
 
 struct AllocationState {
     pages: [UnsafeCell<AllocationPage>; 8],
@@ -218,7 +207,7 @@ struct AllocationState {
     freed: Cell<usize>,
 }
 
-impl Deref for AllocationOwner {
+impl Deref for AllocationFixture {
     type Target = AllocationState;
 
     fn deref(&self) -> &Self::Target {
@@ -226,24 +215,24 @@ impl Deref for AllocationOwner {
     }
 }
 
-impl AllocationOwner {
+std::thread_local! {
+    static ALLOCATION_STATE: RefCell<Option<Rc<AllocationState>>> = const { RefCell::new(None) };
+}
+
+impl AllocationFixture {
     fn new() -> Self {
-        Self(Rc::new(AllocationState {
+        let fixture = Self(Rc::new(AllocationState {
             pages: core::array::from_fn(|_| {
                 UnsafeCell::new(test_page(TreeEntry::from_bits(usize::MAX)))
             }),
             allocated: Cell::new(0),
             budget: Cell::new(8),
             freed: Cell::new(0),
-        }))
-    }
-
-    fn page_index(&self, paddr: PhysAddr) -> usize {
-        assert_eq!(paddr.bits() & 4095, 0);
-        let index = (paddr.bits() / 4096).checked_sub(1).expect("invalid table frame");
-        assert!(index < self.allocated.get(), "resolved a data frame or uncleared tag");
-        assert_eq!(self.freed.get() & (1 << index), 0, "resolved a freed table");
-        index
+        }));
+        ALLOCATION_STATE.with(|active| {
+            assert!(active.borrow_mut().replace(fixture.0.clone()).is_none());
+        });
+        fixture
     }
 
     fn view<'tree>(
@@ -252,104 +241,125 @@ impl AllocationOwner {
         level: PageLevel,
     ) -> AllocationView<'tree> {
         // SAFETY: the owner and tree borrows pin the initialized, unpublished pages.
-        unsafe { AllocationView::from_root(self, tree.root_paddr(), level) }
+        unsafe { AllocationView::from_root(tree.root_paddr(), level) }
     }
 }
 
-// SAFETY: clones share allocation state and pin the same distinct aligned page storage.
+impl Drop for AllocationFixture {
+    fn drop(&mut self) {
+        ALLOCATION_STATE.with(|active| {
+            let state = active.borrow_mut().take().expect("no active allocation fixture");
+            assert!(Rc::ptr_eq(&state, &self.0));
+        });
+    }
+}
+
+impl AllocationOwner {
+    fn active<R>(f: impl FnOnce(&AllocationState) -> R) -> R {
+        ALLOCATION_STATE.with(|active| {
+            let active = active.borrow();
+            f(active.as_ref().expect("no active allocation fixture"))
+        })
+    }
+}
+
+// SAFETY: the active fixture pins distinct aligned page storage for each test.
 unsafe impl PagingAllocator for AllocationOwner {
-    fn paddr_to_vaddr(&self, paddr: PhysAddr) -> VirtAddr {
-        VirtAddr::from(self.pages[self.page_index(paddr)].get() as usize)
+    fn paddr_to_vaddr(paddr: PhysAddr) -> VirtAddr {
+        Self::active(|state| {
+            assert_eq!(paddr.bits() & 4095, 0);
+            let index = (paddr.bits() / 4096).checked_sub(1).expect("invalid table frame");
+            assert!(index < state.allocated.get(), "resolved a data frame or uncleared tag");
+            assert_eq!(state.freed.get() & (1 << index), 0, "resolved a freed table");
+            VirtAddr::from(state.pages[index].get() as usize)
+        })
     }
 
-    fn vaddr_to_paddr(&self, vaddr: VirtAddr) -> PhysAddr {
-        let index = self
-            .pages
-            .iter()
-            .position(|page| page.get() as usize == vaddr.bits())
-            .expect("address outside this owner");
-        let paddr = PhysAddr::from((index + 1) * 4096);
-        self.page_index(paddr);
-        paddr
+    fn vaddr_to_paddr(vaddr: VirtAddr) -> PhysAddr {
+        Self::active(|state| {
+            let index = state
+                .pages
+                .iter()
+                .position(|page| page.get() as usize == vaddr.bits())
+                .expect("address outside this owner");
+            let paddr = PhysAddr::from((index + 1) * 4096);
+            assert!(index < state.allocated.get());
+            paddr
+        })
     }
 
-    fn allocate_table_page(&self) -> Result<PhysAddr, PagingError> {
-        let index = self.allocated.get();
-        if self.budget.get() == 0 || index == self.pages.len() {
-            return Err(PagingError::AllocFrame);
-        }
-        self.budget.set(self.budget.get() - 1);
-        self.allocated.set(index + 1);
-        Ok(PhysAddr::from((index + 1) * 4096))
-    }
-
-    unsafe fn deallocate_table_page(&self, paddr: PhysAddr) {
-        let index = self.page_index(paddr);
-        for (page_index, page) in self.pages.iter().take(self.allocated.get()).enumerate() {
-            if self.freed.get() & (1 << page_index) != 0 {
-                continue;
+    fn allocate_table_page() -> Result<PhysAddr, PagingError> {
+        Self::active(|state| {
+            let index = state.allocated.get();
+            if state.budget.get() == 0 || index == state.pages.len() {
+                return Err(PagingError::AllocFrame);
             }
-            for slot in 0..ENTRY_COUNT {
-                // SAFETY: this fixture retains all initialized arena storage without concurrent access.
-                let entry = unsafe { AllocationPage::read_entry(page.get(), slot) };
-                assert!(
-                    !entry.present() || entry.address() != paddr.bits(),
-                    "freed a table while a parent still links to it"
-                );
+            state.budget.set(state.budget.get() - 1);
+            state.allocated.set(index + 1);
+            Ok(PhysAddr::from((index + 1) * 4096))
+        })
+    }
+
+    unsafe fn deallocate_table_page(paddr: PhysAddr) {
+        Self::active(|state| {
+            let index = (paddr.bits() / 4096) - 1;
+            for (page_index, page) in state.pages.iter().take(state.allocated.get()).enumerate() {
+                if state.freed.get() & (1 << page_index) != 0 {
+                    continue;
+                }
+                for slot in 0..ENTRY_COUNT {
+                    // SAFETY: this fixture retains all initialized arena storage without concurrent access.
+                    let entry = unsafe { AllocationPage::read_entry(page.get(), slot) };
+                    assert!(
+                        !entry.present() || entry.address() != paddr.bits(),
+                        "freed a table while a parent still links to it"
+                    );
+                }
             }
-        }
-        self.freed.set(self.freed.get() | (1 << index));
+            state.freed.set(state.freed.get() | (1 << index));
+        });
     }
 }
 
 #[test]
-fn cloned_allocators_share_allocations_resolutions_and_deallocation() {
-    let owner = AllocationOwner::new();
-    let clone = owner.clone();
-    let (_, first) = AllocationPage::alloc(&owner).unwrap();
-    let (_, second) = AllocationPage::alloc(&clone).unwrap();
+fn stateless_allocator_shares_one_active_allocation_domain() {
+    let owner = AllocationFixture::new();
+    assert_eq!(size_of::<AllocationOwner>(), 0);
+    let (_, first) = AllocationPage::alloc().unwrap();
+    let (_, second) = AllocationPage::alloc().unwrap();
     assert_ne!(first, second);
     assert_eq!(owner.allocated.get(), 2);
-    assert_eq!(clone.allocated.get(), 2);
     for frame in [first, second] {
-        let address = owner.paddr_to_vaddr(frame);
-        assert_eq!(clone.paddr_to_vaddr(frame), address);
-        assert_eq!(clone.vaddr_to_paddr(address), frame);
+        let address = AllocationOwner::paddr_to_vaddr(frame);
+        assert_eq!(AllocationOwner::paddr_to_vaddr(frame), address);
+        assert_eq!(AllocationOwner::vaddr_to_paddr(address), frame);
     }
-    // SAFETY: both frames are unlinked and both clones share the allocation domain.
+    // SAFETY: both frames are unlinked.
     unsafe {
-        clone.deallocate_table_page(first);
-        owner.deallocate_table_page(second);
+        AllocationOwner::deallocate_table_page(first);
+        AllocationOwner::deallocate_table_page(second);
     }
     assert_eq!(owner.freed.get(), 0b11);
-    assert_eq!(clone.freed.get(), 0b11);
 }
 
 #[test]
-fn owned_tree_keeps_allocator_state_alive_after_the_original_handle_drops() {
-    let owner = AllocationOwner::new();
-    let state = Rc::downgrade(&owner.0);
-    let mut tree = AllocationTree::new(owner.clone(), PageLevel::Level2).unwrap();
-    drop(owner);
-    assert_eq!(state.strong_count(), 1);
+fn owned_tree_stores_no_allocator_handle() {
+    let owner = AllocationFixture::new();
+    let mut tree = AllocationTree::new(PageLevel::Level2).unwrap();
+    assert_eq!(size_of_val(&tree), size_of::<(PhysAddr, PageLevel)>());
     tree.grow(
         VirtAddr::from(0usize),
         PageLevel::Level0,
         <TreeArch as ArchPagingMeta>::PTFlags::parent_flags(),
     )
     .unwrap();
-    assert_eq!(state.strong_count(), 1);
-    let observer = AllocationOwner(state.upgrade().expect("tree retains its allocator"));
-    assert_eq!(observer.allocated.get(), 3);
+    assert_eq!(owner.allocated.get(), 3);
     assert_eq!(
-        observer.view(&tree, PageLevel::Level2).walk(VirtAddr::from(0usize)).page.level(),
+        owner.view(&tree, PageLevel::Level2).walk(VirtAddr::from(0usize)).page.level(),
         PageLevel::Level0
     );
     drop(tree);
-    assert_eq!(observer.freed.get(), 0b111);
-    assert_eq!(state.strong_count(), 1);
-    drop(observer);
-    assert!(state.upgrade().is_none());
+    assert_eq!(owner.freed.get(), 0b111);
 }
 
 #[test]
@@ -361,11 +371,11 @@ fn owned_tree_allocates_and_zeroes_its_root_at_every_level() {
         PageLevel::Level3,
         PageLevel::Level4,
     ] {
-        let owner = AllocationOwner::new();
-        let tree = AllocationTree::new(owner.clone(), level).unwrap();
+        let owner = AllocationFixture::new();
+        let tree = AllocationTree::new(level).unwrap();
         assert_eq!(tree.root_paddr().bits(), 0x1000);
         assert_eq!(owner.allocated.get(), 1);
-        assert_eq!(owner.paddr_to_vaddr(tree.root_paddr()).bits() & 4095, 0);
+        assert_eq!(AllocationOwner::paddr_to_vaddr(tree.root_paddr()).bits() & 4095, 0);
         let view = owner.view(&tree, level);
         assert_eq!(view.walk(VirtAddr::from(0usize)).page.level(), level);
         for index in 0..ENTRY_COUNT {
@@ -378,48 +388,37 @@ fn owned_tree_allocates_and_zeroes_its_root_at_every_level() {
 
 #[test]
 fn owned_tree_reports_root_allocation_failure_without_freeing() {
-    let owner = AllocationOwner::new();
+    let owner = AllocationFixture::new();
     owner.budget.set(0);
-    assert!(matches!(
-        AllocationTree::new(owner.clone(), PageLevel::Level2),
-        Err(PagingError::AllocFrame)
-    ));
+    assert!(matches!(AllocationTree::new(PageLevel::Level2), Err(PagingError::AllocFrame)));
     assert_eq!(owner.allocated.get(), 0);
     assert_eq!(owner.freed.get(), 0);
-    assert_eq!(Rc::strong_count(&owner.0), 1);
 }
 
 #[test]
 fn typed_roots_allocate_at_the_static_level_and_transfer_all_parts_without_freeing() {
     fn check<L: LevelSpec>() {
-        let owner = AllocationOwner::new();
-        let tree = PTPageTree::<TreeArch, _, L>::new_root(owner.clone(), KernelPolicy).unwrap();
+        let owner = AllocationFixture::new();
+        let tree = PTPageTree::<TreeArch, AllocationOwner, L>::new_root(KernelPolicy).unwrap();
         let root = tree.root_paddr();
         assert_eq!(root.bits(), 0x1000);
-        assert!(Rc::ptr_eq(&tree.allocator.0, &owner.0));
         assert!(matches!(tree.policy(), KernelPolicy));
         {
             let view = tree.root();
             assert_eq!(view.level(), L::LEVEL);
             assert_eq!(view.paddr(), root);
             assert!(view.is_empty());
-            assert!(Rc::ptr_eq(&view.allocator().0, &owner.0));
-            assert_eq!(Rc::strong_count(&owner.0), 2);
         }
-        assert_eq!(Rc::strong_count(&owner.0), 2);
-        let (allocator, policy, released) = tree.into_parts();
+        let (policy, released) = tree.into_parts();
         assert_eq!(released, root);
         assert!(matches!(policy, KernelPolicy));
-        assert!(Rc::ptr_eq(&allocator.0, &owner.0));
-        assert_eq!(Rc::strong_count(&owner.0), 2);
         assert_eq!(owner.freed.get(), 0);
         // SAFETY: into_parts transferred this initialized, inactive root at L::LEVEL.
         let adopted =
-            unsafe { PTPageTree::<TreeArch, _, L>::from_root(allocator, released, policy) };
+            unsafe { PTPageTree::<TreeArch, AllocationOwner, L>::from_root(released, policy) };
         assert_eq!(adopted.root().level(), L::LEVEL);
         drop(adopted);
         assert_eq!(owner.freed.get(), 1);
-        assert_eq!(Rc::strong_count(&owner.0), 1);
     }
     check::<Lvl<0>>();
     check::<Lvl<1>>();
@@ -430,22 +429,21 @@ fn typed_roots_allocate_at_the_static_level_and_transfer_all_parts_without_freei
 
 #[test]
 fn typed_root_allocation_failure_retains_no_allocator_or_frames() {
-    let owner = AllocationOwner::new();
+    let owner = AllocationFixture::new();
     owner.budget.set(0);
     assert!(matches!(
-        PTPageTree::<TreeArch, _, Lvl<4>>::new_root(owner.clone(), KernelPolicy),
+        PTPageTree::<TreeArch, AllocationOwner, Lvl<4>>::new_root(KernelPolicy),
         Err(PagingError::AllocFrame)
     ));
     assert_eq!(owner.allocated.get(), 0);
     assert_eq!(owner.freed.get(), 0);
-    assert_eq!(Rc::strong_count(&owner.0), 1);
 }
 
 #[test]
 fn typed_adoption_recursively_drops_dynamically_prepared_trees() {
     fn check<L: LevelSpec>() {
-        let owner = AllocationOwner::new();
-        let mut prepared = AllocationTree::new(owner.clone(), L::LEVEL).unwrap();
+        let owner = AllocationFixture::new();
+        let mut prepared = AllocationTree::new(L::LEVEL).unwrap();
         let address = VirtAddr::from(0usize);
         prepared
             .grow(address, PageLevel::Level0, <TreeArch as ArchPagingMeta>::PTFlags::parent_flags())
@@ -454,14 +452,12 @@ fn typed_adoption_recursively_drops_dynamically_prepared_trees() {
         let root = prepared.release();
         assert_eq!(owner.allocated.get(), L::DEPTH + 1);
         assert_eq!(owner.freed.get(), 0);
-        assert_eq!(Rc::strong_count(&owner.0), 1);
         // SAFETY: release transferred an exclusively owned tree built at L::LEVEL.
         let tree =
-            unsafe { PTPageTree::<TreeArch, _, L>::from_root(owner.clone(), root, KernelPolicy) };
+            unsafe { PTPageTree::<TreeArch, AllocationOwner, L>::from_root(root, KernelPolicy) };
         assert_eq!(tree.root().walk(address).entry().load().raw(), published(0xdead_0001));
         drop(tree);
         assert_eq!(owner.freed.get(), (1 << owner.allocated.get()) - 1);
-        assert_eq!(Rc::strong_count(&owner.0), 1);
     }
     check::<Lvl<3>>();
     check::<Lvl<4>>();
@@ -469,8 +465,8 @@ fn typed_adoption_recursively_drops_dynamically_prepared_trees() {
 
 #[test]
 fn owned_tree_grows_downward_reuses_paths_and_drops_tables_not_data() {
-    let owner = AllocationOwner::new();
-    let mut tree = AllocationTree::new(owner.clone(), PageLevel::Level3).unwrap();
+    let owner = AllocationFixture::new();
+    let mut tree = AllocationTree::new(PageLevel::Level3).unwrap();
     let root = tree.root_paddr();
     let flags = <TreeArch as ArchPagingMeta>::PTFlags::parent_flags();
     let address = VirtAddr::from(
@@ -480,7 +476,6 @@ fn owned_tree_grows_downward_reuses_paths_and_drops_tables_not_data() {
             + 5 * PageLevel::Level0.size(),
     );
     tree.grow(address, PageLevel::Level1, flags).unwrap();
-    assert_eq!(Rc::strong_count(&owner.0), 2);
     assert_eq!(owner.allocated.get(), 3);
     {
         let view = owner.view(&tree, PageLevel::Level3);
@@ -505,7 +500,6 @@ fn owned_tree_grows_downward_reuses_paths_and_drops_tables_not_data() {
     tree.grow(address, PageLevel::Level0, flags).unwrap();
     assert_eq!(owner.allocated.get(), 4);
     tree.grow(address + PageLevel::Level1.size(), PageLevel::Level0, flags).unwrap();
-    assert_eq!(Rc::strong_count(&owner.0), 2);
     assert_eq!(owner.allocated.get(), 5);
     assert_eq!(tree.root_paddr(), root);
     {
@@ -523,39 +517,36 @@ fn owned_tree_grows_downward_reuses_paths_and_drops_tables_not_data() {
     assert_eq!(owner.freed.get(), 0);
     drop(tree);
     assert_eq!(owner.freed.get(), 0b1_1111);
-    assert_eq!(Rc::strong_count(&owner.0), 1);
 }
 
 #[test]
 fn owned_tree_release_transfers_all_pages_without_freeing() {
-    let owner = AllocationOwner::new();
+    let owner = AllocationFixture::new();
     let root = {
-        let mut tree = AllocationTree::new(owner.clone(), PageLevel::Level2).unwrap();
+        let mut tree = AllocationTree::new(PageLevel::Level2).unwrap();
         tree.grow(
             VirtAddr::from(0usize),
             PageLevel::Level0,
             <TreeArch as ArchPagingMeta>::PTFlags::parent_flags(),
         )
         .unwrap();
-        assert_eq!(Rc::strong_count(&owner.0), 2);
         let expected = tree.root_paddr();
         let released = tree.release();
-        assert_eq!(Rc::strong_count(&owner.0), 1);
         assert_eq!(released, expected);
         released
     };
     assert_eq!(owner.allocated.get(), 3);
     assert_eq!(owner.freed.get(), 0);
     // SAFETY: release transferred this unpublished subtree to the test.
-    unsafe { AllocationPage::free_unpublished(&owner, root, PageLevel::Level2) };
+    unsafe { AllocationPage::free_unpublished(root, PageLevel::Level2) };
     assert_eq!(owner.freed.get(), 0b111);
 }
 
 #[test]
 fn owned_tree_failed_growth_rolls_back_only_the_staged_suffix() {
     for budget in 0..3 {
-        let owner = AllocationOwner::new();
-        let mut tree = AllocationTree::new(owner.clone(), PageLevel::Level4).unwrap();
+        let owner = AllocationFixture::new();
+        let mut tree = AllocationTree::new(PageLevel::Level4).unwrap();
         let flags = <TreeArch as ArchPagingMeta>::PTFlags::parent_flags();
         let address = VirtAddr::from(PageLevel::Level3.size());
         tree.grow(address, PageLevel::Level3, flags).unwrap();
@@ -575,7 +566,6 @@ fn owned_tree_failed_growth_rolls_back_only_the_staged_suffix() {
             tree.grow(address, PageLevel::Level0, flags),
             Err(PagingError::AllocFrame)
         ));
-        assert_eq!(Rc::strong_count(&owner.0), 2);
         assert_eq!(tree.root_paddr(), root);
         assert_eq!(owner.allocated.get(), 2 + budget);
         assert_eq!(owner.freed.get(), ((1 << budget) - 1) << 2);
@@ -592,21 +582,19 @@ fn owned_tree_failed_growth_rolls_back_only_the_staged_suffix() {
         }
         owner.budget.set(3);
         tree.grow(address, PageLevel::Level0, flags).unwrap();
-        assert_eq!(Rc::strong_count(&owner.0), 2);
         assert_eq!(
             owner.view(&tree, PageLevel::Level4).walk(address).page.level(),
             PageLevel::Level0
         );
         drop(tree);
         assert_eq!(owner.freed.get(), (1 << owner.allocated.get()) - 1);
-        assert_eq!(Rc::strong_count(&owner.0), 1);
     }
 }
 
 #[test]
 fn owned_tree_rejects_upward_growth_and_blocking_huge_leaves() {
-    let owner = AllocationOwner::new();
-    let mut tree = AllocationTree::new(owner.clone(), PageLevel::Level2).unwrap();
+    let owner = AllocationFixture::new();
+    let mut tree = AllocationTree::new(PageLevel::Level2).unwrap();
     let flags = <TreeArch as ArchPagingMeta>::PTFlags::parent_flags();
     let address = VirtAddr::from(0usize);
     assert!(matches!(tree.grow(address, PageLevel::Level3, flags), Err(PagingError::InvalidLevel)));
@@ -621,8 +609,8 @@ fn owned_tree_rejects_upward_growth_and_blocking_huge_leaves() {
     assert_eq!(owner.freed.get(), 1);
 }
 
-#[derive(Clone)]
-struct TreeOwner(Rc<TreeState>);
+struct TreeOwner;
+struct TreeFixture(Rc<TreeState>);
 
 struct TreeState {
     pages: [UnsafeCell<TreePage>; 5],
@@ -634,7 +622,7 @@ struct TreeState {
     require_clear_on_free: Cell<bool>,
 }
 
-impl Deref for TreeOwner {
+impl Deref for TreeFixture {
     type Target = TreeState;
 
     fn deref(&self) -> &Self::Target {
@@ -642,7 +630,11 @@ impl Deref for TreeOwner {
     }
 }
 
-impl TreeOwner {
+std::thread_local! {
+    static TREE_STATE: RefCell<Option<Rc<TreeState>>> = const { RefCell::new(None) };
+}
+
+impl TreeFixture {
     fn new() -> Self {
         let owner = Self(Rc::new(TreeState {
             pages: core::array::from_fn(|_| UnsafeCell::new(test_page(TreeEntry::empty()))),
@@ -653,8 +645,11 @@ impl TreeOwner {
             freed_order: Cell::new(0),
             require_clear_on_free: Cell::new(true),
         }));
+        TREE_STATE.with(|active| {
+            assert!(active.borrow_mut().replace(owner.0.clone()).is_none());
+        });
         for expected in [0x1000usize, 0x2000, 0x3000, 0x4000, 0x5000] {
-            assert_eq!(owner.allocate_table_page().unwrap().bits(), expected);
+            assert_eq!(TreeOwner::allocate_table_page().unwrap().bits(), expected);
         }
         let table = <TreeArch as ArchPagingMeta>::PTFlags::parent_flags();
         // SAFETY: the fixture still exclusively owns these unpublished pages.
@@ -678,73 +673,94 @@ impl TreeOwner {
 
     fn view(&self) -> TreeView<'_> {
         // SAFETY: borrowing the owner pins every initialized page and its resolver.
-        unsafe { TreeView::from_root(self, PhysAddr::from(0x1000usize), PageLevel::Level2) }
-    }
-
-    fn page_index(&self, paddr: PhysAddr) -> usize {
-        assert_eq!(paddr.bits() & 4095, 0);
-        let index = (paddr.bits() / 4096).checked_sub(1).expect("invalid table frame");
-        assert!(index < self.allocated.get(), "resolved a data frame or uncleared tag");
-        assert_eq!(self.freed.get() & (1 << index), 0, "resolved a freed table");
-        index
+        unsafe { TreeView::from_root(PhysAddr::from(0x1000usize), PageLevel::Level2) }
     }
 }
 
-// SAFETY: clones share allocation state and pin the same distinct aligned page storage.
+impl Drop for TreeFixture {
+    fn drop(&mut self) {
+        TREE_STATE.with(|active| {
+            let state = active.borrow_mut().take().expect("no active tree fixture");
+            assert!(Rc::ptr_eq(&state, &self.0));
+        });
+    }
+}
+
+impl TreeOwner {
+    fn active<R>(f: impl FnOnce(&TreeState) -> R) -> R {
+        TREE_STATE.with(|active| {
+            let active = active.borrow();
+            f(active.as_ref().expect("no active tree fixture"))
+        })
+    }
+}
+
+// SAFETY: the active fixture pins distinct aligned page storage for each test.
 unsafe impl PagingAllocator for TreeOwner {
-    fn paddr_to_vaddr(&self, paddr: PhysAddr) -> VirtAddr {
-        let index = self.page_index(paddr);
-        self.resolutions.set(self.resolutions.get() + 1);
-        VirtAddr::from(self.pages[index].get() as usize)
+    fn paddr_to_vaddr(paddr: PhysAddr) -> VirtAddr {
+        Self::active(|state| {
+            assert_eq!(paddr.bits() & 4095, 0);
+            let index = (paddr.bits() / 4096).checked_sub(1).expect("invalid table frame");
+            assert!(index < state.allocated.get(), "resolved a data frame or uncleared tag");
+            assert_eq!(state.freed.get() & (1 << index), 0, "resolved a freed table");
+            state.resolutions.set(state.resolutions.get() + 1);
+            VirtAddr::from(state.pages[index].get() as usize)
+        })
     }
 
-    fn vaddr_to_paddr(&self, vaddr: VirtAddr) -> PhysAddr {
-        self.inverse_resolutions.set(self.inverse_resolutions.get() + 1);
-        let index = self
-            .pages
-            .iter()
-            .position(|page| page.get() as usize == vaddr.bits())
-            .expect("address outside this owner");
-        PhysAddr::from((index + 1) * 4096)
+    fn vaddr_to_paddr(vaddr: VirtAddr) -> PhysAddr {
+        Self::active(|state| {
+            state.inverse_resolutions.set(state.inverse_resolutions.get() + 1);
+            let index = state
+                .pages
+                .iter()
+                .position(|page| page.get() as usize == vaddr.bits())
+                .expect("address outside this owner");
+            PhysAddr::from((index + 1) * 4096)
+        })
     }
 
-    fn allocate_table_page(&self) -> Result<PhysAddr, PagingError> {
-        let index = self.allocated.get();
-        if index == self.pages.len() {
-            return Err(PagingError::AllocFrame);
-        }
-        self.allocated.set(index + 1);
-        Ok(PhysAddr::from((index + 1) * 4096))
+    fn allocate_table_page() -> Result<PhysAddr, PagingError> {
+        Self::active(|state| {
+            let index = state.allocated.get();
+            if index == state.pages.len() {
+                return Err(PagingError::AllocFrame);
+            }
+            state.allocated.set(index + 1);
+            Ok(PhysAddr::from((index + 1) * 4096))
+        })
     }
 
-    unsafe fn deallocate_table_page(&self, paddr: PhysAddr) {
-        let index = self.page_index(paddr);
-        assert_ne!(index, 0, "free_children must retain the root");
-        for (page_index, page) in self.pages.iter().enumerate() {
-            let level = [
-                PageLevel::Level2,
-                PageLevel::Level1,
-                PageLevel::Level0,
-                PageLevel::Level3,
-                PageLevel::Level4,
-            ][page_index];
-            for slot in 0..ENTRY_COUNT {
-                // SAFETY: this quiesced fixture retains the backing storage of its arena.
-                let entry = unsafe { TreePage::read_entry(page.get(), slot) };
-                assert!(!entry.is_table(level) || entry.address() != paddr.bits());
-                if page_index == index && self.require_clear_on_free.get() {
-                    assert!(entry.is_clear());
+    unsafe fn deallocate_table_page(paddr: PhysAddr) {
+        Self::active(|state| {
+            let index = (paddr.bits() / 4096) - 1;
+            assert_ne!(index, 0, "free_children must retain the root");
+            for (page_index, page) in state.pages.iter().enumerate() {
+                let level = [
+                    PageLevel::Level2,
+                    PageLevel::Level1,
+                    PageLevel::Level0,
+                    PageLevel::Level3,
+                    PageLevel::Level4,
+                ][page_index];
+                for slot in 0..ENTRY_COUNT {
+                    // SAFETY: this quiesced fixture retains the backing storage of its arena.
+                    let entry = unsafe { TreePage::read_entry(page.get(), slot) };
+                    assert!(!entry.is_table(level) || entry.address() != paddr.bits());
+                    if page_index == index && state.require_clear_on_free.get() {
+                        assert!(entry.is_clear());
+                    }
                 }
             }
-        }
-        self.freed.set(self.freed.get() | (1 << index));
-        self.freed_order.set(self.freed_order.get() * 16 + index + 1);
+            state.freed.set(state.freed.get() | (1 << index));
+            state.freed_order.set(state.freed_order.get() * 16 + index + 1);
+        });
     }
 }
 
 #[test]
 fn child_views_inherit_the_resolver_and_derive_clean_physical_identity_and_level() {
-    let owner = TreeOwner::new();
+    let owner = TreeFixture::new();
     let root = owner.view();
     let middle = root.child(0).ok().expect("root table link");
     let leaf = middle.child(7).ok().expect("middle table link");
@@ -754,36 +770,24 @@ fn child_views_inherit_the_resolver_and_derive_clean_physical_identity_and_level
     assert_eq!(root.paddr().bits(), 0x1000);
     assert_eq!(middle.paddr().bits(), 0x2000);
     assert_eq!(leaf.paddr().bits(), 0x3000);
-    assert!(Rc::ptr_eq(&root.allocator().0, &owner.0));
-    assert!(Rc::ptr_eq(&root.allocator().0, &middle.allocator().0));
-    assert!(Rc::ptr_eq(&middle.allocator().0, &leaf.allocator().0));
     assert_eq!(owner.resolutions.get(), 3);
     assert_eq!(leaf.load(9).raw(), 0xd081);
     assert_ne!(owner.pages[2].get() as usize, leaf.paddr().bits());
 }
 
 #[test]
-fn views_borrow_clone_only_allocators_without_owning_table_frames() {
-    let owner = TreeOwner::new();
-    assert_eq!(size_of::<TreeView<'_>>(), 4 * size_of::<usize>());
-    assert_eq!(size_of::<AllocationView<'_>>(), 4 * size_of::<usize>());
-    assert_eq!(Rc::strong_count(&owner.0), 1);
+fn views_store_no_allocator_state() {
+    let owner = TreeFixture::new();
+    assert_eq!(size_of::<TreeView<'_>>(), 2 * size_of::<usize>());
+    assert_eq!(size_of::<AllocationView<'_>>(), 2 * size_of::<usize>());
     let root = owner.view();
-    assert!(Rc::ptr_eq(&root.allocator().0, &owner.0));
-    assert_eq!(Rc::strong_count(&owner.0), 1);
     assert_eq!(owner.resolutions.get(), 1);
     let middle = root.child(0).ok().expect("root table link");
-    assert!(Rc::ptr_eq(&middle.allocator().0, &owner.0));
-    assert_eq!(Rc::strong_count(&owner.0), 1);
     assert_eq!(owner.resolutions.get(), 2);
     let leaf = middle.child(7).ok().expect("middle table link");
-    assert!(Rc::ptr_eq(&leaf.allocator().0, &owner.0));
-    assert_eq!(Rc::strong_count(&owner.0), 1);
     assert_eq!(owner.resolutions.get(), 3);
     assert_eq!(owner.inverse_resolutions.get(), 0);
-    assert_eq!(Rc::strong_count(&owner.0), 1);
     assert_eq!(leaf.load(9).raw(), 0xd081);
-    assert_eq!(Rc::strong_count(&owner.0), 1);
     assert_eq!(owner.allocated.get(), 5);
     assert_eq!(owner.freed.get(), 0);
     assert_eq!(owner.resolutions.get(), 3);
@@ -792,28 +796,24 @@ fn views_borrow_clone_only_allocators_without_owning_table_frames() {
 
 #[test]
 fn walk_retains_the_stopping_node_and_tree_borrow() {
-    let owner = TreeOwner::new();
+    let owner = TreeFixture::new();
     let address = VirtAddr::from(7 * PageLevel::Level1.size() + 9 * PageLevel::Level0.size());
     let observed = {
         let root = owner.view();
         let observed = root.walk(address);
-        assert_eq!(Rc::strong_count(&owner.0), 1);
         assert_eq!(owner.resolutions.get(), 3);
         assert_eq!(owner.inverse_resolutions.get(), 0);
         observed
     };
-    assert_eq!(Rc::strong_count(&owner.0), 1);
     assert_eq!(owner.freed.get(), 0);
     assert_eq!(observed.page.level(), PageLevel::Level0);
     assert_eq!(observed.entry().load().raw(), 0xd081);
     assert_eq!(observed.index, 9);
-    assert!(Rc::ptr_eq(&observed.page.allocator().0, &owner.0));
-    assert_eq!(Rc::strong_count(&owner.0), 1);
 }
 
 #[test]
 fn walk_retains_the_stopping_node_without_inverse_resolution() {
-    let owner = TreeOwner::new();
+    let owner = TreeFixture::new();
     let root = owner.view();
     assert_eq!(owner.resolutions.get(), 1);
     assert_eq!(owner.inverse_resolutions.get(), 0);
@@ -847,8 +847,8 @@ fn walk_supports_every_root_level_and_retains_nonpresent_metadata() {
         let owner = Owner::new();
         let paddr = PhysAddr::from(owner.memory.get() as usize);
         // SAFETY: an empty initialized page is a valid root at each tested level.
-        let view = unsafe { View::from_root(&owner.allocator, paddr, level) };
-        assert_eq!(size_of::<View<'_>>(), 4 * size_of::<usize>());
+        let view = unsafe { View::from_root(paddr, level) };
+        assert_eq!(size_of::<View<'_>>(), 2 * size_of::<usize>());
         assert_eq!(view.level(), level);
         assert_eq!(view.paddr(), paddr);
         view.store(0, Entry::from_bits(0x1000));
@@ -867,7 +867,7 @@ fn walk_supports_every_root_level_and_retains_nonpresent_metadata() {
 
 #[test]
 fn high_roots_walk_through_each_child_level_to_the_leaf() {
-    let owner = TreeOwner::new();
+    let owner = TreeFixture::new();
     let flags = <TreeArch as ArchPagingMeta>::PTFlags::parent_flags();
     // SAFETY: neither additional root has been published or viewed.
     unsafe {
@@ -877,10 +877,8 @@ fn high_roots_walk_through_each_child_level_to_the_leaf() {
             .write(TreeEntry::new_table(PhysAddr::from(0x4000usize), flags));
     }
     // SAFETY: these roots extend the same pinned, initialized fixture tree.
-    let root3 =
-        unsafe { TreeView::from_root(&owner, PhysAddr::from(0x4000usize), PageLevel::Level3) };
-    let root4 =
-        unsafe { TreeView::from_root(&owner, PhysAddr::from(0x5000usize), PageLevel::Level4) };
+    let root3 = unsafe { TreeView::from_root(PhysAddr::from(0x4000usize), PageLevel::Level3) };
+    let root4 = unsafe { TreeView::from_root(PhysAddr::from(0x5000usize), PageLevel::Level4) };
     assert_eq!(root3.level(), PageLevel::Level3);
     assert_eq!(root4.level(), PageLevel::Level4);
     let address = VirtAddr::from(7 * PageLevel::Level1.size() + 9 * PageLevel::Level0.size());
@@ -894,7 +892,7 @@ fn high_roots_walk_through_each_child_level_to_the_leaf() {
 
 #[test]
 fn child_lookup_never_resolves_huge_absent_or_level_zero_entries() {
-    let owner = TreeOwner::new();
+    let owner = TreeFixture::new();
     let root = owner.view();
     for (index, expected) in [(1, 0x8000_0081), (2, 0xd080), (3, 0)] {
         assert_eq!(root.child(index).err().expect("stopping entry").raw(), expected);
@@ -916,7 +914,7 @@ fn child_lookup_never_resolves_huge_absent_or_level_zero_entries() {
 
 #[test]
 fn a_walk_result_observes_later_publication_and_continues_from_its_node() {
-    let owner = TreeOwner::new();
+    let owner = TreeFixture::new();
     let root = owner.view();
     let stopped = root.walk(VirtAddr::from(PageLevel::Level2.size()));
     let snapshot = stopped.entry().load();
@@ -936,7 +934,7 @@ fn a_walk_result_observes_later_publication_and_continues_from_its_node() {
 
 #[test]
 fn derived_teardown_unlinks_empty_children_before_freeing_and_retains_data_frames() {
-    let owner = TreeOwner::new();
+    let owner = TreeFixture::new();
     let root = owner.view();
     // SAFETY: the fixture is exclusively accessed and no child view has escaped.
     unsafe { free_children(&root, |_| true) };
@@ -951,7 +949,7 @@ fn derived_teardown_unlinks_empty_children_before_freeing_and_retains_data_frame
 
 #[test]
 fn teardown_applies_ownership_only_at_the_supplied_root() {
-    let owner = TreeOwner::new();
+    let owner = TreeFixture::new();
     let root = owner.view();
     let table = root.load(0).raw();
     // SAFETY: selected slots are exclusively owned, with no installed hardware walks.
@@ -966,7 +964,7 @@ fn teardown_applies_ownership_only_at_the_supplied_root() {
 
 #[test]
 fn path_reclamation_distinguishes_absent_metadata_from_clear_words() {
-    let owner = TreeOwner::new();
+    let owner = TreeFixture::new();
     owner.require_clear_on_free.set(false);
     let root = owner.view();
     {
@@ -987,7 +985,7 @@ fn path_reclamation_distinguishes_absent_metadata_from_clear_words() {
 
 #[test]
 fn range_reclamation_preserves_outside_mappings_and_skipped_root_entries() {
-    let owner = TreeOwner::new();
+    let owner = TreeFixture::new();
     let root = owner.view();
     {
         let middle = root.child(0).ok().expect("middle table");
@@ -1058,7 +1056,7 @@ fn leaf_root_reclamation_never_frees_or_clears_data_mappings() {
 #[test]
 #[should_panic(expected = "index <")]
 fn child_lookup_checks_bounds_before_reading() {
-    let owner = TreeOwner::new();
+    let owner = TreeFixture::new();
     let _ = owner.view().child(ENTRY_COUNT);
 }
 
@@ -1222,7 +1220,6 @@ fn exchanging_two_confidentiality_tags_uses_a_barrier_and_retains_history() {
     for (shared, new_tag) in [(true, SHARED), (false, PRIVATE)] {
         let flush = unsafe {
             PTPage::<DualArch, NoAllocator>::edit_leaf(
-                &NoAllocator,
                 slot,
                 PageLevel::Level0,
                 VirtAddr::from(0x2000usize),

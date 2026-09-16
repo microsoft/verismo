@@ -141,22 +141,18 @@ fn assert_all_reclaimed(arena: &Arena) {
 fn fixture<L: LevelSpec>() -> (Arc<Arena>, Table<L>) {
     let arena = Arena::new(ARENA);
     #[cfg(feature = "concurrent")]
-    let table =
-        Table::new(Allocator(arena.clone()), WholeTreeLock::default(), common::flags()).unwrap();
+    let table = Table::new(WholeTreeLock::default(), common::flags()).unwrap();
     #[cfg(not(feature = "concurrent"))]
-    let table = Table::new(Allocator(arena.clone()), common::flags()).unwrap();
+    let table = Table::new(common::flags()).unwrap();
     (arena, table)
 }
 
-unsafe fn adopt<L: LevelSpec>(
-    allocator: Allocator,
-    root: PhysAddr,
-) -> Result<Table<L>, PagingError> {
+unsafe fn adopt<L: LevelSpec>(root: PhysAddr) -> Result<Table<L>, PagingError> {
     #[cfg(feature = "concurrent")]
-    return unsafe { Table::from_root(allocator, WholeTreeLock::default(), root) };
+    return unsafe { Table::from_root(WholeTreeLock::default(), root) };
     #[cfg(not(feature = "concurrent"))]
     unsafe {
-        Table::from_root(allocator, root)
+        Table::from_root(root)
     }
 }
 
@@ -239,13 +235,13 @@ macro_rules! ad_tests {
                         .map_4k(address, PhysAddr::from(FRAME), common::flags(), false)
                         .unwrap();
                     #[cfg(feature = "concurrent")]
-                    let (allocator, _locks, root) = original.leak();
+                    let (_locks, root) = original.leak();
                     #[cfg(not(feature = "concurrent"))]
-                    let (allocator, root) = original.leak();
+                    let root = original.leak();
                     // SAFETY: this leaked tree has no controllers or hardware users.
                     let before = unsafe { clear_history_before_import(root, L::LEVEL) };
                     // SAFETY: ownership transfers; no hardware runs, so no cache invalidation is needed.
-                    let imported = unsafe { $adopt::<L>(allocator, root) }.unwrap();
+                    let imported = unsafe { $adopt::<L>(root) }.unwrap();
                     assert_words(&before, published_bits);
                     assert_eq!(imported.phys_addr(address), Ok(PhysAddr::from(FRAME)));
                     assert_eq!(imported.validate_page_table(), Ok(()));
@@ -259,13 +255,12 @@ macro_rules! ad_tests {
             #[test]
             fn populate_normalizes_new_subtrees_but_not_rejected_or_identical_attachments() {
                 let (arena, mut table) = $fixture::<Lvl<3>>();
-                let allocator = Allocator(arena.clone());
                 let address = VirtAddr::from(BASE);
                 let index = entry_index(address, PageLevel::Level3);
                 assert_eq!(table.next_table_pa(index), None);
-                let (upper, upper_pa) = Page::alloc(&allocator).unwrap();
-                let (middle, middle_pa) = Page::alloc(&allocator).unwrap();
-                let (leaf, leaf_pa) = Page::alloc(&allocator).unwrap();
+                let (upper, upper_pa) = Page::alloc().unwrap();
+                let (middle, middle_pa) = Page::alloc().unwrap();
+                let (leaf, leaf_pa) = Page::alloc().unwrap();
                 // SAFETY: these three freshly allocated pages are private and exclusively owned.
                 unsafe {
                     Page::entry_ptr_mut(upper, entry_index(address, PageLevel::Level2))
@@ -286,7 +281,7 @@ macro_rules! ad_tests {
                 assert_eq!(unsafe { table.populate(index, upper_pa) }, Ok(false));
                 assert_words(&before, core::convert::identity);
 
-                let (rejected, rejected_pa) = Page::alloc(&allocator).unwrap();
+                let (rejected, rejected_pa) = Page::alloc().unwrap();
                 // SAFETY: the candidate is a private level-two table with one huge data mapping.
                 unsafe {
                     Page::entry_ptr_mut(rejected, 0).write(Entry::from_bits(FRAME | 0x81));
@@ -299,7 +294,7 @@ macro_rules! ad_tests {
                 assert_eq!(table.next_table_pa(index), Some(upper_pa));
                 assert!(arena.freed().is_empty());
                 // SAFETY: rejection retains this unlinked candidate, which has no child tables.
-                unsafe { allocator.deallocate_table_page(rejected_pa) };
+                unsafe { Allocator::deallocate_table_page(rejected_pa) };
                 drop(table);
                 assert_all_reclaimed(&arena);
             }
@@ -307,8 +302,7 @@ macro_rules! ad_tests {
             #[test]
             fn rejected_imports_do_not_normalize_or_free_the_caller_owned_root() {
                 let arena = Arena::new(ARENA);
-                let allocator = Allocator(arena.clone());
-                let (page, root) = Page::alloc(&allocator).unwrap();
+                let (page, root) = Page::alloc().unwrap();
                 let absent = entry_index(VirtAddr::from(root.bits()), PageLevel::Level0);
                 let present = (absent + 1) % Page::COUNT;
                 // SAFETY: this newly allocated root is private and all accesses are quiesced.
@@ -316,7 +310,7 @@ macro_rules! ad_tests {
                     Page::entry_ptr_mut(page, absent).write(Entry::from_bits(0xdead_0020));
                     Page::entry_ptr_mut(page, present).write(Entry::from_bits(FRAME | 1));
                 }
-                let result = unsafe { $adopt::<Lvl<0>>(allocator.clone(), root) };
+                let result = unsafe { $adopt::<Lvl<0>>(root) };
                 assert!(matches!(result, Err(PagingError::TablePageNotSelfMapped)));
                 assert_eq!(
                     unsafe { Entry::load_entry(Page::entry_ptr(page, absent)) }.raw(),
@@ -328,7 +322,7 @@ macro_rules! ad_tests {
                 );
                 assert!(arena.freed().is_empty());
                 // SAFETY: rejection left this unlinked root under the original allocator's ownership.
-                unsafe { allocator.deallocate_table_page(root) };
+                unsafe { Allocator::deallocate_table_page(root) };
                 assert_all_reclaimed(&arena);
             }
         }
@@ -342,20 +336,14 @@ ad_tests!(selected_controller, fixture, adopt);
 fn borrowed_import_normalizes_shared_descendants_only_while_all_controllers_are_quiesced() {
     let arena = Arena::new(ARENA);
     let locks = WholeTreeLock::default();
-    let kernel =
-        Table::<Lvl<3>>::new(Allocator(arena.clone()), locks.clone(), common::flags()).unwrap();
+    let kernel = Table::<Lvl<3>>::new(locks.clone(), common::flags()).unwrap();
     kernel.map_4k(VirtAddr::from(BASE), PhysAddr::from(FRAME), common::flags(), false).unwrap();
     // SAFETY: the inactive roots share all prefixes in the same lock domain.
-    let user = unsafe {
-        Table::new_from_sharing_top::<0, 512>(Allocator(arena.clone()), locks.clone(), &kernel)
-    }
-    .unwrap();
+    let user = unsafe { Table::new_from_sharing_top::<0, 512>(locks.clone(), &kernel) }.unwrap();
     let root = user.root_paddr();
     // SAFETY: both original controllers are unused until normalization finishes; no hardware ran.
     let before = unsafe { clear_history_before_import(root, PageLevel::Level3) };
-    let imported = ManuallyDrop::new(
-        unsafe { Table::<Lvl<3>>::from_root(Allocator(arena.clone()), locks, root) }.unwrap(),
-    );
+    let imported = ManuallyDrop::new(unsafe { Table::<Lvl<3>>::from_root(locks, root) }.unwrap());
     assert_words(&before, published_bits);
     assert_eq!(kernel.phys_addr(VirtAddr::from(BASE)), Ok(PhysAddr::from(FRAME)));
     drop(ManuallyDrop::into_inner(imported).leak());
