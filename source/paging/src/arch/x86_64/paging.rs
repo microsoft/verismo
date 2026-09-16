@@ -89,23 +89,28 @@ impl<P: X86PagingParams> ArchPagingMeta for X86Paging<P> {
         0x000f_ffff_ffff_f000
     }
 
+    #[inline(always)]
     fn split_leaf_attributes(entry: usize, level: PageLevel) -> usize {
         let pat = (entry >> 12) & 1;
         pat << if level == PageLevel::Level1 { 7 } else { 12 }
     }
 
+    #[inline(always)]
     fn leaf_attribute_mask(level: PageLevel) -> usize {
         1 << if level.is_leaf() { 7 } else { 12 }
     }
 
+    #[inline(always)]
     fn accessed_dirty_mask() -> usize {
         (PTEntryFlags::ACCESSED | PTEntryFlags::DIRTY).bits()
     }
 
+    #[inline(always)]
     fn requires_break_before_make(_old: usize, _new: usize, _level: PageLevel) -> bool {
         false
     }
 
+    #[inline(always)]
     fn supported_flags() -> Self::PTFlags {
         P::supported_flags()
     }

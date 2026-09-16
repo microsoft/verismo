@@ -36,6 +36,7 @@ pub trait GenericPageTableFlags:
     fn self_map_table_flags() -> Self;
 
     /// The union of two flag words.
+    #[inline(always)]
     fn with(self, other: Self) -> Self {
         Self::from_bits_retain(self.bits() | other.bits())
     }
@@ -43,6 +44,7 @@ pub trait GenericPageTableFlags:
     /// `self` with every flag of `other` cleared. Splitting a large mapping
     /// needs it: the pieces inherit the permissions of the entry they came
     /// from, but not its size bit.
+    #[inline(always)]
     fn without(self, other: Self) -> Self {
         Self::from_bits_retain(self.bits() & !other.bits())
     }
@@ -131,6 +133,7 @@ pub trait ArchPagingMeta: 'static + Copy {
     }
 
     /// Filter optional flags, retaining structural bits and unnamed extensions.
+    #[inline(always)]
     fn filter_flags(flags: Self::PTFlags) -> Self::PTFlags {
         let structural = Self::PTFlags::present_bit() | Self::PTFlags::huge_bit();
         let disabled = Self::PTFlags::all().bits() & !Self::supported_flags().bits() & !structural;

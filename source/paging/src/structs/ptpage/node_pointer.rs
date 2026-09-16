@@ -20,6 +20,8 @@ pub(crate) struct PTPagePointer<'tree, A: ArchPagingMeta, P: PagingAllocator> {
 pub(crate) struct WalkResult<'tree, A: ArchPagingMeta, P: PagingAllocator> {
     pub(crate) page: PTPagePointer<'tree, A, P>,
     pub(crate) index: usize,
+    #[cfg(feature = "concurrent")]
+    pub(crate) observed: PTEntry<A>,
 }
 
 impl<'tree, A: ArchPagingMeta, P: PagingAllocator> WalkResult<'tree, A, P> {
@@ -87,14 +89,30 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
         let observed = self.load(index);
         match self.child_from_observed(observed) {
             Ok(child) => Ok(child),
-            Err(_) => Err(WalkResult { page: self, index }),
+            Err(observed) => {
+                #[cfg(not(feature = "concurrent"))]
+                let _ = observed;
+                Err(WalkResult {
+                    page: self,
+                    index,
+                    #[cfg(feature = "concurrent")]
+                    observed,
+                })
+            }
         }
     }
 
     #[inline(always)]
     fn finish(self, vaddr: VirtAddr) -> WalkResult<'tree, A, P> {
         let index = entry_index(vaddr, self.level);
-        WalkResult { page: self, index }
+        #[cfg(feature = "concurrent")]
+        let observed = self.load(index);
+        WalkResult {
+            page: self,
+            index,
+            #[cfg(feature = "concurrent")]
+            observed,
+        }
     }
 
     /// Returns the exact stopping observation, even if a table is published next.

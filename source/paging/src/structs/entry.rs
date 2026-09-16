@@ -10,10 +10,7 @@ use crate::structs::address::{Address, PhysAddr};
 use crate::structs::arch_contract::{ArchPagingMeta, GenericPageTableFlags};
 use crate::structs::level::PageLevel;
 
-/// A single hardware page-table entry: a raw machine word, typed by the
-/// architecture whose bit layout it follows. Any word is a well-formed value,
-/// so the type carries no invariant of its own.
-/// One architecture-typed page-table entry word.
+/// A raw page-table entry word typed by the architecture whose layout it follows.
 #[repr(transparent)]
 #[derive(Debug)]
 pub struct PTEntry<A: ArchPagingMeta> {
@@ -42,6 +39,7 @@ impl<A: ArchPagingMeta> PTEntry<A> {
         Self { val, dummy: PhantomData }
     }
 
+    #[inline(always)]
     pub(crate) fn for_publication(self) -> Self {
         #[cfg(not(feature = "use_ad"))]
         if self.present() {
@@ -131,6 +129,7 @@ impl<A: ArchPagingMeta> PTEntry<A> {
     /// An entry holding `addr` with `flags`. Flag bits that fall inside the
     /// address field are dropped, so the address survives whatever the caller
     /// passes. Without `use_ad`, present entries also have A/D preset.
+    #[inline(always)]
     pub fn new(addr: PhysAddr, flags: A::PTFlags) -> Self {
         let val = (addr.bits() & A::address_mask()) | (flags.bits() & !A::address_mask());
         Self::from_bits(val).for_publication()
@@ -139,6 +138,7 @@ impl<A: ArchPagingMeta> PTEntry<A> {
     /// An entry pointing at a table page: present and not huge, whatever
     /// `flags` says, since those two bits are what "points at a table" means.
     /// Without `use_ad`, A/D bits are preset.
+    #[inline(always)]
     pub fn new_table(addr: PhysAddr, flags: A::PTFlags) -> Self {
         let flag_bits = flags.bits() & !A::address_mask() & !A::PTFlags::huge_bit();
         let val = (addr.bits() & A::address_mask()) | flag_bits | A::PTFlags::present_bit();
@@ -148,6 +148,7 @@ impl<A: ArchPagingMeta> PTEntry<A> {
     /// An entry mapping a page rather than pointing at a table. The large-page
     /// bit is left to `flags`, since above the leaf level it is what stops the
     /// hardware reading this entry as a table pointer.
+    #[inline(always)]
     pub fn new_leaf(addr: PhysAddr, flags: A::PTFlags) -> Self {
         Self::new(addr, flags)
     }
@@ -159,18 +160,21 @@ impl<A: ArchPagingMeta> PTEntry<A> {
         Self { val: self.val | A::PTFlags::huge_bit(), dummy: PhantomData }
     }
 
+    #[inline(always)]
     pub(crate) fn with_leaf_flags(self, level: PageLevel, flags: A::PTFlags) -> Self {
         let keep = A::address_mask() | A::leaf_attribute_mask(level) | A::accessed_dirty_mask();
         let size = if level.is_leaf() { 0 } else { A::PTFlags::huge_bit() };
         Self::from_bits((self.val & keep) | (flags.bits() & !keep & !A::PTFlags::huge_bit()) | size)
     }
 
+    #[inline(always)]
     pub(crate) fn split_child(self, level: PageLevel, index: usize) -> Self {
         let child = level.child().expect("cannot split a smallest leaf");
         let base = self.paddr_field() & !(level.size() - 1);
-        let flags =
-            if child.is_leaf() { self.flags().without(A::PTFlags::HUGE) } else { self.flags() };
-        let entry = Self::new(PhysAddr::from(base + index * child.size()), flags);
+        let huge = if child.is_leaf() { A::PTFlags::huge_bit() } else { 0 };
+        let flags = self.raw() & !A::address_mask() & !huge;
+        let address = base + index * child.size();
+        let entry = Self::from_bits((address & A::address_mask()) | flags).for_publication();
         Self::from_bits(entry.raw() | A::split_leaf_attributes(self.raw(), level))
     }
 

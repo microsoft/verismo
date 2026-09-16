@@ -280,7 +280,7 @@ where
         let mut position = self.root_view().walk(vaddr);
         for _ in 0..=position.page.level().depth() {
             let level = position.page.level();
-            let entry = position.entry().load();
+            let entry = position.observed;
             if !entry.is_table(level) {
                 return MappingSnapshot { entry, level };
             }
