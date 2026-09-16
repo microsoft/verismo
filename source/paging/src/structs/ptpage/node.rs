@@ -829,19 +829,37 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
                     Ok(MayNeedFlush::none())
                 }
             }
-            LeafUpdate::Protect(_) => loop {
-                let desired = update.apply(current, level);
-                if desired.raw() == current.raw() {
-                    return Ok(MayNeedFlush::none());
-                }
-                // Permission replacement must preserve A/D that raced with this snapshot.
-                match slot.compare_exchange(current, desired) {
-                    Ok(_) => return Ok(MayNeedFlush::new(vaddr, level)),
-                    Err(entry) => {
-                        current = entry;
-                    }
-                }
-            },
+            LeafUpdate::Protect(flags) => {
+                // SAFETY: the caller excludes writers and `current` is the locked leaf snapshot.
+                Ok(unsafe {
+                    Self::protect_leaf(slot, current, level, vaddr, A::filter_flags(flags))
+                })
+            }
+        }
+    }
+
+    /// # Safety
+    /// `slot` must remain allocated at `level` with software writers excluded,
+    /// and `current` must be its locked leaf observation.
+    #[inline(always)]
+    pub(crate) unsafe fn protect_leaf(
+        slot: PTEntryRef<'_, A>,
+        mut current: PTEntry<A>,
+        level: PageLevel,
+        vaddr: VirtAddr,
+        flags: A::PTFlags,
+    ) -> MayNeedFlush<A::TlbFlushTok> {
+        loop {
+            let desired = current.with_leaf_flags(level, flags);
+            if desired.raw() == current.raw() {
+                return MayNeedFlush::none();
+            }
+            // Permission replacement must preserve A/D that raced with this snapshot.
+            match slot.compare_exchange(current, desired) {
+                Ok(_) if level == PageLevel::Level0 => return MayNeedFlush::new_4k(vaddr),
+                Ok(_) => return MayNeedFlush::new(vaddr, level),
+                Err(entry) => current = entry,
+            }
         }
     }
 

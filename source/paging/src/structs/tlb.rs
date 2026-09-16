@@ -1,8 +1,9 @@
 //! Translation invalidation. Page-size transitions flush synchronously before
 //! publishing replacements; [`MayNeedFlush`] records any remaining obligation
 //! for the caller to discharge.
-use crate::structs::address::VirtAddr;
+use crate::structs::address::{VirtAddr, LOW_CANONICAL_END};
 use crate::structs::level::PageLevel;
+use crate::structs::sizes::{PageSize, Size4KiB};
 
 /// An opaque description of translations to invalidate.
 ///
@@ -67,6 +68,19 @@ impl<T: TlbFlush> MayNeedFlush<T> {
                 Self::new_range(start.into(), end.into(), level)
             }
             _ => Self::all(),
+        }
+    }
+
+    pub(crate) fn new_4k(vaddr: VirtAddr) -> Self {
+        const SIZE: usize = Size4KiB::SIZE;
+
+        let start = vaddr.as_usize();
+        if start == LOW_CANONICAL_END - SIZE {
+            return Self::all();
+        }
+        match start.checked_add(SIZE) {
+            Some(end) => Self::new_range(vaddr, VirtAddr::new(end), PageLevel::Level0),
+            None => Self::all(),
         }
     }
 

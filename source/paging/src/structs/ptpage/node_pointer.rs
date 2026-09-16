@@ -20,6 +20,7 @@ pub(crate) struct PTPagePointer<'tree, A: ArchPagingMeta, P: PagingAllocator> {
 pub(crate) struct WalkResult<'tree, A: ArchPagingMeta, P: PagingAllocator> {
     pub(crate) page: PTPagePointer<'tree, A, P>,
     pub(crate) index: usize,
+    page_paddr: Option<PhysAddr>,
     #[cfg(feature = "concurrent")]
     pub(crate) observed: PTEntry<A>,
 }
@@ -27,6 +28,11 @@ pub(crate) struct WalkResult<'tree, A: ArchPagingMeta, P: PagingAllocator> {
 impl<'tree, A: ArchPagingMeta, P: PagingAllocator> WalkResult<'tree, A, P> {
     pub(crate) fn entry(&self) -> PTEntryRef<'tree, A> {
         self.page.entry(self.index)
+    }
+
+    #[cfg(feature = "concurrent")]
+    pub(crate) fn page_paddr(&self) -> PhysAddr {
+        self.page_paddr.unwrap_or_else(|| self.page.paddr())
     }
 }
 
@@ -68,26 +74,36 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
     #[inline(always)]
     pub(crate) fn walk(&self, vaddr: VirtAddr) -> WalkResult<'tree, A, P> {
         let page = Self { page: self.page, level: self.level, marker: PhantomData };
+        let mut page_paddr = None;
 
         macro_rules! descend {
             ($page:expr, $level:expr, $child:expr) => {
                 match $page.step_at(vaddr, $level, $child) {
-                    Ok(child) => child,
-                    Err(result) => return result,
+                    Ok((child, child_paddr)) => {
+                        page_paddr = Some(child_paddr);
+                        child
+                    }
+                    Err(mut result) => {
+                        result.page_paddr = page_paddr;
+                        return result;
+                    }
                 }
             };
         }
 
         match page.level {
-            PageLevel::Level0 => page.finish_at(vaddr, PageLevel::Level0),
-            PageLevel::Level1 => descend!(page, PageLevel::Level1, PageLevel::Level0)
-                .finish_at(vaddr, PageLevel::Level0),
+            PageLevel::Level0 => page.finish_at(vaddr, PageLevel::Level0, page_paddr),
+            PageLevel::Level1 => descend!(page, PageLevel::Level1, PageLevel::Level0).finish_at(
+                vaddr,
+                PageLevel::Level0,
+                page_paddr,
+            ),
             PageLevel::Level2 => descend!(
                 descend!(page, PageLevel::Level2, PageLevel::Level1),
                 PageLevel::Level1,
                 PageLevel::Level0
             )
-            .finish_at(vaddr, PageLevel::Level0),
+            .finish_at(vaddr, PageLevel::Level0, page_paddr),
             PageLevel::Level3 => descend!(
                 descend!(
                     descend!(page, PageLevel::Level3, PageLevel::Level2),
@@ -97,7 +113,7 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
                 PageLevel::Level1,
                 PageLevel::Level0
             )
-            .finish_at(vaddr, PageLevel::Level0),
+            .finish_at(vaddr, PageLevel::Level0, page_paddr),
             PageLevel::Level4 => descend!(
                 descend!(
                     descend!(
@@ -111,7 +127,7 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
                 PageLevel::Level1,
                 PageLevel::Level0
             )
-            .finish_at(vaddr, PageLevel::Level0),
+            .finish_at(vaddr, PageLevel::Level0, page_paddr),
         }
     }
 
@@ -121,18 +137,20 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
         vaddr: VirtAddr,
         level: PageLevel,
         child_level: PageLevel,
-    ) -> Result<Self, WalkResult<'tree, A, P>> {
+    ) -> Result<(Self, PhysAddr), WalkResult<'tree, A, P>> {
         debug_assert_eq!(self.level, level);
         let index = entry_index(vaddr, level);
         let observed = self.load(index);
         if observed.is_table(level) {
-            Ok(Self::resolve(PhysAddr::from(observed.address()), child_level))
+            let paddr = PhysAddr::from(observed.address());
+            Ok((Self::resolve(paddr, child_level), paddr))
         } else {
             #[cfg(not(feature = "concurrent"))]
             let _ = observed;
             Err(WalkResult {
                 page: self,
                 index,
+                page_paddr: None,
                 #[cfg(feature = "concurrent")]
                 observed,
             })
@@ -140,7 +158,12 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
     }
 
     #[inline(always)]
-    fn finish_at(self, vaddr: VirtAddr, level: PageLevel) -> WalkResult<'tree, A, P> {
+    fn finish_at(
+        self,
+        vaddr: VirtAddr,
+        level: PageLevel,
+        page_paddr: Option<PhysAddr>,
+    ) -> WalkResult<'tree, A, P> {
         debug_assert_eq!(self.level, level);
         let index = entry_index(vaddr, level);
         #[cfg(feature = "concurrent")]
@@ -148,6 +171,7 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
         WalkResult {
             page: self,
             index,
+            page_paddr,
             #[cfg(feature = "concurrent")]
             observed,
         }

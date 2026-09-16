@@ -206,6 +206,7 @@ impl PagingAdapter for CurrentAdapter {
         })
     }
 
+    #[inline(always)]
     fn protect_4k(&self, virtual_address: u64, writable: bool) {
         let flush = self
             .table

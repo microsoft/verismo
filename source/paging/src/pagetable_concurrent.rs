@@ -290,7 +290,7 @@ where
                 let child_level = level.child().unwrap();
                 let mut prepared = PTPageTree::<A, P>::new(child_level)?;
                 prepared.grow(vaddr, target, parent_flags)?;
-                let paddr = mapping.page.paddr();
+                let paddr = mapping.page_paddr();
                 {
                     // Declared after preparation so a losing path is reclaimed after unlocking.
                     let _guard = self.wperms.lock(paddr);
@@ -376,7 +376,7 @@ where
         let flags = A::filter_flags(flags);
         let parent_flags = A::filter_flags(parent_flags);
         let mapping = self.walk_or_alloc(vaddr, target, parent_flags)?;
-        let page = mapping.page.paddr();
+        let page = mapping.page_paddr();
         let _guard = self.wperms.lock(page);
         let entry = mapping.entry().load();
         if entry.is_table(mapping.page.level()) {
@@ -445,7 +445,7 @@ where
     fn unmap_inner(&self, vaddr: VirtAddr) -> (Option<PageLevel>, MayNeedFlush<A::TlbFlushTok>) {
         for _ in 0..=L::LEVEL.depth() {
             let mapping = self.root_view().walk(vaddr);
-            let page = mapping.page.paddr();
+            let page = mapping.page_paddr();
             let _guard = self.wperms.lock(page);
             let entry = mapping.entry().load();
             if entry.is_table(mapping.page.level()) {
@@ -478,7 +478,7 @@ where
             if mapping.page.level() < target {
                 return (None, MayNeedFlush::none());
             }
-            let page = mapping.page.paddr();
+            let page = mapping.page_paddr();
             let _guard = self.wperms.lock(page);
             let entry = mapping.entry().load();
             if entry.is_table(mapping.page.level()) {
@@ -524,6 +524,7 @@ where
     /// a larger leaf if needed. Frame, tags, PAT and A/D history are retained.
     /// A finer subtree is reported rather than overwritten.
     /// `all_cpus` selects the synchronous flush scope as in [`Self::split`].
+    #[inline(always)]
     pub fn mprotect(
         &self,
         vaddr: VirtAddr,
@@ -537,7 +538,34 @@ where
         if !vaddr.is_aligned(target.size()) {
             return Err(PagingError::InvalidAddress);
         }
+        if target == Self::SMALL {
+            return self.protect_4k(vaddr, A::filter_flags(flags), all_cpus);
+        }
         self.edit_leaf(vaddr, target, LeafUpdate::Protect(flags), all_cpus)
+    }
+
+    #[inline(always)]
+    fn protect_4k(
+        &self,
+        vaddr: VirtAddr,
+        flags: A::PTFlags,
+        all_cpus: bool,
+    ) -> Result<MayNeedFlush<A::TlbFlushTok>, PagingError> {
+        let mapping = self.root_view().walk(vaddr);
+        if mapping.page.level() != Self::SMALL {
+            return self.edit_leaf(vaddr, Self::SMALL, LeafUpdate::Protect(flags), all_cpus);
+        }
+
+        let page = mapping.page_paddr();
+        let _guard = self.wperms.lock(page);
+        let current = mapping.entry().load();
+        if !current.is_leaf(Self::SMALL) {
+            return Err(PagingError::NotMapped);
+        }
+        // SAFETY: the slot is pinned at Level0 and the content guard excludes writers.
+        Ok(unsafe {
+            PTPage::<A, P>::protect_leaf(mapping.entry(), current, Self::SMALL, vaddr, flags)
+        })
     }
 
     /// Protects a page-aligned range with per-entry effects, not a transaction.
@@ -688,7 +716,7 @@ where
             if mapping.page.level() < target {
                 return Err(PagingError::NotLeafEntry);
             }
-            let page = mapping.page.paddr();
+            let page = mapping.page_paddr();
             let _guard = self.wperms.lock(page);
             if mapping.entry().load().is_table(mapping.page.level()) {
                 continue;
