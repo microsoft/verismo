@@ -82,12 +82,14 @@ pub unsafe trait DirectMappedAllocator: 'static {
     /// The physical allocation region and the virtual address of its first byte.
     fn direct_map() -> (Range<PhysAddr>, VirtAddr);
 
+    /// A provider hook so monomorphization can erase conversion work for identity maps.
     #[inline(always)]
     fn resolve_paddr(paddr: PhysAddr) -> VirtAddr {
         let (physical, virtual_base) = Self::direct_map();
         virtual_base + (paddr.bits() - physical.start.bits())
     }
 
+    /// The inverse provider hook, avoiding generic direct-map arithmetic when unnecessary.
     #[inline(always)]
     fn resolve_vaddr(vaddr: VirtAddr) -> PhysAddr {
         let (physical, virtual_base) = Self::direct_map();
