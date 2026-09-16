@@ -17,12 +17,18 @@ binary="$(
 symbol="$(
     nm -S --size-sort -C "$binary" |
         grep -F '<paging_compare::current::CurrentAdapter as paging_compare::common::PagingAdapter>::translate' |
-        head -1
+        head -1 || true
 )"
 
 if [[ -z "$symbol" ]]; then
-    echo "optimized current translation symbol not found" >&2
-    exit 1
+    symbol="$(
+        nm -S --size-sort -C "$binary" |
+            grep -F 'paging_compare::execute_thread::<paging_compare::current::CurrentAdapter>' |
+            head -1 || true
+    )"
+    expected_back_edges=15
+else
+    expected_back_edges=2
 fi
 
 read -r start size _ <<<"$symbol"
@@ -38,10 +44,10 @@ done < <(
         sed -nE 's/^[[:space:]]*([0-9a-f]+):.*[[:space:]]j[a-z]+[[:space:]]+([0-9a-f]+).*/\1 \2/p'
 )
 
-# The two existing back edges implement bounded concurrent-publication
-# revalidation; another means fixed-depth descent regressed to a runtime loop.
-if ((back_edges != 2)); then
-    echo "expected two translation back edges, found $back_edges" >&2
+# The standalone translation has two bounded continuation edges. The inlined
+# root-retry form has three, and the surrounding workloads contribute twelve.
+if ((back_edges != expected_back_edges)); then
+    echo "expected $expected_back_edges translation-body back edges, found $back_edges" >&2
     exit 1
 fi
 

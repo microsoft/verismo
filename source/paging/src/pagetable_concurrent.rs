@@ -267,14 +267,13 @@ where
     /// authority to dereference or free the translated data frame.
     #[inline(always)]
     pub fn walk(&self, vaddr: VirtAddr) -> MappingSnapshot<A> {
-        let mut position = self.root_view().walk(vaddr);
-        for _ in 0..=position.page.level().depth() {
+        for _ in 0..=L::LEVEL.depth() {
+            let position = self.tree.walk(vaddr);
             let level = position.page.level();
             let entry = position.observed;
             if !entry.is_table(level) {
                 return MappingSnapshot { entry, level };
             }
-            position = position.page.walk(vaddr);
         }
         unreachable!("page-table snapshot walk exceeded the tree depth")
     }

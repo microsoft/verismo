@@ -308,7 +308,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, S: PagingOwnershipPoli
     }
 
     fn walk_entry(&self, vaddr: VirtAddr) -> (PTEntryRef<'_, A>, PageLevel) {
-        let observed = self.root_view().walk(vaddr);
+        let observed = self.tree.walk(vaddr);
         (observed.entry(), observed.page.level())
     }
 
@@ -318,6 +318,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, S: PagingOwnershipPoli
     }
 
     /// The frame `vaddr` translates to, at whatever page size maps it.
+    #[inline(always)]
     pub fn translate(&self, vaddr: VirtAddr) -> Result<Translation<A>, PagingError> {
         let mapping = self.walk(vaddr);
         let entry = mapping.read();
@@ -333,6 +334,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, S: PagingOwnershipPoli
     }
 
     /// The clean physical address `vaddr` translates to.
+    #[inline(always)]
     pub fn phys_addr(&self, vaddr: VirtAddr) -> Result<PhysAddr, PagingError> {
         self.translate(vaddr).map(|frame| frame.address())
     }

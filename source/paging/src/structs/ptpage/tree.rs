@@ -1,5 +1,6 @@
 use core::marker::PhantomData;
 
+use super::node_pointer::WalkResult;
 use super::{PTPage, PTPagePointer};
 use crate::structs::address::{PhysAddr, VirtAddr};
 use crate::structs::arch_contract::ArchPagingMeta;
@@ -95,6 +96,20 @@ impl<A: ArchPagingMeta, P: PagingAllocator, L: TreeLevel, S: PagingOwnershipPoli
     pub(crate) fn root(&self) -> PTPagePointer<'_, A, P> {
         // SAFETY: the owner borrow pins the initialized tree and its reachable tables.
         unsafe { PTPagePointer::from_root(self.root, L::level(&self.level)) }
+    }
+
+    #[inline(always)]
+    pub(crate) fn walk(&self, vaddr: VirtAddr) -> WalkResult<'_, A, P> {
+        let direct_map_offset = P::direct_map_offset();
+        // SAFETY: the owner borrow pins the initialized tree and its reachable tables.
+        let root = unsafe {
+            PTPagePointer::from_root_with_direct_map(
+                self.root,
+                L::level(&self.level),
+                direct_map_offset,
+            )
+        };
+        root.walk_with_direct_map(vaddr, direct_map_offset)
     }
 
     pub(crate) fn into_parts(self) -> (S, PhysAddr) {

@@ -50,6 +50,11 @@ unsafe impl DirectMappedAllocator for ArenaAllocator {
         (PhysAddr::from(arena.base())..PhysAddr::from(arena.end()), VirtAddr::from(arena.base()))
     }
 
+    #[inline(always)]
+    fn direct_map_offset() -> usize {
+        0
+    }
+
     fn allocate_table_page() -> Result<PhysAddr, PagingError> {
         Self::arena().allocate_page().map(PhysAddr::from).ok_or(PagingError::AllocFrame)
     }
@@ -171,6 +176,7 @@ impl PagingAdapter for CurrentAdapter {
         unsafe { flush.ignore() };
     }
 
+    #[inline(always)]
     fn translate(&self, virtual_address: u64) -> Option<u64> {
         self.table
             .phys_addr(VirtAddr::from(virtual_address as usize))

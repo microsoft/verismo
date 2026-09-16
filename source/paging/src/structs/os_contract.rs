@@ -52,6 +52,11 @@ pub enum PagingError {
 ///   previously been deallocated, no table links to it, and no software or
 ///   hardware access to it remains outstanding.
 pub unsafe trait PagingAllocator: 'static {
+    /// Captures a direct-map offset for one operation, when this provider has one.
+    fn direct_map_offset() -> Option<usize> {
+        None
+    }
+
     fn paddr_to_vaddr(paddr: PhysAddr) -> VirtAddr;
 
     fn vaddr_to_paddr(vaddr: VirtAddr) -> PhysAddr;
@@ -82,6 +87,12 @@ pub unsafe trait DirectMappedAllocator: 'static {
     /// The physical allocation region and the virtual address of its first byte.
     fn direct_map() -> (Range<PhysAddr>, VirtAddr);
 
+    #[inline(always)]
+    fn direct_map_offset() -> usize {
+        let (physical, virtual_base) = Self::direct_map();
+        virtual_base.bits().wrapping_sub(physical.start.bits())
+    }
+
     fn allocate_table_page() -> Result<PhysAddr, PagingError>;
 
     /// # Safety
@@ -97,6 +108,11 @@ pub unsafe trait DirectMappedAllocator: 'static {
 // SAFETY: the offset is fixed, so the two translations invert each other, and
 // the rest is deferred to an implementation that owes the same obligations.
 unsafe impl<T: DirectMappedAllocator> PagingAllocator for T {
+    #[inline(always)]
+    fn direct_map_offset() -> Option<usize> {
+        Some(<T as DirectMappedAllocator>::direct_map_offset())
+    }
+
     #[inline(always)]
     fn paddr_to_vaddr(paddr: PhysAddr) -> VirtAddr {
         let (physical, virtual_base) = T::direct_map();
