@@ -563,6 +563,7 @@ where
             return Err(PagingError::InvalidAddress);
         }
         if target == Self::SMALL {
+            self.tree.policy().check_address(L::LEVEL, vaddr)?;
             return self.protect_4k(vaddr, A::filter_flags(flags), all_cpus);
         }
         self.edit_leaf(vaddr, target, LeafUpdate::Protect(flags), all_cpus)

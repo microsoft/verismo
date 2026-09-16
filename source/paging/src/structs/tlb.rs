@@ -74,12 +74,14 @@ impl<T: TlbFlush> MayNeedFlush<T> {
     pub(crate) fn new_4k(vaddr: VirtAddr) -> Self {
         const SIZE: usize = Size4KiB::SIZE;
 
-        let start = vaddr.as_usize();
+        let start = vaddr.as_usize() & !(SIZE - 1);
         if start == LOW_CANONICAL_END - SIZE {
             return Self::all();
         }
         match start.checked_add(SIZE) {
-            Some(end) => Self::new_range(vaddr, VirtAddr::new(end), PageLevel::Level0),
+            Some(end) => {
+                Self::new_range(VirtAddr::new(start), VirtAddr::new(end), PageLevel::Level0)
+            }
             None => Self::all(),
         }
     }

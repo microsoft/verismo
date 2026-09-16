@@ -856,6 +856,13 @@ fn concurrent_kernel_updates_are_visible_through_an_existing_shared_subtree() {
     std::thread::scope(|scope| {
         scope.spawn(|| kernel.map_4k(addr, frame, common::flags(), false).unwrap()).join().unwrap();
         assert_eq!(user.phys_addr(addr), Ok(frame));
+        let acquired = locks.acquisitions();
+        assert_error(
+            user.mprotect(addr, SMALL_LEVEL, readonly(), true),
+            PagingError::PermissionDenied,
+        );
+        assert_eq!(locks.acquisitions(), acquired);
+        assert!(user.walk(addr).read().writable());
         scope
             .spawn(|| discharge(kernel.mprotect(addr, SMALL_LEVEL, readonly(), true).unwrap()))
             .join()
@@ -863,6 +870,12 @@ fn concurrent_kernel_updates_are_visible_through_an_existing_shared_subtree() {
         assert_readonly(user.walk(addr).read());
         scope.spawn(|| discharge(kernel.unmap(addr).unwrap().1)).join().unwrap();
         assert_eq!(user.phys_addr(addr), Err(PagingError::NotMapped));
+        let acquired = locks.acquisitions();
+        assert_error(
+            user.mprotect(addr, SMALL_LEVEL, common::flags(), true),
+            PagingError::PermissionDenied,
+        );
+        assert_eq!(locks.acquisitions(), acquired);
         scope
             .spawn(|| kernel.map_4k(addr, frame + PAGE, readonly(), false).unwrap())
             .join()

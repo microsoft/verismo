@@ -954,6 +954,34 @@ fn last_address_unmaps_and_splits_produce_nonwrapping_flush_scopes() {
 }
 
 #[test]
+fn unaligned_4k_unmaps_use_the_aligned_flush_scope() {
+    let cases = [
+        (
+            BASE,
+            FlushScope::Range {
+                start: VirtAddr::from(BASE),
+                end: VirtAddr::from(BASE + PAGE),
+                level: SMALL_LEVEL,
+            },
+        ),
+        ((1usize << 47) - PAGE, FlushScope::All),
+        (usize::MAX & !(PAGE - 1), FlushScope::All),
+    ];
+    for (start, expected) in cases {
+        for offset in [0, PAGE - 1] {
+            let (_arena, table, locks) = fixture(1);
+            let start = VirtAddr::from(start);
+            table.map_4k(start, PhysAddr::from(2 * HUGE), flags(), false).unwrap();
+            let (entry, flush) = table.unmap_4k(start + offset).unwrap();
+            assert!(entry.is_some());
+            assert_eq!(flush.scope().as_ref().map(|token| token.scope()), Some(expected));
+            discharge(flush);
+            locks.assert_balanced();
+        }
+    }
+}
+
+#[test]
 fn reclamation_waits_for_external_readers_and_frees_every_table_once() {
     let (arena, table, locks) = fixture(7);
     let root = table.root_paddr();
