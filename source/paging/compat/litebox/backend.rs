@@ -7,7 +7,7 @@ use paging::{
     address::{Address, PhysAddr as PagingPhysAddr, VirtAddr as PagingVirtAddr},
     level::{Lvl, PageLevel},
     os_contract::{PagingAllocator, PagingError},
-    pagetable::{KernelPageTable as ConcurrentPageTable, LockAllSpec, LockSpec},
+    pagetable::{KernelPageTable as ConcurrentPageTable, LockSpec},
     tlb::MayNeedFlush,
     FlushScope, PTEntryFlags, X86Paging, X86PagingParams, X86TlbFlushTok,
 };
@@ -132,15 +132,6 @@ unsafe impl LockSpec<()> for ContentLock {
     type Guard<'a> = SpinMutexGuard<'a, ()>;
 
     fn lock(&self, _: PagingPhysAddr) -> Self::Guard<'_> {
-        CONTENT_LOCK.lock()
-    }
-}
-
-// Page and whole-domain guards acquire the same mutex, never recursively.
-unsafe impl LockAllSpec<()> for ContentLock {
-    type AllGuard<'a> = SpinMutexGuard<'a, ()>;
-
-    fn lock_all(&self) -> Self::AllGuard<'_> {
         CONTENT_LOCK.lock()
     }
 }

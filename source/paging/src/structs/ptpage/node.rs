@@ -381,6 +381,8 @@ impl<A: ArchPagingMeta> Drop for InvalidatedLeaf<'_, A> {
 }
 
 /// An unpublished boundary split prepared for one partially covered huge leaf.
+#[cfg(any(not(feature = "concurrent"), test))]
+#[cfg_attr(feature = "concurrent", allow(dead_code))]
 struct RangeSplit<A: ArchPagingMeta, P: PagingAllocator> {
     base: usize,
     level: PageLevel,
@@ -432,6 +434,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
         start: usize,
         end: usize,
         visit: &mut impl FnMut(
+            PhysAddr,
             PTEntryRef<'tree, A>,
             PTEntry<A>,
             PageLevel,
@@ -450,6 +453,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
             (entry_index(VirtAddr::from(start), level), entry_index(VirtAddr::from(end - 1), level))
         };
         debug_assert!(first_index <= last_index);
+        let page_paddr = page.paddr();
         let mut cursor = start;
         let mut slot_end = (start & !(span - 1)).saturating_add(span).min(end);
         for index in first_index..=last_index {
@@ -461,7 +465,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
                     Err(_) => unreachable!("observed table entry must resolve as a child"),
                 };
                 Self::sweep_page(&child, cursor, slot_end, visit)?;
-            } else if let Err(error) = visit(slot, entry, level, cursor, slot_end) {
+            } else if let Err(error) = visit(page_paddr, slot, entry, level, cursor, slot_end) {
                 return Err((cursor, error));
             }
             cursor = slot_end;
@@ -470,11 +474,12 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
         Ok(())
     }
 
-    fn sweep_range<'tree, E>(
+    pub(crate) fn sweep_range<'tree, E>(
         root: &PTPagePointer<'tree, A, P>,
         start: usize,
         end: usize,
         visit: &mut impl FnMut(
+            PhysAddr,
             PTEntryRef<'tree, A>,
             PTEntry<A>,
             PageLevel,
@@ -490,7 +495,13 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
         Ok(range.position())
     }
 
-    fn range_needs_split(root: &PTPagePointer<'_, A, P>, start: usize, end: usize) -> bool {
+    #[cfg(any(not(feature = "concurrent"), test))]
+    #[cfg_attr(feature = "concurrent", allow(dead_code))]
+    fn range_needs_split(
+        root: &PTPagePointer<'_, A, P>,
+        start: usize,
+        end: usize,
+    ) -> bool {
         let first = root.walk(VirtAddr::from(start));
         let first_level = first.page.level();
         let first_entry = first.entry().load();
@@ -510,6 +521,8 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
         last_entry.is_leaf(last_level) && last_base.saturating_add(last_level.size()) != segment_end
     }
 
+    #[cfg(any(not(feature = "concurrent"), test))]
+    #[cfg_attr(feature = "concurrent", allow(dead_code))]
     fn protect_leaf_range(
         root: &PTPagePointer<'_, A, P>,
         start: usize,
@@ -518,7 +531,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
     ) -> (Result<(), PagingError>, FlushFootprint) {
         let mut footprint = FlushFootprint::default();
         let result =
-            Self::sweep_range(root, start, end, &mut |slot, observed, level, cursor, _| {
+            Self::sweep_range(root, start, end, &mut |_, slot, observed, level, cursor, _| {
                 if !observed.is_leaf(level) {
                     return Err(PagingError::NotMapped);
                 }
@@ -545,19 +558,22 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
 }
 
 /// Restores PTEs that remain invalidated if a split-range publication is interrupted.
+#[cfg(any(not(feature = "concurrent"), test))]
+#[cfg_attr(feature = "concurrent", allow(dead_code))]
 struct InvalidatedPteRollbackGuard<'view, 'tree, A: ArchPagingMeta, P: PagingAllocator> {
     root: &'view PTPagePointer<'tree, A, P>,
     start: usize,
     end: usize,
 }
 
+#[cfg(any(not(feature = "concurrent"), test))]
 impl<A: ArchPagingMeta, P: PagingAllocator> Drop for InvalidatedPteRollbackGuard<'_, '_, A, P> {
     fn drop(&mut self) {
         let _ = PTPage::<A, P>::sweep_range(
             self.root,
             self.start,
             self.end,
-            &mut |slot, entry, _, _, _| {
+            &mut |_, slot, entry, _, _, _| {
                 if !entry.present() {
                     slot.fetch_or(A::PTFlags::present_bit());
                 }
@@ -568,12 +584,14 @@ impl<A: ArchPagingMeta, P: PagingAllocator> Drop for InvalidatedPteRollbackGuard
 }
 
 /// Conservative TLB coverage accumulated from the leaves changed by a range update.
+#[cfg(any(not(feature = "concurrent"), test))]
 #[derive(Default)]
 struct FlushFootprint {
     range: Option<(usize, usize, PageLevel)>,
     all: bool,
 }
 
+#[cfg(any(not(feature = "concurrent"), test))]
 impl FlushFootprint {
     fn include(&mut self, vaddr: VirtAddr, level: PageLevel) {
         let start = vaddr.bits() & !(level.size() - 1);
@@ -858,6 +876,8 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
         }
     }
 
+    #[cfg(any(not(feature = "concurrent"), test))]
+    #[cfg_attr(feature = "concurrent", allow(dead_code))]
     fn build_range_split(
         entry: PTEntry<A>,
         level: PageLevel,
@@ -893,6 +913,8 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
         Ok(tree)
     }
 
+    #[cfg(any(not(feature = "concurrent"), test))]
+    #[cfg_attr(feature = "concurrent", allow(dead_code))]
     unsafe fn refresh_range_split(
         page: &mut Self,
         entry: PTEntry<A>,
@@ -935,6 +957,8 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
     /// excluded throughout the batch and its unwind. Only hardware A/D writes
     /// may race. Flags and range alignment must already be checked. Local scope
     /// requires no stale remote translations or migration during the transition.
+    #[cfg(any(not(feature = "concurrent"), test))]
+    #[cfg_attr(feature = "concurrent", allow(dead_code))]
     pub(crate) unsafe fn mprotect_range(
         root: PTPagePointer<'_, A, P>,
         start: VirtAddr,
@@ -961,7 +985,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
             &root,
             range_start,
             range_end,
-            &mut |_, entry, level, cursor, next| {
+            &mut |_, _, entry, level, cursor, next| {
                 if !entry.is_leaf(level) {
                     return Err(PagingError::NotMapped);
                 }
@@ -1016,7 +1040,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
                 &root,
                 range_start,
                 prefix_end,
-                &mut |slot, entry, level, cursor, next| {
+                &mut |_, slot, entry, level, cursor, next| {
                     let base = cursor & !(level.size() - 1);
                     if let Some(index) = boundary_splits
                         .iter()
@@ -1094,7 +1118,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
             &root,
             range_start,
             prefix_end,
-            &mut |slot, entry, level, cursor, next| {
+            &mut |_, slot, entry, level, cursor, next| {
                 let base = cursor & !(level.size() - 1);
                 if boundary_splits
                     .iter()
@@ -1126,7 +1150,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
             &root,
             invalidated.start,
             prefix_end,
-            &mut |slot, entry, level, cursor, next| {
+            &mut |_, slot, entry, level, cursor, next| {
                 invalidated.start = cursor;
                 let base = cursor & !(level.size() - 1);
                 let old = PTEntry::from_bits(entry.raw() | A::PTFlags::present_bit());

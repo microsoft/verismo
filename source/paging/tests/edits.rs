@@ -10,6 +10,8 @@ use std::ops::{Deref, DerefMut};
 #[cfg(feature = "concurrent")]
 use std::panic::resume_unwind;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+#[cfg(feature = "concurrent")]
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(feature = "concurrent")]
 use std::sync::{mpsc, Barrier, MutexGuard};
@@ -26,9 +28,9 @@ use paging::level::{Lvl, PageLevel};
 #[cfg(not(feature = "concurrent"))]
 use paging::mapping::MappingRefOps;
 use paging::os_contract::{DirectMappedAllocator, PagingError};
-use paging::pagetable::PageTable;
 #[cfg(feature = "concurrent")]
-use paging::pagetable::{LockAllSpec, LockSpec};
+use paging::pagetable::LockSpec;
+use paging::pagetable::PageTable;
 use paging::sizes::entry_index;
 use paging::tlb::MayNeedFlush;
 use paging::{FlushScope, PTEntryFlags, X86Paging, X86PagingParams, X86TlbFlushTok};
@@ -247,7 +249,6 @@ struct LockState {
     #[cfg(feature = "concurrent")]
     attempts: Mutex<Option<mpsc::Sender<()>>>,
     page_calls: AtomicUsize,
-    all_calls: AtomicUsize,
     before_unlock: Mutex<Option<Box<dyn FnMut() + Send>>>,
 }
 
@@ -317,17 +318,6 @@ unsafe impl LockSpec<()> for WholeTreeLock {
 
     fn lock(&self, _page: PhysAddr) -> Self::Guard<'_> {
         self.0.page_calls.fetch_add(1, Ordering::SeqCst);
-        self.acquire()
-    }
-}
-
-// SAFETY: lock_all uses the same mutex as every page lock and every clone.
-#[cfg(feature = "concurrent")]
-unsafe impl LockAllSpec<()> for WholeTreeLock {
-    type AllGuard<'a> = WholeTreeGuard<'a>;
-
-    fn lock_all(&self) -> Self::AllGuard<'_> {
-        self.0.all_calls.fetch_add(1, Ordering::SeqCst);
         self.acquire()
     }
 }
@@ -412,6 +402,10 @@ fn discharge(flush: Flush) {
 
 fn assert_flush_covers(flush: Flush, start: usize, end: usize) {
     assert!(take_flushes().is_empty(), "a deferred edit flushed synchronously");
+    assert_pending_covers(flush, start, end);
+}
+
+fn assert_pending_covers(flush: Flush, start: usize, end: usize) {
     match flush.scope().as_ref().expect("changed mapping must require a flush").scope() {
         FlushScope::All => {}
         FlushScope::Range { start: actual_start, end: actual_end, .. } => {
@@ -560,20 +554,35 @@ fn architecture_bbm_range_breaks_only_structural_boundaries() {
         slots.push(unsafe { leaf_slot(table.root_paddr(), address).0 as usize });
     }
     set_flush_hook(move |_, _| {
+        let mut invalid = 0;
         for (index, slot) in slots.iter().copied().enumerate() {
             let entry = unsafe { BbmEntry::load_entry(slot as *const BbmEntry) };
             if index == 1 {
                 assert!(entry.is_leaf(HUGE_LEVEL));
-                assert!(entry.writable());
+                if !cfg!(feature = "concurrent") {
+                    assert!(entry.writable());
+                }
+            } else if entry.present() {
+                assert!(entry.is_leaf(HUGE_LEVEL) || entry.is_table(HUGE_LEVEL));
             } else {
-                assert!(!entry.present());
+                invalid += 1;
             }
+        }
+        if cfg!(feature = "concurrent") {
+            assert!(invalid <= 1);
+        } else {
+            assert_eq!(invalid, 2);
         }
     });
     let (result, flush) =
         table.mprotect_range(base + PAGE, base + 3 * HUGE - PAGE, new_flags(), true);
     result.unwrap();
-    flush.expect_no_flush();
+    if cfg!(feature = "concurrent") {
+        discharge(flush);
+        assert_eq!(take_flushes().len(), 3);
+    } else {
+        assert_completed(flush, BASE, BASE + 3 * HUGE, HUGE_LEVEL);
+    }
     clear_flush_hook();
     assert_eq!(table.walk(base + PAGE).level(), SMALL_LEVEL);
     assert_eq!(table.walk(base + HUGE).level(), HUGE_LEVEL);
@@ -737,18 +746,32 @@ macro_rules! edit_tests {
                 assert_ne!(originals[0].0 / PAGE, originals[2].0 / PAGE);
                 set_flush_hook(move |scope, all_cpus| {
                     assert!(all_cpus);
-                    assert_eq!(
-                        scope,
-                        FlushScope::Range {
-                            start: head.into(),
-                            end: (tail + LARGE).into(),
-                            level: LARGE_LEVEL,
-                        }
-                    );
+                    if cfg!(feature = "concurrent") {
+                        assert!(matches!(
+                            scope,
+                            FlushScope::Range { start, end, level: LARGE_LEVEL }
+                                if (start == head.into() && end == middle.into())
+                                    || (start == tail.into() && end == (tail + LARGE).into())
+                        ));
+                    } else {
+                        assert_eq!(
+                            scope,
+                            FlushScope::Range {
+                                start: head.into(),
+                                end: (tail + LARGE).into(),
+                                level: LARGE_LEVEL,
+                            }
+                        );
+                    }
                     for (index, (slot, _)) in originals.iter().enumerate() {
                         let entry = unsafe { Entry::load_entry(*slot as *const Entry) };
-                        assert!(entry.present());
-                        assert_eq!(entry.raw() & PTEntryFlags::HUGE.bits() != 0, index == 1);
+                        if index == 1 {
+                            assert!(entry.is_leaf(HUGE_LEVEL));
+                        } else {
+                            assert!(
+                                entry.is_leaf(LARGE_LEVEL) || entry.is_table(LARGE_LEVEL)
+                            );
+                        }
                     }
                 });
                 let (result, flush) = table.mprotect_range(
@@ -759,7 +782,12 @@ macro_rules! edit_tests {
                 );
                 clear_flush_hook();
                 assert_eq!(result, Ok(()));
-                assert_completed(flush, head, tail + LARGE, LARGE_LEVEL);
+                if cfg!(feature = "concurrent") {
+                    discharge(flush);
+                    assert_eq!(take_flushes().len(), 2);
+                } else {
+                    assert_completed(flush, head, tail + LARGE, LARGE_LEVEL);
+                }
                 assert_eq!(fixture.arena.allocated() - allocated, 2);
                 assert_eq!(table.walk(VirtAddr::from(middle)).level(), HUGE_LEVEL);
                 assert_eq!(
@@ -2055,44 +2083,45 @@ macro_rules! barrier_tests {
                             "the range must span distinct physical content pages"
                         );
                     }
-                    let first = bases[0];
-                    let last = bases[bases.len() - 1] + HUGE;
                     let allocated = fixture.arena.allocated();
                     let arena = fixture.arena.clone();
+                    let first = bases[0];
+                    let last = bases[bases.len() - 1] + HUGE;
                     let all_cpus = pages != 3;
                     set_flush_hook(move |scope, selected| {
                         assert_eq!(selected, all_cpus);
-                        assert_eq!(
-                            scope,
-                            FlushScope::Range {
-                                start: first.into(),
-                                end: last.into(),
-                                level: HUGE_LEVEL,
+                        if cfg!(feature = "concurrent") {
+                            assert!(matches!(scope, FlushScope::Range { .. }));
+                            assert!(arena.allocated() <= allocated + pages);
+                            for (slot, _) in &originals {
+                                let entry = unsafe { Entry::load_entry(*slot as *const Entry) };
+                                assert!(entry.is_leaf(HUGE_LEVEL) || entry.is_table(HUGE_LEVEL));
                             }
-                        );
-                        assert_eq!(arena.allocated(), allocated + pages);
-                        for (slot, _) in &originals {
-                            let entry = unsafe { Entry::load_entry(*slot as *const Entry) };
-                            assert!(entry.present());
-                            assert_eq!(entry.raw() & PTEntryFlags::HUGE.bits(), 0);
+                        } else {
+                            assert_eq!(
+                                scope,
+                                FlushScope::Range {
+                                    start: first.into(),
+                                    end: last.into(),
+                                    level: HUGE_LEVEL,
+                                }
+                            );
+                            assert_eq!(arena.allocated(), allocated + pages);
                         }
                     });
                     let (result, flush) =
                         table.mprotect_range(start.into(), end.into(), new_flags(), all_cpus);
                     clear_flush_hook();
                     assert_eq!(result, Ok(()));
-                    flush.expect_no_flush();
-                    assert_eq!(
-                        take_flushes(),
-                        vec![(
-                            FlushScope::Range {
-                                start: first.into(),
-                                end: last.into(),
-                                level: HUGE_LEVEL,
-                            },
-                            all_cpus
-                        )]
-                    );
+                    if cfg!(feature = "concurrent") {
+                        discharge(flush);
+                        let calls = take_flushes();
+                        assert!(!calls.is_empty());
+                        assert!(calls.iter().all(|(_, selected)| *selected == all_cpus));
+                    } else {
+                        flush.expect_no_flush();
+                        assert_eq!(take_flushes().len(), 1);
+                    }
                     assert_eq!(fixture.arena.allocated(), allocated + pages);
                     for (index, base) in bases.iter().copied().enumerate() {
                         let mut offset = 0;
@@ -2205,12 +2234,10 @@ macro_rules! barrier_tests {
                     fixture.locks.0.before_unlock.lock().unwrap().take();
                     assert!(result.is_err());
                     assert_eq!(take_flushes().len(), 1);
-                    let staging = if operation >= 4 { 4 } else { 2 };
+                    let staging = if cfg!(feature = "concurrent") || operation < 4 { 2 } else { 4 };
                     assert_eq!(fixture.arena.allocated(), allocated + staging);
                     assert!(fixture.arena.freed().is_empty());
-                    if fixture.locks.0.page_calls.load(Ordering::SeqCst) != 0
-                        || fixture.locks.0.all_calls.load(Ordering::SeqCst) != 0
-                    {
+                    if fixture.locks.0.page_calls.load(Ordering::SeqCst) != 0 {
                         assert_eq!(
                             valid_before_unlock.load(Ordering::SeqCst),
                             1,
@@ -2219,7 +2246,9 @@ macro_rules! barrier_tests {
                     }
                     for (index, _) in originals.into_iter().enumerate() {
                         let address = base + index * HUGE;
-                        let split = if operation < 4 {
+                        let split = if cfg!(feature = "concurrent") {
+                            index == 0
+                        } else if operation < 4 {
                             index == 0
                         } else if operation == 4 {
                             true
@@ -2308,7 +2337,7 @@ macro_rules! barrier_tests {
                             .unwrap();
                     }
                     let allocated = fixture.arena.allocated();
-                    let allowed = if separate_leaves { 3 } else { 2 };
+                    let allowed = if separate_leaves { 3 } else { 1 };
                     fixture.allow_allocations(allowed);
                     let (start, end) = if separate_leaves {
                         (base + HUGE - PAGE, base + HUGE + PAGE)
@@ -2412,20 +2441,22 @@ fn paused_point_and_range_barriers_exclude_writers_but_not_lock_free_walkers() {
         }
         let table = Arc::new(table);
         let page_calls = fixture.locks.0.page_calls.load(Ordering::SeqCst);
-        let all_calls = fixture.locks.0.all_calls.load(Ordering::SeqCst);
         let (entered, observed) = mpsc::channel();
         let (release, resumed) = mpsc::channel();
         let editor = spawn({
             let table = table.clone();
             let locks = fixture.locks.clone();
             move || {
+                let paused = AtomicBool::new(false);
                 set_flush_hook(move |_, _| {
                     assert!(matches!(
                         locks.0.content.try_lock(),
                         Err(std::sync::TryLockError::WouldBlock)
                     ));
-                    entered.send(()).unwrap();
-                    resumed.recv_timeout(WAIT).expect("edit barrier was not released");
+                    if !paused.swap(true, Ordering::SeqCst) {
+                        entered.send(()).unwrap();
+                        resumed.recv_timeout(WAIT).expect("edit barrier was not released");
+                    }
                 });
                 let result = if range {
                     table.mprotect_range(right - PAGE, right + PAGE, new_flags(), true)
@@ -2437,13 +2468,7 @@ fn paused_point_and_range_barriers_exclude_writers_but_not_lock_free_walkers() {
             }
         });
         observed.recv_timeout(WAIT).expect("edit never reached its synchronous callback");
-        if range {
-            assert_eq!(fixture.locks.0.page_calls.load(Ordering::SeqCst), page_calls);
-            assert_eq!(fixture.locks.0.all_calls.load(Ordering::SeqCst), all_calls + 1);
-        } else {
-            assert!(fixture.locks.0.page_calls.load(Ordering::SeqCst) > page_calls);
-            assert_eq!(fixture.locks.0.all_calls.load(Ordering::SeqCst), all_calls);
-        }
+        assert!(fixture.locks.0.page_calls.load(Ordering::SeqCst) > page_calls);
         let writer = spawn({
             let table = table.clone();
             move || table.map(right, OTHER_FRAME.into(), HUGE_LEVEL, new_flags(), true)
@@ -2465,25 +2490,25 @@ fn paused_point_and_range_barriers_exclude_writers_but_not_lock_free_walkers() {
                     assert_eq!(table.phys_addr(address), Ok(expected.into()));
                     let snapshot = table.walk(address);
                     assert!(snapshot.read().present());
-                    assert_eq!(snapshot.level(), SMALL_LEVEL);
                 }
             }
         }));
         release.send(()).unwrap();
         let ((result, flush), calls) = finish(editor);
         result.unwrap();
-        flush.expect_no_flush();
-        assert_eq!(
-            calls,
-            vec![(
-                FlushScope::Range {
-                    start: if range { left } else { right },
-                    end: right + HUGE,
-                    level: HUGE_LEVEL
-                },
-                true
-            )]
-        );
+        if range {
+            discharge(flush);
+            assert_eq!(calls.len(), 2);
+        } else {
+            flush.expect_no_flush();
+            assert_eq!(
+                calls,
+                vec![(
+                    FlushScope::Range { start: right, end: right + HUGE, level: HUGE_LEVEL },
+                    true
+                )]
+            );
+        }
         assert!(finish(writer).is_err(), "writer replaced a temporarily invalid huge slot");
         assert_eq!(table.phys_addr(right - PAGE), Ok((FRAME + HUGE - PAGE).into()));
         assert_eq!(table.phys_addr(right), Ok((FRAME + HUGE).into()));

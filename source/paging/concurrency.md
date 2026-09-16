@@ -13,7 +13,7 @@ from content updates:
 | --- | --- | --- |
 | Walk, translate, inspect root entries | `&self` | None; atomic observations |
 | Map, unmap, split, mprotect, update encryption | `&self` | Page containing the entry being edited |
-| mprotect_range | `&self` | One second-level write guard excluding all content writers |
+| mprotect_range | `&self` | Each table page while its affected entries are updated |
 | Free empty tables or tear down children | `&mut self` | None; exclusive access required |
 | Attach owned subtrees (kernel controllers only) | `&mut self`, unsafe | Root page |
 
@@ -258,10 +258,12 @@ The same argument applies to `set_shared_4k` and `set_encrypted_4k`.
 Allocation failure while splitting does not change the original mapping.
 `mprotect` refuses an already-finer subtree with `NotLeafEntry`, rather than replacing a
 table pointer and stranding its children. The range helper recursively sweeps each covered
-table under its second-level write guard. Each phase resolves a child once and processes
-the complete covered subrange below it instead of restarting at the root for every leaf.
-Two constant-cost boundary probes determine whether a partial huge leaf needs
-preparation. With no split, protection completes in one hierarchical sweep.
+table and retains one page-keyed guard while updating consecutive entries in that table.
+Each phase resolves a child once and processes the complete covered subrange below it
+instead of restarting at the root for every leaf. Two constant-cost boundary probes
+determine whether a partial huge leaf needs preparation. Boundary leaves are split
+independently before the update sweep. With no split, protection completes in one
+hierarchical sweep.
 
 Protection preserves the physical frame, confidentiality tag, PAT attribute,
 page size, and accessed/dirty history. Other leaf flags are replaced.
@@ -297,7 +299,7 @@ that obligation before propagating the error, for example:
 use paging::address::VirtAddr;
 use paging::level::LevelSpec;
 use paging::os_contract::{PagingError, PagingAllocator};
-use paging::pagetable::{LockAllSpec, PageTable};
+use paging::pagetable::{LockSpec, PageTable};
 use paging::ArchPagingMeta;
 
 fn protect<A, P, L, K>(
@@ -310,7 +312,7 @@ where
     A: ArchPagingMeta,
     P: PagingAllocator,
     L: LevelSpec,
-    K: LockAllSpec<()>,
+    K: LockSpec<()>,
 {
     let (result, pending) = table.mprotect_range(start, end, flags, true);
     if pending.is_pending() {
@@ -333,13 +335,11 @@ choose a lock. Distinct keys may share a lock because the page-table code
 never holds two content guards simultaneously. Every writer of a shared
 physical table page must use the same exclusion domain.
 
-`mprotect_range` additionally requires `LockAllSpec<T>`. Its `lock_all` guard
-excludes **every** page-keyed writer and every other whole-domain writer until
-drop, including writers through other roots sharing the domain. A whole-tree
-mutex implements both acquisitions using that same mutex. A striped provider
-needs a coordinated exclusion mechanism; locking one arbitrary stripe is not
-sufficient. Range edits acquire this guard once and do not recursively acquire
-page-keyed guards. Walks require neither guard.
+Range edits release the current page guard before acquiring a guard for another
+table page. Consecutive leaves in one table therefore share one acquisition,
+while disjoint table pages may be updated concurrently. A concurrent split can
+change the observed walk shape after acquisition; the range update re-reads the
+entry under the guard and retries descent through the published child.
 
 Shared pages must also appear at identical virtual-address prefixes in every
 root, so that a returned range flush covers each affected mapping. The host
@@ -361,7 +361,7 @@ For example, a host implementation can wrap a standard mutex:
 
 ```rust
 use paging::address::PhysAddr;
-use paging::pagetable::{LockAllSpec, LockSpec};
+use paging::pagetable::LockSpec;
 use std::sync::{Mutex, MutexGuard};
 
 struct WholeTreeLock<T>(Mutex<T>);
@@ -371,15 +371,6 @@ unsafe impl<T> LockSpec<T> for WholeTreeLock<T> {
     type Guard<'a> = MutexGuard<'a, T> where Self: 'a, T: 'a;
 
     fn lock(&self, _page: PhysAddr) -> Self::Guard<'_> {
-        self.0.lock().expect("page-table content lock poisoned")
-    }
-}
-
-// SAFETY: batch and page-keyed writers acquire the same mutex.
-unsafe impl<T> LockAllSpec<T> for WholeTreeLock<T> {
-    type AllGuard<'a> = MutexGuard<'a, T> where Self: 'a, T: 'a;
-
-    fn lock_all(&self) -> Self::AllGuard<'_> {
         self.0.lock().expect("page-table content lock poisoned")
     }
 }
@@ -420,13 +411,13 @@ An architecture using BBM must keep page-table access aliases, executing code,
 stack and flush-handler state accessible while the entire old huge leaf is
 temporarily absent. A content lock does not supply those mappings.
 
-A ranged update requiring splits prepares at most two original boundary-leaf
-subtrees. x86 publishes the replacements and updated interior leaves before one
-synchronous flush. A BBM architecture invalidates only the structural boundary
-entries, updates ordinary interior permissions, flushes once, and then publishes
-the boundary tables. Both boundary paths may belong to one original huge leaf.
-The flush covers the full old boundary mappings and uses the smallest original
-leaf stride. No global allocator or unbounded list of entries is needed.
+A ranged update requiring splits changes at most two boundary-leaf paths. Each
+boundary is split through the point-update protocol. x86 publishes one
+replacement before synchronously flushing its old mapping. A BBM architecture
+invalidates that structural entry, flushes, and then publishes its boundary
+table. If both boundaries belong to one original huge leaf, the first split can
+make the second boundary directly editable. No global allocator or unbounded
+list of entries is needed.
 
 Same-size protection retains compare-exchange retries to preserve hardware
 accessed/dirty changes. Removal uses atomic exchange;
@@ -485,8 +476,8 @@ translations and exclude outstanding data users before recycling that frame.
 Use `old.leaf_address(target)` to decode the clean physical frame; the raw
 `address()` field can still contain huge-page PAT.
 Range operations do not provide whole-range snapshots or rollback on every
-error. Protection excludes overlapping software writers with its second-level
-write guard; other range helpers retain their documented per-entry behavior.
+error. Protection excludes overlapping software writers one table page at a
+time; other range helpers retain their documented per-entry behavior.
 
 These are implementation contracts backed by host regression tests, not
 formal verification of this concurrent implementation. `cargo verus focus`

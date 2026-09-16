@@ -39,28 +39,18 @@ pub unsafe trait LockSpec<T> {
     fn lock(&self, page: PhysAddr) -> Self::Guard<'_>;
 }
 
-/// A second-level write guard covering the entire write-permission domain.
-///
-/// # Safety
-/// The guard must exclude every `lock(page)` guard and every other `lock_all`
-/// guard in this domain, including users of shared pages through other trees.
-/// Acquisition must synchronize with prior writers; drop must release without
-/// panicking. It must not require recursively acquiring aliased page locks.
-pub unsafe trait LockAllSpec<T>: LockSpec<T> {
-    /// A guard excluding every keyed writer in this lock domain.
-    type AllGuard<'a>
-    where
-        Self: 'a,
-        T: 'a;
-
-    fn lock_all(&self) -> Self::AllGuard<'_>;
-}
-
 /// An atomic observation, not a reference to a live entry or a pinned frame.
 /// Another update can invalidate its translation immediately.
 pub struct MappingSnapshot<A: ArchPagingMeta> {
     entry: PTEntry<A>,
     level: PageLevel,
+}
+
+/// Internal outcome used to restart a range walk after a concurrent split.
+enum RangeUpdateError {
+    Retry,
+    Split,
+    Paging(PagingError),
 }
 
 impl<A: ArchPagingMeta> MappingSnapshot<A> {
@@ -550,8 +540,7 @@ where
 
     /// Protects a page-aligned range with per-entry effects, not a transaction.
     /// On error, the returned obligation covers any unflushed prefix edits.
-    /// One second-level write guard covers preparation and every transition;
-    /// page-size changes share one architecture-ordered synchronous flush.
+    /// Each table page is locked only while its affected entries are updated.
     /// `all_cpus` selects its scope as in [`Self::split`].
     pub fn mprotect_range(
         &self,
@@ -559,10 +548,7 @@ where
         end: VirtAddr,
         flags: A::PTFlags,
         all_cpus: bool,
-    ) -> (Result<(), PagingError>, MayNeedFlush<A::TlbFlushTok>)
-    where
-        W: LockAllSpec<T>,
-    {
+    ) -> (Result<(), PagingError>, MayNeedFlush<A::TlbFlushTok>) {
         let flush = MayNeedFlush::none();
         if let Err(error) = self.tree.policy().check_range(L::LEVEL, start, end) {
             return (Err(error), flush);
@@ -579,9 +565,77 @@ where
         if start == end {
             return (Ok(()), flush);
         }
-        let _guard = self.wperms.lock_all();
-        // SAFETY: the shared borrow pins the tree; this guard excludes all writers.
-        unsafe { PTPage::<A, P>::mprotect_range(self.root_view(), start, end, flags, all_cpus) }
+        self.protect_leaf_range_locked(start.bits(), end.bits(), A::filter_flags(flags), all_cpus)
+    }
+
+    fn protect_leaf_range_locked(
+        &self,
+        start: usize,
+        end: usize,
+        flags: A::PTFlags,
+        all_cpus: bool,
+    ) -> (Result<(), PagingError>, MayNeedFlush<A::TlbFlushTok>) {
+        let mut cursor = start;
+        let mut flush = Some(MayNeedFlush::none());
+        for _ in 0..=L::LEVEL.depth() {
+            let mut locked_page = None;
+            let mut guard: Option<W::Guard<'_>> = None;
+            let result = PTPage::<A, P>::sweep_range(
+                &self.root_view(),
+                cursor,
+                end,
+                &mut |page, slot, _, level, entry_start, entry_end| {
+                    if locked_page != Some(page) {
+                        guard = None;
+                        guard = Some(self.wperms.lock(page));
+                        locked_page = Some(page);
+                    }
+                    let current = slot.load();
+                    if current.is_table(level) {
+                        return Err(RangeUpdateError::Retry);
+                    }
+                    if !current.is_leaf(level) {
+                        return Err(RangeUpdateError::Paging(PagingError::NotMapped));
+                    }
+                    let leaf_start = entry_start & !(level.size() - 1);
+                    if entry_start != leaf_start
+                        || entry_end != leaf_start.saturating_add(level.size())
+                    {
+                        return Err(RangeUpdateError::Split);
+                    }
+                    let desired = current.with_leaf_flags(level, flags);
+                    if desired.raw() != current.raw() {
+                        slot.update_preserving_ad(current, desired);
+                        let pending = MayNeedFlush::new(VirtAddr::from(entry_start), level);
+                        flush = Some(flush.take().unwrap().and(pending));
+                    }
+                    Ok(())
+                },
+            );
+            drop(guard);
+            match result {
+                Ok(_) => return (Ok(()), flush.take().unwrap()),
+                Err((retry, RangeUpdateError::Retry)) => cursor = retry,
+                Err((retry, RangeUpdateError::Split)) => {
+                    match self.edit_leaf(
+                        VirtAddr::from(retry),
+                        Self::SMALL,
+                        LeafUpdate::Protect(flags),
+                        all_cpus,
+                    ) {
+                        Ok(pending) => {
+                            flush = Some(flush.take().unwrap().and(pending));
+                            cursor = retry;
+                        }
+                        Err(error) => return (Err(error), flush.take().unwrap()),
+                    }
+                }
+                Err((_, RangeUpdateError::Paging(error))) => {
+                    return (Err(error), flush.take().unwrap())
+                }
+            }
+        }
+        unreachable!("page-table range update exceeded the tree depth")
     }
 
     /// Retags one smallest page, splitting if needed. `all_cpus` selects the

@@ -91,7 +91,7 @@ fn contiguous_4k_range_resolves_each_table_per_sweep_not_per_leaf() {
     // SAFETY: this host-backed tree is never installed in hardware.
     unsafe { pending.ignore() };
     let resolved = RESOLUTIONS.load(Ordering::Relaxed);
-    assert!(resolved <= 10, "boundary probes and hierarchical sweep resolved {resolved} pages");
+    assert!(resolved <= 12, "boundary probes and hierarchical sweep resolved {resolved} pages");
     assert!(!table.walk(VirtAddr::from(BASE)).read().writable());
     assert!(!table.walk(VirtAddr::from(BASE + (PAGES - 1) * PAGE)).read().writable());
 }

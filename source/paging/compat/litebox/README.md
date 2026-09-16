@@ -165,11 +165,10 @@ require deferred flush tokens.
   mapping; no allocator value or ownership state is stored in a controller.
   Fault allocation and rollback call that same static provider.
 - **Locking:** an outer `SpinMutex` preserves LiteBox's serialized multi-step
-  operations. A separate shared spin lock implements both `LockSpec<()>` and `LockAllSpec<()>`:
-  `lock(page)` and `lock_all()` acquire exactly the same mutex, never
-  recursively. Range protection uses the whole-domain guard. The flush callback
-  does not acquire either content guard. Host walks/faults participate in the
-  outer lock. Snapshots are copied values, not pinned live entries or data frames.
+  operations. A separate shared spin lock implements `LockSpec<()>`; every page
+  key acquires that mutex. The flush callback does not acquire the content
+  guard. Host walks/faults participate in the outer lock. Snapshots are copied
+  values, not pinned live entries or data frames.
 - **TLB:** every affected paging call passes `FLUSH_ALL_CPUS = false`.
   Live x86 splits, including implicit protection splits and splits before VA relocation,
   publish the prepared subtree and synchronously invoke the per-CPU callback

@@ -20,9 +20,9 @@ use std::sync::{Arc, Condvar, Mutex};
 use paging::address::{Address, PhysAddr, VirtAddr};
 use paging::level::Lvl;
 use paging::os_contract::{DirectMappedAllocator, PagingError};
-use paging::pagetable::{KernelPageTable, PageTable};
 #[cfg(feature = "concurrent")]
-use paging::pagetable::{LockAllSpec, LockSpec};
+use paging::pagetable::LockSpec;
+use paging::pagetable::{KernelPageTable, PageTable};
 use paging::policy::PagingOwnershipPolicy;
 use paging::{FlushScope, PTEntryFlags, X86Paging, X86PagingParams};
 
@@ -168,20 +168,6 @@ unsafe impl<T> LockSpec<T> for WholeTreeLock<T> {
     fn lock(&self, _page: PhysAddr) -> Self::Guard<'_> {
         self.acquisitions.fetch_add(1, Ordering::Relaxed);
         self.content.lock().unwrap()
-    }
-}
-
-// SAFETY: whole-domain and per-page guards exclude each other through the same mutex.
-#[cfg(feature = "concurrent")]
-unsafe impl<T> LockAllSpec<T> for WholeTreeLock<T> {
-    type AllGuard<'a>
-        = MutexGuard<'a, T>
-    where
-        Self: 'a,
-        T: 'a;
-
-    fn lock_all(&self) -> Self::AllGuard<'_> {
-        self.lock(PhysAddr::from(0usize))
     }
 }
 

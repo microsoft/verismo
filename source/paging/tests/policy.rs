@@ -15,7 +15,7 @@ use paging::level::{Lvl, PageLevel};
 use paging::mapping::MappingRefOps;
 use paging::os_contract::{DirectMappedAllocator, PagingError};
 #[cfg(feature = "concurrent")]
-use paging::pagetable::LockAllSpec;
+use paging::pagetable::LockSpec;
 use paging::pagetable::{KernelPageTable, UserPageTable};
 use paging::policy::{KernelPolicy, PagingOwnershipPolicy, UserPolicy};
 use paging::sizes::entry_index;
@@ -813,7 +813,7 @@ fn concurrent_user_leak_returns_policy_and_content_domain() {
     type MetadataKernel = KernelPageTable<Arch, Allocator, Lvl<3>, WholeTreeLock<u64>, u64>;
     let arena = Arena::new(ARENA);
     let locks = WholeTreeLock::<u64>::default();
-    *locks.lock_all() = 73;
+    *locks.lock(PhysAddr::from(0usize)) = 73;
     let kernel = MetadataKernel::new(locks.clone(), common::flags()).unwrap();
     // SAFETY: all subtrees remain borrowed from the inactive kernel in the same lock domain.
     let user =
@@ -826,12 +826,12 @@ fn concurrent_user_leak_returns_policy_and_content_domain() {
     assert!(!(0..512).any(|index| policy.owns_top_entry(index)));
     let acquired = locks.acquisitions();
     {
-        let mut guard = content.lock_all();
+        let mut guard = content.lock(PhysAddr::from(0usize));
         assert_eq!(*guard, 73);
         *guard = 89;
     }
     assert_eq!(locks.acquisitions(), acquired + 1);
-    assert_eq!(*locks.lock_all(), 89);
+    assert_eq!(*locks.lock(PhysAddr::from(0usize)), 89);
     assert!(arena.freed().is_empty());
     // SAFETY: this leaked, inactive root owns no descendants; the kernel retains all shared pages.
     unsafe { Allocator::deallocate_table_page(root) };
