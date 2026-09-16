@@ -460,12 +460,35 @@ where
         unreachable!("page-table unmapping exceeded the tree depth")
     }
 
+    #[inline(always)]
     pub fn unmap_at(&self, vaddr: VirtAddr, target: PageLevel) -> UnmapEntryResult<A> {
         self.tree.policy().check_address(L::LEVEL, vaddr)?;
         if target > L::LEVEL {
             return Err(PagingError::InvalidLevel);
         }
+        if target == Self::SMALL {
+            return Ok(self.unmap_4k_inner(vaddr));
+        }
         Ok(self.unmap_at_inner(vaddr, target))
+    }
+
+    #[inline(always)]
+    fn unmap_4k_inner(
+        &self,
+        vaddr: VirtAddr,
+    ) -> (Option<PTEntry<A>>, MayNeedFlush<A::TlbFlushTok>) {
+        let mapping = self.root_view().walk(vaddr);
+        if mapping.page.level() != Self::SMALL {
+            return self.unmap_at_inner(vaddr, Self::SMALL);
+        }
+
+        let page = mapping.page_paddr();
+        let _guard = self.wperms.lock(page);
+        if !mapping.entry().load().is_leaf(Self::SMALL) {
+            return (None, MayNeedFlush::none());
+        }
+        let entry = mapping.entry().swap(PTEntry::empty());
+        (Some(entry), MayNeedFlush::new_4k(vaddr))
     }
 
     fn unmap_at_inner(
@@ -494,6 +517,7 @@ where
         unreachable!("page-table unmapping exceeded the tree depth")
     }
 
+    #[inline(always)]
     pub fn unmap_4k(&self, vaddr: VirtAddr) -> UnmapEntryResult<A> {
         self.unmap_at(vaddr, Self::SMALL)
     }

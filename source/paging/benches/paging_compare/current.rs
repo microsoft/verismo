@@ -174,6 +174,7 @@ impl PagingAdapter for CurrentAdapter {
             .expect("current map_2m");
     }
 
+    #[inline(always)]
     fn unmap_4k(&self, virtual_address: u64) {
         let (_, flush) =
             self.table.unmap_4k(VirtAddr::from(virtual_address as usize)).expect("current unmap");
