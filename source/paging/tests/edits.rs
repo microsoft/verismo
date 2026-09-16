@@ -86,6 +86,8 @@ type Table = PageTable<Arch, BudgetAllocator, Lvl<3>>;
 type Table = PageTable<Arch, BudgetAllocator, Lvl<3>, WholeTreeLock>;
 #[cfg(feature = "concurrent")]
 type ResolutionCountingTable = PageTable<Arch, ResolutionCountingAllocator, Lvl<3>, WholeTreeLock>;
+#[cfg(feature = "concurrent")]
+type TwoLevelTable = PageTable<Arch, BudgetAllocator, Lvl<1>, WholeTreeLock>;
 
 #[derive(Clone, Copy)]
 struct BbmArchitecture;
@@ -579,7 +581,7 @@ fn architecture_bbm_range_breaks_only_structural_boundaries() {
     result.unwrap();
     if cfg!(feature = "concurrent") {
         discharge(flush);
-        assert_eq!(take_flushes().len(), 3);
+        assert_eq!(take_flushes().len(), 2);
     } else {
         assert_completed(flush, BASE, BASE + 3 * HUGE, HUGE_LEVEL);
     }
@@ -587,6 +589,40 @@ fn architecture_bbm_range_breaks_only_structural_boundaries() {
     assert_eq!(table.walk(base + PAGE).level(), SMALL_LEVEL);
     assert_eq!(table.walk(base + HUGE).level(), HUGE_LEVEL);
     assert_eq!(table.walk(base + 3 * HUGE - PAGE).level(), SMALL_LEVEL);
+    unsafe { table.free_children() };
+    drop(table);
+    fixture.assert_all_reclaimed();
+}
+
+#[cfg(feature = "concurrent")]
+#[test]
+fn two_level_range_can_split_both_boundaries_before_updating() {
+    let fixture = Fixture::new();
+    let mut table = TwoLevelTable::new(fixture.locks.clone(), PTEntryFlags::data()).unwrap();
+    let base = VirtAddr::from(BASE);
+    for index in 0..3 {
+        table
+            .map(
+                base + index * LARGE,
+                PhysAddr::from(FRAME + index * LARGE),
+                LARGE_LEVEL,
+                old_flags(),
+                false,
+            )
+            .unwrap();
+    }
+
+    let start = base + PAGE;
+    let end = base + 3 * LARGE - PAGE;
+    let (result, flush) = table.mprotect_range(start, end, new_flags(), true);
+
+    assert_eq!(result, Ok(()));
+    discharge(flush);
+    assert!(!table.walk(base).read().writable());
+    assert_eq!(table.walk(start).level(), SMALL_LEVEL);
+    assert!(table.walk(start).read().writable());
+    assert!(table.walk(end - PAGE).read().writable());
+    assert!(!table.walk(end).read().writable());
     unsafe { table.free_children() };
     drop(table);
     fixture.assert_all_reclaimed();

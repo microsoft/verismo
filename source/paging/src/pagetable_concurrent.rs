@@ -49,7 +49,7 @@ pub struct MappingSnapshot<A: ArchPagingMeta> {
 /// Internal outcome used to restart a range walk after a concurrent split.
 enum RangeUpdateError {
     Retry,
-    Split,
+    Split(usize),
     Paging(PagingError),
 }
 
@@ -577,7 +577,9 @@ where
     ) -> (Result<(), PagingError>, MayNeedFlush<A::TlbFlushTok>) {
         let mut cursor = start;
         let mut flush = Some(MayNeedFlush::none());
-        for _ in 0..=L::LEVEL.depth() {
+        let mut retries_left = L::LEVEL.depth();
+        let mut splits_left = 2;
+        loop {
             let mut locked_page = None;
             let mut guard: Option<W::Guard<'_>> = None;
             let result = PTPage::<A, P>::sweep_range(
@@ -598,10 +600,11 @@ where
                         return Err(RangeUpdateError::Paging(PagingError::NotMapped));
                     }
                     let leaf_start = entry_start & !(level.size() - 1);
-                    if entry_start != leaf_start
-                        || entry_end != leaf_start.saturating_add(level.size())
-                    {
-                        return Err(RangeUpdateError::Split);
+                    if entry_start != leaf_start {
+                        return Err(RangeUpdateError::Split(entry_start));
+                    }
+                    if entry_end != leaf_start.saturating_add(level.size()) {
+                        return Err(RangeUpdateError::Split(entry_end - Self::SMALL.size()));
                     }
                     let desired = current.with_leaf_flags(level, flags);
                     if desired.raw() != current.raw() {
@@ -615,10 +618,20 @@ where
             drop(guard);
             match result {
                 Ok(_) => return (Ok(()), flush.take().unwrap()),
-                Err((retry, RangeUpdateError::Retry)) => cursor = retry,
-                Err((retry, RangeUpdateError::Split)) => {
+                Err((retry, RangeUpdateError::Retry)) => {
+                    if retries_left == 0 {
+                        unreachable!("page-table range update exceeded its retry bound");
+                    }
+                    retries_left -= 1;
+                    cursor = retry;
+                }
+                Err((retry, RangeUpdateError::Split(split_address))) => {
+                    if splits_left == 0 {
+                        unreachable!("page-table range update exceeded its boundary split bound");
+                    }
+                    splits_left -= 1;
                     match self.edit_leaf(
-                        VirtAddr::from(retry),
+                        VirtAddr::from(split_address),
                         Self::SMALL,
                         LeafUpdate::Protect(flags),
                         all_cpus,
@@ -635,7 +648,6 @@ where
                 }
             }
         }
-        unreachable!("page-table range update exceeded the tree depth")
     }
 
     /// Retags one smallest page, splitting if needed. `all_cpus` selects the

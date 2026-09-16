@@ -158,10 +158,12 @@ guard and retry traversal. Allocation continues from its retained node; the
 other mutation loops restart at the root. No content guard
 is retained through descent. An absent observation is also reread under the
 lock, since it may be a temporary invalidation during a page-size transition.
-Walks and mutation attempts are bounded by the root depth plus one (at most
-five). Each retry or newly published intermediate table makes the next walk
-descend further; installed child links cannot be removed under a shared borrow.
-Exhausting this bound is an invariant violation, not a recoverable mapping error.
+Walks and point-mutation attempts are bounded by the root depth plus one (at
+most five). Each retry or newly published intermediate table makes the next
+walk descend further; installed child links cannot be removed under a shared
+borrow. Range protection allows two additional attempts because its leading
+and trailing leaves may each require an independent split. Exhausting these
+bounds is an invariant violation, not a recoverable mapping error.
 This does not bound waiting inside the content lock or synchronous flush hooks.
 
 Checked indexing also produces an internal entry view with atomic load, store,
@@ -260,9 +262,10 @@ Allocation failure while splitting does not change the original mapping.
 table pointer and stranding its children. The range helper recursively sweeps each covered
 table and retains one page-keyed guard while updating consecutive entries in that table.
 Each phase resolves a child once and processes the complete covered subrange below it
-instead of restarting at the root for every leaf. Two constant-cost boundary probes
-determine whether a partial huge leaf needs preparation. Boundary leaves are split
-independently before the update sweep. With no split, protection completes in one
+instead of restarting at the root for every leaf. After locking a table page, it
+rereads each entry and checks whether the visited subrange covers the complete
+leaf. A partial boundary leaf is split after releasing the guard, then the sweep
+retries from that boundary. With no split, protection completes in one
 hierarchical sweep.
 
 Protection preserves the physical frame, confidentiality tag, PAT attribute,
