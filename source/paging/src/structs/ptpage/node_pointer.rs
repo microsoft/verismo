@@ -2,7 +2,7 @@ use core::marker::PhantomData;
 use core::ptr::NonNull;
 
 use super::PTPage;
-use crate::structs::address::{Address, PhysAddr, VirtAddr};
+use crate::structs::address::{PhysAddr, VirtAddr};
 use crate::structs::arch_contract::ArchPagingMeta;
 use crate::structs::entry::{PTEntry, PTEntryRef};
 use crate::structs::level::PageLevel;
@@ -42,31 +42,9 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
         Self::resolve(root_pa, level)
     }
 
-    /// Resolves a root through one direct-map offset retained by its walk.
-    pub(crate) unsafe fn from_root_with_direct_map(
-        root_pa: PhysAddr,
-        level: PageLevel,
-        direct_map_offset: Option<usize>,
-    ) -> Self {
-        Self::resolve_with_direct_map(root_pa, level, direct_map_offset)
-    }
-
     #[inline(always)]
     fn resolve(paddr: PhysAddr, level: PageLevel) -> Self {
         let vaddr = P::paddr_to_vaddr(paddr);
-        Self::from_vaddr(vaddr, level)
-    }
-
-    #[inline(always)]
-    fn resolve_with_direct_map(
-        paddr: PhysAddr,
-        level: PageLevel,
-        direct_map_offset: Option<usize>,
-    ) -> Self {
-        let vaddr = direct_map_offset.map_or_else(
-            || P::paddr_to_vaddr(paddr),
-            |offset| VirtAddr::from(paddr.bits().wrapping_add(offset)),
-        );
         Self::from_vaddr(vaddr, level)
     }
 
@@ -89,20 +67,11 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
     /// straight-line walk instead of a runtime level loop.
     #[inline(always)]
     pub(crate) fn walk(&self, vaddr: VirtAddr) -> WalkResult<'tree, A, P> {
-        self.walk_with_direct_map(vaddr, None)
-    }
-
-    #[inline(always)]
-    pub(crate) fn walk_with_direct_map(
-        &self,
-        vaddr: VirtAddr,
-        direct_map_offset: Option<usize>,
-    ) -> WalkResult<'tree, A, P> {
         let page = Self { page: self.page, level: self.level, marker: PhantomData };
 
         macro_rules! descend {
             ($page:expr) => {
-                match $page.step(vaddr, direct_map_offset) {
+                match $page.step(vaddr) {
                     Ok(child) => child,
                     Err(result) => return result,
                 }
@@ -119,14 +88,10 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
     }
 
     #[inline(always)]
-    fn step(
-        self,
-        vaddr: VirtAddr,
-        direct_map_offset: Option<usize>,
-    ) -> Result<Self, WalkResult<'tree, A, P>> {
+    fn step(self, vaddr: VirtAddr) -> Result<Self, WalkResult<'tree, A, P>> {
         let index = entry_index(vaddr, self.level);
         let observed = self.load(index);
-        match self.child_from_observed_with_direct_map(observed, direct_map_offset) {
+        match self.child_from_observed(observed) {
             Ok(child) => Ok(child),
             Err(observed) => {
                 #[cfg(not(feature = "concurrent"))]
@@ -161,21 +126,8 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
 
     #[inline(always)]
     pub(crate) fn child_from_observed(&self, entry: PTEntry<A>) -> Result<Self, PTEntry<A>> {
-        self.child_from_observed_with_direct_map(entry, None)
-    }
-
-    #[inline(always)]
-    fn child_from_observed_with_direct_map(
-        &self,
-        entry: PTEntry<A>,
-        direct_map_offset: Option<usize>,
-    ) -> Result<Self, PTEntry<A>> {
         if entry.is_table(self.level) {
-            Ok(Self::resolve_with_direct_map(
-                PhysAddr::from(entry.address()),
-                self.level.child().unwrap(),
-                direct_map_offset,
-            ))
+            Ok(Self::resolve(PhysAddr::from(entry.address()), self.level.child().unwrap()))
         } else {
             Err(entry)
         }

@@ -51,8 +51,13 @@ unsafe impl DirectMappedAllocator for ArenaAllocator {
     }
 
     #[inline(always)]
-    fn direct_map_offset() -> usize {
-        0
+    fn resolve_paddr(paddr: PhysAddr) -> VirtAddr {
+        VirtAddr::from(paddr.bits())
+    }
+
+    #[inline(always)]
+    fn resolve_vaddr(vaddr: VirtAddr) -> PhysAddr {
+        PhysAddr::from(vaddr.bits())
     }
 
     fn allocate_table_page() -> Result<PhysAddr, PagingError> {

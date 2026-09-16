@@ -100,16 +100,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator, L: TreeLevel, S: PagingOwnershipPoli
 
     #[inline(always)]
     pub(crate) fn walk(&self, vaddr: VirtAddr) -> WalkResult<'_, A, P> {
-        let direct_map_offset = P::direct_map_offset();
-        // SAFETY: the owner borrow pins the initialized tree and its reachable tables.
-        let root = unsafe {
-            PTPagePointer::from_root_with_direct_map(
-                self.root,
-                L::level(&self.level),
-                direct_map_offset,
-            )
-        };
-        root.walk_with_direct_map(vaddr, direct_map_offset)
+        self.root().walk(vaddr)
     }
 
     pub(crate) fn into_parts(self) -> (S, PhysAddr) {
