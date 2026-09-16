@@ -1,0 +1,683 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 49f222b7..7ac0acf1 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -414,6 +414,12 @@ dependencies = [
+  "unicode-xid",
+ ]
+
++[[package]]
++name = "convert_case"
++version = "0.4.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
++
+ [[package]]
+ name = "core-foundation"
+ version = "0.9.4"
+@@ -1054,6 +1060,12 @@ dependencies = [
+  "foldhash",
+ ]
+
++[[package]]
++name = "hashbrown"
++version = "0.17.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
++
+ [[package]]
+ name = "heapless"
+ version = "0.8.0"
+@@ -1344,6 +1356,16 @@ dependencies = [
+  "winapi-util",
+ ]
+
++[[package]]
++name = "indexmap"
++version = "2.14.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "cc4e190f5d26ca7051642629da2c52fc03bde85a03197c99408dcd291734c855"
++dependencies = [
++ "equivalent",
++ "hashbrown 0.17.1",
++]
++
+ [[package]]
+ name = "insta"
+ version = "1.43.2"
+@@ -1509,7 +1531,7 @@ dependencies = [
+  "bitflags 2.13.1",
+  "buddy_system_allocator",
+  "either",
+- "hashbrown",
++ "hashbrown 0.15.5",
+  "litebox_util_log",
+  "rangemap",
+  "ringbuf",
+@@ -1591,6 +1613,7 @@ dependencies = [
+  "litebox",
+  "litebox_common_linux",
+  "litebox_util_log",
++ "paging",
+  "paste",
+  "rangemap",
+  "spin 0.9.8",
+@@ -1625,7 +1648,7 @@ dependencies = [
+  "arrayvec",
+  "bitflags 2.13.1",
+  "digest",
+- "hashbrown",
++ "hashbrown 0.15.5",
+  "libc",
+  "litebox",
+  "litebox_common_linux",
+@@ -1767,7 +1790,7 @@ dependencies = [
+  "const-oid",
+  "digest",
+  "elf",
+- "hashbrown",
++ "hashbrown 0.15.5",
+  "litebox",
+  "litebox_common_linux",
+  "litebox_common_lvbs",
+@@ -1816,7 +1839,7 @@ dependencies = [
+  "arrayvec",
+  "ctr",
+  "elf",
+- "hashbrown",
++ "hashbrown 0.15.5",
+  "hmac",
+  "litebox",
+  "litebox_common_linux",
+@@ -2213,6 +2236,16 @@ dependencies = [
+  "sha2",
+ ]
+
++[[package]]
++name = "paging"
++version = "0.1.0"
++dependencies = [
++ "bitflags 2.13.1",
++ "verus_builtin_macros",
++ "verus_state_machines_macros",
++ "vstd",
++]
++
+ [[package]]
+ name = "paste"
+ version = "1.0.15"
+@@ -2369,9 +2402,9 @@ dependencies = [
+
+ [[package]]
+ name = "proc-macro2"
+-version = "1.0.101"
++version = "1.0.107"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "89ae43fd86e4158d6db51ad8e2b80f313af9cc74f5c0e03ccb87de09998732de"
++checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
+ dependencies = [
+  "unicode-ident",
+ ]
+@@ -3424,12 +3457,77 @@ version = "0.9.5"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
++[[package]]
++name = "verus_builtin"
++version = "0.0.0-2026-08-02-0125"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c27a0e580576f364e98925a61618089591e5bdea6e1ccf048b1d56ab3dfada70"
++
++[[package]]
++name = "verus_builtin_macros"
++version = "0.0.0-2026-08-02-0125"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "eabf0883a6e62f1db1538f96607e500dd396ada513329c3f486a14de5611d55b"
++dependencies = [
++ "convert_case",
++ "proc-macro2",
++ "quote",
++ "syn",
++ "synstructure",
++ "verus_prettyplease",
++ "verus_syn",
++]
++
++[[package]]
++name = "verus_prettyplease"
++version = "0.0.0-2026-08-02-0125"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d88628e583fb019eac36690ca2500b158f0221df6be2bae1e7c2a35dd6536bfc"
++dependencies = [
++ "proc-macro2",
++ "verus_syn",
++]
++
++[[package]]
++name = "verus_state_machines_macros"
++version = "0.0.0-2026-08-02-0125"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "93f77ff8d121edb1bf2651335769a80a2f611da8573c3b498434a66b3162805f"
++dependencies = [
++ "indexmap",
++ "proc-macro2",
++ "quote",
++ "verus_syn",
++]
++
++[[package]]
++name = "verus_syn"
++version = "0.0.0-2026-08-02-0125"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f17237ea6d267e457d53ce36f55b315fc9edd26eb88c765dd95e035c0b415869"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "unicode-ident",
++]
++
+ [[package]]
+ name = "volatile"
+ version = "0.4.6"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "442887c63f2c839b346c192d047a7c87e73d0689c9157b00b53dcc27dd5ea793"
+
++[[package]]
++name = "vstd"
++version = "0.0.0-2026-08-02-0125"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "25040241d96eb88dfc6a75c289dc0ef84845ffff051d8e595cc55908d5c06a45"
++dependencies = [
++ "verus_builtin",
++ "verus_builtin_macros",
++ "verus_state_machines_macros",
++]
++
+ [[package]]
+ name = "walkdir"
+ version = "2.5.0"
+diff --git a/litebox_platform_linux_kernel/Cargo.toml b/litebox_platform_linux_kernel/Cargo.toml
+index e0330f3a..cde80302 100644
+--- a/litebox_platform_linux_kernel/Cargo.toml
++++ b/litebox_platform_linux_kernel/Cargo.toml
+@@ -4,11 +4,13 @@ version = "0.1.0"
+ edition = "2024"
+
+ [features]
++verismo-paging = ["dep:paging"]
+
+ [build-dependencies]
+ bindgen = "0.71.0"
+
+ [dependencies]
++paging = { path = "__VERISMO_PAGING__", optional = true }
+ bitflags = "2.13.1"
+ litebox = { path = "../litebox/", version = "0.1.0" }
+ litebox_common_linux = { path = "../litebox_common_linux/", version = "0.1.0" }
+diff --git a/litebox_platform_linux_kernel/src/arch/x86/mm/mod.rs b/litebox_platform_linux_kernel/src/arch/x86/mm/mod.rs
+index 94bfd2a2..ed684102 100644
+--- a/litebox_platform_linux_kernel/src/arch/x86/mm/mod.rs
++++ b/litebox_platform_linux_kernel/src/arch/x86/mm/mod.rs
+@@ -3,4 +3,5 @@
+
+ //! Memory management module for x86 architecture.
+
++#[cfg_attr(feature = "verismo-paging", path = "verismo.rs")]
+ pub(crate) mod paging;
+diff --git a/litebox_platform_linux_kernel/src/arch/x86/mm/paging.rs b/litebox_platform_linux_kernel/src/arch/x86/mm/paging.rs
+index d9ab27f7..024cc3b0 100644
+--- a/litebox_platform_linux_kernel/src/arch/x86/mm/paging.rs
++++ b/litebox_platform_linux_kernel/src/arch/x86/mm/paging.rs
+@@ -22,7 +22,10 @@ use crate::{
+     UserMutPtr,
+     mm::{
+         MemoryProvider,
+-        pgtable::{PageTableAllocator, PageTableImpl},
++        pgtable::{
++            PageTableAllocator, PageTableImpl, USER_ADDRESS_END, USER_PARENT_FLAGS,
++            assert_user_range, validate_user_parents,
++        },
+     },
+ };
+
+@@ -89,6 +92,7 @@ impl<M: MemoryProvider, const ALIGN: usize> X64PageTable<'_, M, ALIGN> {
+         flags: VmFlags,
+         populate_pages: bool,
+     ) -> UserMutPtr<u8> {
++        assert_user_range(range);
+         if populate_pages {
+             let flags = vmflags_to_pteflags(flags);
+             for page in range {
+@@ -113,6 +117,7 @@ impl<M: MemoryProvider, const ALIGN: usize> X64PageTable<'_, M, ALIGN> {
+         range: PageRange<ALIGN>,
+         dealloc_frames: bool,
+     ) -> Result<(), page_mgmt::DeallocationError> {
++        assert_user_range(range);
+         let start_va = VirtAddr::new(range.start as _);
+         let start = Page::<Size4KiB>::from_start_address(start_va)
+             .or(Err(page_mgmt::DeallocationError::Unaligned))?;
+@@ -151,6 +156,8 @@ impl<M: MemoryProvider, const ALIGN: usize> X64PageTable<'_, M, ALIGN> {
+         old_range: PageRange<ALIGN>,
+         new_range: PageRange<ALIGN>,
+     ) -> Result<UserMutPtr<u8>, page_mgmt::RemapError> {
++        assert_user_range(old_range);
++        assert_user_range(new_range);
+         let mut start: Page<Size4KiB> =
+             Page::from_start_address(VirtAddr::new(old_range.start as u64))
+                 .or(Err(page_mgmt::RemapError::Unaligned))?;
+@@ -172,7 +179,15 @@ impl<M: MemoryProvider, const ALIGN: usize> X64PageTable<'_, M, ALIGN> {
+                     flags,
+                 } => match inner.unmap(start) {
+                     Ok((frame, fl)) => {
+-                        match unsafe { inner.map_to(new_start, frame, flags, &mut allocator) } {
++                        match unsafe {
++                            inner.map_to_with_table_flags(
++                                new_start,
++                                frame,
++                                flags,
++                                USER_PARENT_FLAGS,
++                                &mut allocator,
++                            )
++                        } {
+                             Ok(_) => {}
+                             Err(e) => match e {
+                                 MapToError::PageAlreadyMapped(_) => {
+@@ -217,6 +232,7 @@ impl<M: MemoryProvider, const ALIGN: usize> X64PageTable<'_, M, ALIGN> {
+         range: PageRange<ALIGN>,
+         new_flags: VmFlags,
+     ) -> Result<(), page_mgmt::PermissionUpdateError> {
++        assert_user_range(range);
+         let start = VirtAddr::new(range.start as _);
+         let end = VirtAddr::new(range.end as _);
+         let new_flags = vmflags_to_pteflags(new_flags) & Self::MPROTECT_PTE_MASK;
+@@ -274,6 +290,8 @@ impl<M: MemoryProvider, const ALIGN: usize> X64PageTable<'_, M, ALIGN> {
+ impl<M: MemoryProvider, const ALIGN: usize> PageTableImpl<ALIGN> for X64PageTable<'_, M, ALIGN> {
+     unsafe fn init(p4: PhysAddr) -> Self {
+         assert!(p4.is_aligned(Size4KiB::SIZE));
++        unsafe { validate_user_parents::<M>(p4) }
++            .expect("boot user ancestors must be writable, user-accessible and executable");
+         let frame = PhysFrame::from_start_address(p4).unwrap();
+         let mapping = FrameMapping::<M> {
+             _provider: core::marker::PhantomData,
+@@ -296,6 +314,11 @@ impl<M: MemoryProvider, const ALIGN: usize> PageTableImpl<ALIGN> for X64PageTabl
+         flags: PageTableFlags,
+         error_code: PageFaultErrorCode,
+     ) -> Result<(), PageFaultError> {
++        if page.start_address().as_u64() >= USER_ADDRESS_END as u64 {
++            return Err(PageFaultError::AccessError(
++                "kernel address is not a user mapping",
++            ));
++        }
+         let mut inner = self.inner.lock();
+         match inner.translate(page.start_address()) {
+             TranslateResult::Mapped {
+@@ -327,17 +350,12 @@ impl<M: MemoryProvider, const ALIGN: usize> PageTableImpl<ALIGN> for X64PageTabl
+                 // ACCESSED and DIRTY are pre-set here (mirroring the Linux kernel's
+                 // `_KERNPG_TABLE`) so the CPU's page-table walker doesn't need an
+                 // atomic read-modify-write on this entry the first time it's traversed.
+-                let table_flags = PageTableFlags::PRESENT
+-                    | PageTableFlags::WRITABLE
+-                    | PageTableFlags::USER_ACCESSIBLE
+-                    | PageTableFlags::ACCESSED
+-                    | PageTableFlags::DIRTY;
+                 match unsafe {
+                     inner.map_to_with_table_flags(
+                         page,
+                         frame,
+                         flags | PageTableFlags::PRESENT,
+-                        table_flags,
++                        USER_PARENT_FLAGS,
+                         &mut allocator,
+                     )
+                 } {
+diff --git a/litebox_platform_linux_kernel/src/lib.rs b/litebox_platform_linux_kernel/src/lib.rs
+index bfc2fc01..a2547777 100644
+--- a/litebox_platform_linux_kernel/src/lib.rs
++++ b/litebox_platform_linux_kernel/src/lib.rs
+@@ -110,7 +110,19 @@ impl<Host: HostInterface> ArchSpecificProvider for LinuxKernel<Host> {
+ }
+
+ impl<Host: HostInterface> LinuxKernel<Host> {
+-    pub fn new(init_page_table_addr: x86_64::PhysAddr) -> &'static Self {
++    /// Imports the active boot root without changing existing mappings.
++    ///
++    /// # Safety
++    /// The root must be page-aligned and identify a correctly leveled, acyclic
++    /// page-table tree accessible through `Host`. Its pages and direct mapping
++    /// must remain pinned for the returned platform's lifetime, and incompatible
++    /// software mutation must be excluded. The address space must remain pinned
++    /// to one CPU, with no migration or cached users on other CPUs.
++    ///
++    /// # Panics
++    /// Panics if an existing user-half ancestor restricts user, write or execute
++    /// access. User permissions must be carried by leaves, not shared ancestors.
++    pub unsafe fn new(init_page_table_addr: x86_64::PhysAddr) -> &'static Self {
+         // Capture the initial system time and monotonic instant so that
+         // subsequent `current_time` calls can be derived from the monotonic
+         // clock without additional host calls.
+@@ -415,6 +427,12 @@ impl<Host: HostInterface, const ALIGN: usize> PageManagementProvider<ALIGN> for
+         populate_pages_immediately: bool,
+         fixed_address_behavior: FixedAddressBehavior,
+     ) -> Result<Self::RawMutPointer<u8>, litebox::platform::page_mgmt::AllocationError> {
++        if suggested_range.start < <Self as PageManagementProvider<ALIGN>>::TASK_ADDR_MIN {
++            return Err(litebox::platform::page_mgmt::AllocationError::BelowMinAddress);
++        }
++        if suggested_range.end > <Self as PageManagementProvider<ALIGN>>::TASK_ADDR_MAX {
++            return Err(litebox::platform::page_mgmt::AllocationError::AboveMaxAddress);
++        }
+         let range = PageRange::new(suggested_range.start, suggested_range.end)
+             .ok_or(litebox::platform::page_mgmt::AllocationError::Unaligned)?;
+         match fixed_address_behavior {
+diff --git a/litebox_runner_snp/src/main.rs b/litebox_runner_snp/src/main.rs
+index fd58d6ac..0ed39e88 100644
+--- a/litebox_runner_snp/src/main.rs
++++ b/litebox_runner_snp/src/main.rs
+@@ -150,7 +150,9 @@ pub extern "C" fn sandbox_process_init(
+         litebox_platform_linux_kernel::arch::instructions::cr3()
+             & !(litebox::mm::linux::PAGE_SIZE as u64 - 1),
+     );
+-    let platform = litebox_platform_linux_kernel::host::snp::snp_impl::SnpLinuxKernel::new(pgd);
++    // SAFETY: CR3 identifies the pinned active boot tree owned by the SNP host.
++    let platform =
++        unsafe { litebox_platform_linux_kernel::host::snp::snp_impl::SnpLinuxKernel::new(pgd) };
+     #[cfg(debug_assertions)]
+     litebox_util_log::debug!("sandbox_process_init called");
+
+diff --git a/litebox_platform_linux_kernel/src/mm/pgtable.rs b/litebox_platform_linux_kernel/src/mm/pgtable.rs
+index aeece4d3..081d735c 100644
+--- a/litebox_platform_linux_kernel/src/mm/pgtable.rs
++++ b/litebox_platform_linux_kernel/src/mm/pgtable.rs
+@@ -1,12 +1,65 @@
+ // Copyright (c) Microsoft Corporation.
+ // Licensed under the MIT license.
+
+-use litebox::mm::linux::PageFaultError;
++use core::sync::atomic::{AtomicU64, Ordering};
++use litebox::mm::linux::{PageFaultError, PageRange};
+
+ use crate::arch::{
+     Page, PageFaultErrorCode, PageSize, PageTableFlags, PhysAddr, PhysFrame, Size4KiB, VirtAddr,
+ };
+
++pub(crate) const USER_ADDRESS_END: usize = 1 << 47;
++pub(crate) const USER_PARENT_FLAGS: PageTableFlags = PageTableFlags::from_bits_retain(
++    PageTableFlags::PRESENT.bits()
++        | PageTableFlags::WRITABLE.bits()
++        | PageTableFlags::USER_ACCESSIBLE.bits()
++        | PageTableFlags::ACCESSED.bits()
++        | PageTableFlags::DIRTY.bits(),
++);
++
++pub(crate) fn assert_user_range<const ALIGN: usize>(range: PageRange<ALIGN>) {
++    assert!(
++        range.start < USER_ADDRESS_END && range.end <= USER_ADDRESS_END,
++        "page-table operations require a user-half range"
++    );
++}
++
++/// # Safety
++/// The correctly leveled, acyclic tree must be accessible through `M`, with
++/// software mutation excluded during validation. Hardware may update A/D bits.
++pub(crate) unsafe fn validate_user_parents<M: super::MemoryProvider>(
++    root: PhysAddr,
++) -> Result<(), (PhysAddr, usize, PageTableFlags)> {
++    unsafe fn visit<M: super::MemoryProvider>(
++        table: PhysAddr,
++        level: usize,
++        count: usize,
++    ) -> Result<(), (PhysAddr, usize, PageTableFlags)> {
++        if level == 0 {
++            return Ok(());
++        }
++        let words = M::pa_to_va(table).as_mut_ptr::<u64>();
++        for index in 0..count {
++            let bits = unsafe { AtomicU64::from_ptr(words.add(index)) }.load(Ordering::Acquire);
++            let flags = PageTableFlags::from_bits_retain(bits);
++            if !flags.contains(PageTableFlags::PRESENT) || flags.contains(PageTableFlags::HUGE_PAGE)
++            {
++                continue;
++            }
++            if !flags.contains(PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE)
++                || flags.contains(PageTableFlags::NO_EXECUTE)
++            {
++                return Err((table, index, PageTableFlags::from_bits_truncate(bits)));
++            }
++            let child = PhysAddr::new(bits & 0x000f_ffff_ffff_f000 & !M::PRIVATE_PTE_MASK);
++            unsafe { visit::<M>(child, level - 1, 512) }?;
++        }
++        Ok(())
++    }
++
++    unsafe { visit::<M>(root, 3, 256) }
++}
++
+ /// Page table allocator
+ pub(crate) struct PageTableAllocator<M: super::MemoryProvider> {
+     _provider: core::marker::PhantomData<M>,
+@@ -59,7 +112,13 @@ pub trait PageTableImpl<const ALIGN: usize> {
+     ///
+     /// # Safety
+     ///
+-    /// The caller must ensure that the `p` is valid and properly aligned.
++    /// The caller must provide a correctly leveled, acyclic tree accessible
++    /// through the memory provider and exclude incompatible software access.
++    /// Existing user-half table entries must permit user reads/writes/execution;
++    /// leaf entries retain all user/kernel and W/X restrictions. Import rejects
++    /// restrictive user ancestors rather than modifying any existing mapping.
++    /// This local-TLB-only platform requires one pinned CPU for the address
++    /// space's active lifetime, with no migration or cached users on other CPUs.
+     unsafe fn init(p: PhysAddr) -> Self;
+
+     /// Translate a virtual address to a physical address
+diff --git a/litebox_platform_linux_kernel/src/mm/tests.rs b/litebox_platform_linux_kernel/src/mm/tests.rs
+index c0872a89..625a1857 100644
+--- a/litebox_platform_linux_kernel/src/mm/tests.rs
++++ b/litebox_platform_linux_kernel/src/mm/tests.rs
+@@ -23,8 +23,8 @@ use spin::mutex::SpinMutex;
+ use crate::{
+     HostInterface, UserMutPtr,
+     arch::{
+-        MappedFrame, Page, PageFaultErrorCode, PageTableFlags, PhysAddr, Size4KiB, TranslateResult,
+-        VirtAddr,
++        MappedFrame, Page, PageFaultErrorCode, PageTableFlags, PhysAddr, PhysFrame, Size4KiB,
++        TranslateResult, VirtAddr,
+         mm::paging::{X64PageTable, vmflags_to_pteflags},
+     },
+     host::mock::{MockHostInterface, MockKernel},
+@@ -132,11 +132,175 @@ fn check_flags(
+     }
+ }
+
++pub(crate) fn test_root() -> PhysFrame<Size4KiB> {
++    #[cfg(feature = "verismo-paging")]
++    {
++        // Register a bounded future table-page pool before constructing the mock direct map.
++        let reserve = MockKernel::mem_allocate_pages(6).unwrap();
++        unsafe { MockKernel::mem_free_pages(reserve, 6) };
++    }
++    let root = PageTableAllocator::<MockKernel>::allocate_frame(true).unwrap();
++    #[cfg(feature = "verismo-paging")]
++    seed_table_mappings(root);
++    root
++}
++
++#[cfg(feature = "verismo-paging")]
++fn seed_table_mappings(root: PhysFrame<Size4KiB>) {
++    use x86_64::structures::paging::{
++        FrameAllocator, MappedPageTable, Mapper, PageTable,
++        mapper::{MapToError, PageTableFrameMapping},
++    };
++
++    struct Mapping;
++    unsafe impl PageTableFrameMapping for Mapping {
++        fn frame_to_pointer(&self, frame: PhysFrame) -> *mut PageTable {
++            MockKernel::pa_to_va(frame.start_address()).as_mut_ptr()
++        }
++    }
++    struct Allocator;
++    unsafe impl FrameAllocator<Size4KiB> for Allocator {
++        fn allocate_frame(&mut self) -> Option<PhysFrame<Size4KiB>> {
++            PageTableAllocator::<MockKernel>::allocate_frame(true)
++        }
++    }
++
++    let root =
++        unsafe { &mut *MockKernel::pa_to_va(root.start_address()).as_mut_ptr::<PageTable>() };
++    let mut mapper = unsafe { MappedPageTable::new(root, Mapping) };
++    let mut mapped = 0;
++    loop {
++        let addresses = MAPPING.lock().as_slice().to_vec();
++        for (index, address) in addresses.iter().enumerate().skip(mapped) {
++            let frame = PhysFrame::from_start_address(PhysAddr::new(
++                (0x1000_0000 + index * PAGE_SIZE) as u64,
++            ))
++            .unwrap();
++            let result = unsafe {
++                mapper.map_to_with_table_flags(
++                    Page::<Size4KiB>::from_start_address(*address).unwrap(),
++                    frame,
++                    PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::NO_EXECUTE,
++                    super::pgtable::USER_PARENT_FLAGS,
++                    &mut Allocator,
++                )
++            };
++            match result {
++                Ok(flush) => flush.ignore(),
++                Err(MapToError::PageAlreadyMapped(_)) => {
++                    panic!("duplicate mock direct-map address")
++                }
++                Err(error) => panic!("cannot seed mock direct map: {error:?}"),
++            }
++        }
++        mapped = addresses.len();
++        if MAPPING.lock().len() == mapped {
++            break;
++        }
++    }
++}
++
++pub(crate) fn effective_flags(root: PhysAddr, address: usize) -> PageTableFlags {
++    use x86_64::structures::paging::PageTable;
++
++    let access =
++        PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE;
++    let mut effective = access;
++    let mut table = root;
++    for level in (0..4).rev() {
++        let entries = unsafe { &*MockKernel::pa_to_va(table).as_ptr::<PageTable>() };
++        let entry = &entries[(address >> (12 + level * 9)) & 511];
++        let flags = entry.flags();
++        assert!(flags.contains(PageTableFlags::PRESENT));
++        effective &= flags | !access;
++        effective |= flags & PageTableFlags::NO_EXECUTE;
++        if level == 0 || flags.contains(PageTableFlags::HUGE_PAGE) {
++            return effective;
++        }
++        table = entry.addr();
++    }
++    unreachable!()
++}
++
++#[test]
++fn test_permissions_are_leaf_local_after_creation_and_relocation() {
++    let root = test_root().start_address();
++    let table = unsafe { X64PageTable::<MockKernel, PAGE_SIZE>::init(root) };
++    let read_only = PageRange::new(0x70_0000, 0x70_1000).unwrap();
++    let writable = PageRange::new(0x70_1000, 0x70_2000).unwrap();
++    let rwx = VmFlags::VM_READ | VmFlags::VM_WRITE | VmFlags::VM_EXEC;
++    table.map_pages(read_only, VmFlags::VM_READ, true);
++    table.map_pages(writable, rwx, true);
++    let expected_read =
++        PageTableFlags::PRESENT | PageTableFlags::USER_ACCESSIBLE | PageTableFlags::NO_EXECUTE;
++    let expected_rwx =
++        PageTableFlags::PRESENT | PageTableFlags::USER_ACCESSIBLE | PageTableFlags::WRITABLE;
++    assert_eq!(effective_flags(root, read_only.start), expected_read);
++    assert_eq!(effective_flags(root, writable.start), expected_rwx);
++
++    let start = (1usize << 39) + PAGE_SIZE;
++    let relocated = PageRange::new(start, start + PAGE_SIZE).unwrap();
++    let sibling = PageRange::new(start + PAGE_SIZE, start + 2 * PAGE_SIZE).unwrap();
++    unsafe { table.remap_pages(read_only, relocated) }.unwrap();
++    table.map_pages(sibling, rwx, true);
++    assert_eq!(effective_flags(root, relocated.start), expected_read);
++    assert_eq!(effective_flags(root, sibling.start), expected_rwx);
++    unsafe { table.mprotect_pages(relocated, VmFlags::VM_READ | VmFlags::VM_EXEC) }.unwrap();
++    assert_eq!(
++        effective_flags(root, relocated.start),
++        PageTableFlags::PRESENT | PageTableFlags::USER_ACCESSIBLE
++    );
++    for range in [writable, relocated, sibling] {
++        unsafe { table.unmap_pages(range, true) }.unwrap();
++    }
++}
++
++#[test]
++fn test_boot_rejects_restrictive_user_parent_without_changing_it() {
++    extern crate std;
++    use core::sync::atomic::{AtomicU64, Ordering};
++
++    let root = test_root().start_address();
++    let range = PageRange::new(0x80_0000, 0x80_1000).unwrap();
++    let table = unsafe { X64PageTable::<MockKernel, PAGE_SIZE>::init(root) };
++    table.map_pages(range, VmFlags::VM_READ | VmFlags::VM_EXEC, true);
++    drop(table);
++    let slot = unsafe { AtomicU64::from_ptr(MockKernel::pa_to_va(root).as_mut_ptr::<u64>()) };
++    let original = slot.load(Ordering::Acquire);
++    let restricted = original | PageTableFlags::NO_EXECUTE.bits();
++    slot.store(restricted, Ordering::Release);
++    let result =
++        std::panic::catch_unwind(|| unsafe { X64PageTable::<MockKernel, PAGE_SIZE>::init(root) });
++    assert!(result.is_err());
++    assert_eq!(slot.load(Ordering::Acquire), restricted);
++    assert!(effective_flags(root, range.start).contains(PageTableFlags::NO_EXECUTE));
++    slot.store(original, Ordering::Release);
++    let table = unsafe { X64PageTable::<MockKernel, PAGE_SIZE>::init(root) };
++    unsafe { table.unmap_pages(range, true) }.unwrap();
++}
++
++#[test]
++fn test_platform_rejects_kernel_allocation_address() {
++    use litebox::platform::{PageManagementProvider, page_mgmt::*};
++
++    // SAFETY: test_root returns a pinned mock tree exclusively owned by this test.
++    let platform = unsafe { MockKernel::new(test_root().start_address()) };
++    let result = <MockKernel as PageManagementProvider<PAGE_SIZE>>::allocate_pages(
++        platform,
++        0xffff_8000_0000_1000..0xffff_8000_0000_2000,
++        MemoryRegionPermissions::READ | MemoryRegionPermissions::WRITE,
++        false,
++        true,
++        FixedAddressBehavior::NoReplace,
++    );
++    assert!(matches!(result, Err(AllocationError::AboveMaxAddress)));
++}
++
+ fn get_test_pgtable<'a>(
+     range: PageRange<PAGE_SIZE>,
+     flags: VmFlags,
+ ) -> X64PageTable<'a, MockKernel, PAGE_SIZE> {
+-    let p4 = PageTableAllocator::<MockKernel>::allocate_frame(true).unwrap();
++    let p4 = test_root();
+     let pgtable = unsafe { X64PageTable::<MockKernel, PAGE_SIZE>::init(p4.start_address()) };
+     pgtable.map_pages(range, flags, true);
+
+@@ -214,8 +378,9 @@ fn test_page_table() {
+ #[test]
+ fn test_vmm_page_fault() {
+     let start_addr: usize = 0x1_0000;
+-    let p4 = PageTableAllocator::<MockKernel>::allocate_frame(true).unwrap();
+-    let platform = MockKernel::new(p4.start_address());
++    let p4 = test_root();
++    // SAFETY: p4 is the pinned mock tree exclusively owned by this test.
++    let platform = unsafe { MockKernel::new(p4.start_address()) };
+     let litebox = LiteBox::new(platform);
+     let vmm = PageManager::<_, PAGE_SIZE>::new(&litebox);
+     unsafe {
+diff --git a/.cargo/config.toml b/.cargo/config.toml
+new file mode 100644
+index 00000000..2227c8d0
+--- /dev/null
++++ b/.cargo/config.toml
+@@ -0,0 +1,2 @@
++[build]
++rustflags = ["--cfg", "target_min_page=\"4kib\""]
