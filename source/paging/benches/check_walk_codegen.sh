@@ -26,9 +26,9 @@ if [[ -z "$symbol" ]]; then
             grep -F 'paging_compare::execute_thread::<paging_compare::current::CurrentAdapter>' |
             head -1 || true
     )"
-    expected_back_edges=15
+    expected_back_edges=13
 else
-    expected_back_edges=2
+    expected_back_edges=0
 fi
 
 read -r start size _ <<<"$symbol"
@@ -44,8 +44,8 @@ done < <(
         sed -nE 's/^[[:space:]]*([0-9a-f]+):.*[[:space:]]j[a-z]+[[:space:]]+([0-9a-f]+).*/\1 \2/p'
 )
 
-# The standalone translation has two bounded continuation edges. The inlined
-# root-retry form has three, and the surrounding workloads contribute twelve.
+# Translation is loop-free; the inlined benchmark body has thirteen back edges
+# from its surrounding workloads and control flow.
 if ((back_edges != expected_back_edges)); then
     echo "expected $expected_back_edges translation-body back edges, found $back_edges" >&2
     exit 1

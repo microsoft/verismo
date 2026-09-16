@@ -70,8 +70,8 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
         let page = Self { page: self.page, level: self.level, marker: PhantomData };
 
         macro_rules! descend {
-            ($page:expr) => {
-                match $page.step(vaddr) {
+            ($page:expr, $level:expr, $child:expr) => {
+                match $page.step_at(vaddr, $level, $child) {
                     Ok(child) => child,
                     Err(result) => return result,
                 }
@@ -79,36 +79,70 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
         }
 
         match page.level {
-            PageLevel::Level0 => page.finish(vaddr),
-            PageLevel::Level1 => descend!(page).finish(vaddr),
-            PageLevel::Level2 => descend!(descend!(page)).finish(vaddr),
-            PageLevel::Level3 => descend!(descend!(descend!(page))).finish(vaddr),
-            PageLevel::Level4 => descend!(descend!(descend!(descend!(page)))).finish(vaddr),
+            PageLevel::Level0 => page.finish_at(vaddr, PageLevel::Level0),
+            PageLevel::Level1 => descend!(page, PageLevel::Level1, PageLevel::Level0)
+                .finish_at(vaddr, PageLevel::Level0),
+            PageLevel::Level2 => descend!(
+                descend!(page, PageLevel::Level2, PageLevel::Level1),
+                PageLevel::Level1,
+                PageLevel::Level0
+            )
+            .finish_at(vaddr, PageLevel::Level0),
+            PageLevel::Level3 => descend!(
+                descend!(
+                    descend!(page, PageLevel::Level3, PageLevel::Level2),
+                    PageLevel::Level2,
+                    PageLevel::Level1
+                ),
+                PageLevel::Level1,
+                PageLevel::Level0
+            )
+            .finish_at(vaddr, PageLevel::Level0),
+            PageLevel::Level4 => descend!(
+                descend!(
+                    descend!(
+                        descend!(page, PageLevel::Level4, PageLevel::Level3),
+                        PageLevel::Level3,
+                        PageLevel::Level2
+                    ),
+                    PageLevel::Level2,
+                    PageLevel::Level1
+                ),
+                PageLevel::Level1,
+                PageLevel::Level0
+            )
+            .finish_at(vaddr, PageLevel::Level0),
         }
     }
 
     #[inline(always)]
-    fn step(self, vaddr: VirtAddr) -> Result<Self, WalkResult<'tree, A, P>> {
-        let index = entry_index(vaddr, self.level);
+    fn step_at(
+        self,
+        vaddr: VirtAddr,
+        level: PageLevel,
+        child_level: PageLevel,
+    ) -> Result<Self, WalkResult<'tree, A, P>> {
+        debug_assert_eq!(self.level, level);
+        let index = entry_index(vaddr, level);
         let observed = self.load(index);
-        match self.child_from_observed(observed) {
-            Ok(child) => Ok(child),
-            Err(observed) => {
-                #[cfg(not(feature = "concurrent"))]
-                let _ = observed;
-                Err(WalkResult {
-                    page: self,
-                    index,
-                    #[cfg(feature = "concurrent")]
-                    observed,
-                })
-            }
+        if observed.is_table(level) {
+            Ok(Self::resolve(PhysAddr::from(observed.address()), child_level))
+        } else {
+            #[cfg(not(feature = "concurrent"))]
+            let _ = observed;
+            Err(WalkResult {
+                page: self,
+                index,
+                #[cfg(feature = "concurrent")]
+                observed,
+            })
         }
     }
 
     #[inline(always)]
-    fn finish(self, vaddr: VirtAddr) -> WalkResult<'tree, A, P> {
-        let index = entry_index(vaddr, self.level);
+    fn finish_at(self, vaddr: VirtAddr, level: PageLevel) -> WalkResult<'tree, A, P> {
+        debug_assert_eq!(self.level, level);
+        let index = entry_index(vaddr, level);
         #[cfg(feature = "concurrent")]
         let observed = self.load(index);
         WalkResult {

@@ -267,15 +267,8 @@ where
     /// authority to dereference or free the translated data frame.
     #[inline(always)]
     pub fn walk(&self, vaddr: VirtAddr) -> MappingSnapshot<A> {
-        for _ in 0..=L::LEVEL.depth() {
-            let position = self.tree.walk(vaddr);
-            let level = position.page.level();
-            let entry = position.observed;
-            if !entry.is_table(level) {
-                return MappingSnapshot { entry, level };
-            }
-        }
-        unreachable!("page-table snapshot walk exceeded the tree depth")
+        let position = self.tree.walk(vaddr);
+        MappingSnapshot { entry: position.observed, level: position.page.level() }
     }
 
     /// Returns an unlocked target slot, without replacing existing leaves or subtrees.
@@ -326,6 +319,16 @@ where
     #[inline(always)]
     pub fn translate(&self, vaddr: VirtAddr) -> Result<Translation<A>, PagingError> {
         let snapshot = self.walk(vaddr);
+        if snapshot.level == PageLevel::Level0 {
+            if !snapshot.entry.present() {
+                return Err(PagingError::NotMapped);
+            }
+            let offset = vaddr.bits() & (Self::SMALL.size() - 1);
+            return Ok(Translation::new(
+                PhysAddr::from((snapshot.entry.paddr_field() & !(Self::SMALL.size() - 1)) + offset),
+                snapshot.level,
+            ));
+        }
         if !snapshot.entry.is_leaf(snapshot.level) {
             return Err(PagingError::NotMapped);
         }
