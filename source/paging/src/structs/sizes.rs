@@ -18,6 +18,10 @@ pub trait PageSize: PageOffset {
     const SIZE: usize;
 }
 
+impl<T: PageOffset> PageSize for T {
+    const SIZE: usize = 1usize << T::SHIFT;
+}
+
 /// Marker for a 4 KiB page.
 pub struct Size4KiB;
 
@@ -37,10 +41,6 @@ impl PageOffset for Size2MiB {
 
 impl PageOffset for Size1GiB {
     const SHIFT: usize = 30;
-}
-
-impl<T: PageOffset> PageSize for T {
-    const SIZE: usize = 1usize << T::SHIFT;
 }
 
 /// The smallest page this build maps, selected by `--cfg target_min_page=...`
@@ -70,14 +70,7 @@ compile_error!(
 compile_error!("target_min_page was given more than one value");
 
 /// Width of the in-page byte offset, in bits.
-#[cfg(target_min_page = "4kib")]
-pub const PAGE_OFFSET_WIDTH: usize = 12;
-
-#[cfg(target_min_page = "2mib")]
-pub const PAGE_OFFSET_WIDTH: usize = 21;
-
-#[cfg(target_min_page = "1gib")]
-pub const PAGE_OFFSET_WIDTH: usize = 30;
+pub const PAGE_OFFSET_WIDTH: usize = MinPageSize::SHIFT;
 
 /// Bytes in the smallest page.
 pub const PAGE_SIZE: usize = 1usize << PAGE_OFFSET_WIDTH;
