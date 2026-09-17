@@ -15,6 +15,17 @@ CARGO_NET_GIT_FETCH_WITH_CLI=true \
   --target x86_64-unknown-linux-gnu
 ```
 
+Set `PAGING_BENCH_CHECK=1` to fail when this implementation exceeds the
+per-workload latency limits relative to the pinned VeriOS baseline. The check
+uses every configured thread count:
+
+```sh
+CARGO_NET_GIT_FETCH_WITH_CLI=true PAGING_BENCH_CHECK=1 \
+  PAGING_BENCH_WARMUPS=3 PAGING_BENCH_REPETITIONS=11 \
+  cargo bench -p paging --bench paging_compare \
+  --target x86_64-unknown-linux-gnu
+```
+
 Check that optimized four-level translation retains straight-line page
 descent:
 
@@ -70,6 +81,7 @@ Environment variables:
 - `PAGING_BENCH_RANGE_PAGES` (default `16`)
 - `PAGING_BENCH_WARMUPS` (default `2`)
 - `PAGING_BENCH_REPETITIONS` (default `9`)
+- `PAGING_BENCH_CHECK` (`1` or `true` enables the regression limits)
 
 `PAGING_BENCH_WORK_PER_THREAD` is a base used to derive workload-specific
 defaults. The default effective item counts per thread are:

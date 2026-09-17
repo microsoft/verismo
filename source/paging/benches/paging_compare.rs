@@ -47,6 +47,18 @@ const WORKLOADS: [Workload; 9] = [
     Workload::Mixed,
 ];
 
+const PERFORMANCE_LIMITS: [(Workload, f64); 9] = [
+    (Workload::MapMixed, 0.90),
+    (Workload::MapLeafOnly, 0.90),
+    (Workload::MapIntermediate, 1.15),
+    (Workload::Unmap, 1.10),
+    (Workload::Walk, 1.05),
+    (Workload::Protect, 1.15),
+    (Workload::Split, 0.60),
+    (Workload::ProtectRange, 0.95),
+    (Workload::Mixed, 1.15),
+];
+
 impl Workload {
     fn name(self) -> &'static str {
         match self {
@@ -275,6 +287,10 @@ struct Record {
 
 fn env_usize(name: &str, default: usize) -> usize {
     std::env::var(name).map_or(default, |value| value.parse().expect(name))
+}
+
+fn env_flag(name: &str) -> bool {
+    std::env::var(name).is_ok_and(|value| value == "1" || value.eq_ignore_ascii_case("true"))
 }
 
 fn env_list(name: &str, default: &[usize]) -> Vec<usize> {
@@ -581,6 +597,17 @@ fn throughput_median(record: &Record) -> f64 {
     .median
 }
 
+fn latency_median(record: &Record) -> f64 {
+    percentiles_f64(
+        record
+            .samples
+            .iter()
+            .map(|sample| sample.elapsed.as_nanos() as f64 / record.api_ops as f64)
+            .collect(),
+    )
+    .median
+}
+
 fn check_fingerprints(records: &[Record]) {
     let mut expected = BTreeMap::new();
     for record in records {
@@ -591,6 +618,37 @@ fn check_fingerprints(records: &[Record]) {
             assert_eq!(other, fingerprint, "cross-adapter fingerprint mismatch");
         }
     }
+}
+
+fn check_performance(records: &[Record]) {
+    let mut failures = Vec::new();
+    for (workload, max_ratio) in PERFORMANCE_LIMITS {
+        for current in records
+            .iter()
+            .filter(|record| record.implementation == CurrentAdapter::NAME)
+            .filter(|record| record.workload == workload)
+        {
+            let baseline = records
+                .iter()
+                .find(|record| {
+                    record.implementation == VeriosAdapter::NAME
+                        && record.workload == workload
+                        && record.threads == current.threads
+                })
+                .unwrap();
+            let ratio = latency_median(current) / latency_median(baseline);
+            if ratio > max_ratio {
+                failures.push(format!(
+                    "{} at {} thread(s): {:.3}x VeriOS exceeds {:.3}x",
+                    workload.name(),
+                    current.threads,
+                    ratio,
+                    max_ratio
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "paging performance regression:\n{}", failures.join("\n"));
 }
 
 fn print_results(config: &Config, records: &[Record]) {
@@ -697,4 +755,8 @@ fn main() {
     benchmark::<RustX86Adapter>(&config, &plan, &mut records);
     check_fingerprints(&records);
     print_results(&config, &records);
+    if env_flag("PAGING_BENCH_CHECK") {
+        check_performance(&records);
+        eprintln!("paging performance regression check passed");
+    }
 }
