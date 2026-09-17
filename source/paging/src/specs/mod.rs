@@ -7,9 +7,5 @@
 //! recursion node: an impl that names another is grouped with it and cannot see
 //! its definitions.
 //!
-//! The rest of this directory -- `boot_states`, `entry`, `nonnull`,
-//! `page_table`, `points_to`, `points_to_axiom`, `slot` -- specifies the page
-//! table as it was before the rewrite, and is left out of the module tree until
-//! it is ported to the one that replaced it.
 #[cfg(verus_only)]
 pub mod external;
