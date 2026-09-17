@@ -138,6 +138,7 @@ install_verus_assets() {
         "libverus_state_machines_macros.$DYLIB_EXT"
         "libvstd.rlib"
         "vstd.vir"
+        "verus-root"
     )
     local src_dir=$1
     local dst_dir=$2
