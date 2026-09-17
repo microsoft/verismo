@@ -16,7 +16,7 @@ use crate::structs::os_contract::{DirectMappedAllocator, PagingAllocator, Paging
 use crate::structs::policy::{KernelPolicy, PagingOwnershipPolicy, UserPolicy};
 use crate::structs::ptpage::{
     free_children, reclaim_path, reclaim_range, FlushFootprint, LeafUpdate, PTPage, PTPagePointer,
-    PTPageTree, Translation, WalkResult,
+    PTPageTree, Translation,
 };
 use crate::structs::sizes::{entry_index, next_boundary};
 use crate::structs::tlb::MayNeedFlush;
@@ -271,18 +271,36 @@ where
         MappingSnapshot { entry: position.observed, level: position.page.level() }
     }
 
-    /// Returns an unlocked target slot, without replacing existing leaves or subtrees.
-    fn walk_or_alloc(
+    /// Installs a leaf, publishing a fully initialized private path when one is absent.
+    fn map_or_alloc(
         &self,
         vaddr: VirtAddr,
         target: PageLevel,
         parent_flags: A::PTFlags,
-    ) -> Result<WalkResult<'_, A, P>, PagingError> {
+        leaf: PTEntry<A>,
+    ) -> Result<(), PagingError> {
         let mut mapping = self.root_view().walk(vaddr);
-        while mapping.page.level() > target {
+        loop {
             let level = mapping.page.level();
+            if level < target {
+                return Err(PagingError::NotLeafEntry);
+            }
+            if level == target {
+                let page = mapping.page_paddr();
+                let _guard = self.wperms.lock(page);
+                let entry = mapping.entry().load();
+                if entry.is_table(level) {
+                    return Err(PagingError::NotLeafEntry);
+                }
+                if entry.present() {
+                    return Err(Self::already_present(entry, level, vaddr));
+                }
+                mapping.entry().store(leaf);
+                return Ok(());
+            }
+
             let pte_ref = mapping.entry();
-            let pte_val = pte_ref.load();
+            let pte_val = mapping.observed;
             if !pte_val.is_table(level) {
                 if pte_val.present() {
                     return Err(Self::already_present(pte_val, level, vaddr));
@@ -290,6 +308,9 @@ where
                 let child_level = level.child().unwrap();
                 let mut prepared = PTPageTree::<A, P>::new(child_level)?;
                 prepared.grow(vaddr, target, parent_flags)?;
+                let prepared_mapping = prepared.root().walk(vaddr);
+                debug_assert_eq!(prepared_mapping.page.level(), target);
+                prepared_mapping.entry().store(leaf);
                 let paddr = mapping.page_paddr();
                 {
                     // Declared after preparation so a losing path is reclaimed after unlocking.
@@ -304,15 +325,11 @@ where
                             parent_flags,
                         ));
                         prepared.release();
+                        return Ok(());
                     }
                 }
             }
             mapping = mapping.page.walk(vaddr);
-        }
-        if mapping.page.level() < target {
-            Err(PagingError::NotLeafEntry)
-        } else {
-            Ok(mapping)
         }
     }
 
@@ -375,21 +392,10 @@ where
         assert!(flags.present());
         let flags = A::filter_flags(flags);
         let parent_flags = A::filter_flags(parent_flags);
-        let mapping = self.walk_or_alloc(vaddr, target, parent_flags)?;
-        let page = mapping.page_paddr();
-        let _guard = self.wperms.lock(page);
-        let entry = mapping.entry().load();
-        if entry.is_table(mapping.page.level()) {
-            return Err(PagingError::NotLeafEntry);
-        }
-        if entry.present() {
-            return Err(Self::already_present(entry, mapping.page.level(), vaddr));
-        }
         let addr =
             if shared { A::make_shared_address(paddr) } else { A::make_private_address(paddr) };
         let flags = if target.is_leaf() { flags } else { flags.with(A::PTFlags::HUGE) };
-        mapping.entry().store(PTEntry::new(addr, flags));
-        Ok(())
+        self.map_or_alloc(vaddr, target, parent_flags, PTEntry::new(addr, flags))
     }
 
     fn already_present(entry: PTEntry<A>, level: PageLevel, vaddr: VirtAddr) -> PagingError {

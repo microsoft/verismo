@@ -1368,7 +1368,7 @@ fn public_snapshots_remain_valid_across_table_publication() {
         assert!(!entry.is_table(level));
         assert_eq!(entry.present(), writer_offset == 0);
         assert_resolved_once(&take_resolved_pages(), root);
-        assert_eq!(fixture.locks.0.page_calls.load(Ordering::SeqCst) - calls, 2);
+        assert_eq!(fixture.locks.0.page_calls.load(Ordering::SeqCst) - calls, 1);
         assert!(fixture.locks.0.content.try_lock().is_ok());
         assert_eq!(fixture.arena.allocated(), before + 3);
         assert!(fixture.arena.freed().is_empty());
@@ -1404,7 +1404,7 @@ fn uncontended_path_publication_resolves_the_root_and_existing_prefix_only_once(
         assert_resolved_once(&resolved, root);
         assert_resolved_once(&resolved, stopping_page);
         assert_eq!(fixture.arena.allocated(), before + initial_level.depth());
-        assert_eq!(fixture.locks.0.page_calls.load(Ordering::SeqCst) - calls, 2);
+        assert_eq!(fixture.locks.0.page_calls.load(Ordering::SeqCst) - calls, 1);
         assert!(fixture.locks.0.content.try_lock().is_ok());
         assert!(fixture.arena.freed().is_empty());
         assert_eq!(table.phys_addr(address), Ok(PhysAddr::from(OTHER_FRAME)));
@@ -1456,7 +1456,7 @@ fn a_losing_path_publication_resumes_at_its_deeper_stopping_page_without_rewalki
     assert_resolved_once(&winner_resolved, stopping_page);
     assert_resolved_once(&loser_resolved, root);
     assert_resolved_once(&loser_resolved, stopping_page);
-    assert_eq!(fixture.locks.0.page_calls.load(Ordering::SeqCst) - calls, 4);
+    assert_eq!(fixture.locks.0.page_calls.load(Ordering::SeqCst) - calls, 3);
     assert!(fixture.locks.0.content.try_lock().is_ok());
     assert_eq!(fixture.arena.allocated(), before + 4);
     assert_eq!(fixture.arena.freed().len(), 2);
@@ -1567,7 +1567,7 @@ fn paused_path_allocations_publish_nothing_and_do_not_block_a_competing_mapper()
         assert_eq!(table.phys_addr(address + PAGE), Ok(PhysAddr::from(FRAME)));
         assert_eq!(fixture.arena.allocated(), before + needed + 3);
         assert!(fixture.arena.freed().is_empty());
-        assert_eq!(fixture.locks.0.page_calls.load(Ordering::SeqCst) - calls, 2);
+        assert_eq!(fixture.locks.0.page_calls.load(Ordering::SeqCst) - calls, 1);
         release.send(()).unwrap();
         let result = finish(worker);
         if target == SMALL_LEVEL {
@@ -1676,7 +1676,7 @@ fn failed_path_preparation_preserves_the_original_absent_slot_and_installed_tree
         fixture.allow_allocations(3);
         table.map_4k(address, PhysAddr::from(OTHER_FRAME), old_flags(), false).unwrap();
         assert_eq!(fixture.arena.allocated(), before + allowed + 3);
-        assert_eq!(fixture.locks.0.page_calls.load(Ordering::SeqCst) - calls, 2);
+        assert_eq!(fixture.locks.0.page_calls.load(Ordering::SeqCst) - calls, 1);
         assert_eq!(table.phys_addr(address), Ok(PhysAddr::from(OTHER_FRAME)));
         assert_eq!(table.phys_addr(sibling), Ok(PhysAddr::from(FRAME)));
         assert_eq!(table.validate_page_table(), Ok(()));

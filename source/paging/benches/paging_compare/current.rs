@@ -64,6 +64,10 @@ unsafe impl DirectMappedAllocator for ArenaAllocator {
         Self::arena().allocate_page().map(PhysAddr::from).ok_or(PagingError::AllocFrame)
     }
 
+    fn allocate_zeroed_table_page() -> Result<PhysAddr, PagingError> {
+        Self::allocate_table_page()
+    }
+
     unsafe fn deallocate_table_page(paddr: PhysAddr) {
         Self::arena().deallocate_page(paddr.bits());
     }

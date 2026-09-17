@@ -5,6 +5,7 @@ use core::ops::Range;
 
 use crate::structs::address::{Address, PhysAddr, VirtAddr};
 use crate::structs::level::PageLevel;
+use crate::structs::sizes::{PageSize, Size4KiB};
 
 /// Why an operation could not be carried out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +48,8 @@ pub enum PagingError {
 /// * `allocate_table_page` returns a unique, page-aligned frame with a clean
 ///   address that `paddr_to_vaddr` can map. Its contents may be uninitialized;
 ///   the paging layer initializes it before use.
+///   `allocate_zeroed_table_page` has the same obligations and additionally
+///   guarantees that every byte is zero.
 /// * `deallocate_table_page` is given only a currently live, exclusively owned
 ///   allocation returned by this allocator provider. It has not
 ///   previously been deallocated, no table links to it, and no software or
@@ -57,6 +60,15 @@ pub unsafe trait PagingAllocator: 'static {
     fn vaddr_to_paddr(vaddr: VirtAddr) -> PhysAddr;
 
     fn allocate_table_page() -> Result<PhysAddr, PagingError>;
+
+    /// Allocates a page whose complete contents are zero.
+    fn allocate_zeroed_table_page() -> Result<PhysAddr, PagingError> {
+        let paddr = Self::allocate_table_page()?;
+        let page = Self::paddr_to_vaddr(paddr).as_mut_ptr::<u8>();
+        // SAFETY: successful allocation returns a unique, writable table page.
+        unsafe { page.write_bytes(0, Size4KiB::SIZE) };
+        Ok(paddr)
+    }
 
     /// # Safety
     ///
@@ -98,6 +110,15 @@ pub unsafe trait DirectMappedAllocator: 'static {
 
     fn allocate_table_page() -> Result<PhysAddr, PagingError>;
 
+    /// Allocates a page whose complete contents are zero.
+    fn allocate_zeroed_table_page() -> Result<PhysAddr, PagingError> {
+        let paddr = Self::allocate_table_page()?;
+        let page = Self::resolve_paddr(paddr).as_mut_ptr::<u8>();
+        // SAFETY: successful allocation returns a unique, writable table page.
+        unsafe { page.write_bytes(0, Size4KiB::SIZE) };
+        Ok(paddr)
+    }
+
     /// # Safety
     ///
     /// `paddr` must identify a currently live allocation returned by
@@ -123,6 +144,10 @@ unsafe impl<T: DirectMappedAllocator> PagingAllocator for T {
 
     fn allocate_table_page() -> Result<PhysAddr, PagingError> {
         T::allocate_table_page()
+    }
+
+    fn allocate_zeroed_table_page() -> Result<PhysAddr, PagingError> {
+        T::allocate_zeroed_table_page()
     }
 
     unsafe fn deallocate_table_page(paddr: PhysAddr) {

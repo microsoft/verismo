@@ -9,6 +9,4 @@ pub(crate) use node::FlushFootprint;
 pub(crate) use node::LeafUpdate;
 pub use node::{MapSpec, Mapping, PTPage, Translation};
 pub(crate) use node_pointer::PTPagePointer;
-#[cfg(feature = "concurrent")]
-pub(crate) use node_pointer::WalkResult;
 pub(crate) use tree::{free_children, reclaim_path, reclaim_range, PTPageTree};

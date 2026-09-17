@@ -146,6 +146,10 @@ unsafe impl DirectMappedAllocator for Allocator {
         Ok(pa)
     }
 
+    fn allocate_zeroed_table_page() -> Result<VerismoPhys, PagingError> {
+        Self::allocate_table_page()
+    }
+
     unsafe fn deallocate_table_page(pa: VerismoPhys) {
         let va = phys_to_virt(PhysAddr::from(pa.bits()));
         let ptr = NonNull::new(va.as_mut_ptr::<PTPage>()).unwrap();

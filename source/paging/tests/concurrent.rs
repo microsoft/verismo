@@ -732,7 +732,7 @@ fn sharing_top_entries_preserves_their_complete_permission_bits() {
 }
 
 #[test]
-fn mapping_a_five_level_path_finishes_within_the_depth_bound() {
+fn mapping_a_five_level_path_publishes_under_one_lock() {
     let arena = Arena::new(ARENA);
     let locks = Locks::<()>::new(arena.base()..arena.base() + arena.len(), 1);
     let mut table =
@@ -744,7 +744,7 @@ fn mapping_a_five_level_path_finishes_within_the_depth_bound() {
     assert!(!table.walk(address).read().present());
     let before = locks.0.calls.load(Ordering::Relaxed);
     table.map_4k(address, frame, flags(), false).unwrap();
-    assert_eq!(locks.0.calls.load(Ordering::Relaxed) - before, 2);
+    assert_eq!(locks.0.calls.load(Ordering::Relaxed) - before, 1);
     assert_eq!(table.walk(address).level(), SMALL_LEVEL);
     assert_eq!(table.phys_addr(address), Ok(frame));
     locks.assert_balanced();

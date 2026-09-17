@@ -47,10 +47,8 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
 
     /// A zeroed table page, and its clean physical address.
     pub fn alloc() -> Result<(*mut Self, PhysAddr), PagingError> {
-        let paddr = P::allocate_table_page()?;
+        let paddr = P::allocate_zeroed_table_page()?;
         let page = P::paddr_to_vaddr(paddr).as_mut_ptr::<Self>();
-        // SAFETY: the allocator supplies an exclusive, writable frame; no entry is live yet.
-        unsafe { page.write_bytes(0, 1) };
         Ok((page, paddr))
     }
 
