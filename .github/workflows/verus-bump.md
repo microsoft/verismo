@@ -33,11 +33,22 @@ tools:
     - "git:*"
     - "./tools/fmt.sh"
     - "curl"
+    - "jq"
+    - "python3"
     - "unzip"
     - "sed"
     - "grep"
     - "cat"
     - "ls"
+    - "cp"
+    - "mv"
+    - "mkdir"
+    - "head"
+    - "tail"
+    - "wc"
+    - "which"
+    - "echo"
+    - "printf"
 
 safe-outputs:
   report-failure-as-issue: false
@@ -167,7 +178,7 @@ steps:
 
 The version pins have **already been updated for you** by the previous step.
 `git diff` shows exactly what changed in `source/Cargo.toml` and
-`tools/install_verus`, and the matching Verus toolchain is already installed.
+`tools/install_verus`, and the latest Verus toolchain is already installed.
 
 Verification has already been run at the new version and it failed — that is
 why you are here. Your job is to make the repository verify again, and to
@@ -176,12 +187,14 @@ explain what you did.
 ## What to do
 
 1. Run `git --no-pager diff` to see which versions changed.
-2. From `source/`, run:
-   `cargo verus focus --release -- --multiple-errors=20`
-3. If it reports `0 errors`, go to "Opening the pull request".
-4. Otherwise repair each failure, re-running verification after each change.
-5. When verification passes, run `./tools/fmt.sh` from the repository root and
+2. Collect the error info from prior verification step.
+3. You should repair each failure, re-running verification after each change.
+4. When verification passes, run `./tools/fmt.sh` from the repository root and
    include any reformatting in your changes.
+
+## Error in verus tool
+Sometimes the latest verus and vstd does not match. You may encounter some unexpected 
+verus error due to that. Try to use a older verus lib or verus tool version to solve it.
 
 ## How to repair a broken proof
 
