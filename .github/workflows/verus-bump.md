@@ -40,6 +40,7 @@ tools:
     - "ls"
 
 safe-outputs:
+  report-failure-as-issue: false
   create-pull-request:
     title-prefix: "[verus-bump] "
     labels: [dependencies, verus, automated]
