@@ -25,9 +25,9 @@ use vstd::tokens::InstanceId;
 use common_proofs::{ghost, tracked};
 
 use crate::pred::LockPredicate;
+use crate::spin_contract::{SpinLockContract, SpinLockSpec};
 use crate::spin_spec::{CurrentInv, HolderInv};
 use crate::spin_tok::TicketToks;
-use crate::spin_contract::{SpinLockContract, SpinLockSpec};
 
 /// A place in a lock's queue.
 ///
@@ -199,7 +199,7 @@ impl<'a, T: 'a, Pred: LockPredicate<T> + 'a> SpinLockSpec<'a, T, Pred> for SpinL
 #[verus_verify]
 impl<'a, T: 'a, Pred: LockPredicate<T> + 'a> SpinLockContract<'a, T, Pred> for SpinLock<T, Pred> {
     fn new(v: T, pred: Ghost<Pred>) -> SpinLock<T, Pred> {
-        proof_with!{ Ghost(pred@) }
+        proof_with! { Ghost(pred@) }
         SpinLock::new(v)
     }
 
@@ -447,7 +447,7 @@ impl<T, Pred: LockPredicate<T>> SpinLock<T, Pred> {
         proof_decl! {
             let ghost cell_pred = CellInv { cell: cell.id(), pred };
         }
-        proof_with!{ tracked!(perm.get()), ghost!(cell_pred) }
+        proof_with! { tracked!(perm.get()), ghost!(cell_pred) }
         let raw = RawSpinLock::new();
         SpinLock { cell, raw }
     }

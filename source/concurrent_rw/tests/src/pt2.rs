@@ -5,15 +5,15 @@
 
 use concurrent_rw::*;
 use vstd::atomic::PAtomicUsize;
-use vstd::invariant::{create_open_invariant_credit, OpenInvariantCredit};
 #[cfg(verus_only)]
 use vstd::invariant::InvariantPredicate;
-#[cfg(verus_only)]
-use vstd::open_atomic_invariant_in_proof;
-use vstd::open_atomic_invariant;
-use vstd::iset::ISet;
+use vstd::invariant::{create_open_invariant_credit, OpenInvariantCredit};
 #[cfg(verus_only)]
 use vstd::iset::iset;
+use vstd::iset::ISet;
+use vstd::open_atomic_invariant;
+#[cfg(verus_only)]
+use vstd::open_atomic_invariant_in_proof;
 use vstd::prelude::*;
 use vstd::raw_ptr::IsExposed;
 use vstd::raw_ptr::PointsTo;
@@ -154,7 +154,7 @@ impl RWModel for PTEntry {
     >, c: Snapshot<Self, Self::Payload>) {
     }
 
-    
+
 }
 
 // The innermost block of every pass, at every depth: read the entry and take what the next pass
@@ -493,7 +493,7 @@ fn read_level0(
         r.has_observed(out.1@),
         out.1@.value() === out.0.into_spec(),
         out.2@@ == out.1@.payload().provenance@,
-    opens_invariants 
+    opens_invariants
         [r.namespace()],
     no_unwind
 {
@@ -530,7 +530,7 @@ fn read_level1(
         out.1@.id() == o1.payload().reader[0].obs_id(),
         out.1@.value() === out.0.into_spec(),
         out.2@@ == out.1@.payload().provenance@,
-    opens_invariants 
+    opens_invariants
         [r.namespace(), o1.payload().reader[0].namespace()],
     no_unwind
 {
@@ -569,7 +569,7 @@ fn read_level2(
         out.1@.id() == o2.payload().reader[0].obs_id(),
         out.1@.value() === out.0.into_spec(),
         out.2@@ == out.1@.payload().provenance@,
-    opens_invariants 
+    opens_invariants
         [r.namespace(), o1.payload().reader[0].namespace(), o2.payload().reader[0].namespace()],
     no_unwind
 {

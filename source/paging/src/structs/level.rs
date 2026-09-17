@@ -17,7 +17,7 @@ pub enum PageLevel {
 impl PageLevel {
     /// How many levels lie below this one. The leaf level is 0.
     #[inline(always)]
-    pub fn depth(&self) -> usize {
+    pub const fn depth(&self) -> usize {
         match self {
             PageLevel::Level0 => 0,
             PageLevel::Level1 => 1,

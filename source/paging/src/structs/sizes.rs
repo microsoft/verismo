@@ -104,18 +104,18 @@ pub const INDEX_MASK: usize = !(usize::MAX << PAGE_TABLE_INDEX_WIDTH);
 
 /// How far to shift an address to reach the index bits of `level`.
 #[inline(always)]
-pub fn shift_at(level: PageLevel) -> usize {
+pub const fn shift_at(level: PageLevel) -> usize {
     PAGE_OFFSET_WIDTH + level.depth() * PAGE_TABLE_INDEX_WIDTH
 }
 
 /// How much address space one entry at `level` covers.
 #[inline(always)]
-pub fn level_size(level: PageLevel) -> usize {
+pub const fn level_size(level: PageLevel) -> usize {
     1usize << shift_at(level)
 }
 
 #[inline(always)]
-pub fn entry_index_bits(vaddr: usize, level: PageLevel) -> usize {
+pub const fn entry_index_bits(vaddr: usize, level: PageLevel) -> usize {
     (vaddr >> shift_at(level)) & INDEX_MASK
 }
 

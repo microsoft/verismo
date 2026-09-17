@@ -65,9 +65,9 @@ use builtin_macros::*;
 
 pub mod pred;
 pub mod spin;
+pub mod spin_contract;
 pub mod spin_spec;
 pub mod spin_tok;
-pub mod spin_contract;
 
 pub use pred::LockPredicate;
 pub use spin::{Hold, RawSpinLock, SpinGuard, SpinLock, Ticket};

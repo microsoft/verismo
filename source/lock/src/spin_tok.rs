@@ -19,7 +19,7 @@ pub open spec fn spec_max_ticket() -> nat {
 }
 
 } // verus!
-// Who is queued, who is being served, and where the contents are.
+  // Who is queued, who is being served, and where the contents are.
 tokenized_state_machine! {
 TicketToks<V, Pred: LockPredicate<V>> {
     fields {

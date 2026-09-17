@@ -508,11 +508,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
 
     #[cfg(any(not(feature = "concurrent"), test))]
     #[cfg_attr(feature = "concurrent", allow(dead_code))]
-    fn range_needs_split(
-        root: &PTPagePointer<'_, A, P>,
-        start: usize,
-        end: usize,
-    ) -> bool {
+    fn range_needs_split(root: &PTPagePointer<'_, A, P>, start: usize, end: usize) -> bool {
         let first = root.walk(VirtAddr::from(start));
         let first_level = first.page.level();
         let first_entry = first.entry().load();
