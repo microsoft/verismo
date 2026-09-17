@@ -50,37 +50,115 @@ safe-outputs:
 timeout-minutes: 60
 max-turns: 40
 
+if: ${{ needs.bump_and_verify.outputs.updated == 'true' && needs.bump_and_verify.outputs.verified != 'true' }}
+
+jobs:
+  bump_and_verify:
+    name: Bump Verus and verify
+    runs-on: ubuntu-latest
+    outputs:
+      updated: ${{ steps.bump.outputs.updated }}
+      verified: ${{ steps.verify.outputs.verified }}
+      release_date: ${{ steps.bump.outputs.release_date }}
+      verus_version: ${{ steps.bump.outputs.verus_version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - name: Apply the version bump
+        id: bump
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_DATE: ${{ inputs.target_date }}
+        run: |
+          set -uo pipefail
+          args=()
+          if [ -n "${TARGET_DATE:-}" ]; then
+            args+=(--to "$TARGET_DATE")
+          fi
+          status=0
+          ./tools/bump_verus.sh "${args[@]}" || status=$?
+          case "$status" in
+            0)
+              version=$(sed -n 's/^VERUS_VERSION=//p' tools/install_verus | head -1)
+              echo "updated=true" >> "$GITHUB_OUTPUT"
+              echo "release_date=$(echo "$version" | cut -d. -f2-4 | tr '.' '-')" >> "$GITHUB_OUTPUT"
+              echo "verus_version=$version" >> "$GITHUB_OUTPUT"
+              ;;
+            3)
+              echo "updated=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              exit "$status"
+              ;;
+          esac
+      - name: Install the new Verus toolchain
+        if: steps.bump.outputs.updated == 'true'
+        working-directory: tools
+        run: ./install_verus --use-prebuilt
+      - name: Verify at the new version
+        id: verify
+        if: steps.bump.outputs.updated == 'true'
+        working-directory: source
+        run: |
+          if cargo verus focus --release -- --multiple-errors=20 --trace --time; then
+            echo "verified=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "verified=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  open_pr:
+    name: Open the version bump pull request
+    needs: [bump_and_verify]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        if: needs.bump_and_verify.outputs.verified == 'true'
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - name: Apply the version bump
+        if: needs.bump_and_verify.outputs.verified == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_DATE: ${{ needs.bump_and_verify.outputs.release_date }}
+        run: ./tools/bump_verus.sh --to "$TARGET_DATE"
+      - name: Open the pull request
+        if: needs.bump_and_verify.outputs.verified == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_DATE: ${{ needs.bump_and_verify.outputs.release_date }}
+          VERUS_VERSION: ${{ needs.bump_and_verify.outputs.verus_version }}
+          BASE_BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          branch="verus-bump/$RELEASE_DATE"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git commit -am "Update Verus to the $RELEASE_DATE release"
+          git push --force "https://x-access-token:${GH_TOKEN}@${GH_HOST}/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/$branch"
+          if [ -z "$(gh pr list --head "$branch" --state open --json number -q '.[].number')" ]; then
+            body=$(printf '%s\n\n%s\n' \
+              "Bumps the pinned Verus version to \`$VERUS_VERSION\` ($RELEASE_DATE release)." \
+              "\`cargo verus focus --release\` reported no verification errors at the new version, so no proof repair was needed and no agent ran.")
+            gh pr create --draft --base "$BASE_BRANCH" --head "$branch" \
+              --title "[verus-bump] Update Verus to the $RELEASE_DATE release" --body "$body"
+            gh pr edit "$branch" --add-label dependencies,verus,automated || true
+          fi
+
 steps:
   - name: Apply the version bump
-    id: bump
     env:
       GH_TOKEN: ${{ github.token }}
-      GH_AW_SAFE_OUTPUTS: ${{ steps.set-runtime-paths.outputs.GH_AW_SAFE_OUTPUTS }}
-      TARGET_DATE: ${{ inputs.target_date }}
-    run: |
-      set -uo pipefail
-      args=()
-      if [ -n "${TARGET_DATE:-}" ]; then
-        args+=(--to "$TARGET_DATE")
-      fi
-      status=0
-      ./tools/bump_verus.sh "${args[@]}" || status=$?
-      case "$status" in
-        0)
-          echo "updated=true" >> "$GITHUB_OUTPUT"
-          ;;
-        3)
-          echo "updated=false" >> "$GITHUB_OUTPUT"
-          mkdir -p "$(dirname "$GH_AW_SAFE_OUTPUTS")"
-          echo '{"type":"noop","message":"Verus is already at the newest version published on both crates.io and as a release."}' >> "$GH_AW_SAFE_OUTPUTS"
-          ;;
-        *)
-          exit "$status"
-          ;;
-      esac
+      TARGET_DATE: ${{ needs.bump_and_verify.outputs.release_date }}
+    run: ./tools/bump_verus.sh --to "$TARGET_DATE"
 
   - name: Install the new Verus toolchain
-    if: steps.bump.outputs.updated == 'true'
     working-directory: tools
     run: ./install_verus --use-prebuilt
 ---
@@ -91,7 +169,8 @@ The version pins have **already been updated for you** by the previous step.
 `git diff` shows exactly what changed in `source/Cargo.toml` and
 `tools/install_verus`, and the matching Verus toolchain is already installed.
 
-Your job is to make the repository verify again at the new version, and to
+Verification has already been run at the new version and it failed — that is
+why you are here. Your job is to make the repository verify again, and to
 explain what you did.
 
 ## What to do
