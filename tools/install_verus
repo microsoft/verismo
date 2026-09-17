@@ -98,7 +98,12 @@ while [ "$#" -gt 0 ]; do
     shift
 done
 
-require_commands grep
+require_commands grep uname
+
+case "$(uname -s)" in
+    Darwin) DYLIB_EXT="dylib" ;;
+    *)      DYLIB_EXT="so" ;;
+esac
 
 if $VERUS_REV_SPECIFIED && [ -z "$VERUS_DIR" ]; then
     die "--verus-rev requires --verus-dir"
@@ -128,6 +133,11 @@ install_verus_assets() {
         "z3"
         "cargo-verus"
         "verus-root"
+        "libverus_builtin.rlib"
+        "libverus_builtin_macros.$DYLIB_EXT"
+        "libverus_state_machines_macros.$DYLIB_EXT"
+        "libvstd.rlib"
+        "vstd.vir"
     )
     local src_dir=$1
     local dst_dir=$2
