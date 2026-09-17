@@ -47,25 +47,31 @@ test_library_mode_defines_functions() {
 
 test_library_mode_defines_functions
 
-test_workflow_provides_safe_outputs_to_bump_step() {
+test_workflow_gates_the_agent_on_the_bump_outcome() {
     local workflow="$SCRIPT_DIR/../.github/workflows/verus-bump.md"
     local bump_step
     bump_step=$(sed -n '/- name: Apply the version bump/,/- name: Install the new Verus toolchain/p' "$workflow")
 
-    if grep -q 'GH_AW_SAFE_OUTPUTS:' <<< "$bump_step"; then
-        pass "workflow provides GH_AW_SAFE_OUTPUTS to bump step"
+    if grep -q 'updated=true' <<< "$bump_step"; then
+        pass "workflow records the bump outcome as an output"
     else
-        fail "workflow does not provide GH_AW_SAFE_OUTPUTS to bump step"
+        fail "workflow does not record the bump outcome as an output"
     fi
 
-    if grep -q 'mkdir -p.*GH_AW_SAFE_OUTPUTS' <<< "$bump_step"; then
-        pass "workflow creates the safe outputs directory"
+    if grep -q "needs.bump_and_verify.outputs.updated == 'true' && needs.bump_and_verify.outputs.verified != 'true'" "$workflow"; then
+        pass "workflow runs the agent only for a bump that broke verification"
     else
-        fail "workflow does not create the safe outputs directory"
+        fail "workflow does not gate the agent on the bump and verification outcome"
+    fi
+
+    if grep -q "if: needs.bump_and_verify.outputs.verified == 'true'" "$workflow"; then
+        pass "workflow opens the pull request directly when verification is clean"
+    else
+        fail "workflow does not open the pull request directly when verification is clean"
     fi
 }
 
-test_workflow_provides_safe_outputs_to_bump_step
+test_workflow_gates_the_agent_on_the_bump_outcome
 
 test_latest_verus_release_reports_no_eligible_releases() {
     local output status
@@ -195,7 +201,7 @@ test_discover_targets_selects_each_source_independently
 test_discover_targets_honors_inclusive_cutoff
 
 
-# Build a throwaway repo containing just the two files bump_verus.sh edits.
+# Build a throwaway repo containing just the files bump_verus.sh edits.
 make_fixture_repo() {
     local root
     root=$(mktemp -d)
@@ -227,6 +233,12 @@ VERUSFMT_VERSION=v0.7.1
 EOF
     chmod +x "$root/tools/install_verus"
 
+    cat > "$root/source/rust-toolchain.toml" <<'EOF'
+[toolchain]
+channel = "1.97.1"
+components = [ "rust-src", "rustc", "cargo", "rustfmt", "rustc-dev", "llvm-tools-preview" ]
+EOF
+
     echo "$root"
 }
 
@@ -234,6 +246,7 @@ snapshot_fixture() {
     local root=$1
     cp "$root/source/Cargo.toml" "$root/Cargo.toml.before"
     cp "$root/tools/install_verus" "$root/install_verus.before"
+    cp "$root/source/rust-toolchain.toml" "$root/rust-toolchain.toml.before"
 }
 
 check_fixture_unchanged() {
@@ -247,6 +260,11 @@ check_fixture_unchanged() {
         pass "$what leaves install fixture byte-for-byte unchanged"
     else
         fail "$what changed install fixture"
+    fi
+    if cmp -s "$root/rust-toolchain.toml.before" "$root/source/rust-toolchain.toml"; then
+        pass "$what leaves toolchain fixture byte-for-byte unchanged"
+    else
+        fail "$what changed toolchain fixture"
     fi
 }
 
@@ -384,6 +402,27 @@ test_apply_versions_rewrites_install_verus() {
         "$(grep '^DEFAULT_VERUS_REV=' "$install")" "DEFAULT_VERUS_REV rewritten"
     check_eq "VERUS_RUST_VERSION=1.98.0" \
         "$(grep '^VERUS_RUST_VERSION=' "$install")" "VERUS_RUST_VERSION rewritten"
+
+    rm -rf "$root"
+}
+
+test_apply_versions_rewrites_rust_toolchain() {
+    local root; root=$(make_fixture_repo)
+    apply_versions "$root" \
+        "0.2026.08.09.92f466f" \
+        "92f466f1234567890abcdef1234567890abcdef1" \
+        "1.98.0" \
+        "vstd=0.0.0-2026-08-09-0044" \
+        "verus_builtin=0.0.0-2026-08-09-0044" \
+        "verus_builtin_macros=0.0.0-2026-08-09-0044" \
+        "verus_state_machines_macros=0.0.0-2026-08-02-0125" \
+        "verus_syn=0.0.0-2026-08-02-0125"
+
+    local toolchain="$root/source/rust-toolchain.toml"
+    check_eq 'channel = "1.98.0"' \
+        "$(grep '^channel' "$toolchain")" "rust-toolchain channel rewritten"
+    check_eq "1" \
+        "$(grep -c '^components' "$toolchain")" "rust-toolchain components untouched"
 
     rm -rf "$root"
 }
@@ -681,6 +720,7 @@ test_apply_versions_rejects_duplicate_cargo_target() {
 
 test_apply_versions_rewrites_mixed_cargo_pins
 test_apply_versions_rewrites_install_verus
+test_apply_versions_rewrites_rust_toolchain
 test_apply_versions_leaves_unrelated_lines_alone
 test_apply_versions_preserves_executable_bit
 test_apply_versions_requires_five_crate_assignments

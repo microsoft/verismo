@@ -5,10 +5,11 @@
 #
 # Bump the pinned Verus version.
 #
-# Verus is pinned in two places: the five crates.io pins in source/Cargo.toml,
-# and VERUS_VERSION / DEFAULT_VERUS_REV / VERUS_RUST_VERSION in
-# tools/install_verus. This script selects the newest eligible publication for
-# each crate independently and the newest stable, non-rolling Verus release.
+# Verus is pinned in three places: the five crates.io pins in source/Cargo.toml,
+# VERUS_VERSION / DEFAULT_VERUS_REV / VERUS_RUST_VERSION in tools/install_verus,
+# and the Rust channel in source/rust-toolchain.toml. This script selects the
+# newest eligible publication for each crate independently and the newest
+# stable, non-rolling Verus release.
 #
 # Usage:
 #   ./bump_verus.sh                  Bump to the newest versions.
@@ -166,15 +167,17 @@ resolve_rust_version() {
 
 # apply_versions ROOT VERUS_VERSION VERUS_REV RUST_VERSION CRATE=VERSION...
 #
-# Rewrites the five crates.io pins in source/Cargo.toml and the three pinned
-# variables in tools/install_verus. Asserts afterwards that every expected
+# Rewrites the five crates.io pins in source/Cargo.toml, the three pinned
+# variables in tools/install_verus, and the Rust channel in
+# source/rust-toolchain.toml. Asserts afterwards that every expected
 # substitution landed, so a changed file format fails loudly instead of
 # silently producing a half-updated tree.
 apply_versions() {
     local root=$1 verus_version=$2 verus_rev=$3 rust_version=$4
     local cargo="$root/source/Cargo.toml"
     local install="$root/tools/install_verus"
-    local assignment crate version count tmp next_tmp install_tmp actual n
+    local toolchain="$root/source/rust-toolchain.toml"
+    local assignment crate version count tmp next_tmp install_tmp toolchain_tmp actual n
     local known variable expected
 
     shift 4
@@ -201,6 +204,7 @@ apply_versions() {
 
     [ -f "$cargo" ] || die "not found: $cargo"
     [ -f "$install" ] || die "not found: $install"
+    [ -f "$toolchain" ] || die "not found: $toolchain"
 
     for crate in "${VERUS_CRATES[@]}"; do
         count=0
@@ -231,6 +235,10 @@ apply_versions() {
         -e "s|^VERUS_RUST_VERSION=.*|VERUS_RUST_VERSION=${rust_version}|" \
         "$install" > "$install_tmp"
 
+    toolchain_tmp=$(mktemp)
+    sed -E "s|^channel[[:space:]]*=[[:space:]]*\".*\"|channel = \"${rust_version}\"|" \
+        "$toolchain" > "$toolchain_tmp"
+
     for assignment in "$@"; do
         crate=${assignment%%=*}
         version=${assignment#*=}
@@ -255,8 +263,13 @@ apply_versions() {
             || die "expected exactly one $variable assignment in $install, found $n"
     done
 
+    n=$(grep -Fxc "channel = \"${rust_version}\"" "$toolchain_tmp" || true)
+    [ "$n" -eq 1 ] \
+        || die "expected exactly one channel assignment in $toolchain, found $n"
+
     write_file "$cargo" "$tmp"
     write_file "$install" "$install_tmp"
+    write_file "$toolchain" "$toolchain_tmp"
 }
 
 usage() {
