@@ -49,6 +49,7 @@ tools:
     - "which"
     - "echo"
     - "printf"
+    - "verus"
 
 safe-outputs:
   report-failure-as-issue: false
