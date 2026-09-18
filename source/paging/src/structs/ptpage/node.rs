@@ -451,7 +451,8 @@ struct CanonicalRangeCursor {
 impl CanonicalRangeCursor {
     /// Inputs: canonical bounds; Requires: ordered range; Returns: initialized cursor.
     fn new(start: usize, end: usize) -> Self {
-        Self { cursor: start, end }
+        let cursor = if start == LOW_CANONICAL_END { HIGH_CANONICAL_START } else { start };
+        Self { cursor, end }
     }
 
     /// Inputs: cursor state; Requires: none; Returns: current canonical position.
@@ -465,9 +466,6 @@ impl Iterator for CanonicalRangeCursor {
 
     /// Inputs: cursor state; Requires: canonical bounds; Returns: next valid segment.
     fn next(&mut self) -> Option<Self::Item> {
-        if self.cursor == LOW_CANONICAL_END {
-            self.cursor = HIGH_CANONICAL_START;
-        }
         if self.cursor >= self.end {
             return None;
         }
@@ -477,8 +475,10 @@ impl Iterator for CanonicalRangeCursor {
         } else {
             self.end
         };
-        let segment_start = core::mem::replace(&mut self.cursor, segment_end);
-        Some((segment_start, segment_end))
+        let segment = (self.cursor, segment_end);
+        self.cursor =
+            if segment_end == LOW_CANONICAL_END { HIGH_CANONICAL_START } else { segment_end };
+        Some(segment)
     }
 }
 
