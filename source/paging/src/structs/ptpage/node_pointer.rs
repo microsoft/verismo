@@ -16,8 +16,36 @@ pub(crate) struct PTPagePointer<'tree, A: ArchPagingMeta, P: PagingAllocator> {
     marker: PhantomData<&'tree PTPage<A, P>>,
 }
 
-/// The page and slot where a page-table walk stopped.
-pub(crate) struct WalkResult<'tree, A: ArchPagingMeta, P: PagingAllocator> {
+/// An atomic observation returned by a concurrent page-table walk.
+#[cfg(feature = "concurrent")]
+pub struct WalkResult<A: ArchPagingMeta> {
+    entry: PTEntry<A>,
+    level: PageLevel,
+}
+
+#[cfg(feature = "concurrent")]
+impl<A: ArchPagingMeta> WalkResult<A> {
+    #[cfg(feature = "concurrent")]
+    #[inline(always)]
+    pub(crate) fn new(entry: PTEntry<A>, level: PageLevel) -> Self {
+        Self { entry, level }
+    }
+
+    /// The level where the walk stopped.
+    #[inline(always)]
+    pub fn level(&self) -> PageLevel {
+        self.level
+    }
+
+    /// The entry word observed by the walk.
+    #[inline(always)]
+    pub fn read(&self) -> PTEntry<A> {
+        self.entry
+    }
+}
+
+/// The internal page and slot where a page-table walk stopped.
+pub(crate) struct WalkPosition<'tree, A: ArchPagingMeta, P: PagingAllocator> {
     pub(crate) page: PTPagePointer<'tree, A, P>,
     pub(crate) index: usize,
     page_paddr: Option<PhysAddr>,
@@ -25,7 +53,7 @@ pub(crate) struct WalkResult<'tree, A: ArchPagingMeta, P: PagingAllocator> {
     pub(crate) observed: PTEntry<A>,
 }
 
-impl<'tree, A: ArchPagingMeta, P: PagingAllocator> WalkResult<'tree, A, P> {
+impl<'tree, A: ArchPagingMeta, P: PagingAllocator> WalkPosition<'tree, A, P> {
     pub(crate) fn entry(&self) -> PTEntryRef<'tree, A> {
         self.page.entry(self.index)
     }
@@ -70,7 +98,7 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
     }
 
     #[inline(always)]
-    pub(crate) fn walk(&self, vaddr: VirtAddr) -> WalkResult<'tree, A, P> {
+    pub(crate) fn walk(&self, vaddr: VirtAddr) -> WalkPosition<'tree, A, P> {
         let page = Self { page: self.page, level: self.level, marker: PhantomData };
         match page.level {
             PageLevel::Level0 => Self::walk_level::<0>(page, vaddr, None),
@@ -86,7 +114,7 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
         page: Self,
         vaddr: VirtAddr,
         page_paddr: PhysAddr,
-    ) -> WalkResult<'tree, A, P> {
+    ) -> WalkPosition<'tree, A, P> {
         match LEVEL {
             1 => Self::walk_level::<0>(page, vaddr, Some(page_paddr)),
             2 => Self::walk_level::<1>(page, vaddr, Some(page_paddr)),
@@ -101,7 +129,7 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
         page: Self,
         vaddr: VirtAddr,
         page_paddr: Option<PhysAddr>,
-    ) -> WalkResult<'tree, A, P> {
+    ) -> WalkPosition<'tree, A, P> {
         let level = PageLevel::at::<LEVEL>();
         if LEVEL == 0 {
             return page.finish_at(vaddr, level, page_paddr);
@@ -122,7 +150,7 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
         vaddr: VirtAddr,
         level: PageLevel,
         child_level: PageLevel,
-    ) -> Result<(Self, PhysAddr), WalkResult<'tree, A, P>> {
+    ) -> Result<(Self, PhysAddr), WalkPosition<'tree, A, P>> {
         debug_assert_eq!(self.level, level);
         let index = entry_index(vaddr, level);
         let observed = self.load(index);
@@ -132,7 +160,7 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
         } else {
             #[cfg(not(feature = "concurrent"))]
             let _ = observed;
-            Err(WalkResult {
+            Err(WalkPosition {
                 page: self,
                 index,
                 page_paddr: None,
@@ -148,12 +176,12 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
         vaddr: VirtAddr,
         level: PageLevel,
         page_paddr: Option<PhysAddr>,
-    ) -> WalkResult<'tree, A, P> {
+    ) -> WalkPosition<'tree, A, P> {
         debug_assert_eq!(self.level, level);
         let index = entry_index(vaddr, level);
         #[cfg(feature = "concurrent")]
         let observed = self.load(index);
-        WalkResult {
+        WalkPosition {
             page: self,
             index,
             page_paddr,

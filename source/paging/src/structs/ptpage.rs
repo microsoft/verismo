@@ -7,4 +7,6 @@ mod tree;
 pub(crate) use node::FlushFootprint;
 pub use node::{Mapping, PTPage, Translation};
 pub(crate) use node_pointer::PTPagePointer;
+#[cfg(feature = "concurrent")]
+pub use node_pointer::WalkResult;
 pub(crate) use tree::{free_children, reclaim_path, reclaim_range, PTPageTree};

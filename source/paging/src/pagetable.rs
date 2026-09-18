@@ -5,7 +5,7 @@ use crate::structs::address::{Address, PhysAddr, VirtAddr};
 use crate::structs::arch_contract::{ArchPagingMeta, GenericPageTableFlags};
 use crate::structs::entry::{PTEntry, PTEntryRef};
 use crate::structs::frame::PhysFrame;
-use crate::structs::level::{LevelSpec, Lvl, PageLevel};
+use crate::structs::level::{InnerLevel, LevelSpec, Lvl, PageLevel};
 use crate::structs::mapping::{
     MappingMut, MappingMutOps, MappingRef, MappingRefOps, UnmapEntryResult,
 };
@@ -291,7 +291,7 @@ impl<
     }
 
     fn walk_entry(&self, vaddr: VirtAddr) -> (PTEntryRef<'_, Arch>, PageLevel) {
-        let observed = self.tree.walk(vaddr);
+        let observed = self.tree.root().walk(vaddr);
         (observed.entry(), observed.page.level())
     }
 
@@ -372,7 +372,7 @@ impl<
         index: usize,
         page: Page<PS>,
         frame: PhysFrame<PS>,
-        spec: RangeMapSpec<Arch>,
+        flags: Arch::PTFlags,
     ) -> Result<(), PagingError> {
         let target = page_level_for_size::<PS>().ok_or(PagingError::InvalidLevel)?;
         let vaddr = page.start_address();
@@ -382,7 +382,7 @@ impl<
         prepared.grow(vaddr, target, parent_flags)?;
         let mapping = prepared.root().walk(vaddr);
         debug_assert_eq!(mapping.page.level(), target);
-        mapping.entry().store(Self::leaf_entry(frame.start_address(), target, spec.flags));
+        mapping.entry().store(Self::leaf_entry(frame.start_address(), target, flags));
         parent.store(
             index,
             PTEntry::new_table(Arch::make_private_address(prepared.root_paddr()), parent_flags),
@@ -461,7 +461,7 @@ impl<
                         .map_err(|_| PagingError::InvalidAddress)?,
                     PhysFrame::<Size4KiB>::from_start_address(paddr)
                         .map_err(|_| PagingError::InvalidAddress)?,
-                    spec,
+                    spec.flags,
                 )?,
                 PageLevel::Level1 => self.map_missing_path(
                     &page,
@@ -470,7 +470,7 @@ impl<
                         .map_err(|_| PagingError::InvalidAddress)?,
                     PhysFrame::<Size2MiB>::from_start_address(paddr)
                         .map_err(|_| PagingError::InvalidAddress)?,
-                    spec,
+                    spec.flags,
                 )?,
                 _ => return Err(PagingError::InvalidLevel),
             }
@@ -516,36 +516,56 @@ impl<
         state: &mut RangeUnmapState<'_>,
     ) -> Result<(), PagingError> {
         debug_assert_eq!(page.level(), PageLevel::Level0);
+        let mut index = entry_index(start, PageLevel::Level0);
+        let mut first_changed = None;
+        let mut last_changed = start;
         while start < end {
-            let slot = page.entry(entry_index(start, PageLevel::Level0));
+            let slot = page.entry(index);
             if slot.load().is_leaf(PageLevel::Level0) {
                 slot.swap(PTEntry::empty());
-                state.footprint.include(start, PageLevel::Level0);
+                if first_changed.is_none() {
+                    first_changed = Some(start);
+                }
+                last_changed = start;
             } else {
                 *state.all_mapped = false;
             }
             start = next_boundary(start, PageLevel::Level0, end);
+            index = (index + 1) & (PT_ENTRY_COUNT - 1);
+        }
+        if let Some(first) = first_changed {
+            state.footprint.include(first, PageLevel::Level0);
+            state.footprint.include(last_changed, PageLevel::Level0);
         }
         Ok(())
     }
 
     #[inline(always)]
-    fn unmap_region_level<const LEVEL: usize>(
+    fn unmap_region_child<PL: InnerLevel>(
+        &mut self,
+        page: PTPagePointer<'_, Arch, Alloc>,
+        start: VirtAddr,
+        end: VirtAddr,
+        state: &mut RangeUnmapState<'_>,
+    ) -> Result<(), PagingError> {
+        match PL::DEPTH {
+            1 => self.unmap_region_l0(page, start, end, state),
+            2 => self.unmap_region_level::<Lvl<1>>(page, start, end, state),
+            3 => self.unmap_region_level::<Lvl<2>>(page, start, end, state),
+            4 => self.unmap_region_level::<Lvl<3>>(page, start, end, state),
+            _ => unreachable!("leaf page has no child"),
+        }
+    }
+
+    #[inline(always)]
+    fn unmap_region_level<PL: InnerLevel>(
         &mut self,
         page: PTPagePointer<'_, Arch, Alloc>,
         mut start: VirtAddr,
         end: VirtAddr,
         state: &mut RangeUnmapState<'_>,
-        mut lower: impl for<'tree> FnMut(
-            &mut Self,
-            PTPagePointer<'tree, Arch, Alloc>,
-            VirtAddr,
-            VirtAddr,
-            &mut RangeUnmapState<'_>,
-        ) -> Result<(), PagingError>,
     ) -> Result<(), PagingError> {
-        let level = PageLevel::at::<LEVEL>();
-        debug_assert!(LEVEL > 0);
+        let level = PL::LEVEL;
         debug_assert_eq!(page.level(), level);
         while start < end {
             let slot_end = next_boundary(start, level, end);
@@ -555,7 +575,7 @@ impl<
             if observed.is_table(level) {
                 let child =
                     page.child_from_observed(observed).map_err(|_| PagingError::NotLeafEntry)?;
-                lower(self, child, start, slot_end, state)?;
+                self.unmap_region_child::<PL>(child, start, slot_end, state)?;
                 start = slot_end;
                 continue;
             }
@@ -575,54 +595,10 @@ impl<
             // SAFETY: the exclusive controller borrow pins the slot and excludes writers.
             let _ = unsafe { PTPage::<Arch, Alloc>::split_leaf(slot, level, start, target, true) }?;
             let child = page.child(index).map_err(|_| PagingError::NotLeafEntry)?;
-            lower(self, child, start, slot_end, state)?;
+            self.unmap_region_child::<PL>(child, start, slot_end, state)?;
             start = slot_end;
         }
         Ok(())
-    }
-
-    #[inline(always)]
-    fn unmap_region_l1(
-        &mut self,
-        page: PTPagePointer<'_, Arch, Alloc>,
-        start: VirtAddr,
-        end: VirtAddr,
-        state: &mut RangeUnmapState<'_>,
-    ) -> Result<(), PagingError> {
-        self.unmap_region_level::<1>(page, start, end, state, Self::unmap_region_l0)
-    }
-
-    #[inline(always)]
-    fn unmap_region_l2(
-        &mut self,
-        page: PTPagePointer<'_, Arch, Alloc>,
-        start: VirtAddr,
-        end: VirtAddr,
-        state: &mut RangeUnmapState<'_>,
-    ) -> Result<(), PagingError> {
-        self.unmap_region_level::<2>(page, start, end, state, Self::unmap_region_l1)
-    }
-
-    #[inline(always)]
-    fn unmap_region_l3(
-        &mut self,
-        page: PTPagePointer<'_, Arch, Alloc>,
-        start: VirtAddr,
-        end: VirtAddr,
-        state: &mut RangeUnmapState<'_>,
-    ) -> Result<(), PagingError> {
-        self.unmap_region_level::<3>(page, start, end, state, Self::unmap_region_l2)
-    }
-
-    #[inline(always)]
-    fn unmap_region_l4(
-        &mut self,
-        page: PTPagePointer<'_, Arch, Alloc>,
-        start: VirtAddr,
-        end: VirtAddr,
-        state: &mut RangeUnmapState<'_>,
-    ) -> Result<(), PagingError> {
-        self.unmap_region_level::<4>(page, start, end, state, Self::unmap_region_l3)
     }
 
     fn unmap_region_sweep(
@@ -639,10 +615,10 @@ impl<
         let root = unsafe { PTPagePointer::from_root(root_paddr, MaxLevel::LEVEL) };
         match MaxLevel::LEVEL {
             PageLevel::Level0 => self.unmap_region_l0(root, start, end, state),
-            PageLevel::Level1 => self.unmap_region_l1(root, start, end, state),
-            PageLevel::Level2 => self.unmap_region_l2(root, start, end, state),
-            PageLevel::Level3 => self.unmap_region_l3(root, start, end, state),
-            PageLevel::Level4 => self.unmap_region_l4(root, start, end, state),
+            PageLevel::Level1 => self.unmap_region_level::<Lvl<1>>(root, start, end, state),
+            PageLevel::Level2 => self.unmap_region_level::<Lvl<2>>(root, start, end, state),
+            PageLevel::Level3 => self.unmap_region_level::<Lvl<3>>(root, start, end, state),
+            PageLevel::Level4 => self.unmap_region_level::<Lvl<4>>(root, start, end, state),
         }
     }
 
@@ -673,7 +649,9 @@ impl<
         self.translate(vaddr).map(|frame| frame.address())
     }
 
-    fn map_at_level_with_parent_flags<PS: PageSize>(
+    /// Maps `page` to the matching physical `frame`, building intermediate
+    /// tables with `parent_flags`. Existing mappings are never overwritten.
+    pub fn map_with_parent_flags<PS: PageSize>(
         &mut self,
         page: Page<PS>,
         frame: PhysFrame<PS>,
@@ -706,19 +684,6 @@ impl<
         MappingMut::from_view(Some(vaddr), level, entry).commit_no_flush(|map| {
             PTPage::<Arch, Alloc>::do_map(map, page, frame, flags, shared, parent_flags)
         })
-    }
-
-    /// Maps `page` to the matching physical `frame`, building intermediate
-    /// tables with `parent_flags`. Existing mappings are never overwritten.
-    pub fn map_with_parent_flags<PS: PageSize>(
-        &mut self,
-        page: Page<PS>,
-        frame: PhysFrame<PS>,
-        flags: Arch::PTFlags,
-        shared: bool,
-        parent_flags: Arch::PTFlags,
-    ) -> Result<(), PagingError> {
-        self.map_at_level_with_parent_flags(page, frame, flags, shared, parent_flags)
     }
 
     /// [`Self::map_with_parent_flags`] with the architecture's default flags

@@ -11,14 +11,14 @@ use crate::structs::address::{Address, PhysAddr, VirtAddr};
 use crate::structs::arch_contract::{ArchPagingMeta, GenericPageTableFlags};
 use crate::structs::entry::{PTEntry, PTEntryRef};
 use crate::structs::frame::PhysFrame;
-use crate::structs::level::{LevelSpec, Lvl, PageLevel};
+use crate::structs::level::{InnerLevel, LevelSpec, Lvl, PageLevel};
 use crate::structs::mapping::UnmapEntryResult;
 use crate::structs::os_contract::{DirectMappedAllocator, PagingAllocator, PagingError};
 use crate::structs::page::Page;
 use crate::structs::policy::{KernelPolicy, PagingOwnershipPolicy, UserPolicy};
 use crate::structs::ptpage::{
     free_children, reclaim_path, reclaim_range, FlushFootprint, PTPage, PTPagePointer, PTPageTree,
-    Translation,
+    Translation, WalkResult,
 };
 use crate::structs::sizes::{
     entry_index, next_boundary, page_level_for_size, PageSize, Size2MiB, Size4KiB, PT_ENTRY_COUNT,
@@ -55,28 +55,11 @@ pub unsafe trait LockSpec<T> {
     fn lock(&self, page: PhysAddr) -> Self::Guard<'_>;
 }
 
-/// An atomic observation, not a reference to a live entry or a pinned frame.
-/// Another update can invalidate its translation immediately.
-pub struct MappingSnapshot<Arch: ArchPagingMeta> {
-    entry: PTEntry<Arch>,
-    level: PageLevel,
-}
-
 /// Internal outcome used to restart a range walk after a concurrent split.
 enum RangeUpdateError {
-    Retry,
+    Descend,
     Split(usize, PageLevel),
     Paging(PagingError),
-}
-
-impl<Arch: ArchPagingMeta> MappingSnapshot<Arch> {
-    pub fn read(&self) -> PTEntry<Arch> {
-        self.entry
-    }
-
-    pub fn level(&self) -> PageLevel {
-        self.level
-    }
 }
 
 /// Shared access permits walk, map, unmap and split, but never removes an
@@ -282,9 +265,9 @@ where
     /// Arch leaf/absent-entry snapshot. It holds no content lock and gives no
     /// authority to dereference or free the translated data frame.
     #[inline(always)]
-    pub fn walk(&self, vaddr: VirtAddr) -> MappingSnapshot<Arch> {
-        let position = self.tree.walk(vaddr);
-        MappingSnapshot { entry: position.observed, level: position.page.level() }
+    pub fn walk(&self, vaddr: VirtAddr) -> WalkResult<Arch> {
+        let position = self.tree.root().walk(vaddr);
+        WalkResult::new(position.observed, position.page.level())
     }
 
     /// Installs a leaf, publishing a fully initialized private path when one is absent.
@@ -400,24 +383,26 @@ where
     #[inline(always)]
     pub fn translate(&self, vaddr: VirtAddr) -> Result<Translation<Arch>, PagingError> {
         let snapshot = self.walk(vaddr);
+        let level = snapshot.level();
+        let entry = snapshot.read();
         // Keep the common 4 KiB translation path free of dynamic level-size dispatch.
-        if snapshot.level == PageLevel::Level0 {
-            if !snapshot.entry.present() {
+        if level == PageLevel::Level0 {
+            if !entry.present() {
                 return Err(PagingError::NotMapped);
             }
             let offset = vaddr.bits() & (Self::SMALL.size() - 1);
             return Ok(Translation::new(
-                PhysAddr::from((snapshot.entry.paddr_field() & !(Self::SMALL.size() - 1)) + offset),
-                snapshot.level,
+                PhysAddr::from((entry.paddr_field() & !(Self::SMALL.size() - 1)) + offset),
+                level,
             ));
         }
-        if !snapshot.entry.is_leaf(snapshot.level) {
+        if !entry.is_leaf(level) {
             return Err(PagingError::NotMapped);
         }
-        let offset = vaddr.bits() & (snapshot.level.size() - 1);
+        let offset = vaddr.bits() & (level.size() - 1);
         Ok(Translation::new(
-            PhysAddr::from((snapshot.entry.paddr_field() & !(snapshot.level.size() - 1)) + offset),
-            snapshot.level,
+            PhysAddr::from((entry.paddr_field() & !(level.size() - 1)) + offset),
+            level,
         ))
     }
 
@@ -649,38 +634,57 @@ where
         state: &mut RangeUnmapState<'_>,
     ) -> Result<(), PagingError> {
         debug_assert_eq!(page.level(), PageLevel::Level0);
-        let page_paddr = page.paddr();
+        let mut index = entry_index(start, PageLevel::Level0);
+        let mut first_changed = None;
+        let mut last_changed = start;
+        let _guard = self.wperms.lock(page.paddr());
         while start < end {
-            let _guard = self.wperms.lock(page_paddr);
-            let slot = page.entry(entry_index(start, PageLevel::Level0));
+            let slot = page.entry(index);
             if slot.load().is_leaf(PageLevel::Level0) {
                 slot.swap(PTEntry::empty());
-                state.footprint.include(start, PageLevel::Level0);
+                if first_changed.is_none() {
+                    first_changed = Some(start);
+                }
+                last_changed = start;
             } else {
                 *state.all_mapped = false;
             }
             start = next_boundary(start, PageLevel::Level0, end);
+            index = (index + 1) & (PT_ENTRY_COUNT - 1);
+        }
+        if let Some(first) = first_changed {
+            state.footprint.include(first, PageLevel::Level0);
+            state.footprint.include(last_changed, PageLevel::Level0);
         }
         Ok(())
     }
 
     #[inline(always)]
-    fn unmap_region_level<const LEVEL: usize>(
+    fn unmap_region_child<PL: InnerLevel>(
+        &self,
+        page: PTPagePointer<'_, Arch, Alloc>,
+        start: VirtAddr,
+        end: VirtAddr,
+        state: &mut RangeUnmapState<'_>,
+    ) -> Result<(), PagingError> {
+        match PL::DEPTH {
+            1 => self.unmap_region_l0(page, start, end, state),
+            2 => self.unmap_region_level::<Lvl<1>>(page, start, end, state),
+            3 => self.unmap_region_level::<Lvl<2>>(page, start, end, state),
+            4 => self.unmap_region_level::<Lvl<3>>(page, start, end, state),
+            _ => unreachable!("leaf page has no child"),
+        }
+    }
+
+    #[inline(always)]
+    fn unmap_region_level<PL: InnerLevel>(
         &self,
         page: PTPagePointer<'_, Arch, Alloc>,
         mut start: VirtAddr,
         end: VirtAddr,
         state: &mut RangeUnmapState<'_>,
-        mut lower: impl for<'tree> FnMut(
-            &Self,
-            PTPagePointer<'tree, Arch, Alloc>,
-            VirtAddr,
-            VirtAddr,
-            &mut RangeUnmapState<'_>,
-        ) -> Result<(), PagingError>,
     ) -> Result<(), PagingError> {
-        let level = PageLevel::at::<LEVEL>();
-        debug_assert!(LEVEL > 0);
+        let level = PL::LEVEL;
         debug_assert_eq!(page.level(), level);
         let page_paddr = page.paddr();
         while start < end {
@@ -691,7 +695,7 @@ where
             if observed.is_table(level) {
                 let child =
                     page.child_from_observed(observed).map_err(|_| PagingError::NotLeafEntry)?;
-                lower(self, child, start, slot_end, state)?;
+                self.unmap_region_child::<PL>(child, start, slot_end, state)?;
                 start = slot_end;
                 continue;
             }
@@ -701,7 +705,7 @@ where
                 let child =
                     page.child_from_observed(observed).map_err(|_| PagingError::NotLeafEntry)?;
                 drop(guard);
-                lower(self, child, start, slot_end, state)?;
+                self.unmap_region_child::<PL>(child, start, slot_end, state)?;
                 start = slot_end;
                 continue;
             }
@@ -724,54 +728,10 @@ where
             let _ = unsafe { PTPage::<Arch, Alloc>::split_leaf(slot, level, start, target, true) }?;
             let child = page.child(index).map_err(|_| PagingError::NotLeafEntry)?;
             drop(guard);
-            lower(self, child, start, slot_end, state)?;
+            self.unmap_region_child::<PL>(child, start, slot_end, state)?;
             start = slot_end;
         }
         Ok(())
-    }
-
-    #[inline(always)]
-    fn unmap_region_l1(
-        &self,
-        page: PTPagePointer<'_, Arch, Alloc>,
-        start: VirtAddr,
-        end: VirtAddr,
-        state: &mut RangeUnmapState<'_>,
-    ) -> Result<(), PagingError> {
-        self.unmap_region_level::<1>(page, start, end, state, Self::unmap_region_l0)
-    }
-
-    #[inline(always)]
-    fn unmap_region_l2(
-        &self,
-        page: PTPagePointer<'_, Arch, Alloc>,
-        start: VirtAddr,
-        end: VirtAddr,
-        state: &mut RangeUnmapState<'_>,
-    ) -> Result<(), PagingError> {
-        self.unmap_region_level::<2>(page, start, end, state, Self::unmap_region_l1)
-    }
-
-    #[inline(always)]
-    fn unmap_region_l3(
-        &self,
-        page: PTPagePointer<'_, Arch, Alloc>,
-        start: VirtAddr,
-        end: VirtAddr,
-        state: &mut RangeUnmapState<'_>,
-    ) -> Result<(), PagingError> {
-        self.unmap_region_level::<3>(page, start, end, state, Self::unmap_region_l2)
-    }
-
-    #[inline(always)]
-    fn unmap_region_l4(
-        &self,
-        page: PTPagePointer<'_, Arch, Alloc>,
-        start: VirtAddr,
-        end: VirtAddr,
-        state: &mut RangeUnmapState<'_>,
-    ) -> Result<(), PagingError> {
-        self.unmap_region_level::<4>(page, start, end, state, Self::unmap_region_l3)
     }
 
     fn unmap_region_sweep(
@@ -786,10 +746,10 @@ where
         let root = self.root_view();
         match MaxLevel::LEVEL {
             PageLevel::Level0 => self.unmap_region_l0(root, start, end, state),
-            PageLevel::Level1 => self.unmap_region_l1(root, start, end, state),
-            PageLevel::Level2 => self.unmap_region_l2(root, start, end, state),
-            PageLevel::Level3 => self.unmap_region_l3(root, start, end, state),
-            PageLevel::Level4 => self.unmap_region_l4(root, start, end, state),
+            PageLevel::Level1 => self.unmap_region_level::<Lvl<1>>(root, start, end, state),
+            PageLevel::Level2 => self.unmap_region_level::<Lvl<2>>(root, start, end, state),
+            PageLevel::Level3 => self.unmap_region_level::<Lvl<3>>(root, start, end, state),
+            PageLevel::Level4 => self.unmap_region_level::<Lvl<4>>(root, start, end, state),
         }
     }
 
@@ -1013,13 +973,13 @@ where
         let mut cursor = start;
         let mut flush = MayNeedFlush::none();
         let mut footprint = FlushFootprint::default();
-        let mut retries_left = MaxLevel::LEVEL.depth();
-        let mut retry_cursor = cursor;
-        let mut boundary_splits_left = 2;
+        let mut descents_left = MaxLevel::DEPTH;
+        let mut descent_cursor = cursor;
+        let mut partial_leaves_left = 2;
         loop {
-            if cursor != retry_cursor {
-                retry_cursor = cursor;
-                retries_left = MaxLevel::LEVEL.depth();
+            if cursor != descent_cursor {
+                descent_cursor = cursor;
+                descents_left = MaxLevel::DEPTH;
             }
             let mapping = self.root_view().walk(VirtAddr::from(cursor));
             if mapping.page.level() == Self::SMALL {
@@ -1082,7 +1042,7 @@ where
                         observed
                     };
                     if current.is_table(level) {
-                        return Err(RangeUpdateError::Retry);
+                        return Err(RangeUpdateError::Descend);
                     }
                     if !current.is_leaf(level) {
                         return Err(RangeUpdateError::Paging(PagingError::NotMapped));
@@ -1114,18 +1074,18 @@ where
                     let pending = flush.and(footprint.token());
                     return (Ok(()), pending);
                 }
-                Err((retry, RangeUpdateError::Retry)) => {
-                    if retries_left == 0 {
-                        unreachable!("page-table range update exceeded its retry bound");
+                Err((retry, RangeUpdateError::Descend)) => {
+                    if descents_left == 0 {
+                        unreachable!("page-table range update exceeded its descent bound");
                     }
-                    retries_left -= 1;
+                    descents_left -= 1;
                     cursor = retry;
                 }
                 Err((retry, RangeUpdateError::Split(split_address, target))) => {
-                    if boundary_splits_left == 0 {
-                        unreachable!("page-table range update exceeded its boundary split bound");
+                    if partial_leaves_left == 0 {
+                        unreachable!("page-table range update exceeded its partial-leaf bound");
                     }
-                    boundary_splits_left -= 1;
+                    partial_leaves_left -= 1;
                     let split_address = VirtAddr::from(split_address);
                     match self.with_locked_leaf(split_address, target, |entry, level| unsafe {
                         PTPage::<Arch, Alloc>::update_leaf_flags_at(
