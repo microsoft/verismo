@@ -271,14 +271,6 @@ where
         (self.wperms, policy, root_pa)
     }
 
-    pub fn policy(&self) -> &Owned {
-        self.tree.policy()
-    }
-
-    pub fn owns_top_entry(&self, index: usize) -> bool {
-        self.tree.policy().owns_top_entry(index)
-    }
-
     pub fn root_paddr(&self) -> PhysAddr {
         self.tree.root_paddr()
     }
@@ -445,38 +437,6 @@ where
         }
     }
 
-    fn map_range_leaf(
-        &self,
-        vaddr: VirtAddr,
-        paddr: PhysAddr,
-        target: PageLevel,
-        flags: Arch::PTFlags,
-        shared: bool,
-        parent_flags: Arch::PTFlags,
-    ) -> Result<(), PagingError> {
-        match target {
-            PageLevel::Level0 => self.do_map(
-                Page::<Size4KiB>::from_start_address(vaddr)
-                    .map_err(|_| PagingError::InvalidAddress)?,
-                PhysFrame::<Size4KiB>::from_start_address(paddr)
-                    .map_err(|_| PagingError::InvalidAddress)?,
-                flags,
-                shared,
-                parent_flags,
-            ),
-            PageLevel::Level1 => self.do_map(
-                Page::<Size2MiB>::from_start_address(vaddr)
-                    .map_err(|_| PagingError::InvalidAddress)?,
-                PhysFrame::<Size2MiB>::from_start_address(paddr)
-                    .map_err(|_| PagingError::InvalidAddress)?,
-                flags,
-                shared,
-                parent_flags,
-            ),
-            _ => Err(PagingError::InvalidLevel),
-        }
-    }
-
     fn check_map_region(
         &self,
         start: VirtAddr,
@@ -630,14 +590,27 @@ where
                 drop(guard);
             }
 
-            self.map_range_leaf(
-                start,
-                paddr,
-                target,
-                spec.flags,
-                false,
-                Arch::PTFlags::parent_flags(),
-            )?;
+            match target {
+                PageLevel::Level0 => self.do_map(
+                    Page::<Size4KiB>::from_start_address(start)
+                        .map_err(|_| PagingError::InvalidAddress)?,
+                    PhysFrame::<Size4KiB>::from_start_address(paddr)
+                        .map_err(|_| PagingError::InvalidAddress)?,
+                    spec.flags,
+                    false,
+                    Arch::PTFlags::parent_flags(),
+                )?,
+                PageLevel::Level1 => self.do_map(
+                    Page::<Size2MiB>::from_start_address(start)
+                        .map_err(|_| PagingError::InvalidAddress)?,
+                    PhysFrame::<Size2MiB>::from_start_address(paddr)
+                        .map_err(|_| PagingError::InvalidAddress)?,
+                    spec.flags,
+                    false,
+                    Arch::PTFlags::parent_flags(),
+                )?,
+                _ => return Err(PagingError::InvalidLevel),
+            }
             let next = next_boundary(start, target, slot_end);
             if next < slot_end {
                 let child = page.child(index).map_err(|_| PagingError::NotLeafEntry)?;

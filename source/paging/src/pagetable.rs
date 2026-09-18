@@ -17,7 +17,7 @@ use crate::structs::ptpage::{
     Translation,
 };
 use crate::structs::sizes::{
-    entry_index, next_boundary, page_level_for_size, PageSize, PT_ENTRY_COUNT,
+    entry_index, next_boundary, page_level_for_size, PageSize, Size2MiB, Size4KiB, PT_ENTRY_COUNT,
 };
 use crate::structs::tlb::MayNeedFlush;
 
@@ -256,14 +256,6 @@ impl<
         self.tree.into_parts()
     }
 
-    pub fn policy(&self) -> &Owned {
-        self.tree.policy()
-    }
-
-    pub fn owns_top_entry(&self, index: usize) -> bool {
-        self.tree.policy().owns_top_entry(index)
-    }
-
     pub fn root_paddr(&self) -> PhysAddr {
         self.tree.root_paddr()
     }
@@ -374,23 +366,24 @@ impl<
         Ok(())
     }
 
-    fn map_missing_path(
+    fn map_missing_path<PS: PageSize>(
         &mut self,
-        page: &PTPagePointer<'_, Arch, Alloc>,
+        parent: &PTPagePointer<'_, Arch, Alloc>,
         index: usize,
-        vaddr: VirtAddr,
-        paddr: PhysAddr,
-        target: PageLevel,
+        page: Page<PS>,
+        frame: PhysFrame<PS>,
         spec: RangeMapSpec<Arch>,
     ) -> Result<(), PagingError> {
-        let child_level = page.level().child().ok_or(PagingError::InvalidLevel)?;
+        let target = page_level_for_size::<PS>().ok_or(PagingError::InvalidLevel)?;
+        let vaddr = page.start_address();
+        let child_level = parent.level().child().ok_or(PagingError::InvalidLevel)?;
         let parent_flags = Arch::filter_flags(Arch::PTFlags::parent_flags());
         let mut prepared = PTPageTree::<Arch, Alloc>::new(child_level)?;
         prepared.grow(vaddr, target, parent_flags)?;
         let mapping = prepared.root().walk(vaddr);
         debug_assert_eq!(mapping.page.level(), target);
-        mapping.entry().store(Self::leaf_entry(paddr, target, spec.flags));
-        page.store(
+        mapping.entry().store(Self::leaf_entry(frame.start_address(), target, spec.flags));
+        parent.store(
             index,
             PTEntry::new_table(Arch::make_private_address(prepared.root_paddr()), parent_flags),
         );
@@ -460,7 +453,27 @@ impl<
                 return Err(PagingError::EntryAlreadyPresent { level });
             }
 
-            self.map_missing_path(&page, index, start, paddr, target, spec)?;
+            match target {
+                PageLevel::Level0 => self.map_missing_path(
+                    &page,
+                    index,
+                    Page::<Size4KiB>::from_start_address(start)
+                        .map_err(|_| PagingError::InvalidAddress)?,
+                    PhysFrame::<Size4KiB>::from_start_address(paddr)
+                        .map_err(|_| PagingError::InvalidAddress)?,
+                    spec,
+                )?,
+                PageLevel::Level1 => self.map_missing_path(
+                    &page,
+                    index,
+                    Page::<Size2MiB>::from_start_address(start)
+                        .map_err(|_| PagingError::InvalidAddress)?,
+                    PhysFrame::<Size2MiB>::from_start_address(paddr)
+                        .map_err(|_| PagingError::InvalidAddress)?,
+                    spec,
+                )?,
+                _ => return Err(PagingError::InvalidLevel),
+            }
             let next = next_boundary(start, target, slot_end);
             if next < slot_end {
                 let child = page.child(index).map_err(|_| PagingError::NotLeafEntry)?;

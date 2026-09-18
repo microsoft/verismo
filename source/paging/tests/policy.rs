@@ -17,7 +17,7 @@ use paging::os_contract::{DirectMappedAllocator, PagingError};
 #[cfg(feature = "concurrent")]
 use paging::pagetable::LockSpec;
 use paging::pagetable::{KernelPageTable, UserPageTable};
-use paging::policy::{KernelPolicy, PagingOwnershipPolicy, UserPolicy};
+use paging::policy::{PagingOwnershipPolicy, UserPolicy};
 use paging::sizes::entry_index;
 use paging::tlb::{MayNeedFlush, TlbFlush};
 use paging::{PTEntryFlags, X86Paging};
@@ -157,23 +157,16 @@ macro_rules! policy_tests {
             #[test]
             fn shared_reads_preserve_copied_entries_and_all_reserved_slots_are_non_owned() {
                 let (arena, mut kernel, locks) = $fixture();
-                let top = kernel_top(&arena);
                 let empty = reserved_hole(&arena);
                 assert!(kernel.next_table_pa(direct_map_index(&arena)).is_some());
                 assert_eq!(kernel.next_table_pa(empty), None);
-                let _: &KernelPolicy = kernel.policy();
                 let kernel_pages = arena.allocated();
                 let user = $share::<KERNEL_START, KERNEL_END>(&arena, &kernel, &locks);
-                let _: &UserPolicy<'_, KERNEL_START, KERNEL_END> = user.policy();
-                assert_eq!(user.policy().kernel_top(), top);
                 assert_ne!(user.root_paddr(), kernel.root_paddr());
                 assert_eq!(arena.allocated(), kernel_pages + 1);
                 for index in 0..512 {
-                    assert!(kernel.owns_top_entry(index));
-                    assert_eq!(user.owns_top_entry(index), !top.contains(&index));
                     assert_eq!(user.next_table_pa(index), kernel.next_table_pa(index));
                 }
-                assert!(!user.owns_top_entry(empty));
                 for offset in [0, PAGE, ARENA / 2, ARENA - PAGE] {
                     let addr = VirtAddr::from(arena.base() + offset);
                     assert_eq!(user.phys_addr(addr), Ok(PhysAddr::from(addr.bits())));
@@ -193,13 +186,9 @@ macro_rules! policy_tests {
                 let (arena, mut kernel, locks) = $fixture();
                 let mut wide = $share::<KERNEL_START, KERNEL_END>(&arena, &kernel, &locks);
                 let mut narrow = $share::<2, 510>(&arena, &kernel, &locks);
-                assert_eq!(wide.policy().kernel_top(), KERNEL_START..KERNEL_END);
-                assert_eq!(narrow.policy().kernel_top(), 2..510);
                 let frame = PhysAddr::from(arena.base());
                 for index in [KERNEL_START, KERNEL_END - 1] {
                     let addr = VirtAddr::from(index * TOP_SIZE);
-                    assert!(narrow.owns_top_entry(index));
-                    assert!(!wide.owns_top_entry(index));
                     assert_eq!(kernel.next_table_pa(index), None);
                     let allocated = arena.allocated();
                     let acquired = locks.acquisitions();
@@ -301,7 +290,6 @@ macro_rules! policy_tests {
                     assert_eq!(user.walk(kernel_addr).read().raw(), leaf);
                     assert_eq!(user.next_table_pa(shared_index), root_child);
                     assert_eq!(user.next_table_pa(empty), None);
-                    assert!(!user.owns_top_entry(empty));
                     assert!(arena.freed().is_empty());
                 }
                 drop(user);
@@ -463,10 +451,6 @@ macro_rules! policy_tests {
                     .map(common::page_4k(addr), common::frame_4k(frame), common::flags(), false)
                     .unwrap();
                 let mut user = $share::<KERNEL_START, KERNEL_END>(&arena, &kernel, &locks);
-                for index in 0..512 {
-                    assert_eq!(user.owns_top_entry(index), !top.contains(&index));
-                }
-                assert_eq!(user.policy().kernel_top(), top);
                 assert!(user.next_table_pa(first).is_some());
                 assert!(user.next_table_pa(second).is_some());
                 assert_eq!(user.next_table_pa(first), kernel.next_table_pa(first));
@@ -510,7 +494,6 @@ macro_rules! policy_tests {
                 )
                 .unwrap();
                 let private_pages = arena.allocated() - allocated;
-                assert!(user.owns_top_entry(private_index));
                 assert_ne!(user.next_table_pa(private_index), kernel.next_table_pa(private_index));
                 discharge(set_flags_at!(user, addr, SMALL_LEVEL, readonly(), true).unwrap());
                 assert_eq!(user.phys_addr(addr), Ok(frame + PAGE));
@@ -752,7 +735,6 @@ macro_rules! policy_tests {
                 assert_eq!(arena.freed().len(), owned_children);
                 assert!(arena.freed().iter().all(|page| *page > user_root.bits()));
                 assert_eq!(user.next_table_pa(shared_index), shared_pointer);
-                assert!(!user.owns_top_entry(shared_index));
                 assert_eq!(user.walk(kernel_addr).read().raw(), shared_leaf);
                 assert_eq!(user.phys_addr(private), Err(PagingError::NotMapped));
                 assert_eq!(user.validate_page_table(), Ok(()));
