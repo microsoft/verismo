@@ -41,6 +41,26 @@ tags matter, or failure and flush behavior must be explicit. A smaller
 architecture-specific crate may be preferable for a boot-time-only table that
 is built under exclusive ownership and never modified concurrently.
 
+## Hardware boot test
+
+The x86_64 PVH guest in `tests/kvm` enters long mode, constructs a fresh
+four-level identity map with this crate, adds a separate 4 KiB virtual alias,
+loads the constructed root into CR3, and checks the alias through the hardware
+page walker. A serial `VERIOS_PAGETABLE_BOOT_OK` marker is emitted only after
+the mapped write reaches its physical backing page.
+
+Run it from `source`:
+
+```console
+paging/tests/kvm/run.sh
+```
+
+The runner boots QEMU and Cloud Hypervisor when they are available and requires
+every attempted VMM to pass. QEMU uses KVM when `/dev/kvm` is accessible and
+otherwise falls back to TCG. Cloud Hypervisor is skipped without KVM because it
+has no software-emulation mode. The guest uses the Xen PVH direct-boot ABI so
+both VMMs can load the same ELF without external BIOS or UEFI firmware.
+
 ## Live page-table entry access
 
 `PTPage` always stores entries as `AtomicUsize`. Ignoring hardware-maintained

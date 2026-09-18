@@ -22,10 +22,16 @@ name = "paging_compare"
 harness = false
 required-features = ["concurrent"]
 
+[[example]]
+name = "kvm-guest"
+path = "tests/kvm/guest.rs"
+required-features = ["kvm-test"]
+
 [features]
 default = ["concurrent"]
 ignore_access_dirty_bits = []
 concurrent = []
+kvm-test = []
 verification-test = []
 
 [package.metadata.verus]
