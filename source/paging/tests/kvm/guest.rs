@@ -20,6 +20,16 @@ const SERIAL_PORT: u16 = 0x3f8;
 const DEBUG_EXIT_PORT: u16 = 0xf4;
 const TABLE_PAGE_COUNT: usize = 64;
 const TEST_VALUE: u64 = 0x5645_5249_4f53_5054;
+const BOOTSTRAP_MAGIC: [u64; 8] = [
+    0x4253_5452_4150_0001,
+    0x4253_5452_4150_0002,
+    0x4253_5452_4150_0003,
+    0x4253_5452_4150_0004,
+    0x4253_5452_4150_0005,
+    0x4253_5452_4150_0006,
+    0x4253_5452_4150_0007,
+    0x4253_5452_4150_0008,
+];
 const TLB_FLUSH_ALL_THRESHOLD: usize = 256;
 const CR4_PGE: usize = 1 << 7;
 const EXPECTED_BOOT_SIGNATURE: [u8; 16] = *b"VERIOS-PT-IMAGE!";
@@ -129,6 +139,14 @@ pub extern "C" fn kmain() -> ! {
     serial_init();
     serial_write("VERIOS_PAGETABLE_BOOT_START\n");
 
+    let arena = core::ptr::addr_of_mut!(DIRECT_MAP_ARENA).cast::<AlignedPage>();
+    let test_paddr = unsafe { arena.add(TABLE_PAGE_COUNT) } as usize;
+    let bootstrap_probe = test_paddr as *mut u64;
+    for (index, value) in BOOTSTRAP_MAGIC.iter().enumerate() {
+        unsafe { bootstrap_probe.add(index).write_volatile(*value) };
+    }
+    serial_write("VERIOS_PAGETABLE_BOOTSTRAP_MAGIC_WRITTEN\n");
+
     let mut table = match GuestPageTable::new(PTEntryFlags::data()) {
         Ok(table) => table,
         Err(_) => fail("VERIOS_PAGETABLE_BUILD_FAILED\n"),
@@ -154,8 +172,6 @@ pub extern "C" fn kmain() -> ! {
     }
     serial_write("VERIOS_PAGETABLE_BUILD_OK\n");
 
-    let arena = core::ptr::addr_of_mut!(DIRECT_MAP_ARENA).cast::<AlignedPage>();
-    let test_paddr = unsafe { arena.add(TABLE_PAGE_COUNT) } as usize;
     let direct_map_vaddr = GuestAllocator::resolve_paddr(PhysAddr::from(test_paddr));
     if table.phys_addr(direct_map_vaddr) != Ok(PhysAddr::from(test_paddr)) {
         fail("VERIOS_PAGETABLE_DIRECT_MAP_WALK_FAILED\n");
@@ -186,6 +202,13 @@ pub extern "C" fn kmain() -> ! {
 
     let alias = ALIAS_ADDRESS as *mut u64;
     let direct_map_probe = direct_map_vaddr.as_mut_ptr::<u64>();
+    for (index, expected) in BOOTSTRAP_MAGIC.iter().enumerate() {
+        if unsafe { direct_map_probe.add(index).read_volatile() } != *expected {
+            fail("VERIOS_PAGETABLE_BOOTSTRAP_MAGIC_FAILED\n");
+        }
+    }
+    serial_write("VERIOS_PAGETABLE_BOOTSTRAP_MAGIC_OK\n");
+
     unsafe {
         alias.write_volatile(TEST_VALUE);
         if direct_map_probe.read_volatile() != TEST_VALUE {
