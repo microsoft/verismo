@@ -11,11 +11,11 @@ use paging::level::Lvl;
 use paging::os_contract::{DirectMappedAllocator, PagingError};
 use paging::page::Page;
 use paging::pagetable::PageTable;
-use paging::sizes::Size4KiB;
+use paging::sizes::{Size2MiB, Size4KiB};
 use paging::{FlushScope, PTEntryFlags, X86Paging, X86PagingParams};
 
 const ALIAS_ADDRESS: usize = 0x4000_0000;
-const IDENTITY_MAP_END: usize = ALIAS_ADDRESS;
+const DIRECT_MAP_BASE: usize = 0xffff_8000_0000_0000;
 const SERIAL_PORT: u16 = 0x3f8;
 const DEBUG_EXIT_PORT: u16 = 0xf4;
 const TABLE_PAGE_COUNT: usize = 64;
@@ -29,10 +29,17 @@ global_asm!(include_str!("entry.S"), options(att_syntax));
 #[repr(C, align(4096))]
 struct AlignedPage([u8; 4096]);
 
-static mut TABLE_ARENA: [AlignedPage; TABLE_PAGE_COUNT] =
-    [AlignedPage([0; 4096]); TABLE_PAGE_COUNT];
+#[repr(C)]
+struct DirectMapArena {
+    tables: [AlignedPage; TABLE_PAGE_COUNT],
+    probe: AlignedPage,
+}
+
+static mut DIRECT_MAP_ARENA: DirectMapArena = DirectMapArena {
+    tables: [AlignedPage([0; 4096]); TABLE_PAGE_COUNT],
+    probe: AlignedPage([0; 4096]),
+};
 static ALLOCATED_TABLES: AtomicU64 = AtomicU64::new(0);
-static mut TEST_PAGE: AlignedPage = AlignedPage([0; 4096]);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct GuestPaging;
@@ -63,7 +70,12 @@ struct GuestAllocator;
 
 unsafe impl DirectMappedAllocator for GuestAllocator {
     fn direct_map() -> (core::ops::Range<PhysAddr>, VirtAddr) {
-        (PhysAddr::from(0usize)..PhysAddr::from(IDENTITY_MAP_END), VirtAddr::from(0usize))
+        let physical_start = core::ptr::addr_of_mut!(DIRECT_MAP_ARENA) as usize;
+        let physical_end = physical_start + core::mem::size_of::<DirectMapArena>();
+        (
+            PhysAddr::from(physical_start)..PhysAddr::from(physical_end),
+            VirtAddr::from(DIRECT_MAP_BASE + physical_start),
+        )
     }
 
     fn allocate_table_page() -> Result<PhysAddr, PagingError> {
@@ -81,7 +93,7 @@ unsafe impl DirectMappedAllocator for GuestAllocator {
                 Ordering::Relaxed,
             ) {
                 Ok(_) => {
-                    let base = core::ptr::addr_of_mut!(TABLE_ARENA).cast::<AlignedPage>();
+                    let base = core::ptr::addr_of_mut!(DIRECT_MAP_ARENA).cast::<AlignedPage>();
                     return Ok(PhysAddr::from(unsafe { base.add(index) } as usize));
                 }
                 Err(observed) => allocated = observed,
@@ -90,7 +102,7 @@ unsafe impl DirectMappedAllocator for GuestAllocator {
     }
 
     unsafe fn deallocate_table_page(paddr: PhysAddr) {
-        let base = core::ptr::addr_of_mut!(TABLE_ARENA).cast::<AlignedPage>() as usize;
+        let base = core::ptr::addr_of_mut!(DIRECT_MAP_ARENA).cast::<AlignedPage>() as usize;
         let index = (paddr.bits() - base) / 4096;
         ALLOCATED_TABLES.fetch_and(!(1 << index), Ordering::AcqRel);
     }
@@ -105,18 +117,38 @@ pub extern "C" fn kmain() -> ! {
     serial_init();
     serial_write("VERIOS_PAGETABLE_BOOT_START\n");
 
-    let mut table = match GuestPageTable::new(
-        PTEntryFlags::PRESENT
-            | PTEntryFlags::WRITABLE
-            | PTEntryFlags::ACCESSED
-            | PTEntryFlags::DIRTY,
-    ) {
+    let mut table = match GuestPageTable::new(PTEntryFlags::data()) {
         Ok(table) => table,
         Err(_) => fail("VERIOS_PAGETABLE_BUILD_FAILED\n"),
     };
+
+    let identity_page = Page::<Size2MiB>::from_start_address(VirtAddr::from(0usize))
+        .unwrap_or_else(|_| fail("VERIOS_PAGETABLE_IDENTITY_PAGE_INVALID\n"));
+    let identity_frame = PhysFrame::<Size2MiB>::from_start_address(PhysAddr::from(0usize))
+        .unwrap_or_else(|_| fail("VERIOS_PAGETABLE_IDENTITY_FRAME_INVALID\n"));
+    if table
+        .map(
+            identity_page,
+            identity_frame,
+            PTEntryFlags::PRESENT
+                | PTEntryFlags::WRITABLE
+                | PTEntryFlags::ACCESSED
+                | PTEntryFlags::DIRTY,
+            false,
+        )
+        .is_err()
+    {
+        fail("VERIOS_PAGETABLE_IDENTITY_MAP_FAILED\n");
+    }
     serial_write("VERIOS_PAGETABLE_BUILD_OK\n");
 
-    let test_paddr = core::ptr::addr_of_mut!(TEST_PAGE) as usize;
+    let arena = core::ptr::addr_of_mut!(DIRECT_MAP_ARENA).cast::<AlignedPage>();
+    let test_paddr = unsafe { arena.add(TABLE_PAGE_COUNT) } as usize;
+    let direct_map_vaddr = GuestAllocator::resolve_paddr(PhysAddr::from(test_paddr));
+    if table.phys_addr(direct_map_vaddr) != Ok(PhysAddr::from(test_paddr)) {
+        fail("VERIOS_PAGETABLE_DIRECT_MAP_WALK_FAILED\n");
+    }
+
     let page = Page::<Size4KiB>::from_start_address(VirtAddr::from(ALIAS_ADDRESS))
         .unwrap_or_else(|_| fail("VERIOS_PAGETABLE_ALIAS_INVALID\n"));
     let frame = PhysFrame::<Size4KiB>::from_start_address(PhysAddr::from(test_paddr))
@@ -141,13 +173,14 @@ pub extern "C" fn kmain() -> ! {
     serial_write("VERIOS_PAGETABLE_CR3_OK\n");
 
     let alias = ALIAS_ADDRESS as *mut u64;
-    let backing = core::ptr::addr_of_mut!(TEST_PAGE).cast::<u64>();
+    let direct_map_probe = direct_map_vaddr.as_mut_ptr::<u64>();
     unsafe {
         alias.write_volatile(TEST_VALUE);
-        if backing.read_volatile() != TEST_VALUE {
-            fail("VERIOS_PAGETABLE_HARDWARE_WALK_FAILED\n");
+        if direct_map_probe.read_volatile() != TEST_VALUE {
+            fail("VERIOS_PAGETABLE_DIRECT_MAP_HARDWARE_FAILED\n");
         }
     }
+    serial_write("VERIOS_PAGETABLE_DIRECT_MAP_OK\n");
     if read_cr3() != root.bits() {
         fail("VERIOS_PAGETABLE_CR3_FAILED\n");
     }

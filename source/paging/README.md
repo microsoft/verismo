@@ -44,10 +44,11 @@ is built under exclusive ownership and never modified concurrently.
 ## Hardware boot test
 
 The x86_64 PVH guest in `tests/kvm` enters long mode, constructs a fresh
-four-level identity map with this crate, adds a separate 4 KiB virtual alias,
-loads the constructed root into CR3, and checks the alias through the hardware
-page walker. A serial `VERIOS_PAGETABLE_BOOT_OK` marker is emitted only after
-the mapped write reaches its physical backing page.
+four-level table through a high-half nonidentity direct map, adds the low
+bootstrap identity mapping and a separate 4 KiB virtual alias, then loads the
+constructed root into CR3. A serial `VERIOS_PAGETABLE_BOOT_OK` marker is emitted
+only after a write through the extra alias is observed through the high direct
+map by the hardware page walker.
 
 Run it from `source`:
 

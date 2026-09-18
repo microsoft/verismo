@@ -37,6 +37,8 @@ pvh_entry:
     orl $0x3, %eax
     movl %eax, bootstrap_pml4
     movl $0, bootstrap_pml4 + 4
+    movl %eax, bootstrap_pml4 + 2048
+    movl $0, bootstrap_pml4 + 2052
 
     movl $bootstrap_pml4, %eax
     movl %eax, %cr3
