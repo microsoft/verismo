@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 #[cfg(feature = "concurrent")]
 use common::WholeTreeLock;
-use common::{load_entry, published_bits, Allocator, Arena, ARENA};
+use common::{load_entry, Allocator, Arena, ARENA};
 use paging::address::{Address, PhysAddr, VirtAddr};
 use paging::entry::PTEntry;
 use paging::level::{LevelSpec, Lvl, PageLevel};
@@ -52,7 +52,7 @@ const BASE: usize = 0x4000_0000;
 const FRAME: usize = 0x8000_0000;
 
 #[test]
-fn constructor_and_flag_edits_normalize_publication() {
+fn constructor_and_flag_edits_preserve_requested_history_bits() {
     assert_eq!(size_of::<Entry>(), size_of::<usize>());
     assert_eq!(align_of::<Entry>(), align_of::<usize>());
     assert_eq!(size_of::<Page>(), PAGE);
@@ -60,11 +60,11 @@ fn constructor_and_flag_edits_normalize_publication() {
     for bits in [0, 0x20, 0x40, 0x400, 1, 3, 0x21, 0x41, 0x61, 0x80, 0x81] {
         let flags = PTEntryFlags::from_bits_retain(bits);
         let address = PhysAddr::from(FRAME);
-        assert_eq!(Entry::new(address, flags).raw(), published_bits(FRAME | bits));
+        assert_eq!(Entry::new(address, flags).raw(), FRAME | bits);
         let mut entry = Entry::new(address, flags);
         entry.clear_flags(PTEntryFlags::from_bits_retain(bits));
         entry.set_flags(flags);
-        assert_eq!(entry.raw(), published_bits(FRAME | bits));
+        assert_eq!(entry.raw(), FRAME | bits);
     }
 }
 
@@ -92,7 +92,7 @@ unsafe fn assert_path_history(root: PhysAddr, address: VirtAddr, mut level: Page
         // SAFETY: the caller pins the quiesced path, whose table addresses are identity-mapped.
         let entry = unsafe { load_entry(pte) };
         assert!(entry.present());
-        assert_eq!(entry.raw() & AD, published_bits(1) & AD);
+        assert_eq!(entry.raw() & AD, 0);
         if !entry.is_table(level) {
             return;
         }
@@ -187,7 +187,7 @@ macro_rules! ad_tests {
                         // SAFETY: these host tables are never installed or cached by hardware.
                         unsafe { pending.ignore() };
                     }
-                    assert_eq!(table.walk(address).read().raw() & AD, published_bits(1) & AD);
+                    assert_eq!(table.walk(address).read().raw() & AD, 0);
                     let readonly = PTEntryFlags::PRESENT | PTEntryFlags::NX;
                     let pending =
                         set_flags_at!(table, address, PageLevel::Level0, readonly, true).unwrap();
@@ -201,17 +201,10 @@ macro_rules! ad_tests {
                         .unwrap();
                         unsafe { pending.ignore() };
                         let entry = table.walk(address).read();
-                        assert_eq!(entry.raw() & AD, published_bits(1) & AD);
+                        assert_eq!(entry.raw() & AD, 0);
                         assert!(!entry.writable());
                         assert_eq!(entry.is_shared(), shared);
                         assert_eq!(table.phys_addr(address), Ok(PhysAddr::from(FRAME + PAGE)));
-                    }
-                    // SAFETY: the table stays owned and has no hardware or concurrent users.
-                    for (_, word, _) in unsafe { tree_words(table.root_paddr(), PageLevel::Level3) }
-                    {
-                        if !cfg!(feature = "use_ad") && word & 1 != 0 {
-                            assert_eq!(word & AD, AD);
-                        }
                     }
                     let (_, pending) = table.unmap(common::page_4k(address), true).unwrap();
                     unsafe { pending.ignore() };
@@ -222,7 +215,7 @@ macro_rules! ad_tests {
             }
 
             #[test]
-            fn imported_four_and_five_level_trees_normalize_only_present_entries() {
+            fn imported_four_and_five_level_trees_preserve_entry_bits() {
                 fn check<L: LevelSpec>() {
                     let (arena, mut original) = fixture::<L>();
                     let address = VirtAddr::from(BASE);
@@ -242,7 +235,7 @@ macro_rules! ad_tests {
                     let before = unsafe { clear_history_before_import(root, L::LEVEL) };
                     // SAFETY: ownership transfers; no hardware runs, so no cache invalidation is needed.
                     let imported = unsafe { $adopt::<L>(root) }.unwrap();
-                    assert_words(&before, published_bits);
+                    assert_words(&before, core::convert::identity);
                     assert_eq!(imported.phys_addr(address), Ok(PhysAddr::from(FRAME)));
                     assert_eq!(imported.validate_page_table(), Ok(()));
                     drop(imported);
@@ -253,7 +246,7 @@ macro_rules! ad_tests {
             }
 
             #[test]
-            fn populate_normalizes_new_subtrees_but_not_rejected_or_identical_attachments() {
+            fn populate_preserves_new_and_existing_subtree_bits() {
                 let (arena, mut table) = $fixture::<Lvl<3>>();
                 let address = VirtAddr::from(BASE);
                 let index = entry_index(address, PageLevel::Level3);
@@ -274,7 +267,7 @@ macro_rules! ad_tests {
                 let before = unsafe { clear_history_before_import(upper_pa, PageLevel::Level2) };
                 // SAFETY: ownership transfers; all pages and hardware users are quiesced.
                 assert_eq!(unsafe { table.populate(index, upper_pa) }, Ok(true));
-                assert_words(&before, published_bits);
+                assert_words(&before, core::convert::identity);
                 assert_eq!(table.phys_addr(address), Ok(PhysAddr::from(FRAME)));
 
                 // SAFETY: the attached subtree remains quiesced while raw import state is staged.
@@ -301,7 +294,7 @@ macro_rules! ad_tests {
             }
 
             #[test]
-            fn rejected_imports_do_not_normalize_or_free_the_caller_owned_root() {
+            fn rejected_imports_do_not_modify_or_free_the_caller_owned_root() {
                 let arena = Arena::new(ARENA);
                 let (page, root) = Page::alloc().unwrap();
                 let absent = entry_index(VirtAddr::from(root.bits()), PageLevel::Level0);
@@ -328,7 +321,7 @@ ad_tests!(selected_controller, fixture, adopt);
 
 #[cfg(feature = "concurrent")]
 #[test]
-fn borrowed_import_normalizes_shared_descendants_only_while_all_controllers_are_quiesced() {
+fn borrowed_import_preserves_shared_descendants() {
     let arena = Arena::new(ARENA);
     let locks = WholeTreeLock::default();
     let kernel = Table::<Lvl<3>>::new(locks.clone(), common::flags()).unwrap();
@@ -343,10 +336,10 @@ fn borrowed_import_normalizes_shared_descendants_only_while_all_controllers_are_
     // SAFETY: the inactive roots share all prefixes in the same lock domain.
     let user = unsafe { Table::new_from_sharing_top::<0, 512>(locks.clone(), &kernel) }.unwrap();
     let root = user.root_paddr();
-    // SAFETY: both original controllers are unused until normalization finishes; no hardware ran.
+    // SAFETY: both original controllers are unused during import; no hardware ran.
     let before = unsafe { clear_history_before_import(root, PageLevel::Level3) };
     let imported = ManuallyDrop::new(unsafe { Table::<Lvl<3>>::from_root(locks, root) }.unwrap());
-    assert_words(&before, published_bits);
+    assert_words(&before, core::convert::identity);
     assert_eq!(kernel.phys_addr(VirtAddr::from(BASE)), Ok(PhysAddr::from(FRAME)));
     drop(ManuallyDrop::into_inner(imported).leak());
     assert!(arena.freed().is_empty());

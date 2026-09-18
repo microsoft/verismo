@@ -34,15 +34,6 @@ impl<A: ArchPagingMeta> PTEntry<A> {
         Self { val, dummy: PhantomData }
     }
 
-    #[inline(always)]
-    pub(crate) fn for_publication(self) -> Self {
-        #[cfg(not(feature = "use_ad"))]
-        if self.present() {
-            return Self::from_bits(self.val | A::accessed_dirty_mask());
-        }
-        self
-    }
-
     /// The address-field bits, *including* any confidentiality or shared tag
     /// stored alongside the physical address.
     #[inline(always)]
@@ -123,11 +114,11 @@ impl<A: ArchPagingMeta> PTEntry<A> {
 
     /// An entry holding `addr` with `flags`. Flag bits that fall inside the
     /// address field are dropped, so the address survives whatever the caller
-    /// passes. Without `use_ad`, present entries also have A/D preset.
+    /// passes.
     #[inline(always)]
     pub fn new(addr: PhysAddr, flags: A::PTFlags) -> Self {
         let val = (addr.bits() & A::address_mask()) | (flags.bits() & !A::address_mask());
-        Self::from_bits(val).for_publication()
+        Self::from_bits(val)
     }
 
     /// Builds a present, non-huge pointer to a child table.
@@ -157,7 +148,7 @@ impl<A: ArchPagingMeta> PTEntry<A> {
         let huge = if child.is_leaf() { A::PTFlags::huge_bit() } else { 0 };
         let flags = self.raw() & !A::address_mask() & !huge;
         let address = base + index * child.size();
-        let entry = Self::from_bits((address & A::address_mask()) | flags).for_publication();
+        let entry = Self::from_bits((address & A::address_mask()) | flags);
         Self::from_bits(entry.raw() | A::split_leaf_attributes(self.raw(), level))
     }
 
@@ -178,7 +169,6 @@ impl<A: ArchPagingMeta> PTEntry<A> {
 }
 
 /// Borrowed atomic access to a live page-table entry.
-/// Without `use_ad`, every successful write presets A/D if the result is present.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct PTEntryRef<'tree, A: ArchPagingMeta> {
     word: &'tree AtomicUsize,
@@ -201,44 +191,19 @@ impl<'tree, A: ArchPagingMeta> PTEntryRef<'tree, A> {
     }
 
     pub(crate) fn store(self, value: PTEntry<A>) {
-        self.word.store(value.for_publication().raw(), Ordering::Release);
+        self.word.store(value.raw(), Ordering::Release);
     }
 
     pub(crate) fn swap(self, value: PTEntry<A>) -> PTEntry<A> {
-        PTEntry::from_bits(self.word.swap(value.for_publication().raw(), Ordering::AcqRel))
+        PTEntry::from_bits(self.word.swap(value.raw(), Ordering::AcqRel))
     }
 
     pub(crate) fn fetch_and(self, mask: usize) -> PTEntry<A> {
-        #[cfg(feature = "use_ad")]
-        {
-            PTEntry::from_bits(self.word.fetch_and(mask, Ordering::AcqRel))
-        }
-        #[cfg(not(feature = "use_ad"))]
-        {
-            self.update(|word| word & mask)
-        }
+        PTEntry::from_bits(self.word.fetch_and(mask, Ordering::AcqRel))
     }
 
     pub(crate) fn fetch_or(self, mask: usize) -> PTEntry<A> {
-        #[cfg(feature = "use_ad")]
-        {
-            PTEntry::from_bits(self.word.fetch_or(mask, Ordering::AcqRel))
-        }
-        #[cfg(not(feature = "use_ad"))]
-        {
-            self.update(|word| word | mask)
-        }
-    }
-
-    #[cfg(not(feature = "use_ad"))]
-    fn update(self, update: impl Fn(usize) -> usize) -> PTEntry<A> {
-        let previous = self
-            .word
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |word| {
-                Some(PTEntry::<A>::from_bits(update(word)).for_publication().raw())
-            })
-            .unwrap();
-        PTEntry::from_bits(previous)
+        PTEntry::from_bits(self.word.fetch_or(mask, Ordering::AcqRel))
     }
 
     pub(crate) fn compare_exchange(
@@ -247,18 +212,14 @@ impl<'tree, A: ArchPagingMeta> PTEntryRef<'tree, A> {
         value: PTEntry<A>,
     ) -> Result<PTEntry<A>, PTEntry<A>> {
         self.word
-            .compare_exchange(
-                current.raw(),
-                value.for_publication().raw(),
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            )
+            .compare_exchange(current.raw(), value.raw(), Ordering::AcqRel, Ordering::Acquire)
             .map(PTEntry::from_bits)
             .map_err(PTEntry::from_bits)
     }
 
-    pub(crate) fn update_preserving_ad(self, current: PTEntry<A>, value: PTEntry<A>) {
-        #[cfg(feature = "use_ad")]
+    /// Updates a valid entry according to the configured A/D policy.
+    pub(crate) fn update_valid_entry(self, current: PTEntry<A>, value: PTEntry<A>) {
+        #[cfg(not(feature = "ignore_access_dirty_bits"))]
         {
             let ad_mask = A::accessed_dirty_mask();
             let mut observed = current;
@@ -271,7 +232,7 @@ impl<'tree, A: ArchPagingMeta> PTEntryRef<'tree, A> {
                 }
             }
         }
-        #[cfg(not(feature = "use_ad"))]
+        #[cfg(feature = "ignore_access_dirty_bits")]
         {
             let _ = current;
             self.store(value);

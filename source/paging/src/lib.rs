@@ -6,10 +6,9 @@
 //! The selected controllers intentionally have different constructor and lock parameters,
 //! so every consumer in one Cargo feature-unification graph must agree on `concurrent`.
 //!
-//! The default `use_ad` feature supports hardware-updated accessed/dirty bits
-//! using atomic entry storage. Disabling `use_ad` presets A/D on present entries
-//! instead; importing a tree then requires quiescence and subsequent paging-cache
-//! invalidation. Storage is atomic whenever `use_ad` or `concurrent` is enabled.
+//! By default, atomic entry updates preserve hardware-updated accessed/dirty
+//! bits. `ignore_access_dirty_bits` removes that preservation guarantee.
+//! Page-table entries use atomic storage in every configuration.
 #![no_std]
 #![allow(unused_braces)]
 

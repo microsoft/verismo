@@ -96,9 +96,8 @@ impl<'a, A: ArchPagingMeta> MappingMut<'a, A> {
     /// `entry` must remain allocated and atomically accessible for all of `'a`, and other
     /// software writers must be excluded throughout this handle's lifetime.
     /// Every committed value must preserve the containing tree's level and
-    /// ownership invariants. This handle cannot replace a present leaf with a
-    /// table or a present table with a leaf. Commits preserve hardware A/D
-    /// updates when the staged entry keeps the original leaf/table kind.
+    /// ownership invariants. Present entries must retain their leaf/table kind,
+    /// output frame, and address tags. Commits follow the configured A/D policy.
     pub unsafe fn new(vaddr: Option<VirtAddr>, level: PageLevel, entry: *mut PTEntry<A>) -> Self {
         Self::from_view(vaddr, level, unsafe { PTEntryRef::from_raw(entry) })
     }
@@ -139,14 +138,15 @@ impl<'a, A: ArchPagingMeta> MappingMutOps<'a, A> for MappingMut<'a, A> {
         assert!(
             !original.present()
                 || !staged.present()
-                || original.is_leaf(self.level) == staged.is_leaf(self.level),
-            "present leaf/table transitions require architecture-aware publication"
+                || (original.is_leaf(self.level) == staged.is_leaf(self.level)
+                    && original.paddr_field() == staged.paddr_field()),
+            "present mapping identity transitions require architecture-aware publication"
         );
         let preserve_ad = original.present()
             && staged.present()
             && original.is_leaf(self.level) == staged.is_leaf(self.level);
         if preserve_ad {
-            self.entry.update_preserving_ad(original, staged);
+            self.entry.update_valid_entry(original, staged);
         } else {
             self.entry.store(staged);
         }

@@ -20,8 +20,8 @@ harness = false
 required-features = ["concurrent"]
 
 [features]
-default = ["use_ad", "concurrent"]
-use_ad = []
+default = ["concurrent"]
+ignore_access_dirty_bits = []
 concurrent = []
 verification-test = []
 

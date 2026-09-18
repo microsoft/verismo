@@ -5,7 +5,6 @@ use alloc::rc::Rc;
 use core::cell::{Cell, RefCell, UnsafeCell};
 use core::mem::{align_of, size_of, size_of_val};
 use core::ops::Deref;
-#[cfg(any(feature = "use_ad", feature = "concurrent"))]
 use core::sync::atomic::AtomicUsize;
 
 use super::*;
@@ -29,25 +28,11 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'_, A, P> {
 }
 
 fn test_page<A: ArchPagingMeta, P: PagingAllocator>(entry: PTEntry<A>) -> PTPage<A, P> {
-    PTPage {
-        #[cfg(any(feature = "use_ad", feature = "concurrent"))]
-        entries: core::array::from_fn(|_| AtomicUsize::new(entry.raw())),
-        #[cfg(not(any(feature = "use_ad", feature = "concurrent")))]
-        entries: [entry; PT_ENTRY_COUNT],
-        dummy: PhantomData,
-    }
+    PTPage { entries: core::array::from_fn(|_| AtomicUsize::new(entry.raw())), dummy: PhantomData }
 }
 
 fn entry_from_bits<A: ArchPagingMeta>(bits: usize) -> PTEntry<A> {
     unsafe { (&bits as *const usize).cast::<PTEntry<A>>().read() }
-}
-
-fn published(word: usize) -> usize {
-    if !cfg!(feature = "use_ad") && word & 1 != 0 {
-        word | 0x60
-    } else {
-        word
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -144,11 +129,11 @@ fn exclusive_private_entry_edits_preserve_layout_and_live_atomic_access() {
     assert_eq!(last - base, (PT_ENTRY_COUNT - 1) * size_of::<Entry>());
     *page.entry_mut(0) = Entry::new(PhysAddr::from(0x1000usize), crate::PTEntryFlags::PRESENT);
     *page.entry_mut(PT_ENTRY_COUNT - 1) = entry_from_bits::<Arch>(0xdead_0020);
-    assert_eq!(page.entry_mut(0).raw(), published(0x1001));
+    assert_eq!(page.entry_mut(0).raw(), 0x1001);
     assert_eq!(page.entry_mut(PT_ENTRY_COUNT - 1).raw(), 0xdead_0020);
     let owner = Owner { memory: UnsafeCell::new(page) };
     let view = owner.view();
-    assert_eq!(view.load(0).raw(), published(0x1001));
+    assert_eq!(view.load(0).raw(), 0x1001);
     assert_eq!(view.load(PT_ENTRY_COUNT - 1).raw(), 0xdead_0020);
     view.store(0, Entry::empty());
     assert!(view.is_empty());
@@ -164,10 +149,10 @@ fn views_access_both_page_boundaries_and_return_snapshots() {
     view.store(PT_ENTRY_COUNT - 1, entry_from_bits::<Arch>(0x2001));
     let snapshot = view.load(0);
     assert!(!view.is_empty());
-    assert_eq!(view.swap(0, entry_from_bits::<Arch>(0x3001)).raw(), published(0x1001));
-    assert_eq!(snapshot.raw(), published(0x1001));
-    assert_eq!(view.load(0).raw(), published(0x3001));
-    assert_eq!(view.load(PT_ENTRY_COUNT - 1).raw(), published(0x2001));
+    assert_eq!(view.swap(0, entry_from_bits::<Arch>(0x3001)).raw(), 0x1001);
+    assert_eq!(snapshot.raw(), 0x1001);
+    assert_eq!(view.load(0).raw(), 0x3001);
+    assert_eq!(view.load(PT_ENTRY_COUNT - 1).raw(), 0x2001);
     for index in 1..PT_ENTRY_COUNT - 1 {
         assert_eq!(view.load(index).raw(), 0);
     }
@@ -469,7 +454,7 @@ fn typed_adoption_recursively_drops_dynamically_prepared_trees() {
         // SAFETY: release transferred an exclusively owned tree built at L::LEVEL.
         let tree =
             unsafe { PTPageTree::<TreeArch, AllocationOwner, L>::from_root(root, KernelPolicy) };
-        assert_eq!(tree.root().walk(address).entry().load().raw(), published(0xdead_0001));
+        assert_eq!(tree.root().walk(address).entry().load().raw(), 0xdead_0001);
         drop(tree);
         assert_eq!(owner.freed.get(), (1 << owner.allocated.get()) - 1);
     }
@@ -630,7 +615,7 @@ fn owned_tree_rejects_upward_growth_and_blocking_huge_leaves() {
         Err(PagingError::NotLeafEntry)
     ));
     tree.grow(TypedPage::<Size1GiB>::containing_address(address), flags).unwrap();
-    assert_eq!(owner.view(&tree, PageLevel::Level2).load(0).raw(), published(0x8000_0081));
+    assert_eq!(owner.view(&tree, PageLevel::Level2).load(0).raw(), 0x8000_0081);
     assert_eq!(owner.allocated.get(), 1);
     assert_eq!(owner.freed.get(), 0);
     drop(tree);
@@ -938,10 +923,10 @@ fn child_lookup_never_resolves_huge_absent_or_level_zero_entries() {
     let leaf = middle.child(7).ok().expect("middle table link");
     for word in [0xd081, 0xd001] {
         leaf.store(9, entry_from_bits::<TreeArch>(word));
-        assert_eq!(leaf.child(9).err().expect("level-zero leaf").raw(), published(word));
+        assert_eq!(leaf.child(9).err().expect("level-zero leaf").raw(), word);
         assert_eq!(owner.resolutions.get(), 3);
         let observed = leaf.walk(VirtAddr::from(9 * PageLevel::Level0.size()));
-        assert_eq!(observed.entry().load().raw(), published(word));
+        assert_eq!(observed.entry().load().raw(), word);
         assert_eq!(observed.page.level(), PageLevel::Level0);
     }
     assert_eq!(owner.resolutions.get(), 3);
@@ -1081,9 +1066,9 @@ fn leaf_root_reclamation_never_frees_or_clears_data_mappings() {
     unsafe {
         reclaim_range(&root, 0, PageLevel::Level0.size(), |_| true, |entry| entry.is_clear())
     };
-    assert_eq!(root.load(0).raw(), published(0x1081));
+    assert_eq!(root.load(0).raw(), 0x1081);
     unsafe { free_children(&root, |_| false) };
-    assert_eq!(root.load(0).raw(), published(0x1081));
+    assert_eq!(root.load(0).raw(), 0x1081);
     unsafe { free_children(&root, |_| true) };
     assert!(root.is_empty());
 }
@@ -1110,11 +1095,11 @@ fn atomic_publication_presets_only_present_words_and_preserves_exact_observation
             assert_eq!(pte_ref.load().raw(), before);
             assert_eq!(entry_from_bits::<Arch>(before).raw(), before);
             pte_ref.store(entry_from_bits::<Arch>(after));
-            assert_eq!(pte_ref.load().raw(), published(after));
+            assert_eq!(pte_ref.load().raw(), after);
 
             word.store(before, Ordering::Release);
             assert_eq!(pte_ref.swap(entry_from_bits::<Arch>(after)).raw(), before);
-            assert_eq!(pte_ref.load().raw(), published(after));
+            assert_eq!(pte_ref.load().raw(), after);
 
             word.store(before, Ordering::Release);
             assert_eq!(
@@ -1132,17 +1117,17 @@ fn atomic_publication_presets_only_present_words_and_preserves_exact_observation
                 )),
                 Ok(before)
             );
-            assert_eq!(pte_ref.load().raw(), published(after));
+            assert_eq!(pte_ref.load().raw(), after);
         }
         for mask in [usize::MAX, !0x60, !1, 0] {
             word.store(before, Ordering::Release);
             assert_eq!(pte_ref.fetch_and(mask).raw(), before);
-            assert_eq!(pte_ref.load().raw(), published(before & mask));
+            assert_eq!(pte_ref.load().raw(), before & mask);
         }
         for mask in [0, 1, 0x60, 0x2000] {
             word.store(before, Ordering::Release);
             assert_eq!(pte_ref.fetch_or(mask).raw(), before);
-            assert_eq!(pte_ref.load().raw(), published(before | mask));
+            assert_eq!(pte_ref.load().raw(), before | mask);
         }
     }
 }
@@ -1151,8 +1136,8 @@ fn atomic_publication_presets_only_present_words_and_preserves_exact_observation
 fn compare_exchange_rejects_a_stale_snapshot_without_overwriting_updates() {
     let owner = Owner::new();
     let view = owner.view();
-    let current = entry_from_bits::<Arch>(published(0x1001));
-    let updated = entry_from_bits::<Arch>(published(0x1003));
+    let current = entry_from_bits::<Arch>(0x1001);
+    let updated = entry_from_bits::<Arch>(0x1003);
     let raw =
         |result: Result<Entry, Entry>| result.map(|entry| entry.raw()).map_err(|entry| entry.raw());
     view.store(0, current);
@@ -1166,7 +1151,7 @@ fn compare_exchange_rejects_a_stale_snapshot_without_overwriting_updates() {
 fn invalidation_rollback_retains_the_old_encoding_and_late_history() {
     let owner = Owner::new();
     let pte_ref = owner.view().entry(0);
-    let original = entry_from_bits::<Arch>(published(0x20_0181));
+    let original = entry_from_bits::<Arch>(0x20_0181);
     pte_ref.store(original);
     {
         let invalidated = InvalidatedLeaf::new(pte_ref);
@@ -1211,25 +1196,15 @@ fn unrepresentable_leaf_endpoints_require_a_global_footprint() {
 }
 
 #[test]
-fn exchanging_two_confidentiality_tags_uses_a_barrier_and_retains_history() {
+fn exchanging_two_confidentiality_tags_is_atomic_and_retains_history() {
     use core::sync::atomic::{AtomicUsize, Ordering};
 
     const PRIVATE: usize = 1 << 51;
     const SHARED: usize = 1 << 50;
     static WORD: AtomicUsize = AtomicUsize::new(0);
-    static SCOPES: AtomicUsize = AtomicUsize::new(0);
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     struct DualTag;
-
-    impl DualTag {
-        fn flush(scope: usize) {
-            let word = WORD.fetch_or(0x60, Ordering::AcqRel);
-            assert_eq!(word & 1, 0);
-            assert!(matches!(word & (PRIVATE | SHARED), PRIVATE | SHARED));
-            SCOPES.fetch_or(scope, Ordering::AcqRel);
-        }
-    }
 
     unsafe impl X86PagingParams for DualTag {
         fn private_mask() -> usize {
@@ -1245,16 +1220,16 @@ fn exchanging_two_confidentiality_tags_uses_a_barrier_and_retains_history() {
         }
 
         fn flush_tlb_global_sync(_: FlushScope) {
-            Self::flush(1);
+            panic!("x86-64 retagging does not require synchronous BBM")
         }
 
         fn flush_tlb_global_percpu(_: FlushScope) {
-            Self::flush(2);
+            panic!("x86-64 retagging does not require synchronous BBM")
         }
     }
 
     type DualArch = X86Paging<DualTag>;
-    WORD.store(PRIVATE | 0x2003, Ordering::Release);
+    WORD.store(PRIVATE | 0x2063, Ordering::Release);
     // SAFETY: static atomic storage pins the entry; this test is its only software writer.
     let pte_ref = unsafe { PTEntryRef::<DualArch>::from_raw(WORD.as_ptr().cast()) };
     for (shared, new_tag) in [(true, SHARED), (false, PRIVATE)] {
@@ -1268,10 +1243,10 @@ fn exchanging_two_confidentiality_tags_uses_a_barrier_and_retains_history() {
             )
         }
         .unwrap();
-        flush.expect_no_flush();
+        assert!(flush.is_pending());
+        unsafe { flush.ignore() };
         assert_eq!(pte_ref.load().raw(), new_tag | 0x2063);
     }
-    assert_eq!(SCOPES.load(Ordering::Acquire), 3);
 }
 
 #[test]

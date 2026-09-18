@@ -190,21 +190,14 @@ It propagates errors from the now-fallible unmap API. Creating a separate
 `UserPageTable` with protected shared kernel entries is a different operation
 from borrowing the existing SVSM root.
 
-The Verismo dependency sets `default-features = false, features = ["use_ad"]`.
-This preserves native hardware-managed accessed/dirty behavior while disabling
+The Verismo dependency sets `default-features = false`. This disables
 `concurrent`, selecting the sequential controller through `paging::pagetable`
-(imported here under the `verismo_paging` dependency alias). Other consumers
-default to `use_ad` plus `concurrent`; there is no separate concurrent module.
-The native test command's `--no-default-features` disables SVSM's defaults;
-the dependency declaration explicitly keeps Verismo's `use_ad` enabled.
-If Verismo's `use_ad` is disabled, new present parents/leaves have A/D preset,
-and `from_root` normalizes all present entries after validation. Import then
-requires hardware walkers, software access and every table alias to be
-quiesced, with paging-structure caches and TLBs invalidated on all affected CPUs
-before resuming access. An exclusive Rust borrow or `ManuallyDrop` does not
-satisfy that hardware/cache obligation or suppress normalization. Active
-borrowed roots therefore require `use_ad` unless the caller supplies the full
-quiescence and invalidation protocol; this bridge does not implement it.
+(imported here under the `verismo_paging` dependency alias), while the absence
+of `ignore_access_dirty_bits` retains atomic storage and preserves native
+hardware-managed A/D history. Other consumers default to `concurrent`; there is
+no separate concurrent module. Enabling `ignore_access_dirty_bits` permits
+paging updates to discard A/D history. Entry storage remains atomic, and import
+always preserves existing entry bits.
 
 `unsafe { PageTable::from_svsm(&mut native_table) }` creates a lifetime-bound
 controller using Verismo's `from_root` inside `ManuallyDrop`, without reclaiming

@@ -186,9 +186,8 @@ fn flush_local<M: MemoryProvider + 'static>(flush: Flush<M>) {
 
 impl<M: MemoryProvider + 'static, const ALIGN: usize> X64PageTable<'_, M, ALIGN> {
     /// # Safety
-    /// Boot-root imports retain paging's default `use_ad` feature. If disabled,
-    /// quiesce hardware, software walkers and all table aliases during import;
-    /// invalidate paging-structure caches and TLBs before resuming any user.
+    /// Boot-root imports preserve existing entry bits. Keep the tree stable
+    /// during validation and coordinate all hardware and software users.
     pub(crate) unsafe fn new(root: PhysAddr) -> Self {
         unsafe { Self::init(root) }
     }

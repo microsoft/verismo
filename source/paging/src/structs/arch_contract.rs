@@ -108,10 +108,9 @@ pub trait ArchPagingMeta: 'static + Copy {
         0
     }
 
-    /// Hardware-maintained history retained when changing permissions.
-    /// Without `use_ad`, all these bits are preset on every present entry;
-    /// include every hardware A/D bit, without address or permission bits.
-    /// Presetting them must be valid for both table pointers and leaf mappings.
+    /// Hardware-maintained history retained when changing permissions unless
+    /// `ignore_access_dirty_bits` is enabled. Include every hardware A/D bit,
+    /// without address or permission bits.
     fn accessed_dirty_mask() -> usize {
         0
     }
@@ -121,8 +120,8 @@ pub trait ArchPagingMeta: 'static + Copy {
     /// hardware-maintained, memory-type, and software-defined bits are excluded.
     fn leaf_flags_mask() -> Self::PTFlags;
 
-    /// Whether changing a valid mapping's structure or output frame requires
-    /// invalidation and completed TLB maintenance before publication. Flag-only
+    /// Whether changing a valid mapping's structure, output frame, or address
+    /// tags requires completed TLB maintenance before publication. Flag-only
     /// updates never call this hook and must exclude attributes requiring BBM.
     fn requires_break_before_make(old: usize, new: usize, level: PageLevel) -> bool;
 

@@ -2,7 +2,6 @@
 //! entry can undergo. Entries of a live table are only ever read and written
 //! atomically, one word at a time, because the MMU writes them too.
 use core::marker::PhantomData;
-#[cfg(any(feature = "use_ad", feature = "concurrent"))]
 use core::sync::atomic::AtomicUsize;
 
 use bitflags::Flags;
@@ -23,10 +22,7 @@ use crate::structs::tlb::{MayNeedFlush, TlbFlush};
 /// A page-table page: nothing but its entries.
 #[repr(C, align(4096))]
 pub struct PTPage<A: ArchPagingMeta, P: PagingAllocator> {
-    #[cfg(any(feature = "use_ad", feature = "concurrent"))]
     entries: [AtomicUsize; PT_ENTRY_COUNT],
-    #[cfg(not(any(feature = "use_ad", feature = "concurrent")))]
-    entries: [PTEntry<A>; PT_ENTRY_COUNT],
     dummy: PhantomData<(A, P)>,
 }
 
@@ -38,17 +34,10 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
     }
 
     pub(crate) fn entry_mut(&mut self, index: usize) -> &mut PTEntry<A> {
-        #[cfg(any(feature = "use_ad", feature = "concurrent"))]
-        {
-            let word = self.entries[index].get_mut();
-            // SAFETY: PTEntry is transparent over usize; the exclusive page borrow
-            // excludes all software and hardware access to this word.
-            unsafe { &mut *core::ptr::from_mut(word).cast::<PTEntry<A>>() }
-        }
-        #[cfg(not(any(feature = "use_ad", feature = "concurrent")))]
-        {
-            &mut self.entries[index]
-        }
+        let word = self.entries[index].get_mut();
+        // SAFETY: PTEntry is transparent over usize; the exclusive page borrow
+        // excludes all software and hardware access to this word.
+        unsafe { &mut *core::ptr::from_mut(word).cast::<PTEntry<A>>() }
     }
 
     /// A zeroed table page, and its clean physical address.
@@ -118,31 +107,6 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
             }
             if clear_entries {
                 *self.entry_mut(idx) = PTEntry::empty();
-            }
-        }
-    }
-
-    /// # Safety
-    /// The validated tree must be acyclic and correctly leveled. Every table,
-    /// including shared subtrees, must exclude all software and hardware access
-    /// and aliases for this traversal. Flush stale translations before resuming.
-    #[cfg(not(feature = "use_ad"))]
-    pub(crate) unsafe fn normalize_ad_tree(root_pa: PhysAddr, root_level: PageLevel) {
-        // SAFETY: the caller quiesces every reachable page and excludes aliases.
-        let page = unsafe { &mut *P::paddr_to_vaddr(root_pa).as_mut_ptr::<Self>() };
-        for index in 0..PT_ENTRY_COUNT {
-            let entry = page.entry_mut(index);
-            if !entry.present() {
-                continue;
-            }
-            *entry = entry.for_publication();
-            if entry.is_table(root_level) {
-                unsafe {
-                    Self::normalize_ad_tree(
-                        PhysAddr::from(entry.address()),
-                        root_level.child().unwrap(),
-                    )
-                };
             }
         }
     }
@@ -432,7 +396,7 @@ impl<A: ArchPagingMeta> Drop for InvalidatedLeaf<'_, A> {
 }
 
 /// An unpublished boundary split prepared for one partially covered huge leaf.
-#[cfg(not(feature = "concurrent"))]
+#[cfg_attr(feature = "concurrent", allow(dead_code))]
 struct RangeSplit<A: ArchPagingMeta, P: PagingAllocator> {
     base: usize,
     level: PageLevel,
@@ -470,7 +434,7 @@ impl Iterator for CanonicalRangeCursor {
             return None;
         }
         let seg_start = self.cursor;
-        debug_assert!(seg_start < LOW_CANONICAL_END || seg_start >= HIGH_CANONICAL_START);
+        debug_assert!(!(LOW_CANONICAL_END..HIGH_CANONICAL_START).contains(&seg_start));
         let seg_end = if seg_start < LOW_CANONICAL_END && self.end >= HIGH_CANONICAL_START {
             LOW_CANONICAL_END
         } else {
@@ -569,7 +533,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
         Ok(range.position())
     }
 
-    #[cfg(not(feature = "concurrent"))]
+    #[cfg_attr(feature = "concurrent", allow(dead_code))]
     /// Inputs: root and bounds; Requires: nonempty valid range; Returns: split requirement.
     fn range_needs_split(root: &PTPagePointer<'_, A, P>, start: usize, end: usize) -> bool {
         let first = root.walk(VirtAddr::from(start));
@@ -591,7 +555,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
         last_entry.is_leaf(last_level) && last_base.saturating_add(last_level.size()) != segment_end
     }
 
-    #[cfg(not(feature = "concurrent"))]
+    #[cfg_attr(feature = "concurrent", allow(dead_code))]
     /// Inputs: root, range, and flags; Requires: excluded writers; Returns: status and footprint.
     fn update_leaf_flags_in_range(
         root: &PTPagePointer<'_, A, P>,
@@ -629,14 +593,13 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
 }
 
 /// Restores PTEs that remain invalidated if a split-range publication is interrupted.
-#[cfg(not(feature = "concurrent"))]
+#[cfg_attr(feature = "concurrent", allow(dead_code))]
 struct InvalidatedPteRollbackGuard<'view, 'tree, A: ArchPagingMeta, P: PagingAllocator> {
     root: &'view PTPagePointer<'tree, A, P>,
     start: usize,
     end: usize,
 }
 
-#[cfg(not(feature = "concurrent"))]
 impl<A: ArchPagingMeta, P: PagingAllocator> Drop for InvalidatedPteRollbackGuard<'_, '_, A, P> {
     /// Inputs: rollback guard; Requires: pinned excluded range; Returns: nothing.
     fn drop(&mut self) {
@@ -748,7 +711,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
             let mut child = entry.split_child(level, idx);
             let mut prepared_subtree = None;
             if idx != target_index {
-                *page.entry_mut(idx) = child.for_publication();
+                *page.entry_mut(idx) = child;
                 continue;
             }
             if child_level > target {
@@ -761,7 +724,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
             } else {
                 child = update(child, child_level);
             }
-            *page.entry_mut(idx) = child.for_publication();
+            *page.entry_mut(idx) = child;
             if let Some(subtree) = prepared_subtree {
                 subtree.release();
             }
@@ -785,6 +748,55 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
             Err(PagingError::NotLeafEntry)
         } else {
             Err(PagingError::NotMapped)
+        }
+    }
+
+    /// Returns the narrowest flush obligation for one leaf mapping.
+    #[inline(always)]
+    pub(crate) fn flush_for_leaf(
+        vaddr: VirtAddr,
+        level: PageLevel,
+    ) -> MayNeedFlush<A::TlbFlushTok> {
+        if level == PageLevel::Level0 {
+            MayNeedFlush::new_small(vaddr)
+        } else {
+            MayNeedFlush::new(vaddr, level)
+        }
+    }
+
+    /// Inputs: leaf and replacement; Requires: pinned excluded entry; Returns: pending flush.
+    /// # Safety
+    /// `pte_ref` must remain allocated at `level`, with software writers excluded.
+    /// Concurrent entry access may only atomically update hardware history bits.
+    /// Local flushing requires no stale remote translations or migration.
+    unsafe fn replace_leaf_mapping<F>(
+        pte_ref: PTEntryRef<'_, A>,
+        mut current: PTEntry<A>,
+        level: PageLevel,
+        vaddr: VirtAddr,
+        update: F,
+        all_cpus: bool,
+    ) -> MayNeedFlush<A::TlbFlushTok>
+    where
+        F: Fn(PTEntry<A>) -> PTEntry<A>,
+    {
+        loop {
+            let desired = update(current);
+            if desired.raw() == current.raw() {
+                return MayNeedFlush::none();
+            }
+            let flush = Self::flush_for_leaf(vaddr, level);
+            if A::requires_break_before_make(current.raw(), desired.raw(), level) {
+                let mut invalidated = InvalidatedLeaf::new(pte_ref);
+                flush_transition(flush, all_cpus);
+                let latest = invalidated.snapshot();
+                invalidated.publish(update(latest));
+                return MayNeedFlush::none();
+            }
+            match pte_ref.compare_exchange(current, desired) {
+                Ok(_) => return flush,
+                Err(latest) => current = latest,
+            }
         }
     }
 
@@ -885,27 +897,16 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
             return unsafe { Self::publish_split(pte_ref, level, page, current, update, all_cpus) };
         }
 
-        let desired = update(current, level);
-        let clear = current.raw() & !desired.raw();
-        let set = desired.raw() & !current.raw();
-        if clear == 0 && set == 0 {
-            return Ok(MayNeedFlush::none());
-        }
-        let flush = MayNeedFlush::<A::TlbFlushTok>::new(vaddr, level);
-        if clear == 0 {
-            pte_ref.fetch_or(set);
-            Ok(flush)
-        } else if set == 0 {
-            pte_ref.fetch_and(!clear);
-            Ok(flush)
-        } else {
-            // Two disjoint tags must never appear in a malformed present intermediate.
-            let mut invalidated = InvalidatedLeaf::new(pte_ref);
-            flush_transition(flush, all_cpus);
-            let old = invalidated.snapshot();
-            invalidated.publish(update(old, level));
-            Ok(MayNeedFlush::none())
-        }
+        Ok(unsafe {
+            Self::replace_leaf_mapping(
+                pte_ref,
+                current,
+                level,
+                vaddr,
+                |entry| update(entry, level),
+                all_cpus,
+            )
+        })
     }
 
     /// # Safety
@@ -959,8 +960,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
             }
             // Permission replacement must preserve A/D that raced with this snapshot.
             match pte_ref.compare_exchange(current, desired) {
-                Ok(_) if level == PageLevel::Level0 => return MayNeedFlush::new_4k(vaddr),
-                Ok(_) => return MayNeedFlush::new(vaddr, level),
+                Ok(_) => return Self::flush_for_leaf(vaddr, level),
                 Err(entry) => current = entry,
             }
         }
@@ -984,7 +984,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
             let pte_ref = page.entry_mut(idx);
             let mut child = entry.split_child(level, idx);
             if idx != target_index {
-                *pte_ref = child.for_publication();
+                *pte_ref = child;
                 continue;
             }
             if child_level > target {
@@ -997,11 +997,11 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
             } else {
                 child = update(child, child_level);
             }
-            *pte_ref = child.for_publication();
+            *pte_ref = child;
         }
     }
 
-    #[cfg(not(feature = "concurrent"))]
+    #[cfg_attr(feature = "concurrent", allow(dead_code))]
     /// Inputs: leaf, local range, and flags; Requires: splittable leaf; Returns: private subtree.
     fn build_range_split(
         entry: PTEntry<A>,
@@ -1030,7 +1030,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
             } else if first < last {
                 Self::set_leaf_flags(&mut child, flags);
             }
-            *page.entry_mut(idx) = child.for_publication();
+            *page.entry_mut(idx) = child;
             if let Some(subtree) = subtree {
                 subtree.release();
             }
@@ -1038,7 +1038,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
         Ok(tree)
     }
 
-    #[cfg(not(feature = "concurrent"))]
+    #[cfg_attr(feature = "concurrent", allow(dead_code))]
     /// Inputs: private tree and leaf snapshot; Requires: matching range split; Returns: nothing.
     unsafe fn refresh_range_split(
         page: &mut Self,
@@ -1063,17 +1063,17 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
                 unsafe {
                     Self::refresh_range_split(child_page, child, child_level, first, last, flags)
                 };
-                *pte_ref = table.for_publication();
+                *pte_ref = table;
                 continue;
             }
             if first < last {
                 Self::set_leaf_flags(&mut child, flags);
             }
-            *pte_ref = child.for_publication();
+            *pte_ref = child;
         }
     }
 
-    #[cfg(not(feature = "concurrent"))]
+    #[cfg_attr(feature = "concurrent", allow(dead_code))]
     /// Inputs: entry, snapshot, and flags; Requires: pinned leaf; Returns: nothing.
     fn update_flags_with_cas(
         pte_ref: PTEntryRef<'_, A>,
@@ -1093,7 +1093,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
         }
     }
 
-    #[cfg(not(feature = "concurrent"))]
+    #[cfg_attr(feature = "concurrent", allow(dead_code))]
     /// Inputs: entry and split state; Requires: pinned excluded entry; Returns: nothing.
     unsafe fn publish_range_split_with_cas(
         pte_ref: PTEntryRef<'_, A>,
@@ -1133,7 +1133,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
         }
     }
 
-    #[cfg(not(feature = "concurrent"))]
+    #[cfg_attr(feature = "concurrent", allow(dead_code))]
     /// Inputs: segment and range bounds; Requires: boundary segment; Returns: boundary index.
     fn range_boundary_index(
         cursor: usize,
@@ -1159,7 +1159,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
     /// excluded throughout the batch and its unwind. Only hardware A/D writes
     /// may race. Flags and range alignment must already be checked. Local scope
     /// requires no stale remote translations or migration during the transition.
-    #[cfg(not(feature = "concurrent"))]
+    #[cfg_attr(feature = "concurrent", allow(dead_code))]
     pub(crate) unsafe fn update_leaf_flags_range(
         root: PTPagePointer<'_, A, P>,
         start: VirtAddr,

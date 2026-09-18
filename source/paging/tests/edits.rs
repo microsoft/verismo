@@ -117,9 +117,10 @@ impl paging::ArchPagingMeta for BbmArchitecture {
     }
 
     fn requires_break_before_make(old: usize, new: usize, _: PageLevel) -> bool {
+        let mapping_mask = Self::address_mask() | PTEntryFlags::HUGE.bits();
         old & PTEntryFlags::PRESENT.bits() != 0
             && new & PTEntryFlags::PRESENT.bits() != 0
-            && old & PTEntryFlags::HUGE.bits() != new & PTEntryFlags::HUGE.bits()
+            && (old ^ new) & mapping_mask != 0
     }
 }
 
@@ -457,13 +458,11 @@ fn leaf_word(
     shared: bool,
     pat: bool,
 ) -> usize {
-    common::published_bits(
-        frame
-            | if shared { 0 } else { PRIVATE }
-            | (flags & !PTEntryFlags::HUGE).bits()
-            | if level == SMALL_LEVEL { 0 } else { PTEntryFlags::HUGE.bits() }
-            | if pat { pat_bit(level) } else { 0 },
-    )
+    frame
+        | if shared { 0 } else { PRIVATE }
+        | (flags & !PTEntryFlags::HUGE).bits()
+        | if level == SMALL_LEVEL { 0 } else { PTEntryFlags::HUGE.bits() }
+        | if pat { pat_bit(level) } else { 0 }
 }
 
 fn protected_word(old: usize, flags: PTEntryFlags) -> usize {
@@ -542,6 +541,37 @@ fn architecture_policy_can_require_break_before_make_for_a_split() {
     unsafe { table.free_children() };
     drop(table);
     fixture.assert_all_reclaimed();
+}
+
+#[test]
+fn architecture_policy_can_require_break_before_make_for_a_remap() {
+    type BbmEntry = PTEntry<BbmArchitecture>;
+
+    for all_cpus in [false, true] {
+        let (fixture, mut table) = bbm_fixture();
+        let base = VirtAddr::from(BASE);
+        map_at!(table, base, FRAME.into(), SMALL_LEVEL, old_flags(), false).unwrap();
+        let (pte, level) = unsafe { leaf_pte(table.root_paddr(), base) };
+        assert_eq!(level, SMALL_LEVEL);
+        let old = table.walk(base).read().raw();
+        let pte = pte as usize;
+        let history = (PTEntryFlags::ACCESSED | PTEntryFlags::DIRTY).bits();
+        take_flushes();
+        set_flush_hook(move |_, observed_all_cpus| {
+            assert_eq!(observed_all_cpus, all_cpus);
+            let entry = unsafe { load_entry(pte as *const BbmEntry) };
+            assert_eq!(entry.raw(), old & !PTEntryFlags::PRESENT.bits());
+            let word = unsafe { AtomicUsize::from_ptr((pte as *mut BbmEntry).cast::<usize>()) };
+            word.fetch_or(history, Ordering::AcqRel);
+        });
+        table.set_shared(common::page_4k(base), all_cpus).unwrap().expect_no_flush();
+        clear_flush_hook();
+        assert_eq!(take_flushes().len(), 1);
+        assert_eq!(table.walk(base).read().raw(), (old & !PRIVATE) | history);
+        unsafe { table.free_children() };
+        drop(table);
+        fixture.assert_all_reclaimed();
+    }
 }
 
 #[test]

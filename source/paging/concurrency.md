@@ -36,41 +36,27 @@ data frame.
 
 ## Accessed and dirty bits
 
-Both `use_ad` and `concurrent` are enabled by default. `PTPage` stores
-`[AtomicUsize; ENTRY_COUNT]` whenever either feature is enabled; only disabling
-both selects `[PTEntry<A>; ENTRY_COUNT]`.
+Hardware-updated A/D bits are preserved by default. The
+`ignore_access_dirty_bits` feature permits software updates to discard those
+bits. Entry storage is always atomic; private construction obtains ordinary
+mutable access through `AtomicUsize::get_mut`.
 
 | Features | Controller | Entry storage | A/D policy |
 | --- | --- | --- | --- |
-| Default: `use_ad`, `concurrent` | Concurrent | Atomic | Hardware maintained |
-| Only `use_ad` | Sequential | Atomic | Hardware maintained |
-| Only `concurrent` | Concurrent | Atomic | Software preset |
-| Neither | Sequential | Plain | Software preset |
+| Default: `concurrent` | Concurrent | Atomic | Preserved |
+| No features | Sequential | Atomic | Preserved |
+| `concurrent`, `ignore_access_dirty_bits` | Concurrent | Atomic | Ignored |
+| `ignore_access_dirty_bits` | Sequential | Atomic | Ignored |
 
-Disabling `use_ad` presets `ArchPagingMeta::accessed_dirty_mask()` on every
-present entry constructed or published by paging. Both leaves and table pointers are covered. Raw
-`PTEntry::from_bits` and reads remain exact; non-present words, including zero
-entries, are not normalized.
+`from_root`, `populate`, mapping, splitting and remapping preserve the entry
+bits supplied by their callers. Paging never presets A/D or normalizes imported
+trees. When A/D is preserved, valid-to-valid permission updates merge the latest
+hardware A/D values into the replacement. Ignore mode makes no such guarantee.
 
-Atomic stores, swaps, successful compare-exchanges and bitwise updates enforce
-the disabled-mode policy. Bitwise updates use a compare-exchange loop in that
-mode to enforce preset A/D only when the resulting entry is present.
-Mapping, flag updates, splitting and encryption updates
-retain the same publication and TLB protocols in both modes.
-
-With `use_ad` disabled, `from_root` validates first, then presets A/D throughout
-the imported tree, including shared pages. The caller must exclude all software
-and hardware users, end conflicting Rust references through aliases, and
-invalidate cached translations and paging-structure state before resuming use.
-New raw subtrees passed to `populate` have the same normalization requirement.
-Validation rejection does not normalize or adopt the tree.
-
-`PTPagePointer` is unchanged: it retains its raw pointer and lifetime-bound atomic
-access in both modes. Disabling hardware A/D updates does not eliminate concurrent
-software writes, and an immutable reference to plain entries would forbid those
-writes even under a content lock. Private construction and quiesced operations
-can instead use ordinary page references; mutable entry references require
-exclusive access with hardware excluded.
+`PTPagePointer` retains its raw pointer and lifetime-bound atomic access in every
+mode. Sequential private construction may use ordinary page references because
+its controller provides exclusive access; hardware access must still follow the
+caller's paging and TLB protocol.
 
 ## Lifetime-bound page views
 

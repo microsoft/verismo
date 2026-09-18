@@ -478,14 +478,6 @@ pub fn flags() -> PTEntryFlags {
     PTEntryFlags::data()
 }
 
-pub fn published_bits(word: usize) -> usize {
-    if !cfg!(feature = "use_ad") && word & PTEntryFlags::PRESENT.bits() != 0 {
-        word | (PTEntryFlags::ACCESSED | PTEntryFlags::DIRTY).bits()
-    } else {
-        word
-    }
-}
-
 /// The table pages the root points at.
 #[cfg(feature = "concurrent")]
 pub fn root_children<S: PagingOwnershipPolicy>(

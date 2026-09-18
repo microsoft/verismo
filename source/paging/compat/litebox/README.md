@@ -35,19 +35,14 @@ Core unmap calls are fallible; the privileged controller
 has unrestricted address authority, while user-policy controllers reject kernel
 addresses with `PermissionDenied`.
 
-The paging dependency retains its defaults, `use_ad` and `concurrent`.
+The paging dependency retains its default `concurrent` feature.
 `paging::pagetable` therefore provides the concurrent controller and lock traits;
 there is no separate `pagetable_concurrent` module. Standard native comparisons
-preserve hardware-managed accessed/dirty behavior. Active
-borrowed boot roots require `use_ad` unless the caller can fully quiesce
-hardware walkers, software access and all aliases to the table pages during
-import, then invalidate paging-structure caches and TLBs on all affected CPUs
-before resuming access. With `use_ad` disabled, `from_root` sets A/D on every
-present parent and leaf after validation; newly installed present entries also
-have A/D preset. `ManuallyDrop`/`leak` suppress reclamation, not normalization.
-This adapter supplies no boot-import quiescence or cache-invalidation protocol,
-and its content lock alone does not provide one. Do not disable dependency
-defaults for an active boot root without establishing those obligations.
+preserve hardware-managed accessed/dirty bits. Enabling
+`ignore_access_dirty_bits` permits paging updates to discard A/D history but
+does not change imported entries or disable atomic storage. Boot-root import
+still requires stable table structure throughout
+validation. `ManuallyDrop`/`leak` suppress reclamation only.
 
 ## Reproduce
 

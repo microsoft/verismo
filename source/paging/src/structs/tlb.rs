@@ -3,7 +3,7 @@
 //! for the caller to discharge.
 use crate::structs::address::{VirtAddr, LOW_CANONICAL_END};
 use crate::structs::level::PageLevel;
-use crate::structs::sizes::{PageSize, Size4KiB};
+use crate::structs::sizes::PAGE_SIZE;
 
 /// An opaque description of translations to invalidate.
 ///
@@ -71,14 +71,13 @@ impl<T: TlbFlush> MayNeedFlush<T> {
         }
     }
 
-    pub(crate) fn new_4k(vaddr: VirtAddr) -> Self {
-        const SIZE: usize = Size4KiB::SIZE;
-
-        let start = vaddr.as_usize() & !(SIZE - 1);
-        if start == LOW_CANONICAL_END - SIZE {
+    /// An optimized obligation for one configured minimum-size page.
+    pub(crate) fn new_small(vaddr: VirtAddr) -> Self {
+        let start = vaddr.as_usize() & !(PAGE_SIZE - 1);
+        if start == LOW_CANONICAL_END - PAGE_SIZE {
             return Self::all();
         }
-        match start.checked_add(SIZE) {
+        match start.checked_add(PAGE_SIZE) {
             Some(end) => {
                 Self::new_range(VirtAddr::new(start), VirtAddr::new(end), PageLevel::Level0)
             }

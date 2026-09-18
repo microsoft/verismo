@@ -147,9 +147,6 @@ where
     /// Every software user must follow this atomic-access, content-lock and
     /// lifetime protocol. Shared pages must
     /// appear at identical virtual prefixes, never at different aliases.
-    /// Without `use_ad`, import presets Arch/D throughout the tree. Exclude all
-    /// software and hardware access, and end conflicting Rust references through aliases;
-    /// invalidate cached translations and paging structures before resuming use.
     /// Only allow Drop when the root and every descendant table are exclusively
     /// owned, allocator-allocated, and have no software or hardware users;
     /// otherwise use `ManuallyDrop` or [`Self::leak`].
@@ -159,11 +156,6 @@ where
                 PTEntryRef::from_raw(pte_ref.cast_mut()).load()
             })
         }?;
-        #[cfg(not(feature = "use_ad"))]
-        // SAFETY: validation established shape; the caller excludes all users during import.
-        unsafe {
-            PTPage::<Arch, Alloc>::normalize_ad_tree(root_pa, MaxLevel::LEVEL);
-        }
         // SAFETY: validation establishes shape; ownership and quiescence are the caller's duty.
         let tree = unsafe { PTPageTree::from_root(root_pa, KernelPolicy) };
         Ok(Self { tree, wperms, marker: PhantomData })
@@ -187,7 +179,7 @@ where
             for idx in START..END {
                 let entry = other.root_view().load(idx);
                 if entry.is_table(MaxLevel::LEVEL) {
-                    *page.entry_mut(idx) = entry.for_publication();
+                    *page.entry_mut(idx) = entry;
                 }
             }
         }
@@ -208,8 +200,6 @@ where
     /// The subtree must be initialized, correctly leveled, acyclic, mapped and
     /// allocated by this controller's allocator.
     /// Arch new installation transfers its ownership; no other parent may link to it.
-    /// Without `use_ad`, new subtrees must be quiesced while their Arch/D bits are
-    /// preset; invalidate any cached state before hardware can use them.
     pub unsafe fn populate(
         &mut self,
         idx: usize,
@@ -233,11 +223,6 @@ where
         }
         if entry.present() {
             return Err(PagingError::EntryAlreadyPresent { level: MaxLevel::LEVEL });
-        }
-        #[cfg(not(feature = "use_ad"))]
-        // SAFETY: a new subtree is correctly leveled and quiesced by the caller.
-        unsafe {
-            PTPage::<Arch, Alloc>::normalize_ad_tree(subpage_pa, MaxLevel::LEVEL.child().unwrap());
         }
         // Only an absent entry changes; ownership transfers with publication.
         pte_ref.store(desired);
@@ -826,7 +811,7 @@ where
             return Ok((None, MayNeedFlush::none()));
         }
         let entry = mapping.entry().swap(PTEntry::empty());
-        Ok((Some(entry), MayNeedFlush::new_4k(vaddr)))
+        Ok((Some(entry), PTPage::<Arch, Alloc>::flush_for_leaf(vaddr, Self::SMALL)))
     }
 
     /// Inputs: typed page and flush scope; Requires: policy-approved address; Returns: old mapping.
@@ -854,22 +839,13 @@ where
             }
             if mapping.page.level() == target {
                 let entry = mapping.entry().swap(PTEntry::empty());
-                let pending = Self::flush_for_page(vaddr, target);
+                let pending = PTPage::<Arch, Alloc>::flush_for_leaf(vaddr, target);
                 return Ok((Some(entry), flush.and(pending)));
             }
             drop(_guard);
             flush = flush.and(self.split(page, all_cpus)?);
         }
         unreachable!("unmap traversal exceeded the page-table depth")
-    }
-
-    /// Inputs: page address and level; Requires: aligned mapping; Returns: matching flush token.
-    fn flush_for_page(vaddr: VirtAddr, level: PageLevel) -> MayNeedFlush<Arch::TlbFlushTok> {
-        if level == Self::SMALL {
-            MayNeedFlush::new_4k(vaddr)
-        } else {
-            MayNeedFlush::new(vaddr, level)
-        }
     }
 
     /// Splits a huge leaf while preserving its mappings. New pages are prepared
@@ -1061,7 +1037,7 @@ where
                 let mut desired = current;
                 PTPage::<Arch, Alloc>::set_leaf_flags(&mut desired, flags);
                 if desired.raw() != current.raw() {
-                    pte_ref.update_preserving_ad(current, desired);
+                    pte_ref.update_valid_entry(current, desired);
                     state.footprint.include(VirtAddr::from(entry_start), level);
                 }
                 Ok(())
@@ -1141,7 +1117,7 @@ where
             let mut desired = current;
             PTPage::<Arch, Alloc>::set_leaf_flags(&mut desired, flags);
             if desired.raw() != current.raw() {
-                pte_ref.update_preserving_ad(current, desired);
+                pte_ref.update_valid_entry(current, desired);
                 changed = true;
             }
         }
@@ -1186,8 +1162,9 @@ where
         boundary & (level.size() - 1) == 0
     }
 
-    /// Retags `page` as shared, splitting if needed. `all_cpus` selects the
-    /// synchronous flush scope as in [`Self::split`].
+    /// Retags `page` as shared, splitting if needed.
+    /// Discharge the returned flush unless BBM completes it synchronously.
+    /// `all_cpus` selects the scope only when the architecture requires BBM.
     pub fn set_shared<PS: PageSize>(
         &self,
         page: Page<PS>,
@@ -1198,8 +1175,9 @@ where
         })
     }
 
-    /// Retags `page` as private. `all_cpus` selects the
-    /// synchronous flush scope as in [`Self::split`].
+    /// Retags `page` as private.
+    /// Discharge the returned flush unless BBM completes it synchronously.
+    /// `all_cpus` selects the scope only when the architecture requires BBM.
     pub fn set_private<PS: PageSize>(
         &self,
         page: Page<PS>,

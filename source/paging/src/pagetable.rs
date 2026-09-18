@@ -82,9 +82,6 @@ impl<Arch: ArchPagingMeta, Alloc: PagingAllocator, MaxLevel: LevelSpec>
     /// Exclude other software access during mutations and entire mutable-handle
     /// lifetimes, including across roots.
     /// Shared pages must have identical virtual prefixes, never other aliases.
-    /// Without `use_ad`, import presets Arch/D throughout the tree. Exclude all
-    /// software and hardware access, and end conflicting Rust references through aliases;
-    /// invalidate cached translations and paging structures before resuming use.
     /// Only allow Drop when the root and every descendant table are exclusively
     /// owned, allocator-allocated, and have no software or hardware users;
     /// otherwise use `ManuallyDrop` or [`Self::leak`].
@@ -94,11 +91,6 @@ impl<Arch: ArchPagingMeta, Alloc: PagingAllocator, MaxLevel: LevelSpec>
                 PTEntryRef::from_raw(pte_ref.cast_mut()).load()
             })
         }?;
-        #[cfg(not(feature = "use_ad"))]
-        // SAFETY: validation established shape; the caller excludes all users during import.
-        unsafe {
-            PTPage::<Arch, Alloc>::normalize_ad_tree(root_pa, MaxLevel::LEVEL);
-        }
         // SAFETY: validation establishes shape; ownership and quiescence are the caller's duty.
         let tree = unsafe { PTPageTree::from_root(root_pa, KernelPolicy) };
         Ok(Self { tree })
@@ -149,7 +141,7 @@ impl<Arch: ArchPagingMeta, Alloc: PagingAllocator, MaxLevel: LevelSpec>
             for idx in START..END {
                 let entry = other.root_view().load(idx);
                 if entry.is_table(MaxLevel::LEVEL) {
-                    *page.entry_mut(idx) = entry.for_publication();
+                    *page.entry_mut(idx) = entry;
                 }
             }
         }
@@ -171,6 +163,7 @@ impl<Arch: ArchPagingMeta, Alloc: PagingAllocator, MaxLevel: LevelSpec>
     /// Committed entries must preserve the tree's level, validity and ownership
     /// invariants. New table links transfer exclusive ownership of initialized,
     /// correctly leveled, allocator-allocated subtrees; no aliases or cycles.
+    /// Present entries must retain their output frame and address tags.
     /// Coordinate hardware access and flushes for every published change.
     ///
     /// ```compile_fail,E0133
@@ -196,8 +189,6 @@ impl<Arch: ArchPagingMeta, Alloc: PagingAllocator, MaxLevel: LevelSpec>
     /// The subtree must be initialized, correctly leveled, acyclic, mapped and
     /// allocated by this controller's allocator.
     /// Arch new installation transfers its ownership; no other parent may link to it.
-    /// Without `use_ad`, new subtrees must be quiesced while their Arch/D bits are
-    /// preset; invalidate any cached state before hardware can use them.
     pub unsafe fn populate(
         &mut self,
         idx: usize,
@@ -223,11 +214,7 @@ impl<Arch: ArchPagingMeta, Alloc: PagingAllocator, MaxLevel: LevelSpec>
         if entry.present() {
             return Err(PagingError::EntryAlreadyPresent { level: MaxLevel::LEVEL });
         }
-        #[cfg(not(feature = "use_ad"))]
-        // SAFETY: a new subtree is correctly leveled and quiesced by the caller.
-        unsafe {
-            PTPage::<Arch, Alloc>::normalize_ad_tree(subpage_pa, MaxLevel::LEVEL.child().unwrap());
-        }
+
         pte_ref.store(desired);
         Ok(true)
     }
@@ -656,7 +643,8 @@ impl<
             }
             if level == target {
                 let removed = entry.swap(PTEntry::empty());
-                return Ok((Some(removed), flush.and(MayNeedFlush::new(vaddr, target))));
+                let pending = PTPage::<Arch, Alloc>::flush_for_leaf(vaddr, target);
+                return Ok((Some(removed), flush.and(pending)));
             }
             // SAFETY: the exclusive borrow pins the entry and excludes software writers.
             let pending =
@@ -768,7 +756,8 @@ impl<
     const SMALL: PageLevel = PageLevel::Level0;
 
     /// Retags `page` as shared, splitting any larger mapping it lies in.
-    /// `all_cpus` selects the synchronous flush scope as in [`Self::split`].
+    /// Discharge the returned flush unless BBM completes it synchronously.
+    /// `all_cpus` selects the scope only when the architecture requires BBM.
     pub fn set_shared<PS: PageSize>(
         &mut self,
         page: Page<PS>,
@@ -780,7 +769,8 @@ impl<
     }
 
     /// Retags `page` as private, splitting as [`Self::set_shared`] does.
-    /// `all_cpus` selects the synchronous flush scope as in [`Self::split`].
+    /// Discharge the returned flush unless BBM completes it synchronously.
+    /// `all_cpus` selects the scope only when the architecture requires BBM.
     pub fn set_private<PS: PageSize>(
         &mut self,
         page: Page<PS>,

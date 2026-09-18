@@ -227,10 +227,8 @@ impl<'a> PageTable<'a> {
     /// Except for the standard recursive root entry, which is rejected, the
     /// tree must be acyclic, with no different-prefix table aliases. Exclude
     /// access through all other software controllers during this borrow.
-    /// If paging's default `use_ad` feature is disabled, import sets A/D on all
-    /// present entries after validation. Quiesce hardware, software walkers and
-    /// all table aliases during import, then invalidate paging-structure caches
-    /// and TLBs before resuming any user.
+    /// Import preserves existing entry bits. Keep hardware walkers and table
+    /// aliases stable throughout validation.
     /// Permit synchronous SVSM shootdowns: do not block IPI delivery or hold
     /// exclusion that an interrupt handler can reenter. Keep the transition's
     /// code, stack and shootdown state accessible throughout the callback.
