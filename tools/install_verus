@@ -13,10 +13,10 @@ set -euo pipefail
 trap 'echo "Error at line $LINENO: $BASH_COMMAND" >&2' ERR
 
 # Verus release version and commit hash
-VERUS_VERSION=0.2026.08.02.b677dd5
+VERUS_VERSION=0.2026.09.13.671956e
 VERUS_RELEASE_TAG=release/$VERUS_VERSION
-DEFAULT_VERUS_REV=b677dd5a766f25f56e9aa1e32621aa4e53304b47
-VERUS_RUST_VERSION=1.97.1
+DEFAULT_VERUS_REV=671956ec527d3b7164779f767bdbfe769bedce6c
+VERUS_RUST_VERSION=1.98.1
 
 # Verusfmt version
 VERUSFMT_VERSION=v0.7.1
@@ -42,7 +42,7 @@ EOF
 
 cleanup() {
     local tmpdir
-    for tmpdir in "${TMPDIRS[@]}"; do
+    for tmpdir in "${TMPDIRS[@]-}"; do
         rm -rf "$tmpdir"
     done
 }
@@ -98,7 +98,12 @@ while [ "$#" -gt 0 ]; do
     shift
 done
 
-require_commands grep
+require_commands grep uname
+
+case "$(uname -s)" in
+    Darwin) DYLIB_EXT="dylib" ;;
+    *)      DYLIB_EXT="so" ;;
+esac
 
 if $VERUS_REV_SPECIFIED && [ -z "$VERUS_DIR" ]; then
     die "--verus-rev requires --verus-dir"
@@ -127,7 +132,11 @@ install_verus_assets() {
         "rust_verify"
         "z3"
         "cargo-verus"
-        "verus-root"
+        "libverus_builtin.rlib"
+        "libverus_builtin_macros.$DYLIB_EXT"
+        "libverus_state_machines_macros.$DYLIB_EXT"
+        "libvstd.rlib"
+        "vstd.vir"
     )
     local src_dir=$1
     local dst_dir=$2
@@ -137,15 +146,23 @@ install_verus_assets() {
         echo "Installing $asset to $dst_dir"
         install "$src_dir/$asset" "$dst_dir"
     done
+    # verus-root is an empty marker vargo writes beside the binaries; release
+    # archives may omit it, so recreate it when it is not shipped.
+    if [ -e "$src_dir/verus-root" ]; then
+        install -m 644 "$src_dir/verus-root" "$dst_dir"
+    else
+        : > "$dst_dir/verus-root"
+    fi
 }
 
 verify_verus_assets() {
     local asset
-    for asset in verus rust_verify z3 cargo-verus verus-root; do
+    for asset in verus rust_verify z3 cargo-verus; do
         [ -x "$VERUS_INSTALL_DIR/$asset" ] || die "installed asset is missing or not executable: $VERUS_INSTALL_DIR/$asset"
     done
+    [ -f "$VERUS_INSTALL_DIR/verus-root" ] || die "installed asset is missing: $VERUS_INSTALL_DIR/verus-root"
     if [ "$VERUS_REV" = "$DEFAULT_VERUS_REV" ]; then
-        "$VERUS_INSTALL_DIR/verus" --version | grep -q "$VERUS_VERSION" \
+        "$VERUS_INSTALL_DIR/verus" --version | grep "$VERUS_VERSION" > /dev/null \
             || die "installed verus does not report expected version $VERUS_VERSION"
     fi
 }
