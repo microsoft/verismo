@@ -22,8 +22,20 @@ const TABLE_PAGE_COUNT: usize = 64;
 const TEST_VALUE: u64 = 0x5645_5249_4f53_5054;
 const TLB_FLUSH_ALL_THRESHOLD: usize = 256;
 const CR4_PGE: usize = 1 << 7;
+const EXPECTED_BOOT_SIGNATURE: [u8; 16] = *b"VERIOS-PT-IMAGE!";
 
 global_asm!(include_str!("entry.S"), options(att_syntax));
+
+extern "C" {
+    static __boot_image_load_start: u8;
+    static __boot_image_load_end: u8;
+    static __boot_image_content_start: u8;
+    static __boot_image_content_end: u8;
+}
+
+#[used]
+#[link_section = ".rodata.boot_signature"]
+static BOOT_IMAGE_SIGNATURE: [u8; 16] = EXPECTED_BOOT_SIGNATURE;
 
 #[derive(Clone, Copy)]
 #[repr(C, align(4096))]
@@ -70,8 +82,8 @@ struct GuestAllocator;
 
 unsafe impl DirectMappedAllocator for GuestAllocator {
     fn direct_map() -> (core::ops::Range<PhysAddr>, VirtAddr) {
-        let physical_start = core::ptr::addr_of_mut!(DIRECT_MAP_ARENA) as usize;
-        let physical_end = physical_start + core::mem::size_of::<DirectMapArena>();
+        let physical_start = core::ptr::addr_of!(__boot_image_load_start) as usize;
+        let physical_end = core::ptr::addr_of!(__boot_image_load_end) as usize;
         (
             PhysAddr::from(physical_start)..PhysAddr::from(physical_end),
             VirtAddr::from(DIRECT_MAP_BASE + physical_start),
@@ -184,6 +196,7 @@ pub extern "C" fn kmain() -> ! {
     if read_cr3() != root.bits() {
         fail("VERIOS_PAGETABLE_CR3_FAILED\n");
     }
+    verify_boot_image();
 
     let nonglobal_flags = PTEntryFlags::PRESENT | PTEntryFlags::WRITABLE;
     match table.set_flags(page, nonglobal_flags, true) {
@@ -202,6 +215,39 @@ pub extern "C" fn kmain() -> ! {
     serial_write("VERIOS_PAGETABLE_BOOT_OK\n");
     unsafe { outb(DEBUG_EXIT_PORT, 0x10) };
     halt()
+}
+
+/// Compares immutable boot-image bytes with their high direct-map aliases.
+fn verify_boot_image() {
+    let content_start = core::ptr::addr_of!(__boot_image_content_start) as usize;
+    let content_end = core::ptr::addr_of!(__boot_image_content_end) as usize;
+    let direct_content =
+        GuestAllocator::resolve_paddr(PhysAddr::from(content_start)).as_ptr::<u8>();
+    let identity_hash = image_checksum(content_start as *const u8, content_end - content_start);
+    let direct_hash = image_checksum(direct_content, content_end - content_start);
+    if identity_hash != direct_hash {
+        fail("VERIOS_PAGETABLE_BOOT_IMAGE_HASH_FAILED\n");
+    }
+
+    let signature_paddr = core::ptr::addr_of!(BOOT_IMAGE_SIGNATURE) as usize;
+    let direct_signature =
+        GuestAllocator::resolve_paddr(PhysAddr::from(signature_paddr)).as_ptr::<u8>();
+    for (index, expected) in EXPECTED_BOOT_SIGNATURE.iter().enumerate() {
+        if unsafe { direct_signature.add(index).read_volatile() } != *expected {
+            fail("VERIOS_PAGETABLE_BOOT_IMAGE_CONTENT_FAILED\n");
+        }
+    }
+    serial_write("VERIOS_PAGETABLE_BOOT_IMAGE_OK\n");
+}
+
+/// Hashes image bytes with volatile reads so both virtual paths reach memory.
+fn image_checksum(start: *const u8, len: usize) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for index in 0..len {
+        hash ^= unsafe { start.add(index).read_volatile() } as u64;
+        hash = hash.wrapping_mul(0x100_0000_01b3);
+    }
+    hash
 }
 
 /// Flushes a range or widens a large request to a complete local invalidation.

@@ -48,7 +48,8 @@ four-level table through a high-half nonidentity direct map, adds the low
 bootstrap identity mapping and a separate 4 KiB virtual alias, then loads the
 constructed root into CR3. A serial `VERIOS_PAGETABLE_BOOT_OK` marker is emitted
 only after a write through the extra alias is observed through the high direct
-map by the hardware page walker.
+map and the loaded image's text and read-only data match their high direct-map
+aliases. The embedded image signature must also have its expected binary content.
 
 Run it from `source`:
 

@@ -17,6 +17,8 @@ SECTIONS
 
     .text : ALIGN(4K)
     {
+        __boot_image_load_start = .;
+        __boot_image_content_start = .;
         KEEP(*(.text.boot))
         *(.text .text.*)
     } :load
@@ -24,11 +26,13 @@ SECTIONS
     .rodata : ALIGN(4K)
     {
         *(.rodata .rodata.*)
+        __boot_image_content_end = .;
     } :load
 
     .data : ALIGN(4K)
     {
         *(.data .data.*)
+        *(.got .got.*)
     } :load
 
     .bss : ALIGN(4K)
@@ -36,6 +40,8 @@ SECTIONS
         *(.bss.boot)
         *(.bss .bss.*)
         *(COMMON)
+        . = ALIGN(4K);
+        __boot_image_load_end = .;
     } :load
 
     /DISCARD/ :
