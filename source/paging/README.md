@@ -1,9 +1,10 @@
-# Paging
+# verios-pagetable-beta
 
-Verismo needs to modify active page tables while other software and the MMU can
-still walk them. It must also split huge mappings, change confidential-memory
-address tags, share selected subtrees between roots, and reclaim owned table
-pages without relying on one global lock.
+`verios-pagetable-beta` is an independent paging crate developed as part of
+Verismo. It was built for systems that modify active page tables while other
+software and the MMU can still walk them. Such systems must also split huge
+mappings, change confidential-memory address tags, share selected subtrees
+between roots, and reclaim owned table pages without relying on one global lock.
 
 Many page-table APIs assume a simpler environment: exclusive mutable access to
 the whole tree, architecture-specific invalidation performed out of band, and

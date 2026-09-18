@@ -5,7 +5,7 @@ source_root="$(cd "$(dirname "$0")/../.." && pwd)"
 target="x86_64-unknown-linux-gnu"
 
 cd "$source_root"
-cargo bench -p paging --bench paging_compare --target "$target" --no-run --quiet
+cargo bench -p verios-pagetable-beta --bench paging_compare --target "$target" --no-run --quiet
 
 binary="$(
     find "target/$target/release/deps" -maxdepth 1 -type f \

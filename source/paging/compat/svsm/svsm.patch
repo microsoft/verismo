@@ -64,7 +64,7 @@ diff --git a/kernel/Cargo.toml b/kernel/Cargo.toml
 @@ -21,6 +21,7 @@ bootimg.workspace = true
  cpuarch.workspace = true
  paging.workspace = true
-+verismo_paging = { package = "paging", path = "__VERISMO_PAGING__", default-features = false }
++verismo_paging = { package = "verios-pagetable-beta", path = "__VERISMO_PAGING__", default-features = false }
 
  libaproxy = { workspace = true, optional = true }
  elf.workspace = true

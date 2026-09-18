@@ -52,4 +52,4 @@ jobs:
           PAGING_BENCH_CHECK: 1
           PAGING_BENCH_WARMUPS: 3
           PAGING_BENCH_REPETITIONS: 11
-        run: cargo bench -p paging --bench paging_compare --target x86_64-unknown-linux-gnu
+        run: cargo bench -p verios-pagetable-beta --bench paging_compare --target x86_64-unknown-linux-gnu

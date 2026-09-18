@@ -11,7 +11,7 @@ Run it on a host target:
 
 ```sh
 CARGO_NET_GIT_FETCH_WITH_CLI=true \
-  cargo bench -p paging --bench paging_compare \
+  cargo bench -p verios-pagetable-beta --bench paging_compare \
   --target x86_64-unknown-linux-gnu
 ```
 
@@ -22,7 +22,7 @@ uses every configured thread count:
 ```sh
 CARGO_NET_GIT_FETCH_WITH_CLI=true PAGING_BENCH_CHECK=1 \
   PAGING_BENCH_WARMUPS=3 PAGING_BENCH_REPETITIONS=11 \
-  cargo bench -p paging --bench paging_compare \
+  cargo bench -p verios-pagetable-beta --bench paging_compare \
   --target x86_64-unknown-linux-gnu
 ```
 

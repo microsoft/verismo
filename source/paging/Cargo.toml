@@ -1,7 +1,10 @@
 [package]
-name = "paging"
+name = "verios-pagetable-beta"
 version = "0.1.0"
 edition = "2021"
+
+[lib]
+name = "paging"
 
 [dependencies]
 bitflags = { workspace = true }

@@ -94,7 +94,7 @@ index 49f222b7..7ac0acf1 100644
  ]
 
 +[[package]]
-+name = "paging"
++name = "verios-pagetable-beta"
 +version = "0.1.0"
 +dependencies = [
 + "bitflags 2.13.1",
@@ -210,7 +210,7 @@ index e0330f3a..cde80302 100644
  bindgen = "0.71.0"
 
  [dependencies]
-+paging = { path = "__VERISMO_PAGING__", optional = true }
++paging = { package = "verios-pagetable-beta", path = "__VERISMO_PAGING__", optional = true }
  bitflags = "2.13.1"
  litebox = { path = "../litebox/", version = "0.1.0" }
  litebox_common_linux = { path = "../litebox_common_linux/", version = "0.1.0" }

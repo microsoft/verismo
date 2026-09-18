@@ -6,7 +6,7 @@
 //! time within each test binary.
 //!
 //! Run them on a target that can execute:
-//! `cargo test -p paging --target x86_64-unknown-linux-gnu`.
+//! `cargo test -p verios-pagetable-beta --target x86_64-unknown-linux-gnu`.
 #![allow(dead_code)]
 
 use std::cell::Cell;
