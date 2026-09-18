@@ -399,7 +399,7 @@ impl<
             return Err(PagingError::InvalidLevel);
         }
         let mut start = range.start;
-        loop {
+        for _ in 0..PT_ENTRY_COUNT {
             let offset = (start.start_address().bits() & (level.size() - 1)) / PS::SIZE;
             let count = (level.size() / PS::SIZE - offset).min(range.end - start + 1);
             let end = start + count - 1;
@@ -407,11 +407,11 @@ impl<
             let child = self.mapping_child(ptpage, index)?;
             self.do_map_region(&child, Page::range_inclusive(start, end), frames, flags, state)?;
             if end.start_address() == range.end.start_address() {
-                break;
+                return Ok(());
             }
             start = end + 1;
         }
-        Ok(())
+        unreachable!("range spans more entries than one page-table page")
     }
 
     #[inline(always)]

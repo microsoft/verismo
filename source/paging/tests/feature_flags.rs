@@ -74,7 +74,7 @@ fn discharge<T: TlbFlush>(pending: MayNeedFlush<T>) {
 unsafe fn assert_parent_flags(root: PhysAddr, addr: VirtAddr) {
     let mut page = root.bits();
     let mut level = PageLevel::Level3;
-    loop {
+    for _ in 0..=PageLevel::Level3.depth() {
         let pte = (page as *const PTEntry<Arch>).wrapping_add(entry_index(addr, level));
         // SAFETY: the caller pins the inactive, host-backed tree.
         let entry = unsafe { load_entry(pte) };
@@ -85,6 +85,7 @@ unsafe fn assert_parent_flags(root: PhysAddr, addr: VirtAddr) {
         page = entry.address();
         level = level.child().unwrap();
     }
+    unreachable!("parent walk exceeded the tree depth")
 }
 
 macro_rules! feature_tests {

@@ -1,3 +1,13 @@
+//! Lifetime-bound access to live page-table pages.
+//!
+//! Concurrent paging requires reads from a `PTPage` to coexist with writes to
+//! its entries. Whole-page `&PTPage` and `&mut PTPage` borrows cannot express
+//! that access pattern because the mutable borrow must be exclusive.
+//! `PTPagePointer` instead uses the tree lifetime only to pin the allocation
+//! and grants no aliasing rights over entry contents. Each entry is observed or
+//! changed through its atomic `PTEntryRef`, with writes separately serialized
+//! by the controller when required.
+
 use core::marker::PhantomData;
 use core::ptr::NonNull;
 

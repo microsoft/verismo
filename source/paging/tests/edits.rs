@@ -476,7 +476,7 @@ fn protected_word(old: usize, flags: PTEntryFlags) -> usize {
 unsafe fn leaf_pte(root: PhysAddr, address: VirtAddr) -> (*mut Entry, PageLevel) {
     let mut page = root.bits();
     let mut level = PageLevel::Level3;
-    loop {
+    for _ in 0..=PageLevel::Level3.depth() {
         let pte = (page as *mut Entry).wrapping_add(entry_index(address, level));
         // SAFETY: the caller owns this live host-backed tree; table addresses
         // are identity-mapped, and no references into PTE storage are created.
@@ -487,6 +487,7 @@ unsafe fn leaf_pte(root: PhysAddr, address: VirtAddr) -> (*mut Entry, PageLevel)
         page = entry.address();
         level = level.child().unwrap();
     }
+    unreachable!("leaf walk exceeded the tree depth")
 }
 
 unsafe fn seed_pat(root: PhysAddr, address: VirtAddr) {
@@ -500,7 +501,7 @@ unsafe fn seed_pat(root: PhysAddr, address: VirtAddr) {
 unsafe fn assert_permissive_ancestors(root: PhysAddr, address: VirtAddr) {
     let mut page = root.bits();
     let mut level = PageLevel::Level3;
-    loop {
+    for _ in 0..=PageLevel::Level3.depth() {
         let pte = (page as *const Entry).wrapping_add(entry_index(address, level));
         // SAFETY: the caller pins the tree, and all accesses use atomic loads.
         let entry = unsafe { load_entry(pte) };
@@ -517,6 +518,7 @@ unsafe fn assert_permissive_ancestors(root: PhysAddr, address: VirtAddr) {
         page = entry.address();
         level = level.child().unwrap();
     }
+    unreachable!("ancestor walk exceeded the tree depth")
 }
 
 #[test]

@@ -18,12 +18,14 @@ pub(crate) trait TreeLevel {
     /// The value retained when this level is stored in a tree owner.
     type State: Copy;
 
+    /// Inputs: stored level state; Requires: valid representation; Returns: root level.
     fn level(state: &Self::State) -> PageLevel;
 }
 
 impl<L: LevelSpec> TreeLevel for L {
     type State = ();
 
+    /// Inputs: unit state; Requires: static level type; Returns: type-selected root level.
     fn level(_: &()) -> PageLevel {
         L::LEVEL
     }
@@ -32,6 +34,7 @@ impl<L: LevelSpec> TreeLevel for L {
 impl TreeLevel for PageLevel {
     type State = PageLevel;
 
+    /// Inputs: stored level; Requires: valid page level; Returns: stored root level.
     fn level(state: &PageLevel) -> PageLevel {
         *state
     }
@@ -139,6 +142,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPageTree<A, P> {
     }
 
     #[cfg(any(feature = "concurrent", test))]
+    /// Inputs: private page and target; Requires: exclusive unpublished tree; Returns: growth status.
     unsafe fn grow_page<PS: PageSize>(
         page: &mut PTPage<A, P>,
         level: PageLevel,
@@ -174,6 +178,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPageTree<A, P> {
 impl<A: ArchPagingMeta, P: PagingAllocator, L: TreeLevel, S: PagingOwnershipPolicy> Drop
     for PTPageTree<A, P, L, S>
 {
+    /// Inputs: owned tree; Requires: quiesced owned pages; Returns: nothing.
     fn drop(&mut self) {
         // SAFETY: owned tables are quiesced before Drop; shared subtrees are excluded.
         unsafe { free_children(&self.root(), |index| self.policy.owns_top_entry(index)) };
@@ -182,6 +187,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator, L: TreeLevel, S: PagingOwnershipPoli
     }
 }
 
+/// Inputs: entry index; Requires: selected owned subtree; Returns: true.
 fn all_entries_owned(_: usize) -> bool {
     true
 }
@@ -197,6 +203,7 @@ pub(crate) unsafe fn reclaim_path<A: ArchPagingMeta, P: PagingAllocator>(
     unsafe { reclaim_path_inner(root, vaddr, &empty_entry) }.1
 }
 
+/// Inputs: root, address, and emptiness test; Requires: exclusive path; Returns: emptiness and count.
 unsafe fn reclaim_path_inner<A: ArchPagingMeta, P: PagingAllocator>(
     root: &PTPagePointer<'_, A, P>,
     vaddr: VirtAddr,
@@ -238,6 +245,7 @@ pub(crate) unsafe fn reclaim_range<A: ArchPagingMeta, P: PagingAllocator>(
     unsafe { reclaim_range_inner(root, start, end, &owns_entry, &empty_entry) };
 }
 
+/// Inputs: root, offsets, and predicates; Requires: exclusive selected subtrees; Returns: emptiness.
 unsafe fn reclaim_range_inner<A: ArchPagingMeta, P: PagingAllocator>(
     root: &PTPagePointer<'_, A, P>,
     start: usize,

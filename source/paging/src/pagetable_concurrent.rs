@@ -26,7 +26,7 @@ use crate::structs::sizes::{
     entry_index, next_boundary, page_level_for_size, PageSize, Size1GiB, Size2MiB, Size4KiB,
     PT_ENTRY_COUNT,
 };
-use crate::structs::tlb::MayNeedFlush;
+use crate::structs::tlb::{MayNeedFlush, TlbFlush};
 
 #[derive(Default)]
 struct RangeMapState {
@@ -36,6 +36,25 @@ struct RangeMapState {
 struct RangeUnmapState<'a> {
     all_mapped: &'a mut bool,
     footprint: &'a mut FlushFootprint,
+}
+
+struct RangeFlagsState<T: TlbFlush> {
+    cursor: usize,
+    flush: MayNeedFlush<T>,
+    footprint: FlushFootprint,
+    descents_left: usize,
+    descent_cursor: usize,
+    partial_leaves_left: usize,
+}
+
+type RangeFlagsResult<T> = (Result<(), PagingError>, MayNeedFlush<T>);
+
+impl<T: TlbFlush> RangeFlagsState<T> {
+    /// Inputs: final result; Requires: completed updates; Returns: result with accumulated flush.
+    fn finish(&mut self, result: Result<(), PagingError>) -> RangeFlagsResult<T> {
+        let flush = core::mem::replace(&mut self.flush, MayNeedFlush::none());
+        (result, flush.and(self.footprint.token()))
+    }
 }
 
 /// Arch write-permission lock keyed by physical table page. Keys may share one lock or
@@ -53,6 +72,7 @@ pub unsafe trait LockSpec<T> {
         Self: 'a,
         T: 'a;
 
+    /// Inputs: table address; Requires: stable lock domain; Returns: exclusive write guard.
     fn lock(&self, page: PhysAddr) -> Self::Guard<'_>;
 }
 
@@ -249,6 +269,7 @@ where
 {
     const SMALL: PageLevel = PageLevel::Level0;
 
+    /// Inputs: owned controller; Requires: none; Returns: lock, policy, and unreclaimed root.
     fn leak_parts(self) -> (WP, Owned, PhysAddr) {
         let (policy, root_pa) = self.tree.into_parts();
         (self.wperms, policy, root_pa)
@@ -258,6 +279,7 @@ where
         self.tree.root_paddr()
     }
 
+    /// Inputs: controller borrow; Requires: live tree; Returns: pinned atomic root view.
     fn root_view(&self) -> PTPagePointer<'_, Arch, Alloc> {
         self.tree.root()
     }
@@ -270,7 +292,7 @@ where
         WalkResult::new(position.observed, position.page.level())
     }
 
-    /// Installs a leaf, publishing a fully initialized private path when one is absent.
+    /// Inputs: page, frame, and flags; Requires: valid typed mapping; Returns: mapping status.
     #[inline(always)]
     fn do_map<PS: PageSize>(
         &self,
@@ -327,6 +349,7 @@ where
         unreachable!("mapping traversal exceeded the page-table depth")
     }
 
+    /// Inputs: page, index, and leaf; Requires: live table; Returns: leaf installation status.
     fn install_leaf(
         &self,
         page: &PTPagePointer<'_, Arch, Alloc>,
@@ -347,6 +370,7 @@ where
         Ok(())
     }
 
+    /// Inputs: parent slot and leaf; Requires: absent path; Returns: whether this path was installed.
     fn alloc_and_install_leaf<PS: PageSize>(
         &self,
         parent: &PTPagePointer<'_, Arch, Alloc>,
@@ -425,6 +449,7 @@ where
         }
     }
 
+    /// Inputs: typed range and flags; Requires: none; Returns: validation status.
     fn check_map_region<PS: PageSize>(
         &self,
         range: PageRangeInclusive<PS>,
@@ -448,6 +473,7 @@ where
         self.tree.policy().check_address(MaxLevel::LEVEL, range.end.start_address())
     }
 
+    /// Inputs: frame, level, and flags; Requires: aligned frame; Returns: private leaf descriptor.
     fn leaf_entry(paddr: PhysAddr, target: PageLevel, flags: Arch::PTFlags) -> PTEntry<Arch> {
         let addr = Arch::make_private_address(paddr);
         let flags = Arch::filter_flags(flags);
@@ -455,6 +481,7 @@ where
         PTEntry::new(addr, flags)
     }
 
+    /// Inputs: leaf run and frames; Requires: one matching leaf table; Returns: mapping status.
     fn map_leaf_run<PS: PageSize, I: Iterator<Item = PhysFrame<PS>>>(
         &self,
         page: &PTPagePointer<'_, Arch, Alloc>,
@@ -517,6 +544,7 @@ where
         }
     }
 
+    /// Inputs: parent slot and target page; Requires: non-leaf parent; Returns: resolved child.
     fn mapping_child<'tree>(
         &self,
         parent: &PTPagePointer<'tree, Arch, Alloc>,
@@ -550,6 +578,7 @@ where
     }
 
     #[inline(always)]
+    /// Inputs: root, range, and frames; Requires: validated range; Returns: mapping status.
     fn do_map_region<PS: PageSize, I: Iterator<Item = PhysFrame<PS>>>(
         &self,
         ptpage: &PTPagePointer<'_, Arch, Alloc>,
@@ -566,7 +595,7 @@ where
             return Err(PagingError::InvalidLevel);
         }
         let mut start = range.start;
-        loop {
+        for _ in 0..PT_ENTRY_COUNT {
             let offset = (start.start_address().bits() & (level.size() - 1)) / PS::SIZE;
             let count = (level.size() / PS::SIZE - offset).min(range.end - start + 1);
             let end = start + count - 1;
@@ -574,14 +603,15 @@ where
             let child = self.mapping_child(ptpage, index)?;
             self.do_map_region(&child, Page::range_inclusive(start, end), frames, flags, state)?;
             if end.start_address() == range.end.start_address() {
-                break;
+                return Ok(());
             }
             start = end + 1;
         }
-        Ok(())
+        unreachable!("range spans more entries than one page-table page")
     }
 
     #[inline(always)]
+    /// Inputs: L0 table and range; Requires: range intersects table; Returns: unmap status.
     fn unmap_region_l0(
         &self,
         page: PTPagePointer<'_, Arch, Alloc>,
@@ -603,9 +633,7 @@ where
             let pte_ref = page.entry(index);
             if pte_ref.load().is_leaf(PageLevel::Level0) {
                 pte_ref.swap(PTEntry::empty());
-                if first_changed.is_none() {
-                    first_changed = Some(vaddr);
-                }
+                first_changed.get_or_insert(vaddr);
                 last_changed = vaddr;
             } else {
                 *state.all_mapped = false;
@@ -620,6 +648,7 @@ where
     }
 
     #[inline(always)]
+    /// Inputs: child table and range; Requires: matching level type; Returns: unmap status.
     fn unmap_region_child<PL: InnerLevel>(
         &self,
         page: PTPagePointer<'_, Arch, Alloc>,
@@ -637,6 +666,7 @@ where
     }
 
     #[inline(always)]
+    /// Inputs: inner table and range; Requires: matching level type; Returns: unmap status.
     fn unmap_region_level<PL: InnerLevel>(
         &self,
         page: PTPagePointer<'_, Arch, Alloc>,
@@ -719,6 +749,7 @@ where
         Ok(())
     }
 
+    /// Inputs: validated range and state; Requires: ordered bounds; Returns: unmap status.
     fn unmap_region_sweep(
         &self,
         start: VirtAddr,
@@ -781,6 +812,7 @@ where
     }
 
     #[inline(always)]
+    /// Inputs: 4 KiB page and flush scope; Requires: policy-approved address; Returns: old mapping.
     fn unmap_4k_inner(&self, page: Page<Size4KiB>, all_cpus: bool) -> UnmapEntryResult<Arch> {
         let vaddr = page.start_address();
         let mapping = self.root_view().walk(vaddr);
@@ -797,6 +829,7 @@ where
         Ok((Some(entry), MayNeedFlush::new_4k(vaddr)))
     }
 
+    /// Inputs: typed page and flush scope; Requires: policy-approved address; Returns: old mapping.
     fn unmap_with_split<PS: PageSize>(
         &self,
         page: Page<PS>,
@@ -821,17 +854,22 @@ where
             }
             if mapping.page.level() == target {
                 let entry = mapping.entry().swap(PTEntry::empty());
-                let pending = if target == Self::SMALL {
-                    MayNeedFlush::new_4k(vaddr)
-                } else {
-                    MayNeedFlush::new(vaddr, target)
-                };
+                let pending = Self::flush_for_page(vaddr, target);
                 return Ok((Some(entry), flush.and(pending)));
             }
             drop(_guard);
             flush = flush.and(self.split(page, all_cpus)?);
         }
         unreachable!("unmap traversal exceeded the page-table depth")
+    }
+
+    /// Inputs: page address and level; Requires: aligned mapping; Returns: matching flush token.
+    fn flush_for_page(vaddr: VirtAddr, level: PageLevel) -> MayNeedFlush<Arch::TlbFlushTok> {
+        if level == Self::SMALL {
+            MayNeedFlush::new_4k(vaddr)
+        } else {
+            MayNeedFlush::new(vaddr, level)
+        }
     }
 
     /// Splits a huge leaf while preserving its mappings. New pages are prepared
@@ -871,6 +909,7 @@ where
     }
 
     #[inline(always)]
+    /// Inputs: page, flags, and flush scope; Requires: present flags; Returns: flush obligation.
     fn set_flags_4k(
         &self,
         page: Page<Size4KiB>,
@@ -933,6 +972,7 @@ where
         self.set_flags_range_inner(start.bits(), end.bits(), Arch::filter_flags(flags), all_cpus)
     }
 
+    /// Inputs: validated bounds and flags; Requires: nonempty range; Returns: result and flush.
     fn set_flags_range_inner(
         &self,
         start: usize,
@@ -940,161 +980,190 @@ where
         flags: Arch::PTFlags,
         all_cpus: bool,
     ) -> (Result<(), PagingError>, MayNeedFlush<Arch::TlbFlushTok>) {
-        let mut cursor = start;
-        let mut flush = MayNeedFlush::none();
-        let mut footprint = FlushFootprint::default();
-        let mut descents_left = MaxLevel::DEPTH;
-        let mut descent_cursor = cursor;
-        let mut partial_leaves_left = 2;
+        let mut state = RangeFlagsState {
+            cursor: start,
+            flush: MayNeedFlush::none(),
+            footprint: FlushFootprint::default(),
+            descents_left: MaxLevel::DEPTH,
+            descent_cursor: start,
+            partial_leaves_left: 2,
+        };
         loop {
-            if cursor != descent_cursor {
-                descent_cursor = cursor;
-                descents_left = MaxLevel::DEPTH;
-            }
-            let mapping = self.root_view().walk(VirtAddr::from(cursor));
-            if mapping.page.level() == Self::SMALL {
-                let page = mapping.page_paddr();
-                let _guard = self.wperms.lock(page);
-                let run_start = cursor;
-                let count =
-                    ((end - cursor) / Self::SMALL.size()).min(PT_ENTRY_COUNT - mapping.index);
-                let mut changed = false;
-                for index in mapping.index..mapping.index + count {
-                    let pte_ref = mapping.page.entry(index);
-                    let current = pte_ref.load();
-                    if !current.is_leaf(Self::SMALL) {
-                        if changed {
-                            footprint.include(VirtAddr::from(run_start), Self::SMALL);
-                            footprint.include(
-                                VirtAddr::from(
-                                    run_start + (index - mapping.index - 1) * Self::SMALL.size(),
-                                ),
-                                Self::SMALL,
-                            );
-                        }
-                        let pending = flush.and(footprint.token());
-                        return (Err(PagingError::NotMapped), pending);
-                    }
-                    let mut desired = current;
-                    PTPage::<Arch, Alloc>::set_leaf_flags(&mut desired, flags);
-                    if desired.raw() != current.raw() {
-                        pte_ref.update_preserving_ad(current, desired);
-                        changed = true;
-                    }
-                }
-                cursor += count * Self::SMALL.size();
-                if changed {
-                    footprint.include(VirtAddr::from(run_start), Self::SMALL);
-                    footprint.include(VirtAddr::from(cursor - Self::SMALL.size()), Self::SMALL);
-                }
-                // Crossing the canonical gap wraps the low segment into its high alias.
-                cursor = VirtAddr::from(cursor).bits();
-                if cursor == end {
-                    let pending = flush.and(footprint.token());
-                    return (Ok(()), pending);
-                }
-                continue;
-            }
-
-            let mut locked_page = None;
-            let mut guard: Option<WP::Guard<'_>> = None;
-            let result = PTPage::<Arch, Alloc>::sweep_range(
-                &self.root_view(),
-                cursor,
-                end,
-                &mut |page, pte_ref, observed, level, entry_start, entry_end| {
-                    let current = if locked_page != Some(page) {
-                        guard = None;
-                        guard = Some(self.wperms.lock(page));
-                        locked_page = Some(page);
-                        pte_ref.load()
-                    } else {
-                        observed
-                    };
-                    if current.is_table(level) {
-                        return Err(RangeUpdateError::Descend);
-                    }
-                    if !current.is_leaf(level) {
-                        return Err(RangeUpdateError::Paging(PagingError::NotMapped));
-                    }
-                    let leaf_start = entry_start & !(level.size() - 1);
-                    if entry_start != leaf_start {
-                        return Err(RangeUpdateError::Split(
-                            entry_start,
-                            Self::largest_covered_level(entry_start, entry_end, level, false),
-                        ));
-                    }
-                    if entry_end != leaf_start.saturating_add(level.size()) {
-                        let target =
-                            Self::largest_covered_level(entry_start, entry_end, level, true);
-                        return Err(RangeUpdateError::Split(entry_end - target.size(), target));
-                    }
-                    let mut desired = current;
-                    PTPage::<Arch, Alloc>::set_leaf_flags(&mut desired, flags);
-                    if desired.raw() != current.raw() {
-                        pte_ref.update_preserving_ad(current, desired);
-                        footprint.include(VirtAddr::from(entry_start), level);
-                    }
-                    Ok(())
-                },
-            );
-            drop(guard);
-            match result {
-                Ok(_) => {
-                    let pending = flush.and(footprint.token());
-                    return (Ok(()), pending);
-                }
-                Err((retry, RangeUpdateError::Descend)) => {
-                    if descents_left == 0 {
-                        unreachable!("page-table range update exceeded its descent bound");
-                    }
-                    descents_left -= 1;
-                    cursor = retry;
-                }
-                Err((retry, RangeUpdateError::Split(split_address, target))) => {
-                    if partial_leaves_left == 0 {
-                        unreachable!("page-table range update exceeded its partial-leaf bound");
-                    }
-                    partial_leaves_left -= 1;
-                    let split_address = VirtAddr::from(split_address);
-                    let update = match target {
-                        PageLevel::Level0 => self.update_flags(
-                            Page::<Size4KiB>::containing_address(split_address),
-                            flags,
-                            all_cpus,
-                        ),
-                        PageLevel::Level1 => self.update_flags(
-                            Page::<Size2MiB>::containing_address(split_address),
-                            flags,
-                            all_cpus,
-                        ),
-                        PageLevel::Level2 => self.update_flags(
-                            Page::<Size1GiB>::containing_address(split_address),
-                            flags,
-                            all_cpus,
-                        ),
-                        _ => Err(PagingError::InvalidLevel),
-                    };
-                    match update {
-                        Ok(pending) => {
-                            flush = flush.and(pending);
-                            cursor = retry;
-                        }
-                        Err(error) => {
-                            let pending = flush.and(footprint.token());
-                            return (Err(error), pending);
-                        }
-                    }
-                }
-
-                Err((_, RangeUpdateError::Paging(error))) => {
-                    let pending = flush.and(footprint.token());
-                    return (Err(error), pending);
-                }
+            if let Some(result) = self.set_flags_range_step(end, flags, all_cpus, &mut state) {
+                return result;
             }
         }
     }
 
+    /// Inputs: range end, flags, and state; Requires: live cursor; Returns: completion if finished.
+    fn set_flags_range_step(
+        &self,
+        end: usize,
+        flags: Arch::PTFlags,
+        all_cpus: bool,
+        state: &mut RangeFlagsState<Arch::TlbFlushTok>,
+    ) -> Option<RangeFlagsResult<Arch::TlbFlushTok>> {
+        if state.cursor != state.descent_cursor {
+            state.descent_cursor = state.cursor;
+            state.descents_left = MaxLevel::DEPTH;
+        }
+        let mapping = self.root_view().walk(VirtAddr::from(state.cursor));
+        if mapping.page.level() == Self::SMALL {
+            return match self.set_flags_l0_run(
+                &mapping.page,
+                mapping.page_paddr(),
+                mapping.index,
+                end,
+                flags,
+                state,
+            ) {
+                Ok(cursor) if cursor == end => Some(state.finish(Ok(()))),
+                Ok(cursor) => {
+                    state.cursor = cursor;
+                    None
+                }
+                Err(error) => Some(state.finish(Err(error))),
+            };
+        }
+
+        let mut locked_page = None;
+        let mut guard: Option<WP::Guard<'_>> = None;
+        let result = PTPage::<Arch, Alloc>::sweep_range(
+            &self.root_view(),
+            state.cursor,
+            end,
+            &mut |page, pte_ref, observed, level, entry_start, entry_end| {
+                let current = if locked_page != Some(page) {
+                    guard = None;
+                    guard = Some(self.wperms.lock(page));
+                    locked_page = Some(page);
+                    pte_ref.load()
+                } else {
+                    observed
+                };
+                if current.is_table(level) {
+                    return Err(RangeUpdateError::Descend);
+                }
+                if !current.is_leaf(level) {
+                    return Err(RangeUpdateError::Paging(PagingError::NotMapped));
+                }
+                let leaf_start = entry_start & !(level.size() - 1);
+                if entry_start != leaf_start {
+                    return Err(RangeUpdateError::Split(
+                        entry_start,
+                        Self::largest_covered_level(entry_start, entry_end, level, false),
+                    ));
+                }
+                if entry_end != leaf_start.saturating_add(level.size()) {
+                    let target = Self::largest_covered_level(entry_start, entry_end, level, true);
+                    return Err(RangeUpdateError::Split(entry_end - target.size(), target));
+                }
+                let mut desired = current;
+                PTPage::<Arch, Alloc>::set_leaf_flags(&mut desired, flags);
+                if desired.raw() != current.raw() {
+                    pte_ref.update_preserving_ad(current, desired);
+                    state.footprint.include(VirtAddr::from(entry_start), level);
+                }
+                Ok(())
+            },
+        );
+        drop(guard);
+        match result {
+            Ok(_) => Some(state.finish(Ok(()))),
+            Err((retry, RangeUpdateError::Descend)) => {
+                if state.descents_left == 0 {
+                    unreachable!("page-table range update exceeded its descent bound");
+                }
+                state.descents_left -= 1;
+                state.cursor = retry;
+                None
+            }
+            Err((retry, RangeUpdateError::Split(split_address, target))) => {
+                if state.partial_leaves_left == 0 {
+                    unreachable!("page-table range update exceeded its partial-leaf bound");
+                }
+                state.partial_leaves_left -= 1;
+                let split_address = VirtAddr::from(split_address);
+                let update = match target {
+                    PageLevel::Level0 => self.update_flags(
+                        Page::<Size4KiB>::containing_address(split_address),
+                        flags,
+                        all_cpus,
+                    ),
+                    PageLevel::Level1 => self.update_flags(
+                        Page::<Size2MiB>::containing_address(split_address),
+                        flags,
+                        all_cpus,
+                    ),
+                    PageLevel::Level2 => self.update_flags(
+                        Page::<Size1GiB>::containing_address(split_address),
+                        flags,
+                        all_cpus,
+                    ),
+                    _ => Err(PagingError::InvalidLevel),
+                };
+                match update {
+                    Ok(pending) => {
+                        let flush = core::mem::replace(&mut state.flush, MayNeedFlush::none());
+                        state.flush = flush.and(pending);
+                        state.cursor = retry;
+                        None
+                    }
+                    Err(error) => Some(state.finish(Err(error))),
+                }
+            }
+            Err((_, RangeUpdateError::Paging(error))) => Some(state.finish(Err(error))),
+        }
+    }
+
+    /// Inputs: L0 run and state; Requires: matching table; Returns: next cursor or error.
+    fn set_flags_l0_run(
+        &self,
+        page: &PTPagePointer<'_, Arch, Alloc>,
+        page_paddr: PhysAddr,
+        start_index: usize,
+        end: usize,
+        flags: Arch::PTFlags,
+        state: &mut RangeFlagsState<Arch::TlbFlushTok>,
+    ) -> Result<usize, PagingError> {
+        let _guard = self.wperms.lock(page_paddr);
+        let start = state.cursor;
+        let count = ((end - start) / Self::SMALL.size()).min(PT_ENTRY_COUNT - start_index);
+        let mut changed = false;
+        for index in start_index..start_index + count {
+            let pte_ref = page.entry(index);
+            let current = pte_ref.load();
+            if !current.is_leaf(Self::SMALL) {
+                let run_end = start + (index - start_index) * Self::SMALL.size();
+                Self::include_l0_footprint(&mut state.footprint, changed, start, run_end);
+                return Err(PagingError::NotMapped);
+            }
+            let mut desired = current;
+            PTPage::<Arch, Alloc>::set_leaf_flags(&mut desired, flags);
+            if desired.raw() != current.raw() {
+                pte_ref.update_preserving_ad(current, desired);
+                changed = true;
+            }
+        }
+        let run_end = start + count * Self::SMALL.size();
+        Self::include_l0_footprint(&mut state.footprint, changed, start, run_end);
+        Ok(VirtAddr::from(run_end).bits())
+    }
+
+    /// Inputs: footprint and run bounds; Requires: nonempty changed run; Returns: nothing.
+    fn include_l0_footprint(
+        footprint: &mut FlushFootprint,
+        changed: bool,
+        start: usize,
+        end: usize,
+    ) {
+        if changed {
+            footprint.include(VirtAddr::from(start), Self::SMALL);
+            footprint.include(VirtAddr::from(end - Self::SMALL.size()), Self::SMALL);
+        }
+    }
+
+    /// Inputs: bounds and maximum level; Requires: nonempty range; Returns: largest covered level.
     fn largest_covered_level(
         start: usize,
         end: usize,
@@ -1102,17 +1171,19 @@ where
         align_end: bool,
     ) -> PageLevel {
         let mut target = level.child().unwrap();
-        while target > Self::SMALL
-            && (end - start < target.size()
-                || if align_end {
-                    end & (target.size() - 1) != 0
-                } else {
-                    start & (target.size() - 1) != 0
-                })
-        {
+        while target > Self::SMALL && !Self::level_fits_range(start, end, target, align_end) {
             target = target.child().unwrap();
         }
         target
+    }
+
+    /// Inputs: bounds, level, and alignment side; Requires: ordered bounds; Returns: fit decision.
+    fn level_fits_range(start: usize, end: usize, level: PageLevel, align_end: bool) -> bool {
+        if end - start < level.size() {
+            return false;
+        }
+        let boundary = if align_end { end } else { start };
+        boundary & (level.size() - 1) == 0
     }
 
     /// Retags `page` as shared, splitting if needed. `all_cpus` selects the
@@ -1140,6 +1211,7 @@ where
     }
 
     #[inline(always)]
+    /// Inputs: page, flags, and flush scope; Requires: present flags; Returns: flush obligation.
     fn update_flags<PS: PageSize>(
         &self,
         page: Page<PS>,
@@ -1157,6 +1229,7 @@ where
         })
     }
 
+    /// Inputs: page and update callback; Requires: policy-approved address; Returns: callback result.
     fn with_locked_leaf<PS: PageSize>(
         &self,
         page: Page<PS>,
@@ -1223,6 +1296,7 @@ where
         frames_4k: &mut impl Iterator<Item = PhysFrame<Size4KiB>>,
         flags: Arch::PTFlags,
     ) -> Result<(), MapRegionError> {
+        /// Inputs: two ranges; Requires: nonempty ranges; Returns: canonical adjacency decision.
         fn followed_by<A: PageSize, B: PageSize>(
             first: PageRangeInclusive<A>,
             second: PageRangeInclusive<B>,

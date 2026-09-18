@@ -86,18 +86,20 @@ unsafe fn tree_words(root: PhysAddr, level: PageLevel) -> Vec<(usize, usize, Pag
 
 unsafe fn assert_path_history(root: PhysAddr, address: VirtAddr, mut level: PageLevel) {
     let mut page = root;
-    loop {
+    let depth = level.depth();
+    for _ in 0..=depth {
         let pte = Page::entry_ptr(page.bits() as *const Page, entry_index(address, level));
         // SAFETY: the caller pins the quiesced path, whose table addresses are identity-mapped.
         let entry = unsafe { load_entry(pte) };
         assert!(entry.present());
         assert_eq!(entry.raw() & AD, published_bits(1) & AD);
         if !entry.is_table(level) {
-            break;
+            return;
         }
         page = PhysAddr::from(entry.address());
         level = level.child().unwrap();
     }
+    unreachable!("history walk exceeded the tree depth")
 }
 
 unsafe fn clear_history_before_import(

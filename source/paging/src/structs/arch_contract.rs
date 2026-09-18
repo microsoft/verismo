@@ -116,12 +116,14 @@ pub trait ArchPagingMeta: 'static + Copy {
         0
     }
 
-    /// Leaf access-control flags replaced by a flag update. Structural,
+    /// Leaf access-control flags replaced valid-to-valid before the returned
+    /// TLB invalidation. They must not require break-before-make. Structural,
     /// hardware-maintained, memory-type, and software-defined bits are excluded.
     fn leaf_flags_mask() -> Self::PTFlags;
 
-    /// Whether replacing this valid descriptor with another valid descriptor
-    /// requires invalidation and completed TLB maintenance before publication.
+    /// Whether changing a valid mapping's structure or output frame requires
+    /// invalidation and completed TLB maintenance before publication. Flag-only
+    /// updates never call this hook and must exclude attributes requiring BBM.
     fn requires_break_before_make(old: usize, new: usize, level: PageLevel) -> bool;
 
     /// Declared flags allowed in new mapping and leaf-flag update requests, for example
