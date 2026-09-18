@@ -20,6 +20,8 @@ const SERIAL_PORT: u16 = 0x3f8;
 const DEBUG_EXIT_PORT: u16 = 0xf4;
 const TABLE_PAGE_COUNT: usize = 64;
 const TEST_VALUE: u64 = 0x5645_5249_4f53_5054;
+const TLB_FLUSH_ALL_THRESHOLD: usize = 256;
+const CR4_PGE: usize = 1 << 7;
 
 global_asm!(include_str!("entry.S"), options(att_syntax));
 
@@ -44,8 +46,16 @@ unsafe impl X86PagingParams for GuestPaging {
         PTEntryFlags::all()
     }
 
-    fn flush_tlb_global_sync(_scope: FlushScope) {
-        reload_cr3();
+    fn flush_tlb_global_sync(scope: FlushScope) {
+        flush_tlb_scope(scope, true);
+    }
+
+    fn flush_tlb_global_percpu(scope: FlushScope) {
+        flush_tlb_scope(scope, true);
+    }
+
+    fn flush_tlb_ignore_global_sync(scope: FlushScope) {
+        flush_tlb_scope(scope, false);
     }
 }
 
@@ -53,10 +63,7 @@ struct GuestAllocator;
 
 unsafe impl DirectMappedAllocator for GuestAllocator {
     fn direct_map() -> (core::ops::Range<PhysAddr>, VirtAddr) {
-        (
-            PhysAddr::from(0usize)..PhysAddr::from(IDENTITY_MAP_END),
-            VirtAddr::from(0usize),
-        )
+        (PhysAddr::from(0usize)..PhysAddr::from(IDENTITY_MAP_END), VirtAddr::from(0usize))
     }
 
     fn allocate_table_page() -> Result<PhysAddr, PagingError> {
@@ -114,7 +121,12 @@ pub extern "C" fn kmain() -> ! {
         .unwrap_or_else(|_| fail("VERIOS_PAGETABLE_ALIAS_INVALID\n"));
     let frame = PhysFrame::<Size4KiB>::from_start_address(PhysAddr::from(test_paddr))
         .unwrap_or_else(|_| fail("VERIOS_PAGETABLE_FRAME_INVALID\n"));
-    if table.map(page, frame, PTEntryFlags::data(), false).is_err() {
+    let initial_alias_flags = PTEntryFlags::PRESENT
+        | PTEntryFlags::WRITABLE
+        | PTEntryFlags::NX
+        | PTEntryFlags::ACCESSED
+        | PTEntryFlags::DIRTY;
+    if table.map(page, frame, initial_alias_flags, false).is_err() {
         fail("VERIOS_PAGETABLE_MAP_FAILED\n");
     }
     if table.validate_page_table().is_err()
@@ -124,7 +136,7 @@ pub extern "C" fn kmain() -> ! {
     }
     serial_write("VERIOS_PAGETABLE_MAP_OK\n");
 
-    let root = table.leak();
+    let root = table.root_paddr();
     load_cr3(root.bits());
     serial_write("VERIOS_PAGETABLE_CR3_OK\n");
 
@@ -140,9 +152,53 @@ pub extern "C" fn kmain() -> ! {
         fail("VERIOS_PAGETABLE_CR3_FAILED\n");
     }
 
+    let nonglobal_flags = PTEntryFlags::PRESENT | PTEntryFlags::WRITABLE;
+    match table.set_flags(page, nonglobal_flags, true) {
+        Ok(flush) => flush.flush_tlb_ignore_global_sync(),
+        Err(_) => fail("VERIOS_PAGETABLE_SYNC_FLUSH_FAILED\n"),
+    }
+    match table.set_flags(page, PTEntryFlags::data(), false) {
+        Ok(flush) => flush.flush_tlb_global_percpu(),
+        Err(_) => fail("VERIOS_PAGETABLE_PERCPU_FLUSH_FAILED\n"),
+    }
+
+    let leaked_root = table.leak();
+    if leaked_root != root {
+        fail("VERIOS_PAGETABLE_ROOT_CHANGED\n");
+    }
     serial_write("VERIOS_PAGETABLE_BOOT_OK\n");
     unsafe { outb(DEBUG_EXIT_PORT, 0x10) };
     halt()
+}
+
+/// Flushes a range or widens a large request to a complete local invalidation.
+fn flush_tlb_scope(scope: FlushScope, include_global: bool) {
+    let FlushScope::Range { start, end, level } = scope else {
+        flush_tlb_all(include_global);
+        return;
+    };
+    let page_size = level.size();
+    let page_count = (end.bits() - start.bits()).div_ceil(page_size);
+    if page_count > TLB_FLUSH_ALL_THRESHOLD {
+        flush_tlb_all(include_global);
+        return;
+    }
+    let mut address = start.bits();
+    while address < end.bits() {
+        invalidate_page(address);
+        address += page_size;
+    }
+}
+
+/// Flushes all local translations, optionally including global entries.
+fn flush_tlb_all(include_global: bool) {
+    if !include_global {
+        reload_cr3();
+        return;
+    }
+    let cr4 = read_cr4();
+    write_cr4(cr4 ^ CR4_PGE);
+    write_cr4(cr4);
 }
 
 /// Reloads the active root to invalidate local translations.
@@ -165,6 +221,29 @@ fn read_cr3() -> usize {
         asm!("mov {}, cr3", out(reg) root, options(nostack, preserves_flags));
     }
     root
+}
+
+/// Reads the current CR4 control flags.
+fn read_cr4() -> usize {
+    let cr4;
+    unsafe {
+        asm!("mov {}, cr4", out(reg) cr4, options(nostack, preserves_flags));
+    }
+    cr4
+}
+
+/// Writes CR4 while preserving every flag not selected by the caller.
+fn write_cr4(cr4: usize) {
+    unsafe {
+        asm!("mov cr4, {}", in(reg) cr4, options(nostack, preserves_flags));
+    }
+}
+
+/// Invalidates the local translation containing `address`.
+fn invalidate_page(address: usize) {
+    unsafe {
+        asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
+    }
 }
 
 /// Initializes the first 16550-compatible serial port.
