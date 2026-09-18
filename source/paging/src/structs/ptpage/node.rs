@@ -469,16 +469,15 @@ impl Iterator for CanonicalRangeCursor {
         if self.cursor >= self.end {
             return None;
         }
-        debug_assert!(self.cursor < LOW_CANONICAL_END || self.cursor >= HIGH_CANONICAL_START);
-        let segment_end = if self.cursor < LOW_CANONICAL_END && self.end >= HIGH_CANONICAL_START {
+        let seg_start = self.cursor;
+        debug_assert!(seg_start < LOW_CANONICAL_END || seg_start >= HIGH_CANONICAL_START);
+        let seg_end = if seg_start < LOW_CANONICAL_END && self.end >= HIGH_CANONICAL_START {
             LOW_CANONICAL_END
         } else {
             self.end
         };
-        let segment = (self.cursor, segment_end);
-        self.cursor =
-            if segment_end == LOW_CANONICAL_END { HIGH_CANONICAL_START } else { segment_end };
-        Some(segment)
+        self.cursor = VirtAddr::new(seg_end).as_usize();
+        Some((seg_start, seg_end))
     }
 }
 
