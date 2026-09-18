@@ -21,7 +21,7 @@ use std::thread::{self, JoinHandle};
 #[cfg(feature = "concurrent")]
 use std::time::Duration;
 
-use common::{Allocator, Arena, ARENA};
+use common::{load_entry, Allocator, Arena, ARENA};
 use paging::address::{Address, PhysAddr, VirtAddr};
 use paging::entry::PTEntry;
 use paging::level::{Lvl, PageLevel};
@@ -110,6 +110,10 @@ impl paging::ArchPagingMeta for BbmArchitecture {
 
     fn accessed_dirty_mask() -> usize {
         (PTEntryFlags::ACCESSED | PTEntryFlags::DIRTY).bits()
+    }
+
+    fn leaf_flags_mask() -> Self::PTFlags {
+        PTEntryFlags::WRITABLE | PTEntryFlags::USER | PTEntryFlags::GLOBAL | PTEntryFlags::NX
     }
 
     fn requires_break_before_make(old: usize, new: usize, _: PageLevel) -> bool {
@@ -463,14 +467,9 @@ fn leaf_word(
 }
 
 fn protected_word(old: usize, flags: PTEntryFlags) -> usize {
-    let replaced = (PTEntryFlags::PRESENT
-        | PTEntryFlags::WRITABLE
-        | PTEntryFlags::USER
-        | PTEntryFlags::WRITE_THROUGH
-        | PTEntryFlags::NO_CACHE
-        | PTEntryFlags::GLOBAL
-        | PTEntryFlags::NX)
-        .bits();
+    let replaced =
+        (PTEntryFlags::WRITABLE | PTEntryFlags::USER | PTEntryFlags::GLOBAL | PTEntryFlags::NX)
+            .bits();
     (old & !replaced) | (flags.bits() & replaced)
 }
 
@@ -481,7 +480,7 @@ unsafe fn leaf_slot(root: PhysAddr, address: VirtAddr) -> (*mut Entry, PageLevel
         let slot = (page as *mut Entry).wrapping_add(entry_index(address, level));
         // SAFETY: the caller owns this live host-backed tree; table addresses
         // are identity-mapped, and no references into PTE storage are created.
-        let entry = unsafe { Entry::load_entry(slot) };
+        let entry = unsafe { load_entry(slot) };
         if !entry.is_table(level) {
             return (slot, level);
         }
@@ -493,9 +492,9 @@ unsafe fn leaf_slot(root: PhysAddr, address: VirtAddr) -> (*mut Entry, PageLevel
 unsafe fn seed_pat(root: PhysAddr, address: VirtAddr) {
     // SAFETY: the caller exclusively owns the tree during this fixture edit.
     let (slot, level) = unsafe { leaf_slot(root, address) };
-    let entry = unsafe { Entry::load_entry(slot) };
+    let entry = unsafe { load_entry(slot) };
     assert!(entry.is_leaf(level));
-    unsafe { Entry::store_entry(slot, Entry::from_bits(entry.raw() | pat_bit(level))) };
+    unsafe { &*slot.cast::<AtomicUsize>() }.store(entry.raw() | pat_bit(level), Ordering::Release);
 }
 
 unsafe fn assert_permissive_ancestors(root: PhysAddr, address: VirtAddr) {
@@ -504,7 +503,7 @@ unsafe fn assert_permissive_ancestors(root: PhysAddr, address: VirtAddr) {
     loop {
         let slot = (page as *const Entry).wrapping_add(entry_index(address, level));
         // SAFETY: the caller pins the tree, and all accesses use atomic loads.
-        let entry = unsafe { Entry::load_entry(slot) };
+        let entry = unsafe { load_entry(slot) };
         if !entry.is_table(level) {
             assert!(entry.is_leaf(level));
             return;
@@ -526,13 +525,13 @@ fn architecture_policy_can_require_break_before_make_for_a_split() {
 
     let (fixture, mut table) = bbm_fixture();
     let base = VirtAddr::from(BASE);
-    table.map(base, FRAME.into(), HUGE_LEVEL, old_flags(), false).unwrap();
+    map_at!(table, base, FRAME.into(), HUGE_LEVEL, old_flags(), false).unwrap();
     let (slot, level) = unsafe { leaf_slot(table.root_paddr(), base) };
     assert_eq!(level, HUGE_LEVEL);
     let old = table.walk(base).read().raw();
     let slot = slot as usize;
     set_flush_hook(move |_, _| {
-        let entry = unsafe { BbmEntry::load_entry(slot as *const BbmEntry) };
+        let entry = unsafe { load_entry(slot as *const BbmEntry) };
         assert_eq!(entry.raw(), old & !PTEntryFlags::PRESENT.bits());
     });
     table.split(base + PAGE, SMALL_LEVEL, true).unwrap().expect_no_flush();
@@ -552,13 +551,14 @@ fn architecture_bbm_range_breaks_only_structural_boundaries() {
     let mut slots = Vec::new();
     for index in 0..3 {
         let address = base + index * HUGE;
-        table.map(address, (FRAME + index * HUGE).into(), HUGE_LEVEL, old_flags(), false).unwrap();
+        map_at!(table, address, (FRAME + index * HUGE).into(), HUGE_LEVEL, old_flags(), false)
+            .unwrap();
         slots.push(unsafe { leaf_slot(table.root_paddr(), address).0 as usize });
     }
     set_flush_hook(move |_, _| {
         let mut invalid = 0;
         for (index, slot) in slots.iter().copied().enumerate() {
-            let entry = unsafe { BbmEntry::load_entry(slot as *const BbmEntry) };
+            let entry = unsafe { load_entry(slot as *const BbmEntry) };
             if index == 1 {
                 assert!(entry.is_leaf(HUGE_LEVEL));
                 if !cfg!(feature = "concurrent") {
@@ -577,7 +577,7 @@ fn architecture_bbm_range_breaks_only_structural_boundaries() {
         }
     });
     let (result, flush) =
-        table.mprotect_range(base + PAGE, base + 3 * HUGE - PAGE, new_flags(), true);
+        table.set_flags_range(base + PAGE, base + 3 * HUGE - PAGE, new_flags(), true);
     result.unwrap();
     if cfg!(feature = "concurrent") {
         discharge(flush);
@@ -601,20 +601,20 @@ fn two_level_range_can_split_both_boundaries_before_updating() {
     let mut table = TwoLevelTable::new(fixture.locks.clone(), PTEntryFlags::data()).unwrap();
     let base = VirtAddr::from(BASE);
     for index in 0..3 {
-        table
-            .map(
-                base + index * LARGE,
-                PhysAddr::from(FRAME + index * LARGE),
-                LARGE_LEVEL,
-                old_flags(),
-                false,
-            )
-            .unwrap();
+        map_at!(
+            table,
+            base + index * LARGE,
+            PhysAddr::from(FRAME + index * LARGE),
+            LARGE_LEVEL,
+            old_flags(),
+            false
+        )
+        .unwrap();
     }
 
     let start = base + PAGE;
     let end = base + 3 * LARGE - PAGE;
-    let (result, flush) = table.mprotect_range(start, end, new_flags(), true);
+    let (result, flush) = table.set_flags_range(start, end, new_flags(), true);
 
     assert_eq!(result, Ok(()));
     discharge(flush);
@@ -636,15 +636,14 @@ macro_rules! edit_tests {
             use super::*;
 
             #[test]
-            fn same_size_protection_replaces_permissions_but_preserves_frame_tags_pat_and_ad() {
+            fn same_size_protection_preserves_mapping_attributes() {
                 let (fixture, mut table) = $fixture();
                 for (index, level) in [SMALL_LEVEL, LARGE_LEVEL, HUGE_LEVEL].into_iter().enumerate()
                 {
                     for shared in [false, true] {
                         let address =
                             VirtAddr::from(BASE + (index * 2 + usize::from(shared)) * HUGE);
-                        table
-                            .map(address, PhysAddr::from(FRAME), level, old_flags(), shared)
+                        map_at!(table, address, PhysAddr::from(FRAME), level, old_flags(), shared)
                             .unwrap();
                         // SAFETY: no other thread or hardware can access this fixture.
                         unsafe { seed_pat(table.root_paddr(), address) };
@@ -658,7 +657,7 @@ macro_rules! edit_tests {
                             PTEntryFlags::PRESENT,
                             PTEntryFlags::PRESENT | PTEntryFlags::NO_CACHE | PTEntryFlags::NX,
                         ] {
-                            let flush = table.mprotect(address, level, requested, true).unwrap();
+                            let flush = set_flags_at!(table, address, level, requested, true).unwrap();
                             assert_flush_covers(
                                 flush,
                                 address.bits(),
@@ -691,13 +690,12 @@ macro_rules! edit_tests {
                     let target_offset =
                         if level == HUGE_LEVEL { LARGE + 7 * PAGE } else { 7 * PAGE };
                     let target = VirtAddr::from(base + target_offset);
-                    table
-                        .map(VirtAddr::from(base), PhysAddr::from(FRAME), level, old_flags(), false)
+                    map_at!(table, VirtAddr::from(base), PhysAddr::from(FRAME), level, old_flags(), false)
                         .unwrap();
                     // SAFETY: the fixture has no concurrent users.
                     unsafe { seed_pat(table.root_paddr(), target) };
                     let allocated = fixture.arena.allocated();
-                    let flush = table.mprotect(target, SMALL_LEVEL, new_flags(), true).unwrap();
+                    let flush = set_flags_at!(table, target, SMALL_LEVEL, new_flags(), true).unwrap();
                     assert_completed(flush, base, base + level.size(), level);
                     assert_eq!(fixture.arena.allocated() - allocated, level.depth());
 
@@ -757,14 +755,7 @@ macro_rules! edit_tests {
                     (middle, FRAME + HUGE, HUGE_LEVEL),
                     (tail, FRAME + 2 * HUGE, LARGE_LEVEL),
                 ] {
-                    table
-                        .map(
-                            VirtAddr::from(address),
-                            PhysAddr::from(frame),
-                            level,
-                            old_flags(),
-                            false,
-                        )
+                    map_at!(table, VirtAddr::from(address), PhysAddr::from(frame), level, old_flags(), false)
                         .unwrap();
                 }
                 let allocated = fixture.arena.allocated();
@@ -800,7 +791,7 @@ macro_rules! edit_tests {
                         );
                     }
                     for (index, (slot, _)) in originals.iter().enumerate() {
-                        let entry = unsafe { Entry::load_entry(*slot as *const Entry) };
+                        let entry = unsafe { load_entry(*slot as *const Entry) };
                         if index == 1 {
                             assert!(entry.is_leaf(HUGE_LEVEL));
                         } else {
@@ -810,7 +801,7 @@ macro_rules! edit_tests {
                         }
                     }
                 });
-                let (result, flush) = table.mprotect_range(
+                let (result, flush) = table.set_flags_range(
                     VirtAddr::from(start),
                     VirtAddr::from(end),
                     new_flags(),
@@ -862,19 +853,12 @@ macro_rules! edit_tests {
                     (BASE + LARGE, LARGE_LEVEL),
                     (BASE + 2 * LARGE, SMALL_LEVEL),
                 ] {
-                    table
-                        .map(
-                            VirtAddr::from(address),
-                            PhysAddr::from(FRAME),
-                            level,
-                            old_flags(),
-                            true,
-                        )
+                    map_at!(table, VirtAddr::from(address), PhysAddr::from(FRAME), level, old_flags(), true)
                         .unwrap();
                 }
                 let allocated = fixture.arena.allocated();
                 fixture.allow_allocations(0);
-                let (result, flush) = table.mprotect_range(
+                let (result, flush) = table.set_flags_range(
                     VirtAddr::from(start),
                     VirtAddr::from(end),
                     new_flags(),
@@ -904,15 +888,10 @@ macro_rules! edit_tests {
                 let (_fixture, mut table) = $fixture();
                 for page in [0, 1, 3] {
                     table
-                        .map_4k(
-                            VirtAddr::from(BASE + page * PAGE),
-                            PhysAddr::from(FRAME + page * PAGE),
-                            old_flags(),
-                            false,
-                        )
+                        .map(common::page_4k(VirtAddr::from(BASE + page * PAGE)), common::frame_4k(PhysAddr::from(FRAME + page * PAGE)), old_flags(), false)
                         .unwrap();
                 }
-                let (result, flush) = table.mprotect_range(
+                let (result, flush) = table.set_flags_range(
                     VirtAddr::from(BASE),
                     VirtAddr::from(BASE + 4 * PAGE),
                     new_flags(),
@@ -933,7 +912,7 @@ macro_rules! edit_tests {
                     table.phys_addr(VirtAddr::from(BASE + 2 * PAGE)),
                     Err(PagingError::NotMapped)
                 );
-                let (result, flush) = table.mprotect_range(
+                let (result, flush) = table.set_flags_range(
                     VirtAddr::from(BASE + 2 * PAGE),
                     VirtAddr::from(BASE + 4 * PAGE),
                     new_flags(),
@@ -951,12 +930,12 @@ macro_rules! edit_tests {
             fn empty_and_invalid_ranges_do_not_change_the_tree() {
                 let (fixture, mut table) = $fixture();
                 let address = VirtAddr::from(BASE);
-                table.map_4k(address, PhysAddr::from(FRAME), old_flags(), false).unwrap();
+                table.map(common::page_4k(address), common::frame_4k(PhysAddr::from(FRAME)), old_flags(), false).unwrap();
                 let original = table.walk(address).read().raw();
                 let allocated = fixture.arena.allocated();
                 fixture.allow_allocations(0);
                 for empty in [address, VirtAddr::from(BASE + HUGE)] {
-                    let (result, flush) = table.mprotect_range(empty, empty, new_flags(), true);
+                    let (result, flush) = table.set_flags_range(empty, empty, new_flags(), true);
                     assert_eq!(result, Ok(()));
                     flush.expect_no_flush();
                 }
@@ -966,7 +945,7 @@ macro_rules! edit_tests {
                     (BASE, BASE + PAGE - 1),
                     (BASE + 1, BASE + 1),
                 ] {
-                    let (result, flush) = table.mprotect_range(
+                    let (result, flush) = table.set_flags_range(
                         VirtAddr::from(start),
                         VirtAddr::from(end),
                         new_flags(),
@@ -976,7 +955,7 @@ macro_rules! edit_tests {
                     flush.expect_no_flush();
                 }
                 let (result, flush) =
-                    table.mprotect_range(address, address + PAGE, PTEntryFlags::WRITABLE, true);
+                    table.set_flags_range(address, address + PAGE, PTEntryFlags::WRITABLE, true);
                 assert_eq!(result, Err(PagingError::InvalidFlags));
                 flush.expect_no_flush();
                 assert_eq!(table.walk(address).read().raw(), original);
@@ -991,14 +970,7 @@ macro_rules! edit_tests {
                         fixture.allow_allocations(usize::MAX);
                         let base = BASE + (operation * 2 + allowed) * HUGE;
                         let address = VirtAddr::from(base + 7 * PAGE);
-                        table
-                            .map(
-                                VirtAddr::from(base),
-                                PhysAddr::from(FRAME),
-                                HUGE_LEVEL,
-                                old_flags(),
-                                false,
-                            )
+                        map_at!(table, VirtAddr::from(base), PhysAddr::from(FRAME), HUGE_LEVEL, old_flags(), false)
                             .unwrap();
                         // SAFETY: the test owns the tree without concurrent users.
                         unsafe { seed_pat(table.root_paddr(), address) };
@@ -1008,11 +980,10 @@ macro_rules! edit_tests {
                         fixture.allow_allocations(allowed);
                         let result = match operation {
                             0 => table.split(address, SMALL_LEVEL, true).map(discharge),
-                            1 => table
-                                .mprotect(address, SMALL_LEVEL, new_flags(), true)
+                            1 => set_flags_at!(table, address, SMALL_LEVEL, new_flags(), true)
                                 .map(discharge),
-                            2 => table.set_shared_4k(address, true).map(discharge),
-                            _ => table.set_encrypted_4k(address, true).map(discharge),
+                            2 => table.set_shared(common::page_4k(address), true).map(discharge),
+                            _ => table.set_private(common::page_4k(address), true).map(discharge),
                         };
                         assert_eq!(result, Err(PagingError::AllocFrame));
                         assert_eq!(table.walk(address).level(), HUGE_LEVEL);
@@ -1039,20 +1010,13 @@ macro_rules! edit_tests {
             fn range_allocation_failure_retains_only_completed_prefix_edits_and_their_flush() {
                 let (fixture, mut table) = $fixture();
                 for offset in [0, HUGE] {
-                    table
-                        .map(
-                            VirtAddr::from(BASE + offset),
-                            PhysAddr::from(FRAME + offset),
-                            HUGE_LEVEL,
-                            old_flags(),
-                            false,
-                        )
+                    map_at!(table, VirtAddr::from(BASE + offset), PhysAddr::from(FRAME + offset), HUGE_LEVEL, old_flags(), false)
                         .unwrap();
                 }
                 let start = BASE + HUGE - PAGE;
                 let end = BASE + HUGE + PAGE;
                 fixture.allow_allocations(1);
-                let (result, flush) = table.mprotect_range(
+                let (result, flush) = table.set_flags_range(
                     VirtAddr::from(start),
                     VirtAddr::from(end),
                     new_flags(),
@@ -1069,7 +1033,7 @@ macro_rules! edit_tests {
                 }
 
                 fixture.allow_allocations(2);
-                let (result, flush) = table.mprotect_range(
+                let (result, flush) = table.set_flags_range(
                     VirtAddr::from(start),
                     VirtAddr::from(end),
                     new_flags(),
@@ -1110,7 +1074,7 @@ macro_rules! edit_tests {
                     Err(PagingError::NotMapped)
                 ));
                 let allocated = fixture.arena.allocated();
-                table.map(start, PhysAddr::from(FRAME), HUGE_LEVEL, old_flags(), false).unwrap();
+                map_at!(table, start, PhysAddr::from(FRAME), HUGE_LEVEL, old_flags(), false).unwrap();
                 // SAFETY: this fixture has no other users.
                 unsafe { seed_pat(table.root_paddr(), start) };
                 let flush = table.split(target, SMALL_LEVEL, true).unwrap();
@@ -1167,23 +1131,18 @@ macro_rules! edit_tests {
                 let address = VirtAddr::from(BASE);
                 for page in [0, 1, 511] {
                     table
-                        .map_4k(
-                            address + page * PAGE,
-                            PhysAddr::from(FRAME + page * PAGE),
-                            old_flags(),
-                            false,
-                        )
+                        .map(common::page_4k(address + page * PAGE), common::frame_4k(PhysAddr::from(FRAME + page * PAGE)), old_flags(), false)
                         .unwrap();
                 }
                 let allocated = fixture.arena.allocated();
                 fixture.allow_allocations(0);
                 assert!(matches!(
-                    table.mprotect(address, LARGE_LEVEL, new_flags(), true),
+                    set_flags_at!(table, address, LARGE_LEVEL, new_flags(), true),
                     Err(PagingError::NotLeafEntry)
                 ));
                 for missing in [address + 2 * PAGE, address + HUGE] {
                     assert!(matches!(
-                        table.mprotect(missing, SMALL_LEVEL, new_flags(), true),
+                        set_flags_at!(table, missing, SMALL_LEVEL, new_flags(), true),
                         Err(PagingError::NotMapped)
                     ));
                     assert!(matches!(
@@ -1191,11 +1150,11 @@ macro_rules! edit_tests {
                         Err(PagingError::NotMapped)
                     ));
                     assert!(matches!(
-                        table.set_shared_4k(missing, true),
+                        table.set_shared(common::page_4k(missing), true),
                         Err(PagingError::NotMapped)
                     ));
                     assert!(matches!(
-                        table.set_encrypted_4k(missing, true),
+                        table.set_private(common::page_4k(missing), true),
                         Err(PagingError::NotMapped)
                     ));
                     assert_eq!(table.phys_addr(missing), Err(PagingError::NotMapped));
@@ -1212,30 +1171,63 @@ macro_rules! edit_tests {
             }
 
             #[test]
+            fn partial_one_gib_range_splits_only_to_two_mib_leaves() {
+                let (fixture, mut table) = $fixture();
+                let base = VirtAddr::from(BASE);
+                table
+                    .map(
+                        common::page_1g(base),
+                        common::frame_1g(PhysAddr::from(FRAME)),
+                        old_flags(),
+                        false,
+                    )
+                    .unwrap();
+                let allocated = fixture.arena.allocated();
+                let start = base + LARGE;
+                let end = base + 3 * LARGE;
+
+                let (result, flush) = table.set_flags_range(start, end, new_flags(), true);
+
+                assert_eq!(result, Ok(()));
+                discharge(flush);
+                assert_eq!(fixture.arena.allocated() - allocated, 1);
+                for address in [base, start, start + LARGE, end] {
+                    assert_eq!(table.walk(address).level(), LARGE_LEVEL);
+                }
+                assert!(!table.walk(base).read().writable());
+                assert!(table.walk(start).read().writable());
+                assert!(table.walk(start + LARGE).read().writable());
+                assert!(!table.walk(end).read().writable());
+                assert_eq!(table.validate_page_table(), Ok(()));
+            }
+
+            #[test]
             fn invalid_leaf_edit_arguments_are_rejected_before_allocation_or_mutation() {
                 let (fixture, mut table) = $fixture();
                 let address = VirtAddr::from(BASE);
-                table.map_2m(address, PhysAddr::from(FRAME), old_flags(), false).unwrap();
+                table.map(common::page_2m(address), common::frame_2m(PhysAddr::from(FRAME)), old_flags(), false).unwrap();
                 let original = table.walk(address).read().raw();
                 let allocated = fixture.arena.allocated();
                 fixture.allow_allocations(0);
                 for flags in [PTEntryFlags::empty(), PTEntryFlags::WRITABLE | PTEntryFlags::NX] {
                     assert!(matches!(
-                        table.mprotect(address, SMALL_LEVEL, flags, true),
+                        set_flags_at!(table, address, SMALL_LEVEL, flags, true),
                         Err(PagingError::InvalidFlags)
                     ));
                 }
-                for (offset, level) in [(1, SMALL_LEVEL), (PAGE, LARGE_LEVEL)] {
-                    assert!(matches!(
-                        table.mprotect(address + offset, level, new_flags(), true),
-                        Err(PagingError::InvalidAddress)
-                    ));
-                }
+                assert!(paging::page::Page::<paging::sizes::Size4KiB>::from_start_address(
+                    address + 1
+                )
+                .is_err());
+                assert!(paging::page::Page::<paging::sizes::Size2MiB>::from_start_address(
+                    address + PAGE
+                )
+                .is_err());
                 let zero = VirtAddr::from(0usize);
                 let invalid = PageLevel::Level4;
                 assert!(matches!(table.split(zero, invalid, true), Err(PagingError::InvalidLevel)));
                 assert!(matches!(
-                    table.mprotect(zero, invalid, new_flags(), true),
+                    set_flags_at!(table, zero, invalid, new_flags(), true),
                     Err(PagingError::InvalidLevel)
                 ));
                 assert_eq!(table.walk(address).read().raw(), original);
@@ -1274,7 +1266,9 @@ fn finish<T>((handle, receive): Worker<T>) -> T {
 fn concurrent_disjoint_subpage_protections_survive_the_shared_huge_leaf_split() {
     let (fixture, table) = fixture();
     let address = VirtAddr::from(BASE);
-    table.map_2m(address, PhysAddr::from(FRAME), old_flags(), false).unwrap();
+    table
+        .map(common::page_2m(address), common::frame_2m(PhysAddr::from(FRAME)), old_flags(), false)
+        .unwrap();
     // SAFETY: this fixture edit happens before the table is shared.
     unsafe { seed_pat(table.root_paddr(), address) };
     let table = Arc::new(table);
@@ -1291,7 +1285,7 @@ fn concurrent_disjoint_subpage_protections_survive_the_shared_huge_leaf_split() 
                     PTEntryFlags::PRESENT | PTEntryFlags::NX
                 };
                 let address = VirtAddr::from(BASE + worker * 17 * PAGE);
-                let flush = table.mprotect(address, SMALL_LEVEL, flags, true).unwrap();
+                let flush = set_flags_at!(table, address, SMALL_LEVEL, flags, true).unwrap();
                 let calls = take_flushes();
                 if calls.is_empty() {
                     assert_flush_covers(flush, address.bits(), address.bits() + PAGE);
@@ -1356,7 +1350,14 @@ fn public_snapshots_remain_valid_across_table_publication() {
         assert_eq!(fixture.arena.allocated(), before);
         assert_eq!(fixture.locks.0.page_calls.load(Ordering::SeqCst), calls);
         assert!(fixture.locks.0.content.try_lock().is_ok());
-        table.map_4k(address + writer_offset, PhysAddr::from(FRAME), old_flags(), false).unwrap();
+        table
+            .map(
+                common::page_4k(address + writer_offset),
+                common::frame_4k(PhysAddr::from(FRAME)),
+                old_flags(),
+                false,
+            )
+            .unwrap();
         assert_eq!(before_publication.level(), PageLevel::Level3);
         assert!(!before_publication.read().present());
         take_resolved_pages();
@@ -1364,9 +1365,7 @@ fn public_snapshots_remain_valid_across_table_publication() {
         let level = after_publication.level();
         let word = after_publication.read().raw();
         assert_eq!(level, SMALL_LEVEL);
-        let entry = Entry::from_bits(word);
-        assert!(!entry.is_table(level));
-        assert_eq!(entry.present(), writer_offset == 0);
+        assert_eq!(word & PTEntryFlags::PRESENT.bits() != 0, writer_offset == 0);
         assert_resolved_once(&take_resolved_pages(), root);
         assert_eq!(fixture.locks.0.page_calls.load(Ordering::SeqCst) - calls, 1);
         assert!(fixture.locks.0.content.try_lock().is_ok());
@@ -1386,8 +1385,7 @@ fn uncontended_path_publication_resolves_the_root_and_existing_prefix_only_once(
         let address = VirtAddr::from(BASE);
         let root = table.root_paddr();
         if initial_level == HUGE_LEVEL {
-            table
-                .map(address + HUGE, PhysAddr::from(FRAME), HUGE_LEVEL, old_flags(), false)
+            map_at!(table, address + HUGE, PhysAddr::from(FRAME), HUGE_LEVEL, old_flags(), false)
                 .unwrap();
         }
         let stopping_page = if initial_level == HUGE_LEVEL {
@@ -1399,7 +1397,14 @@ fn uncontended_path_publication_resolves_the_root_and_existing_prefix_only_once(
         let before = fixture.arena.allocated();
         let calls = fixture.locks.0.page_calls.load(Ordering::SeqCst);
         take_resolved_pages();
-        table.map_4k(address, PhysAddr::from(OTHER_FRAME), old_flags(), false).unwrap();
+        table
+            .map(
+                common::page_4k(address),
+                common::frame_4k(PhysAddr::from(OTHER_FRAME)),
+                old_flags(),
+                false,
+            )
+            .unwrap();
         let resolved = take_resolved_pages();
         assert_resolved_once(&resolved, root);
         assert_resolved_once(&resolved, stopping_page);
@@ -1419,7 +1424,7 @@ fn uncontended_path_publication_resolves_the_root_and_existing_prefix_only_once(
 fn a_losing_path_publication_resumes_at_its_deeper_stopping_page_without_rewalking_the_root() {
     let (fixture, table) = resolution_counting_fixture();
     let address = VirtAddr::from(BASE);
-    table.map(address + HUGE, PhysAddr::from(FRAME), HUGE_LEVEL, old_flags(), false).unwrap();
+    map_at!(table, address + HUGE, PhysAddr::from(FRAME), HUGE_LEVEL, old_flags(), false).unwrap();
     let root = table.root_paddr();
     let stopping_page = table.next_table_pa(entry_index(address, PageLevel::Level3)).unwrap();
     let original = table.walk(address);
@@ -1434,7 +1439,12 @@ fn a_losing_path_publication_resumes_at_its_deeper_stopping_page_without_rewalki
         let table = table.clone();
         move || {
             take_resolved_pages();
-            let result = table.map_4k(address, PhysAddr::from(OTHER_FRAME), old_flags(), false);
+            let result = table.map(
+                common::page_4k(address),
+                common::frame_4k(PhysAddr::from(OTHER_FRAME)),
+                old_flags(),
+                false,
+            );
             (result, take_resolved_pages())
         }
     });
@@ -1446,7 +1456,14 @@ fn a_losing_path_publication_resumes_at_its_deeper_stopping_page_without_rewalki
     assert_eq!(table.walk(address).level(), original.level());
     assert_eq!(table.walk(address).read().raw(), original.read().raw());
     take_resolved_pages();
-    table.map_4k(address + PAGE, PhysAddr::from(FRAME), old_flags(), false).unwrap();
+    table
+        .map(
+            common::page_4k(address + PAGE),
+            common::frame_4k(PhysAddr::from(FRAME)),
+            old_flags(),
+            false,
+        )
+        .unwrap();
     let winner_resolved = take_resolved_pages();
     assert_eq!(fixture.arena.allocated(), before + 4);
     release.send(()).unwrap();
@@ -1484,14 +1501,28 @@ fn a_coarse_mapping_losing_to_growth_rejects_an_absent_slot_in_the_finer_subtree
     let (entered, release) = fixture.locks.pause_next();
     let worker = spawn({
         let table = table.clone();
-        move || table.map_2m(address, PhysAddr::from(OTHER_FRAME), old_flags(), false)
+        move || {
+            table.map(
+                common::page_2m(address),
+                common::frame_2m(PhysAddr::from(OTHER_FRAME)),
+                old_flags(),
+                false,
+            )
+        }
     });
     entered.recv_timeout(WAIT).expect("mapping did not reach its content lock");
     assert_eq!(fixture.arena.allocated(), before + 2);
     assert_eq!(table.walk(address).level(), original.level());
     assert_eq!(table.walk(address).read().raw(), original.read().raw());
     assert!(fixture.arena.freed().is_empty());
-    table.map_4k(address + PAGE, PhysAddr::from(FRAME), old_flags(), false).unwrap();
+    table
+        .map(
+            common::page_4k(address + PAGE),
+            common::frame_4k(PhysAddr::from(FRAME)),
+            old_flags(),
+            false,
+        )
+        .unwrap();
     release.send(()).unwrap();
     assert_eq!(finish(worker), Err(PagingError::NotLeafEntry));
     assert_eq!(
@@ -1505,16 +1536,19 @@ fn a_coarse_mapping_losing_to_growth_rejects_an_absent_slot_in_the_finer_subtree
 
     let calls = fixture.locks.0.page_calls.load(Ordering::SeqCst);
     assert_eq!(
-        table.map_2m(address, PhysAddr::from(OTHER_FRAME), old_flags(), false),
+        table.map(
+            common::page_2m(address),
+            common::frame_2m(PhysAddr::from(OTHER_FRAME)),
+            old_flags(),
+            false
+        ),
         Err(PagingError::NotLeafEntry)
     );
     assert!(matches!(
-        table.mprotect(address, LARGE_LEVEL, new_flags(), true),
+        set_flags_at!(table, address, LARGE_LEVEL, new_flags(), true),
         Err(PagingError::NotLeafEntry)
     ));
-    let (removed, flush) = table.unmap_at(address, LARGE_LEVEL).unwrap();
-    assert!(removed.is_none());
-    flush.expect_no_flush();
+    assert!(matches!(unmap_at!(table, address, LARGE_LEVEL), Err(PagingError::NotLeafEntry)));
     table.split(address, LARGE_LEVEL, true).unwrap().expect_no_flush();
     assert_eq!(fixture.locks.0.page_calls.load(Ordering::SeqCst), calls);
     assert_eq!(table.phys_addr(address + PAGE), Ok(PhysAddr::from(FRAME)));
@@ -1542,7 +1576,7 @@ fn paused_path_allocations_publish_nothing_and_do_not_block_a_competing_mapper()
         let (mut entered, mut release) = fixture.pause_next_allocation();
         let worker = spawn({
             let table = table.clone();
-            move || table.map(address, PhysAddr::from(OTHER_FRAME), target, old_flags(), false)
+            move || map_at!(table, address, PhysAddr::from(OTHER_FRAME), target, old_flags(), false)
         });
         for prepared in 1..=needed {
             entered.recv_timeout(WAIT).expect("mapping did not reach its private allocation");
@@ -1561,7 +1595,14 @@ fn paused_path_allocations_publish_nothing_and_do_not_block_a_competing_mapper()
         }
         let winner = spawn({
             let table = table.clone();
-            move || table.map_4k(address + PAGE, PhysAddr::from(FRAME), old_flags(), false)
+            move || {
+                table.map(
+                    common::page_4k(address + PAGE),
+                    common::frame_4k(PhysAddr::from(FRAME)),
+                    old_flags(),
+                    false,
+                )
+            }
         });
         assert_eq!(finish(winner), Ok(()));
         assert_eq!(table.phys_addr(address + PAGE), Ok(PhysAddr::from(FRAME)));
@@ -1598,7 +1639,8 @@ fn paused_path_allocations_publish_nothing_and_do_not_block_a_competing_mapper()
 fn a_fine_mapping_losing_to_a_huge_leaf_reclaims_its_preparation_after_unlock() {
     let (fixture, table) = fixture();
     let address = VirtAddr::from(BASE);
-    table.map(address + HUGE, PhysAddr::from(OTHER_FRAME), HUGE_LEVEL, old_flags(), false).unwrap();
+    map_at!(table, address + HUGE, PhysAddr::from(OTHER_FRAME), HUGE_LEVEL, old_flags(), false)
+        .unwrap();
     let original = table.walk(address);
     assert_eq!(original.level(), HUGE_LEVEL);
     assert!(!original.read().present());
@@ -1608,21 +1650,22 @@ fn a_fine_mapping_losing_to_a_huge_leaf_reclaims_its_preparation_after_unlock() 
     let (entered, release) = fixture.locks.pause_next();
     let worker = spawn({
         let table = table.clone();
-        move || table.map_4k(address + PAGE, PhysAddr::from(OTHER_FRAME), old_flags(), false)
+        move || {
+            table.map(
+                common::page_4k(address + PAGE),
+                common::frame_4k(PhysAddr::from(OTHER_FRAME)),
+                old_flags(),
+                false,
+            )
+        }
     });
     entered.recv_timeout(WAIT).expect("mapping did not reach its publication lock");
     assert_eq!(fixture.arena.allocated(), before + 2);
     assert_eq!(table.walk(address).level(), original.level());
     assert_eq!(table.walk(address).read().raw(), original.read().raw());
-    table.map(address, PhysAddr::from(FRAME), HUGE_LEVEL, old_flags(), false).unwrap();
+    map_at!(table, address, PhysAddr::from(FRAME), HUGE_LEVEL, old_flags(), false).unwrap();
     release.send(()).unwrap();
-    assert_eq!(
-        finish(worker),
-        Err(PagingError::EntryAlreadyPresent {
-            frame: PhysAddr::from(FRAME + PAGE),
-            level: HUGE_LEVEL,
-        })
-    );
+    assert_eq!(finish(worker), Err(PagingError::EntryAlreadyPresent { level: HUGE_LEVEL }));
     assert_eq!(fixture.arena.allocated(), before + 2);
     assert_eq!(fixture.arena.freed().len(), 2);
     assert_eq!(
@@ -1646,20 +1689,33 @@ fn failed_path_preparation_preserves_the_original_absent_slot_and_installed_tree
     for allowed in 0..3 {
         let (fixture, table) = fixture();
         let sibling = VirtAddr::from(BASE + (1usize << 39));
-        table.map_4k(sibling, PhysAddr::from(FRAME), old_flags(), false).unwrap();
+        table
+            .map(
+                common::page_4k(sibling),
+                common::frame_4k(PhysAddr::from(FRAME)),
+                old_flags(),
+                false,
+            )
+            .unwrap();
         let address = VirtAddr::from(BASE);
         // SAFETY: this fixture edit precedes every operation on the exclusively owned tree.
         let (slot, level) = unsafe { leaf_slot(table.root_paddr(), address) };
         assert_eq!(level, PageLevel::Level3);
-        let original = Entry::from_bits(PTEntryFlags::WRITABLE.bits() | PTEntryFlags::NX.bits());
+        let original =
+            Entry::new(PhysAddr::from(0usize), PTEntryFlags::WRITABLE | PTEntryFlags::NX);
         // SAFETY: this absent slot belongs exclusively to the inactive fixture.
-        unsafe { Entry::store_entry(slot, original) };
+        unsafe { &*slot.cast::<AtomicUsize>() }.store(original.raw(), Ordering::Release);
         let before = fixture.arena.allocated();
         let calls = fixture.locks.0.page_calls.load(Ordering::SeqCst);
         fixture.check_deallocation_is_unlocked();
         fixture.allow_allocations(allowed);
         assert_eq!(
-            table.map_4k(address, PhysAddr::from(OTHER_FRAME), old_flags(), false),
+            table.map(
+                common::page_4k(address),
+                common::frame_4k(PhysAddr::from(OTHER_FRAME)),
+                old_flags(),
+                false
+            ),
             Err(PagingError::AllocFrame)
         );
         assert_eq!(table.walk(address).level(), level);
@@ -1674,7 +1730,14 @@ fn failed_path_preparation_preserves_the_original_absent_slot_and_installed_tree
             (before..before + allowed).map(|page| fixture.arena.base() + page * PAGE).collect()
         );
         fixture.allow_allocations(3);
-        table.map_4k(address, PhysAddr::from(OTHER_FRAME), old_flags(), false).unwrap();
+        table
+            .map(
+                common::page_4k(address),
+                common::frame_4k(PhysAddr::from(OTHER_FRAME)),
+                old_flags(),
+                false,
+            )
+            .unwrap();
         assert_eq!(fixture.arena.allocated(), before + allowed + 3);
         assert_eq!(fixture.locks.0.page_calls.load(Ordering::SeqCst) - calls, 1);
         assert_eq!(table.phys_addr(address), Ok(PhysAddr::from(OTHER_FRAME)));
@@ -1691,20 +1754,25 @@ fn failed_path_preparation_preserves_the_original_absent_slot_and_installed_tree
 #[cfg(feature = "concurrent")]
 #[test]
 fn unmapping_rechecks_a_split_published_before_lock_acquisition() {
-    for target in [None, Some(SMALL_LEVEL), Some(LARGE_LEVEL)] {
+    for target in [SMALL_LEVEL, LARGE_LEVEL] {
         let (fixture, table) = fixture();
         let address = VirtAddr::from(BASE);
         let selected = address + 7 * PAGE;
-        table.map_2m(address, PhysAddr::from(FRAME), old_flags(), false).unwrap();
+        table
+            .map(
+                common::page_2m(address),
+                common::frame_2m(PhysAddr::from(FRAME)),
+                old_flags(),
+                false,
+            )
+            .unwrap();
         let table = Arc::new(table);
         let (entered, release) = fixture.locks.pause_next();
         let worker = spawn({
             let table = table.clone();
-            move || match target {
-                Some(level) => table
-                    .unmap_at(selected, level)
-                    .map(|(entry, flush)| (entry.map(|_| level), flush)),
-                None => table.unmap(selected),
+            move || {
+                let page = if target == LARGE_LEVEL { address } else { selected };
+                unmap_at!(table, page, target).map(|(entry, flush)| (entry.map(|_| target), flush))
             }
         });
         entered.recv_timeout(WAIT).expect("unmapping did not reach its content lock");
@@ -1715,12 +1783,12 @@ fn unmapping_rechecks_a_split_published_before_lock_acquisition() {
             LARGE_LEVEL,
         );
         release.send(()).unwrap();
-        let (removed, flush) = finish(worker).unwrap();
-        if target == Some(LARGE_LEVEL) {
-            assert_eq!(removed, None);
-            flush.expect_no_flush();
+        let result = finish(worker);
+        if target == LARGE_LEVEL {
+            assert_eq!(result, Err(PagingError::NotLeafEntry));
             assert_eq!(table.phys_addr(selected), Ok(PhysAddr::from(FRAME + 7 * PAGE)));
         } else {
+            let (removed, flush) = result.unwrap();
             assert_eq!(removed, Some(SMALL_LEVEL));
             assert_flush_covers(flush, selected.bits(), selected.bits() + PAGE);
             assert_eq!(table.phys_addr(selected), Err(PagingError::NotMapped));
@@ -1740,12 +1808,14 @@ fn a_fine_protection_retries_after_a_split_before_lock_acquisition() {
     let (fixture, table) = fixture();
     let address = VirtAddr::from(BASE);
     let selected = address + 7 * PAGE;
-    table.map_2m(address, PhysAddr::from(FRAME), old_flags(), false).unwrap();
+    table
+        .map(common::page_2m(address), common::frame_2m(PhysAddr::from(FRAME)), old_flags(), false)
+        .unwrap();
     let table = Arc::new(table);
     let (entered, release) = fixture.locks.pause_next();
     let worker = spawn({
         let table = table.clone();
-        move || table.mprotect(selected, SMALL_LEVEL, new_flags(), true)
+        move || set_flags_at!(table, selected, SMALL_LEVEL, new_flags(), true)
     });
     entered.recv_timeout(WAIT).expect("protection did not reach its content lock");
     assert_completed(
@@ -1768,7 +1838,9 @@ fn a_fine_protection_retries_after_a_split_before_lock_acquisition() {
 fn a_split_waiting_for_its_lock_preserves_a_completed_same_slot_protection() {
     let (fixture, table) = fixture();
     let address = VirtAddr::from(BASE);
-    table.map_2m(address, PhysAddr::from(FRAME), old_flags(), false).unwrap();
+    table
+        .map(common::page_2m(address), common::frame_2m(PhysAddr::from(FRAME)), old_flags(), false)
+        .unwrap();
     let table = Arc::new(table);
     let (entered, release) = fixture.locks.pause_next();
     let worker = spawn({
@@ -1779,7 +1851,7 @@ fn a_split_waiting_for_its_lock_preserves_a_completed_same_slot_protection() {
         }
     });
     entered.recv_timeout(WAIT).expect("split did not reach its content lock");
-    let flush = table.mprotect(address, LARGE_LEVEL, new_flags(), true).unwrap();
+    let flush = set_flags_at!(table, address, LARGE_LEVEL, new_flags(), true).unwrap();
     assert_flush_covers(flush, BASE, BASE + LARGE);
     release.send(()).unwrap();
     let (flush, calls) = finish(worker);
@@ -1806,12 +1878,14 @@ fn a_split_waiting_for_its_lock_preserves_a_completed_same_slot_protection() {
 fn a_coarse_protection_losing_to_a_split_refuses_instead_of_overwriting_children() {
     let (fixture, table) = fixture();
     let address = VirtAddr::from(BASE);
-    table.map_2m(address, PhysAddr::from(FRAME), old_flags(), false).unwrap();
+    table
+        .map(common::page_2m(address), common::frame_2m(PhysAddr::from(FRAME)), old_flags(), false)
+        .unwrap();
     let table = Arc::new(table);
     let (entered, release) = fixture.locks.pause_next();
     let worker = spawn({
         let table = table.clone();
-        move || table.mprotect(address, LARGE_LEVEL, new_flags(), true)
+        move || set_flags_at!(table, address, LARGE_LEVEL, new_flags(), true)
     });
     entered.recv_timeout(WAIT).expect("protection did not reach its content lock");
     assert_completed(
@@ -1823,7 +1897,7 @@ fn a_coarse_protection_losing_to_a_split_refuses_instead_of_overwriting_children
     let protected = address + 17 * PAGE;
     let flags = PTEntryFlags::PRESENT | PTEntryFlags::USER;
     assert_flush_covers(
-        table.mprotect(protected, SMALL_LEVEL, flags, true).unwrap(),
+        set_flags_at!(table, protected, SMALL_LEVEL, flags, true).unwrap(),
         protected.bits(),
         protected.bits() + PAGE,
     );
@@ -1843,14 +1917,14 @@ fn a_coarse_protection_losing_to_a_split_refuses_instead_of_overwriting_children
 fn a_range_observes_finer_levels_after_acquiring_its_whole_domain_guard() {
     let (fixture, table) = fixture();
     let address = VirtAddr::from(BASE);
-    table.map(address, PhysAddr::from(FRAME), HUGE_LEVEL, old_flags(), false).unwrap();
+    map_at!(table, address, PhysAddr::from(FRAME), HUGE_LEVEL, old_flags(), false).unwrap();
     // SAFETY: the fixture edit precedes publication to the worker.
     unsafe { seed_pat(table.root_paddr(), address) };
     let table = Arc::new(table);
     let (entered, release) = fixture.locks.pause_next();
     let worker = spawn({
         let table = table.clone();
-        move || table.mprotect_range(address, address + HUGE, new_flags(), true)
+        move || table.set_flags_range(address, address + HUGE, new_flags(), true)
     });
     entered.recv_timeout(WAIT).expect("range did not reach its content lock");
     let target = address + LARGE + 7 * PAGE;
@@ -1902,7 +1976,7 @@ fn concurrent_split_allocates_once_and_preserves_hardware_ad_accrued_during_prep
         let target = address + target_offset;
         let history = PTEntryFlags::ACCESSED | PTEntryFlags::DIRTY;
         let flags = old_flags() & !history;
-        table.map(address, PhysAddr::from(FRAME), HUGE_LEVEL, flags, false).unwrap();
+        map_at!(table, address, PhysAddr::from(FRAME), HUGE_LEVEL, flags, false).unwrap();
         // SAFETY: the fixture edit precedes sharing this exclusively owned tree.
         unsafe { seed_pat(table.root_paddr(), address) };
         let original = leaf_word(FRAME, HUGE_LEVEL, flags, false, true);
@@ -1918,7 +1992,7 @@ fn concurrent_split_allocates_once_and_preserves_hardware_ad_accrued_during_prep
             let table = table.clone();
             move || {
                 if protect {
-                    table.mprotect(target, SMALL_LEVEL, new_flags(), true)
+                    set_flags_at!(table, target, SMALL_LEVEL, new_flags(), true)
                 } else {
                     table.split(target, SMALL_LEVEL, true)
                 }
@@ -2002,7 +2076,7 @@ macro_rules! barrier_tests {
                             let initial =
                                 old_flags() & !(PTEntryFlags::ACCESSED | PTEntryFlags::DIRTY);
                             let shared = operation == 3;
-                            table.map(base, FRAME.into(), level, initial, shared).unwrap();
+                            map_at!(table, base, FRAME.into(), level, initial, shared).unwrap();
                             // SAFETY: the tree is exclusively owned and all slot accesses are atomic.
                             unsafe { seed_pat(table.root_paddr(), base) };
                             let (slot, observed_level) =
@@ -2021,7 +2095,7 @@ macro_rules! barrier_tests {
                                         level,
                                     }
                                 );
-                                let published = unsafe { Entry::load_entry(slot as *const Entry) };
+                                let published = unsafe { load_entry(slot as *const Entry) };
                                 assert!(published.present());
                                 assert_eq!(published.raw() & PTEntryFlags::HUGE.bits(), 0);
                                 assert_eq!(arena.allocated(), allocated + level.depth());
@@ -2029,11 +2103,12 @@ macro_rules! barrier_tests {
                             });
                             let flush = match operation {
                                 0 => table.split(target, SMALL_LEVEL, all_cpus).unwrap(),
-                                1 => table
-                                    .mprotect(target, SMALL_LEVEL, new_flags(), all_cpus)
-                                    .unwrap(),
-                                2 => table.set_shared_4k(target, all_cpus).unwrap(),
-                                _ => table.set_encrypted_4k(target, all_cpus).unwrap(),
+                                1 => {
+                                    set_flags_at!(table, target, SMALL_LEVEL, new_flags(), all_cpus)
+                                        .unwrap()
+                                }
+                                2 => table.set_shared(common::page_4k(target), all_cpus).unwrap(),
+                                _ => table.set_private(common::page_4k(target), all_cpus).unwrap(),
                             };
                             clear_flush_hook();
                             flush.expect_no_flush();
@@ -2098,15 +2173,15 @@ macro_rules! barrier_tests {
                     let (fixture, mut table) = $fixture();
                     let mut originals = Vec::new();
                     for (index, base) in bases.iter().copied().enumerate() {
-                        table
-                            .map(
-                                base.into(),
-                                (FRAME + index * HUGE).into(),
-                                HUGE_LEVEL,
-                                old_flags(),
-                                index != 0,
-                            )
-                            .unwrap();
+                        map_at!(
+                            table,
+                            base.into(),
+                            (FRAME + index * HUGE).into(),
+                            HUGE_LEVEL,
+                            old_flags(),
+                            index != 0
+                        )
+                        .unwrap();
                         unsafe { seed_pat(table.root_paddr(), base.into()) };
                         let (slot, level) = unsafe { leaf_slot(table.root_paddr(), base.into()) };
                         assert_eq!(level, HUGE_LEVEL);
@@ -2130,7 +2205,7 @@ macro_rules! barrier_tests {
                             assert!(matches!(scope, FlushScope::Range { .. }));
                             assert!(arena.allocated() <= allocated + pages);
                             for (slot, _) in &originals {
-                                let entry = unsafe { Entry::load_entry(*slot as *const Entry) };
+                                let entry = unsafe { load_entry(*slot as *const Entry) };
                                 assert!(entry.is_leaf(HUGE_LEVEL) || entry.is_table(HUGE_LEVEL));
                             }
                         } else {
@@ -2146,7 +2221,7 @@ macro_rules! barrier_tests {
                         }
                     });
                     let (result, flush) =
-                        table.mprotect_range(start.into(), end.into(), new_flags(), all_cpus);
+                        table.set_flags_range(start.into(), end.into(), new_flags(), all_cpus);
                     clear_flush_hook();
                     assert_eq!(result, Ok(()));
                     if cfg!(feature = "concurrent") {
@@ -2205,15 +2280,15 @@ macro_rules! barrier_tests {
                     let base = VirtAddr::from(BASE);
                     let original_count = if operation == 5 { 3 } else { 2 };
                     for index in 0..original_count {
-                        table
-                            .map(
-                                base + index * HUGE,
-                                (FRAME + index * HUGE).into(),
-                                HUGE_LEVEL,
-                                old_flags(),
-                                false,
-                            )
-                            .unwrap();
+                        map_at!(
+                            table,
+                            base + index * HUGE,
+                            (FRAME + index * HUGE).into(),
+                            HUGE_LEVEL,
+                            old_flags(),
+                            false
+                        )
+                        .unwrap();
                         unsafe { seed_pat(table.root_paddr(), base + index * HUGE) };
                     }
                     let originals: Vec<_> = (0..original_count)
@@ -2232,7 +2307,7 @@ macro_rules! barrier_tests {
                     let retained = originals.clone();
                     *fixture.locks.0.before_unlock.lock().unwrap() = Some(Box::new(move || {
                         let valid = retained.iter().all(|(slot, _)| {
-                            unsafe { Entry::load_entry(*slot as *const Entry) }.present()
+                            unsafe { load_entry(*slot as *const Entry) }.present()
                         });
                         if valid && arena.freed().is_empty() && arena.allocated() > allocated {
                             checked.fetch_add(1, Ordering::SeqCst);
@@ -2242,21 +2317,26 @@ macro_rules! barrier_tests {
                         for (slot, _) in
                             observed.iter().take(if operation >= 4 { original_count } else { 1 })
                         {
-                            assert!(unsafe { Entry::load_entry(*slot as *const Entry) }.present());
+                            assert!(unsafe { load_entry(*slot as *const Entry) }.present());
                         }
                         panic!("injected synchronous invalidation failure");
                     });
                     let target = base + HUGE - PAGE;
                     let result = catch_unwind(AssertUnwindSafe(|| match operation {
                         0 => table.split(target, SMALL_LEVEL, true).unwrap().expect_no_flush(),
-                        1 => table
-                            .mprotect(target, SMALL_LEVEL, new_flags(), true)
+                        1 => set_flags_at!(table, target, SMALL_LEVEL, new_flags(), true)
                             .unwrap()
                             .expect_no_flush(),
-                        2 => table.set_shared_4k(target, true).unwrap().expect_no_flush(),
-                        3 => table.set_encrypted_4k(target, true).unwrap().expect_no_flush(),
+                        2 => table
+                            .set_shared(common::page_4k(target), true)
+                            .unwrap()
+                            .expect_no_flush(),
+                        3 => table
+                            .set_private(common::page_4k(target), true)
+                            .unwrap()
+                            .expect_no_flush(),
                         _ => {
-                            let (result, flush) = table.mprotect_range(
+                            let (result, flush) = table.set_flags_range(
                                 target,
                                 base + if operation == 5 { 2 * HUGE } else { HUGE } + PAGE,
                                 new_flags(),
@@ -2313,16 +2393,27 @@ macro_rules! barrier_tests {
             fn unchanged_leaf_edits_neither_flush_synchronously_nor_return_pending_work() {
                 let (fixture, mut table) = $fixture();
                 let base = VirtAddr::from(BASE);
-                table.map_4k(base, FRAME.into(), new_flags(), true).unwrap();
-                table.map_4k(base + PAGE, (FRAME + PAGE).into(), new_flags(), false).unwrap();
+                table
+                    .map(common::page_4k(base), common::frame_4k(FRAME.into()), new_flags(), true)
+                    .unwrap();
+                table
+                    .map(
+                        common::page_4k(base + PAGE),
+                        common::frame_4k((FRAME + PAGE).into()),
+                        new_flags(),
+                        false,
+                    )
+                    .unwrap();
                 let old = table.walk(base).read().raw();
                 let encrypted = table.walk(base + PAGE).read().raw();
                 let allocated = fixture.arena.allocated();
                 table.split(base, SMALL_LEVEL, false).unwrap().expect_no_flush();
-                table.mprotect(base, SMALL_LEVEL, new_flags(), false).unwrap().expect_no_flush();
-                table.set_shared_4k(base, false).unwrap().expect_no_flush();
-                table.set_encrypted_4k(base + PAGE, false).unwrap().expect_no_flush();
-                let (result, flush) = table.mprotect_range(base, base + PAGE, new_flags(), false);
+                set_flags_at!(table, base, SMALL_LEVEL, new_flags(), false)
+                    .unwrap()
+                    .expect_no_flush();
+                table.set_shared(common::page_4k(base), false).unwrap().expect_no_flush();
+                table.set_private(common::page_4k(base + PAGE), false).unwrap().expect_no_flush();
+                let (result, flush) = table.set_flags_range(base, base + PAGE, new_flags(), false);
                 result.unwrap();
                 flush.expect_no_flush();
                 assert!(take_flushes().is_empty());
@@ -2335,7 +2426,7 @@ macro_rules! barrier_tests {
             fn overflow_uses_one_whole_tlb_barrier_and_returns_no_pending_split() {
                 let (_fixture, mut table) = $fixture();
                 let base = VirtAddr::from(usize::MAX & !(HUGE - 1));
-                table.map(base, FRAME.into(), HUGE_LEVEL, old_flags(), false).unwrap();
+                map_at!(table, base, FRAME.into(), HUGE_LEVEL, old_flags(), false).unwrap();
                 let (slot, level) = unsafe { leaf_slot(table.root_paddr(), base) };
                 assert_eq!(level, HUGE_LEVEL);
                 let slot = slot as usize;
@@ -2343,7 +2434,7 @@ macro_rules! barrier_tests {
                     assert_eq!(scope, FlushScope::All);
                     assert!(!all_cpus);
                     assert_eq!(
-                        unsafe { Entry::load_entry(slot as *const Entry) }.raw()
+                        unsafe { load_entry(slot as *const Entry) }.raw()
                             & (PTEntryFlags::PRESENT | PTEntryFlags::HUGE).bits(),
                         PTEntryFlags::PRESENT.bits()
                     );
@@ -2366,11 +2457,17 @@ macro_rules! barrier_tests {
                 for separate_leaves in [false, true] {
                     let (fixture, mut table) = $fixture();
                     let base = VirtAddr::from(BASE);
-                    table.map(base, FRAME.into(), HUGE_LEVEL, old_flags(), false).unwrap();
+                    map_at!(table, base, FRAME.into(), HUGE_LEVEL, old_flags(), false).unwrap();
                     if separate_leaves {
-                        table
-                            .map(base + HUGE, (FRAME + HUGE).into(), HUGE_LEVEL, old_flags(), false)
-                            .unwrap();
+                        map_at!(
+                            table,
+                            base + HUGE,
+                            (FRAME + HUGE).into(),
+                            HUGE_LEVEL,
+                            old_flags(),
+                            false
+                        )
+                        .unwrap();
                     }
                     let allocated = fixture.arena.allocated();
                     let allowed = if separate_leaves { 3 } else { 1 };
@@ -2380,7 +2477,7 @@ macro_rules! barrier_tests {
                     } else {
                         (base + PAGE, base + 3 * LARGE + PAGE)
                     };
-                    let (result, flush) = table.mprotect_range(start, end, new_flags(), true);
+                    let (result, flush) = table.set_flags_range(start, end, new_flags(), true);
                     assert_eq!(result, Err(PagingError::AllocFrame));
                     assert_eq!(fixture.arena.allocated(), allocated + allowed);
                     if separate_leaves {
@@ -2428,21 +2525,28 @@ macro_rules! barrier_tests {
                 let (fixture, mut table) = $fixture();
                 let base = VirtAddr::from(BASE);
                 let boundary = base + HUGE;
-                table.map(base, FRAME.into(), HUGE_LEVEL, old_flags(), false).unwrap();
-                table.map_4k(boundary + PAGE, OTHER_FRAME.into(), old_flags(), true).unwrap();
+                map_at!(table, base, FRAME.into(), HUGE_LEVEL, old_flags(), false).unwrap();
+                table
+                    .map(
+                        common::page_4k(boundary + PAGE),
+                        common::frame_4k(OTHER_FRAME.into()),
+                        old_flags(),
+                        true,
+                    )
+                    .unwrap();
                 let untouched = table.walk(boundary + PAGE).read().raw();
                 let (slot, _) = unsafe { leaf_slot(table.root_paddr(), base) };
                 let slot = slot as usize;
                 set_flush_hook(move |_, _| {
                     assert_eq!(
-                        unsafe { Entry::load_entry(slot as *const Entry) }.raw()
+                        unsafe { load_entry(slot as *const Entry) }.raw()
                             & (PTEntryFlags::PRESENT | PTEntryFlags::HUGE).bits(),
                         PTEntryFlags::PRESENT.bits()
                     );
                 });
                 let allocated = fixture.arena.allocated();
                 let (result, flush) =
-                    table.mprotect_range(boundary - PAGE, boundary + 2 * PAGE, new_flags(), true);
+                    table.set_flags_range(boundary - PAGE, boundary + 2 * PAGE, new_flags(), true);
                 clear_flush_hook();
                 assert_eq!(result, Err(PagingError::NotMapped));
                 assert_completed(flush, BASE, BASE + HUGE, HUGE_LEVEL);
@@ -2473,7 +2577,7 @@ fn paused_point_and_range_barriers_exclude_writers_but_not_lock_free_walkers() {
         let left = VirtAddr::from(boundary - HUGE);
         let right = VirtAddr::from(boundary);
         for (address, frame) in [(left, FRAME), (right, FRAME + HUGE)] {
-            table.map(address, frame.into(), HUGE_LEVEL, old_flags(), false).unwrap();
+            map_at!(table, address, frame.into(), HUGE_LEVEL, old_flags(), false).unwrap();
         }
         let table = Arc::new(table);
         let page_calls = fixture.locks.0.page_calls.load(Ordering::SeqCst);
@@ -2495,7 +2599,7 @@ fn paused_point_and_range_barriers_exclude_writers_but_not_lock_free_walkers() {
                     }
                 });
                 let result = if range {
-                    table.mprotect_range(right - PAGE, right + PAGE, new_flags(), true)
+                    table.set_flags_range(right - PAGE, right + PAGE, new_flags(), true)
                 } else {
                     (Ok(()), table.split(right + PAGE, SMALL_LEVEL, true).unwrap())
                 };
@@ -2507,7 +2611,7 @@ fn paused_point_and_range_barriers_exclude_writers_but_not_lock_free_walkers() {
         assert!(fixture.locks.0.page_calls.load(Ordering::SeqCst) > page_calls);
         let writer = spawn({
             let table = table.clone();
-            move || table.map(right, OTHER_FRAME.into(), HUGE_LEVEL, new_flags(), true)
+            move || map_at!(table, right, OTHER_FRAME.into(), HUGE_LEVEL, new_flags(), true)
         });
         assert!(matches!(writer.1.try_recv(), Err(mpsc::TryRecvError::Empty)));
         finish(spawn({

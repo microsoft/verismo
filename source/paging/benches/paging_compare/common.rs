@@ -41,7 +41,9 @@ pub trait PagingAdapter: Send + Sync + Sized + 'static {
     fn new(arena_pages: usize) -> Self;
     fn map_4k(&self, virtual_address: u64, physical_address: u64);
     fn map_2m(&self, virtual_address: u64, physical_address: u64);
+    fn map_range(&self, start: u64, end: u64, physical_start: u64);
     fn unmap_4k(&self, virtual_address: u64);
+    fn unmap_range(&self, start: u64, end: u64);
     fn translate(&self, virtual_address: u64) -> Option<u64>;
     fn observe(&self, virtual_address: u64) -> Option<Observation>;
     fn protect_4k(&self, virtual_address: u64, writable: bool);

@@ -8,7 +8,7 @@ use crate::structs::entry::PTEntry;
 use crate::structs::level::{LevelSpec, PageLevel};
 use crate::structs::os_contract::{PagingAllocator, PagingError};
 use crate::structs::policy::{KernelPolicy, PagingOwnershipPolicy};
-use crate::structs::sizes::entry_index;
+use crate::structs::sizes::{entry_index, PT_ENTRY_COUNT};
 
 /// Supplies either a static type-level root level or a stored runtime level.
 pub(crate) trait TreeLevel {
@@ -125,7 +125,6 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPageTree<A, P> {
     }
 
     /// Adds missing tables down to `target`, without splitting existing leaves.
-    #[cfg(any(feature = "concurrent", test))]
     pub(crate) fn grow(
         &mut self,
         vaddr: VirtAddr,
@@ -140,7 +139,6 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPageTree<A, P> {
         unsafe { Self::grow_page(self.page_mut(), level, vaddr, target, parent_flags) }
     }
 
-    #[cfg(any(feature = "concurrent", test))]
     unsafe fn grow_page(
         page: &mut PTPage<A, P>,
         level: PageLevel,
@@ -288,7 +286,7 @@ pub(crate) unsafe fn free_children<A: ArchPagingMeta, P: PagingAllocator>(
     root: &PTPagePointer<'_, A, P>,
     owns_entry: impl Fn(usize) -> bool,
 ) {
-    for index in 0..PTPage::<A, P>::COUNT {
+    for index in 0..PT_ENTRY_COUNT {
         if !owns_entry(index) {
             continue;
         }

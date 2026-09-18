@@ -27,7 +27,9 @@ enum Workload {
     MapMixed,
     MapLeafOnly,
     MapIntermediate,
+    MapRange,
     Unmap,
+    UnmapRange,
     Walk,
     Protect,
     Split,
@@ -35,11 +37,13 @@ enum Workload {
     Mixed,
 }
 
-const WORKLOADS: [Workload; 9] = [
+const WORKLOADS: [Workload; 11] = [
     Workload::MapMixed,
     Workload::MapLeafOnly,
     Workload::MapIntermediate,
+    Workload::MapRange,
     Workload::Unmap,
+    Workload::UnmapRange,
     Workload::Walk,
     Workload::Protect,
     Workload::Split,
@@ -47,11 +51,13 @@ const WORKLOADS: [Workload; 9] = [
     Workload::Mixed,
 ];
 
-const PERFORMANCE_LIMITS: [(Workload, f64); 9] = [
+const PERFORMANCE_LIMITS: [(Workload, f64); 11] = [
     (Workload::MapMixed, 0.90),
     (Workload::MapLeafOnly, 0.90),
     (Workload::MapIntermediate, 1.15),
+    (Workload::MapRange, 1.80),
     (Workload::Unmap, 1.10),
+    (Workload::UnmapRange, 3.00),
     (Workload::Walk, 1.05),
     (Workload::Protect, 1.15),
     (Workload::Split, 0.60),
@@ -65,7 +71,9 @@ impl Workload {
             Workload::MapMixed => "map_mixed_4k",
             Workload::MapLeafOnly => "map_leaf_only_4k",
             Workload::MapIntermediate => "map_intermediate_4k",
+            Workload::MapRange => "map_region",
             Workload::Unmap => "unmap_4k",
+            Workload::UnmapRange => "unmap_region",
             Workload::Walk => "walk_translate",
             Workload::Protect => "protect_4k",
             Workload::Split => "split_2m_to_4k",
@@ -98,7 +106,9 @@ struct WorkItems {
     map_mixed: usize,
     map_leaf_only: usize,
     map_intermediate: usize,
+    map_range: usize,
     unmap: usize,
+    unmap_range: usize,
     walk: usize,
     protect: usize,
     split: usize,
@@ -112,7 +122,9 @@ impl WorkItems {
             Workload::MapMixed => self.map_mixed,
             Workload::MapLeafOnly => self.map_leaf_only,
             Workload::MapIntermediate => self.map_intermediate,
+            Workload::MapRange => self.map_range,
             Workload::Unmap => self.unmap,
+            Workload::UnmapRange => self.unmap_range,
             Workload::Walk => self.walk,
             Workload::Protect => self.protect,
             Workload::Split => self.split,
@@ -146,10 +158,20 @@ impl Config {
                 base_work_per_thread,
                 4,
             ),
+            map_range: env_workload_items(
+                "PAGING_BENCH_MAP_RANGE_ITEMS_PER_THREAD",
+                base_work_per_thread,
+                256,
+            ),
             unmap: env_workload_items(
                 "PAGING_BENCH_UNMAP_ITEMS_PER_THREAD",
                 base_work_per_thread,
                 4096,
+            ),
+            unmap_range: env_workload_items(
+                "PAGING_BENCH_UNMAP_RANGE_ITEMS_PER_THREAD",
+                base_work_per_thread,
+                256,
             ),
             walk: env_workload_items(
                 "PAGING_BENCH_WALK_ITEMS_PER_THREAD",
@@ -185,7 +207,7 @@ impl Config {
             warmups: env_usize("PAGING_BENCH_WARMUPS", 2),
             repetitions: env_usize("PAGING_BENCH_REPETITIONS", 9),
         };
-        assert!(config.range_pages > 0);
+        assert!(config.range_pages > 0 && config.range_pages < 512);
         assert!(config.repetitions > 0);
         config
     }
@@ -195,7 +217,7 @@ impl Config {
         let table_pages = match workload {
             Workload::MapIntermediate => threads.saturating_mul(items),
             Workload::Split => threads.saturating_mul(items),
-            Workload::ProtectRange => {
+            Workload::MapRange | Workload::UnmapRange | Workload::ProtectRange => {
                 threads.saturating_mul(items).saturating_mul(self.range_pages).div_ceil(512)
             }
             _ => threads.saturating_mul(items).div_ceil(512),
@@ -225,7 +247,9 @@ impl Plan {
         let point_span = point_items as u64 * PAGE_SIZE;
         let split_span = config.items.split as u64 * HUGE_SIZE;
         let intermediate_span = config.items.map_intermediate as u64 * HUGE_SIZE;
-        let range_span = config.items.protect_range as u64 * config.range_pages as u64 * PAGE_SIZE;
+        let range_items =
+            config.items.map_range.max(config.items.unmap_range).max(config.items.protect_range);
+        let range_span = range_items as u64 * config.range_pages as u64 * PAGE_SIZE + PAGE_SIZE;
         let span = point_span.max(split_span).max(intermediate_span).max(range_span).max(GIB);
         let stride = span.div_ceil(GIB) * GIB;
         let max_thread = *config.threads.iter().max().unwrap() as u64;
@@ -255,7 +279,9 @@ impl Plan {
     }
 
     fn range(&self, thread: usize, item: usize) -> (u64, u64) {
-        let start = self.thread_base(thread) + item as u64 * self.range_pages as u64 * PAGE_SIZE;
+        let start = self.thread_base(thread)
+            + PAGE_SIZE
+            + item as u64 * self.range_pages as u64 * PAGE_SIZE;
         (start, start + self.range_pages as u64 * PAGE_SIZE)
     }
 
@@ -310,7 +336,7 @@ fn env_workload_items(name: &str, base: usize, multiplier: usize) -> usize {
 fn prepare<A: PagingAdapter>(adapter: &A, workload: Workload, threads: usize, plan: &Plan) {
     let items = plan.items(workload);
     match workload {
-        Workload::MapMixed | Workload::MapIntermediate => {}
+        Workload::MapMixed | Workload::MapIntermediate | Workload::MapRange => {}
         Workload::MapLeafOnly => {
             for thread in 0..threads {
                 for item in 0..items {
@@ -325,6 +351,14 @@ fn prepare<A: PagingAdapter>(adapter: &A, workload: Workload, threads: usize, pl
                 for item in 0..items {
                     let virtual_address = plan.point(thread, item);
                     adapter.map_4k(virtual_address, plan.frame(virtual_address));
+                }
+            }
+        }
+        Workload::UnmapRange => {
+            for thread in 0..threads {
+                for item in 0..items {
+                    let (start, end) = plan.range(thread, item);
+                    adapter.map_range(start, end, plan.frame(start));
                 }
             }
         }
@@ -362,7 +396,15 @@ fn execute_thread<A: PagingAdapter>(adapter: &A, workload: Workload, thread: usi
                 let address = plan.intermediate(thread, item);
                 adapter.map_4k(address, plan.frame(address));
             }
+            Workload::MapRange => {
+                let (start, end) = plan.range(thread, item);
+                adapter.map_range(start, end, plan.frame(start));
+            }
             Workload::Unmap => adapter.unmap_4k(plan.point(thread, item)),
+            Workload::UnmapRange => {
+                let (start, end) = plan.range(thread, item);
+                adapter.unmap_range(start, end);
+            }
             Workload::Walk => {
                 black_box(adapter.translate(plan.point(thread, item)));
             }
@@ -393,6 +435,16 @@ fn validate<A: PagingAdapter>(adapter: &A, workload: Workload, threads: usize, p
                     assert_eq!(observation, None);
                     hash_observation(&mut fingerprint, None);
                 }
+                Workload::UnmapRange => {
+                    let (start, end) = plan.range(thread, item);
+                    let mut address = start;
+                    while address < end {
+                        let observation = adapter.observe(address);
+                        assert_eq!(observation, None);
+                        hash_observation(&mut fingerprint, None);
+                        address += PAGE_SIZE;
+                    }
+                }
                 Workload::Split => {
                     let base = plan.huge(thread, item);
                     for page in 0..512 {
@@ -400,6 +452,16 @@ fn validate<A: PagingAdapter>(adapter: &A, workload: Workload, threads: usize, p
                         let observation = adapter.observe(address);
                         assert_mapping(observation, plan.frame(address), PAGE_SIZE, true);
                         hash_observation(&mut fingerprint, observation);
+                    }
+                }
+                Workload::MapRange => {
+                    let (start, end) = plan.range(thread, item);
+                    let mut address = start;
+                    while address < end {
+                        let observation = adapter.observe(address);
+                        assert_mapping(observation, plan.frame(address), PAGE_SIZE, true);
+                        hash_observation(&mut fingerprint, observation);
+                        address += PAGE_SIZE;
                     }
                 }
                 Workload::ProtectRange => {
@@ -526,7 +588,9 @@ fn benchmark<A: PagingAdapter>(config: &Config, plan: &Plan, records: &mut Vec<R
             let items_per_thread = plan.items(workload);
             let api_ops = threads * items_per_thread * workload.api_ops_per_item();
             let leaf_ops = match workload {
-                Workload::ProtectRange => threads * items_per_thread * plan.range_pages,
+                Workload::MapRange | Workload::UnmapRange | Workload::ProtectRange => {
+                    threads * items_per_thread * plan.range_pages
+                }
                 _ => api_ops,
             };
             records.push(Record {
@@ -661,11 +725,13 @@ fn print_results(config: &Config, records: &[Record]) {
         config.repetitions
     );
     println!(
-        "effective_items_per_thread: map_mixed={} map_leaf_only={} map_intermediate={} unmap={} walk={} protect={} split={} protect_range={} mixed={}",
+        "effective_items_per_thread: map_mixed={} map_leaf_only={} map_intermediate={} map_range={} unmap={} unmap_range={} walk={} protect={} split={} protect_range={} mixed={}",
         config.items.map_mixed,
         config.items.map_leaf_only,
         config.items.map_intermediate,
+        config.items.map_range,
         config.items.unmap,
+        config.items.unmap_range,
         config.items.walk,
         config.items.protect,
         config.items.split,

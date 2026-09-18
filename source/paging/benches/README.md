@@ -41,8 +41,12 @@ The pinned verios repository must be reachable by the invoking Git
 credentials.
 
 The harness measures mixed-cost map, leaf-only map, map with intermediate-table
-allocation, unmap, walk/translate, protect, 2 MiB-to-4 KiB split,
-`protect_range`, and a mixed read/protect/unmap/map sequence. Each
+allocation, `map_region`, point unmap, `unmap_region`, walk/translate, protect,
+2 MiB-to-4 KiB split, `protect_range`, and a mixed
+read/protect/unmap/map sequence. The region workloads call paging's
+`map_region`/`unmap_region` and VeriOS's `map_range`/`unmap_range` directly.
+Their starts are offset from huge-page alignment so every adapter represents
+the configurable range with matching 4 KiB leaves. Each
 thread gets a disjoint address region and a fixed number of work items. Worker
 threads announce readiness and spin on a shared start flag. The coordinator
 takes the start timestamp only after every worker is ready; elapsed time ends
@@ -78,7 +82,7 @@ Environment variables:
 
 - `PAGING_BENCH_THREADS` (default `1,2,4,8`)
 - `PAGING_BENCH_WORK_PER_THREAD` (default `128`)
-- `PAGING_BENCH_RANGE_PAGES` (default `16`)
+- `PAGING_BENCH_RANGE_PAGES` (default `16`, must be between `1` and `511`)
 - `PAGING_BENCH_WARMUPS` (default `2`)
 - `PAGING_BENCH_REPETITIONS` (default `9`)
 - `PAGING_BENCH_CHECK` (`1` or `true` enables the regression limits)
@@ -89,7 +93,9 @@ defaults. The default effective item counts per thread are:
 - mixed-cost map: `base * 2048` (`262144`)
 - leaf-only map: `base * 2048` (`262144`)
 - map with intermediate allocation: `base * 4` (`512`)
+- map region: `base * 256` (`32768` ranges)
 - unmap: `base * 4096` (`524288`)
+- unmap region: `base * 256` (`32768` ranges)
 - walk/translate: `base * 8192` (`1048576`)
 - protect: `base * 4096` (`524288`)
 - split: `base * 4` (`512`)
@@ -100,7 +106,9 @@ Each effective count can be replaced directly with
 `PAGING_BENCH_MAP_ITEMS_PER_THREAD`,
 `PAGING_BENCH_MAP_LEAF_ONLY_ITEMS_PER_THREAD`,
 `PAGING_BENCH_MAP_INTERMEDIATE_ITEMS_PER_THREAD`,
+`PAGING_BENCH_MAP_RANGE_ITEMS_PER_THREAD`,
 `PAGING_BENCH_UNMAP_ITEMS_PER_THREAD`,
+`PAGING_BENCH_UNMAP_RANGE_ITEMS_PER_THREAD`,
 `PAGING_BENCH_WALK_ITEMS_PER_THREAD`,
 `PAGING_BENCH_PROTECT_ITEMS_PER_THREAD`,
 `PAGING_BENCH_SPLIT_ITEMS_PER_THREAD`,

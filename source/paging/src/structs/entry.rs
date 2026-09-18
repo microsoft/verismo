@@ -29,13 +29,8 @@ impl<A: ArchPagingMeta> PTEntry<A> {
         self.val == 0
     }
 
-    pub fn clear(&mut self) {
-        self.val = 0;
-    }
-
-    /// The exact entry a raw word denotes, without publication-time A/D normalization.
     #[inline(always)]
-    pub fn from_bits(val: usize) -> Self {
+    pub(crate) fn from_bits(val: usize) -> Self {
         Self { val, dummy: PhantomData }
     }
 
@@ -135,36 +130,24 @@ impl<A: ArchPagingMeta> PTEntry<A> {
         Self::from_bits(val).for_publication()
     }
 
-    /// An entry pointing at a table page: present and not huge, whatever
-    /// `flags` says, since those two bits are what "points at a table" means.
-    /// Without `use_ad`, A/D bits are preset.
+    /// Builds a present, non-huge pointer to a child table.
     #[inline(always)]
-    pub fn new_table(addr: PhysAddr, flags: A::PTFlags) -> Self {
-        let flag_bits = flags.bits() & !A::address_mask() & !A::PTFlags::huge_bit();
-        let val = (addr.bits() & A::address_mask()) | flag_bits | A::PTFlags::present_bit();
-        Self::from_bits(val).for_publication()
+    pub(crate) fn new_table(addr: PhysAddr, flags: A::PTFlags) -> Self {
+        Self::new(addr, flags.with(A::PTFlags::PRESENT).without(A::PTFlags::HUGE))
     }
 
-    /// An entry mapping a page rather than pointing at a table. The large-page
-    /// bit is left to `flags`, since above the leaf level it is what stops the
-    /// hardware reading this entry as a table pointer.
-    #[inline(always)]
-    pub fn new_leaf(addr: PhysAddr, flags: A::PTFlags) -> Self {
-        Self::new(addr, flags)
+    pub fn set_flags(&mut self, flags: A::PTFlags) {
+        self.val |= (flags & A::supported_flags()).bits();
     }
 
-    /// The same entry with the large-page bit set. Above the leaf, an update
-    /// that keeps a huge page huge has to keep that bit: flags supplied by a
-    /// caller who does not know the level would not.
-    pub fn set_huge(self) -> Self {
-        Self { val: self.val | A::PTFlags::huge_bit(), dummy: PhantomData }
+    pub fn clear_flags(&mut self, flags: A::PTFlags) {
+        self.val &= !(flags & A::PTFlags::all()).bits();
     }
 
     #[inline(always)]
-    pub(crate) fn with_leaf_flags(self, level: PageLevel, flags: A::PTFlags) -> Self {
-        let keep = A::address_mask() | A::leaf_attribute_mask(level) | A::accessed_dirty_mask();
-        let size = if level.is_leaf() { 0 } else { A::PTFlags::huge_bit() };
-        Self::from_bits((self.val & keep) | (flags.bits() & !keep & !A::PTFlags::huge_bit()) | size)
+    pub(crate) fn with_present(mut self) -> Self {
+        self.val |= A::PTFlags::present_bit();
+        self
     }
 
     #[inline(always)]
@@ -178,57 +161,19 @@ impl<A: ArchPagingMeta> PTEntry<A> {
         Self::from_bits(entry.raw() | A::split_leaf_attributes(self.raw(), level))
     }
 
-    pub fn set(&mut self, addr: PhysAddr, flags: A::PTFlags) {
-        *self = Self::new(addr, flags);
-    }
-
     /// Retags the mapped frame as shared, keeping the flags. The address the
     /// entry reports already has the private tag stripped.
     pub fn make_shared(&mut self) {
         let flags = self.flags();
         let addr = PhysAddr::from(self.address());
-        self.set(A::make_shared_address(addr), flags);
+        *self = Self::new(A::make_shared_address(addr), flags);
     }
 
     /// Retags the mapped frame as private, keeping the flags.
     pub fn make_private(&mut self) {
         let flags = self.flags();
         let addr = PhysAddr::from(self.address());
-        self.set(A::make_private_address(addr), flags);
-    }
-
-    /// Acquires an entry and the initialized subtree it publishes.
-    /// # Safety
-    /// The pointer must address initialized, writable, `AtomicUsize`-aligned storage.
-    /// All concurrent accesses must be atomic; no live Rust entry references.
-    pub unsafe fn load_entry(entry: *const Self) -> Self {
-        unsafe { PTEntryRef::from_raw(entry.cast_mut()) }.load()
-    }
-
-    /// Release-publishes an entry and its initialized subtree.
-    /// # Safety
-    /// As in [`Self::load_entry`].
-    pub unsafe fn store_entry(entry: *mut Self, value: Self) {
-        unsafe { PTEntryRef::from_raw(entry) }.store(value);
-    }
-
-    /// Replaces an entry and returns what it held.
-    ///
-    /// # Safety
-    /// As in [`Self::load_entry`].
-    pub unsafe fn swap_entry(entry: *mut Self, value: Self) -> Self {
-        unsafe { PTEntryRef::from_raw(entry) }.swap(value)
-    }
-
-    /// Updates an entry only if its complete word is unchanged.
-    /// # Safety
-    /// As in [`Self::load_entry`].
-    pub unsafe fn compare_exchange_entry(
-        entry: *mut Self,
-        current: Self,
-        value: Self,
-    ) -> Result<Self, Self> {
-        unsafe { PTEntryRef::from_raw(entry) }.compare_exchange(current, value)
+        *self = Self::new(A::make_private_address(addr), flags);
     }
 }
 
@@ -341,15 +286,3 @@ impl<A: ArchPagingMeta> Clone for PTEntry<A> {
 }
 
 impl<A: ArchPagingMeta> Copy for PTEntry<A> {}
-
-impl<A: ArchPagingMeta> From<usize> for PTEntry<A> {
-    fn from(val: usize) -> Self {
-        Self::from_bits(val)
-    }
-}
-
-impl<A: ArchPagingMeta> From<PTEntry<A>> for usize {
-    fn from(entry: PTEntry<A>) -> usize {
-        entry.raw()
-    }
-}

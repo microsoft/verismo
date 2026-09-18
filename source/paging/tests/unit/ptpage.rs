@@ -25,9 +25,13 @@ fn test_page<A: ArchPagingMeta, P: PagingAllocator>(entry: PTEntry<A>) -> PTPage
         #[cfg(any(feature = "use_ad", feature = "concurrent"))]
         entries: core::array::from_fn(|_| AtomicUsize::new(entry.raw())),
         #[cfg(not(any(feature = "use_ad", feature = "concurrent")))]
-        entries: [entry; ENTRY_COUNT],
+        entries: [entry; PT_ENTRY_COUNT],
         dummy: PhantomData,
     }
+}
+
+fn entry_from_bits<A: ArchPagingMeta>(bits: usize) -> PTEntry<A> {
+    unsafe { (&bits as *const usize).cast::<PTEntry<A>>().read() }
 }
 
 fn published(word: usize) -> usize {
@@ -127,20 +131,20 @@ fn typed_roots_and_controllers_store_no_runtime_level_or_duplicate_allocator() {
 fn exclusive_private_entry_edits_preserve_layout_and_live_atomic_access() {
     let mut page: Page = test_page(Entry::empty());
     let base = &mut page as *mut Page as usize;
-    let last = page.entry_mut(ENTRY_COUNT - 1) as *mut Entry as usize;
+    let last = page.entry_mut(PT_ENTRY_COUNT - 1) as *mut Entry as usize;
     assert_eq!(base % 4096, 0);
-    assert_eq!(last - base, (ENTRY_COUNT - 1) * size_of::<Entry>());
-    page.entry_mut(0).set(PhysAddr::from(0x1000usize), crate::PTEntryFlags::PRESENT);
-    *page.entry_mut(ENTRY_COUNT - 1) = Entry::from_bits(0xdead_0020);
+    assert_eq!(last - base, (PT_ENTRY_COUNT - 1) * size_of::<Entry>());
+    *page.entry_mut(0) = Entry::new(PhysAddr::from(0x1000usize), crate::PTEntryFlags::PRESENT);
+    *page.entry_mut(PT_ENTRY_COUNT - 1) = entry_from_bits::<Arch>(0xdead_0020);
     assert_eq!(page.entry_mut(0).raw(), published(0x1001));
-    assert_eq!(page.entry_mut(ENTRY_COUNT - 1).raw(), 0xdead_0020);
+    assert_eq!(page.entry_mut(PT_ENTRY_COUNT - 1).raw(), 0xdead_0020);
     let owner = Owner { memory: UnsafeCell::new(page) };
     let view = owner.view();
     assert_eq!(view.load(0).raw(), published(0x1001));
-    assert_eq!(view.load(ENTRY_COUNT - 1).raw(), 0xdead_0020);
+    assert_eq!(view.load(PT_ENTRY_COUNT - 1).raw(), 0xdead_0020);
     view.store(0, Entry::empty());
     assert!(view.is_empty());
-    assert_eq!(view.load(ENTRY_COUNT - 1).raw(), 0xdead_0020);
+    assert_eq!(view.load(PT_ENTRY_COUNT - 1).raw(), 0xdead_0020);
 }
 
 #[test]
@@ -148,19 +152,19 @@ fn views_access_both_page_boundaries_and_return_snapshots() {
     let owner = Owner::new();
     let view = owner.view();
     assert!(view.is_empty());
-    view.store(0, Entry::from_bits(0x1001));
-    view.store(ENTRY_COUNT - 1, Entry::from_bits(0x2001));
+    view.store(0, entry_from_bits::<Arch>(0x1001));
+    view.store(PT_ENTRY_COUNT - 1, entry_from_bits::<Arch>(0x2001));
     let snapshot = view.load(0);
     assert!(!view.is_empty());
-    assert_eq!(view.swap(0, Entry::from_bits(0x3001)).raw(), published(0x1001));
+    assert_eq!(view.swap(0, entry_from_bits::<Arch>(0x3001)).raw(), published(0x1001));
     assert_eq!(snapshot.raw(), published(0x1001));
     assert_eq!(view.load(0).raw(), published(0x3001));
-    assert_eq!(view.load(ENTRY_COUNT - 1).raw(), published(0x2001));
-    for index in 1..ENTRY_COUNT - 1 {
+    assert_eq!(view.load(PT_ENTRY_COUNT - 1).raw(), published(0x2001));
+    for index in 1..PT_ENTRY_COUNT - 1 {
         assert_eq!(view.load(index).raw(), 0);
     }
     view.store(0, Entry::empty());
-    view.store(ENTRY_COUNT - 1, Entry::empty());
+    view.store(PT_ENTRY_COUNT - 1, Entry::empty());
     assert!(view.is_empty());
     assert_eq!(view.level(), PageLevel::Level0);
     assert_eq!(view.paddr().bits(), owner.memory.get() as usize);
@@ -223,7 +227,7 @@ impl AllocationFixture {
     fn new() -> Self {
         let fixture = Self(Rc::new(AllocationState {
             pages: core::array::from_fn(|_| {
-                UnsafeCell::new(test_page(TreeEntry::from_bits(usize::MAX)))
+                UnsafeCell::new(test_page(entry_from_bits::<TreeArch>(usize::MAX)))
             }),
             allocated: Cell::new(0),
             budget: Cell::new(8),
@@ -307,7 +311,7 @@ unsafe impl PagingAllocator for AllocationOwner {
                 if state.freed.get() & (1 << page_index) != 0 {
                     continue;
                 }
-                for slot in 0..ENTRY_COUNT {
+                for slot in 0..PT_ENTRY_COUNT {
                     // SAFETY: this fixture retains all initialized arena storage without concurrent access.
                     let entry = unsafe { AllocationPage::read_entry(page.get(), slot) };
                     assert!(
@@ -378,7 +382,7 @@ fn owned_tree_allocates_and_zeroes_its_root_at_every_level() {
         assert_eq!(AllocationOwner::paddr_to_vaddr(tree.root_paddr()).bits() & 4095, 0);
         let view = owner.view(&tree, level);
         assert_eq!(view.walk(VirtAddr::from(0usize)).page.level(), level);
-        for index in 0..ENTRY_COUNT {
+        for index in 0..PT_ENTRY_COUNT {
             assert_eq!(view.load(index).raw(), 0);
         }
         drop(tree);
@@ -448,7 +452,7 @@ fn typed_adoption_recursively_drops_dynamically_prepared_trees() {
         prepared
             .grow(address, PageLevel::Level0, <TreeArch as ArchPagingMeta>::PTFlags::parent_flags())
             .unwrap();
-        prepared.root().walk(address).entry().store(TreeEntry::from_bits(0xdead_0001));
+        prepared.root().walk(address).entry().store(entry_from_bits::<TreeArch>(0xdead_0001));
         let root = prepared.release();
         assert_eq!(owner.allocated.get(), L::DEPTH + 1);
         assert_eq!(owner.freed.get(), 0);
@@ -486,11 +490,19 @@ fn owned_tree_grows_downward_reuses_paths_and_drops_tables_not_data() {
         assert_eq!(leaf.level(), PageLevel::Level1);
         assert_eq!(
             view.load(2).raw(),
-            TreeEntry::new_table(TreeArch::make_private_address(middle.paddr()), flags).raw()
+            TreeEntry::new(
+                TreeArch::make_private_address(middle.paddr()),
+                (flags | PTEntryFlags::PRESENT) & !PTEntryFlags::HUGE,
+            )
+            .raw()
         );
         assert_eq!(
             middle.load(3).raw(),
-            TreeEntry::new_table(TreeArch::make_private_address(leaf.paddr()), flags).raw()
+            TreeEntry::new(
+                TreeArch::make_private_address(leaf.paddr()),
+                (flags | PTEntryFlags::PRESENT) & !PTEntryFlags::HUGE,
+            )
+            .raw()
         );
         assert!(leaf.entries_satisfy(&|entry| entry.is_clear()));
     }
@@ -507,10 +519,10 @@ fn owned_tree_grows_downward_reuses_paths_and_drops_tables_not_data() {
         let leaf = view.walk(address);
         assert_eq!(leaf.page.level(), PageLevel::Level0);
         assert!(leaf.entry().load().is_clear());
-        leaf.entry().store(TreeEntry::from_bits(0xdead_0001));
+        leaf.entry().store(entry_from_bits::<TreeArch>(0xdead_0001));
         let middle = view.child(2).ok().unwrap().child(3).ok().unwrap();
-        middle.store(6, TreeEntry::from_bits(0x20_0081));
-        middle.store(7, TreeEntry::from_bits(0xd080));
+        middle.store(6, entry_from_bits::<TreeArch>(0x20_0081));
+        middle.store(7, entry_from_bits::<TreeArch>(0xd080));
     }
     tree.grow(address, PageLevel::Level0, flags).unwrap();
     assert_eq!(owner.allocated.get(), 5);
@@ -554,11 +566,11 @@ fn owned_tree_failed_growth_rolls_back_only_the_staged_suffix() {
         let snapshots = {
             let view = owner.view(&tree, PageLevel::Level4);
             let child = view.child(0).ok().unwrap();
-            child.store(1, TreeEntry::from_bits(0xd080));
-            child.store(2, TreeEntry::from_bits(0xe000));
+            child.store(1, entry_from_bits::<TreeArch>(0xd080));
+            child.store(2, entry_from_bits::<TreeArch>(0xe000));
             [
-                core::array::from_fn::<_, ENTRY_COUNT, _>(|index| view.load(index).raw()),
-                core::array::from_fn::<_, ENTRY_COUNT, _>(|index| child.load(index).raw()),
+                core::array::from_fn::<_, PT_ENTRY_COUNT, _>(|index| view.load(index).raw()),
+                core::array::from_fn::<_, PT_ENTRY_COUNT, _>(|index| child.load(index).raw()),
             ]
         };
         owner.budget.set(budget);
@@ -599,7 +611,7 @@ fn owned_tree_rejects_upward_growth_and_blocking_huge_leaves() {
     let address = VirtAddr::from(0usize);
     assert!(matches!(tree.grow(address, PageLevel::Level3, flags), Err(PagingError::InvalidLevel)));
     assert!(owner.view(&tree, PageLevel::Level2).entries_satisfy(&|entry| entry.is_clear()));
-    owner.view(&tree, PageLevel::Level2).store(0, TreeEntry::from_bits(0x8000_0081));
+    owner.view(&tree, PageLevel::Level2).store(0, entry_from_bits::<TreeArch>(0x8000_0081));
     assert!(matches!(tree.grow(address, PageLevel::Level0, flags), Err(PagingError::NotLeafEntry)));
     tree.grow(address, PageLevel::Level2, flags).unwrap();
     assert_eq!(owner.view(&tree, PageLevel::Level2).load(0).raw(), published(0x8000_0081));
@@ -654,19 +666,22 @@ impl TreeFixture {
         let table = <TreeArch as ArchPagingMeta>::PTFlags::parent_flags();
         // SAFETY: the fixture still exclusively owns these unpublished pages.
         unsafe {
-            TreePage::entry_ptr_mut(owner.pages[0].get(), 0).write(TreeEntry::new_table(
+            TreePage::entry_ptr_mut(owner.pages[0].get(), 0).write(TreeEntry::new(
                 TreeArch::make_private_address(PhysAddr::from(0x2000usize)),
-                table,
+                (table | PTEntryFlags::PRESENT) & !PTEntryFlags::HUGE,
             ));
             TreePage::entry_ptr_mut(owner.pages[0].get(), 1)
-                .write(TreeEntry::from_bits(0x8000_0081));
-            TreePage::entry_ptr_mut(owner.pages[0].get(), 2).write(TreeEntry::from_bits(0xd080));
-            TreePage::entry_ptr_mut(owner.pages[1].get(), 7).write(TreeEntry::new_table(
+                .write(entry_from_bits::<TreeArch>(0x8000_0081));
+            TreePage::entry_ptr_mut(owner.pages[0].get(), 2)
+                .write(entry_from_bits::<TreeArch>(0xd080));
+            TreePage::entry_ptr_mut(owner.pages[1].get(), 7).write(TreeEntry::new(
                 TreeArch::make_shared_address(PhysAddr::from(0x3000usize)),
-                table,
+                (table | PTEntryFlags::PRESENT) & !PTEntryFlags::HUGE,
             ));
-            TreePage::entry_ptr_mut(owner.pages[1].get(), 8).write(TreeEntry::from_bits(0x20_0081));
-            TreePage::entry_ptr_mut(owner.pages[2].get(), 9).write(TreeEntry::from_bits(0xd081));
+            TreePage::entry_ptr_mut(owner.pages[1].get(), 8)
+                .write(entry_from_bits::<TreeArch>(0x20_0081));
+            TreePage::entry_ptr_mut(owner.pages[2].get(), 9)
+                .write(entry_from_bits::<TreeArch>(0xd081));
         }
         owner
     }
@@ -743,7 +758,7 @@ unsafe impl PagingAllocator for TreeOwner {
                     PageLevel::Level3,
                     PageLevel::Level4,
                 ][page_index];
-                for slot in 0..ENTRY_COUNT {
+                for slot in 0..PT_ENTRY_COUNT {
                     // SAFETY: this quiesced fixture retains the backing storage of its arena.
                     let entry = unsafe { TreePage::read_entry(page.get(), slot) };
                     assert!(!entry.is_table(level) || entry.address() != paddr.bits());
@@ -851,7 +866,7 @@ fn walk_supports_every_root_level_and_retains_nonpresent_metadata() {
         assert_eq!(size_of::<View<'_>>(), 2 * size_of::<usize>());
         assert_eq!(view.level(), level);
         assert_eq!(view.paddr(), paddr);
-        view.store(0, Entry::from_bits(0x1000));
+        view.store(0, entry_from_bits::<Arch>(0x1000));
         assert!(view.is_empty());
         let observed = view.walk(VirtAddr::from(0usize));
         assert_eq!(observed.page.level(), level);
@@ -871,10 +886,14 @@ fn high_roots_walk_through_each_child_level_to_the_leaf() {
     let flags = <TreeArch as ArchPagingMeta>::PTFlags::parent_flags();
     // SAFETY: neither additional root has been published or viewed.
     unsafe {
-        TreePage::entry_ptr_mut(owner.pages[3].get(), 0)
-            .write(TreeEntry::new_table(PhysAddr::from(0x1000usize), flags));
-        TreePage::entry_ptr_mut(owner.pages[4].get(), 0)
-            .write(TreeEntry::new_table(PhysAddr::from(0x4000usize), flags));
+        TreePage::entry_ptr_mut(owner.pages[3].get(), 0).write(TreeEntry::new(
+            PhysAddr::from(0x1000usize),
+            (flags | PTEntryFlags::PRESENT) & !PTEntryFlags::HUGE,
+        ));
+        TreePage::entry_ptr_mut(owner.pages[4].get(), 0).write(TreeEntry::new(
+            PhysAddr::from(0x4000usize),
+            (flags | PTEntryFlags::PRESENT) & !PTEntryFlags::HUGE,
+        ));
     }
     // SAFETY: these roots extend the same pinned, initialized fixture tree.
     let root3 = unsafe { TreeView::from_root(PhysAddr::from(0x4000usize), PageLevel::Level3) };
@@ -902,7 +921,7 @@ fn child_lookup_never_resolves_huge_absent_or_level_zero_entries() {
     assert_eq!(middle.child(8).err().expect("huge leaf").raw(), 0x20_0081);
     let leaf = middle.child(7).ok().expect("middle table link");
     for word in [0xd081, 0xd001] {
-        leaf.store(9, TreeEntry::from_bits(word));
+        leaf.store(9, entry_from_bits::<TreeArch>(word));
         assert_eq!(leaf.child(9).err().expect("level-zero leaf").raw(), published(word));
         assert_eq!(owner.resolutions.get(), 3);
         let observed = leaf.walk(VirtAddr::from(9 * PageLevel::Level0.size()));
@@ -939,7 +958,7 @@ fn derived_teardown_unlinks_empty_children_before_freeing_and_retains_data_frame
     // SAFETY: the fixture is exclusively accessed and no child view has escaped.
     unsafe { free_children(&root, |_| true) };
     assert!(root.is_empty());
-    for index in 0..ENTRY_COUNT {
+    for index in 0..PT_ENTRY_COUNT {
         assert!(root.load(index).is_clear());
     }
     assert_eq!(owner.freed.get(), 0b110);
@@ -971,7 +990,7 @@ fn path_reclamation_distinguishes_absent_metadata_from_clear_words() {
         let middle = root.child(0).ok().expect("middle table");
         let leaf = middle.child(7).ok().expect("leaf table");
         middle.store(8, TreeEntry::empty());
-        leaf.store(9, TreeEntry::from_bits(0xd080));
+        leaf.store(9, entry_from_bits::<TreeArch>(0xd080));
     }
     let address = VirtAddr::from(7 * PageLevel::Level1.size() + 9 * PageLevel::Level0.size());
     // SAFETY: no child view survives and both predicates reject present mappings.
@@ -1040,7 +1059,7 @@ fn range_reclamation_preserves_outside_mappings_and_skipped_root_entries() {
 fn leaf_root_reclamation_never_frees_or_clears_data_mappings() {
     let owner = Owner::new();
     let root = owner.view();
-    root.store(0, Entry::from_bits(0x1081));
+    root.store(0, entry_from_bits::<Arch>(0x1081));
     // SAFETY: this root has no descendants and is not installed in hardware.
     assert_eq!(unsafe { reclaim_path(&root, VirtAddr::from(0usize), |entry| !entry.present()) }, 0);
     unsafe {
@@ -1057,7 +1076,7 @@ fn leaf_root_reclamation_never_frees_or_clears_data_mappings() {
 #[should_panic(expected = "index <")]
 fn child_lookup_checks_bounds_before_reading() {
     let owner = TreeFixture::new();
-    let _ = owner.view().child(ENTRY_COUNT);
+    let _ = owner.view().child(PT_ENTRY_COUNT);
 }
 
 #[test]
@@ -1073,23 +1092,28 @@ fn atomic_publication_presets_only_present_words_and_preserves_exact_observation
         for after in [0, 0x2040, 0x2001, 0x2061] {
             word.store(before, Ordering::Release);
             assert_eq!(slot.load().raw(), before);
-            assert_eq!(Entry::from_bits(before).raw(), before);
-            slot.store(Entry::from_bits(after));
+            assert_eq!(entry_from_bits::<Arch>(before).raw(), before);
+            slot.store(entry_from_bits::<Arch>(after));
             assert_eq!(slot.load().raw(), published(after));
 
             word.store(before, Ordering::Release);
-            assert_eq!(slot.swap(Entry::from_bits(after)).raw(), before);
+            assert_eq!(slot.swap(entry_from_bits::<Arch>(after)).raw(), before);
             assert_eq!(slot.load().raw(), published(after));
 
             word.store(before, Ordering::Release);
             assert_eq!(
-                raw(slot
-                    .compare_exchange(Entry::from_bits(before ^ 0x1000), Entry::from_bits(after))),
+                raw(slot.compare_exchange(
+                    entry_from_bits::<Arch>(before ^ 0x1000),
+                    entry_from_bits::<Arch>(after),
+                )),
                 Err(before)
             );
             assert_eq!(slot.load().raw(), before);
             assert_eq!(
-                raw(slot.compare_exchange(Entry::from_bits(before), Entry::from_bits(after))),
+                raw(slot.compare_exchange(
+                    entry_from_bits::<Arch>(before),
+                    entry_from_bits::<Arch>(after),
+                )),
                 Ok(before)
             );
             assert_eq!(slot.load().raw(), published(after));
@@ -1111,8 +1135,8 @@ fn atomic_publication_presets_only_present_words_and_preserves_exact_observation
 fn compare_exchange_rejects_a_stale_snapshot_without_overwriting_updates() {
     let owner = Owner::new();
     let view = owner.view();
-    let current = Entry::from_bits(published(0x1001));
-    let updated = Entry::from_bits(published(0x1003));
+    let current = entry_from_bits::<Arch>(published(0x1001));
+    let updated = entry_from_bits::<Arch>(published(0x1003));
     let raw =
         |result: Result<Entry, Entry>| result.map(|entry| entry.raw()).map_err(|entry| entry.raw());
     view.store(0, current);
@@ -1126,7 +1150,7 @@ fn compare_exchange_rejects_a_stale_snapshot_without_overwriting_updates() {
 fn invalidation_rollback_retains_the_old_encoding_and_late_history() {
     let owner = Owner::new();
     let slot = owner.view().entry(0);
-    let original = Entry::from_bits(published(0x20_0181));
+    let original = entry_from_bits::<Arch>(published(0x20_0181));
     slot.store(original);
     {
         let invalidated = InvalidatedLeaf::new(slot);
@@ -1219,12 +1243,12 @@ fn exchanging_two_confidentiality_tags_uses_a_barrier_and_retains_history() {
     let slot = unsafe { PTEntryRef::<DualArch>::from_raw(WORD.as_ptr().cast()) };
     for (shared, new_tag) in [(true, SHARED), (false, PRIVATE)] {
         let flush = unsafe {
-            PTPage::<DualArch, NoAllocator>::edit_leaf(
+            PTPage::<DualArch, NoAllocator>::update_encryption_leaf(
                 slot,
                 PageLevel::Level0,
                 VirtAddr::from(0x2000usize),
                 PageLevel::Level0,
-                LeafUpdate::UpdateEncryption(shared),
+                shared,
                 shared,
             )
         }
@@ -1239,5 +1263,5 @@ fn exchanging_two_confidentiality_tags_uses_a_barrier_and_retains_history() {
 #[should_panic(expected = "index <")]
 fn views_reject_indexes_outside_the_page() {
     let owner = Owner::new();
-    owner.view().load(ENTRY_COUNT);
+    owner.view().load(PT_ENTRY_COUNT);
 }

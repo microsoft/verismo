@@ -16,11 +16,12 @@
 use core::marker::PhantomData;
 
 use builtin_macros::*;
+#[cfg(verus_only)]
 use vstd::prelude::*;
 
-use crate::structs::address::{Address, VirtAddr};
 #[cfg(verus_only)]
 use crate::structs::address::VADDR_UPPER_MASK;
+use crate::structs::address::{Address, VirtAddr};
 use crate::structs::sizes::{PageSize, Size4KiB};
 
 #[cfg(verus_only)]
@@ -55,22 +56,6 @@ impl<S: PageSize> Page<S> {
         }
         proof! { S::lemma_size_wf(); }
         Ok(Page { start_address: address, size: PhantomData })
-    }
-
-    /// The page starting at `start_address`.
-    ///
-    /// Safe, unlike the original: the alignment the `unsafe` version asks the
-    /// caller to guarantee is a precondition here, so it is checked.
-    #[inline]
-    #[verus_spec(ret =>
-        requires
-            is_aligned_spec(start_address@, S::SIZE),
-        ensures
-            ret@ == start_address@,
-    )]
-    pub fn from_start_address_unchecked(start_address: VirtAddr) -> Self {
-        proof! { S::lemma_size_wf(); }
-        Page { start_address, size: PhantomData }
     }
 
     /// The page containing `address`.

@@ -233,7 +233,7 @@ require deferred flush tokens.
   `PageFaultError::AccessError`. Thus permissive user parents cannot be created
   inside a kernel subtree through these task-memory entry points.
 - **Protection:** LiteBox implements `PROT_NONE` as present, supervisor-only,
-  non-writable, NX. It therefore works with paging's present-only `mprotect`.
+  non-writable, NX. It therefore works with paging's present-only `set_flags`.
   Permission upgrades preserve LiteBox's deferred COW policy; the original
   unimplemented COW case now returns `PageFaultError::AccessError` rather than
   pretending the write succeeded. Execute-only conversion retains the original

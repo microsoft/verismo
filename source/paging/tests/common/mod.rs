@@ -18,13 +18,178 @@ use std::sync::MutexGuard;
 use std::sync::{Arc, Condvar, Mutex};
 
 use paging::address::{Address, PhysAddr, VirtAddr};
+use paging::entry::PTEntry;
+use paging::frame::PhysFrame;
 use paging::level::Lvl;
 use paging::os_contract::{DirectMappedAllocator, PagingError};
+use paging::page::Page;
 #[cfg(feature = "concurrent")]
 use paging::pagetable::LockSpec;
 use paging::pagetable::{KernelPageTable, PageTable};
 use paging::policy::PagingOwnershipPolicy;
-use paging::{FlushScope, PTEntryFlags, X86Paging, X86PagingParams};
+use paging::sizes::{Size1GiB, Size2MiB, Size4KiB};
+use paging::{ArchPagingMeta, FlushScope, PTEntryFlags, X86Paging, X86PagingParams};
+
+pub fn page_4k(address: VirtAddr) -> Page<Size4KiB> {
+    Page::<Size4KiB>::from_start_address(address).unwrap()
+}
+
+pub fn frame_4k(address: PhysAddr) -> PhysFrame<Size4KiB> {
+    PhysFrame::<Size4KiB>::from_start_address(address).unwrap()
+}
+
+pub fn page_2m(address: VirtAddr) -> Page<Size2MiB> {
+    Page::<Size2MiB>::from_start_address(address).unwrap()
+}
+
+pub fn frame_2m(address: PhysAddr) -> PhysFrame<Size2MiB> {
+    PhysFrame::<Size2MiB>::from_start_address(address).unwrap()
+}
+
+pub fn page_1g(address: VirtAddr) -> Page<Size1GiB> {
+    Page::<Size1GiB>::from_start_address(address).unwrap()
+}
+
+pub fn frame_1g(address: PhysAddr) -> PhysFrame<Size1GiB> {
+    PhysFrame::<Size1GiB>::from_start_address(address).unwrap()
+}
+
+#[macro_export]
+macro_rules! map_at {
+    ($table:expr, $address:expr, $frame:expr, $level:expr, $flags:expr, $shared:expr) => {{
+        match $level {
+            paging::level::PageLevel::Level0 => $table.map(
+                paging::page::Page::<paging::sizes::Size4KiB>::from_start_address($address)
+                    .unwrap(),
+                paging::frame::PhysFrame::<paging::sizes::Size4KiB>::from_start_address($frame)
+                    .unwrap(),
+                $flags,
+                $shared,
+            ),
+            paging::level::PageLevel::Level1 => $table.map(
+                paging::page::Page::<paging::sizes::Size2MiB>::from_start_address($address)
+                    .unwrap(),
+                paging::frame::PhysFrame::<paging::sizes::Size2MiB>::from_start_address($frame)
+                    .unwrap(),
+                $flags,
+                $shared,
+            ),
+            paging::level::PageLevel::Level2 => $table.map(
+                paging::page::Page::<paging::sizes::Size1GiB>::from_start_address($address)
+                    .unwrap(),
+                paging::frame::PhysFrame::<paging::sizes::Size1GiB>::from_start_address($frame)
+                    .unwrap(),
+                $flags,
+                $shared,
+            ),
+            _ => Err(paging::os_contract::PagingError::InvalidLevel),
+        }
+    }};
+}
+
+#[macro_export]
+macro_rules! map_at_with_parent_flags {
+    (
+        $table:expr,
+        $address:expr,
+        $frame:expr,
+        $level:expr,
+        $flags:expr,
+        $shared:expr,
+        $parent_flags:expr
+    ) => {{
+        match $level {
+            paging::level::PageLevel::Level0 => $table.map_with_parent_flags(
+                paging::page::Page::<paging::sizes::Size4KiB>::from_start_address($address)
+                    .unwrap(),
+                paging::frame::PhysFrame::<paging::sizes::Size4KiB>::from_start_address($frame)
+                    .unwrap(),
+                $flags,
+                $shared,
+                $parent_flags,
+            ),
+            paging::level::PageLevel::Level1 => $table.map_with_parent_flags(
+                paging::page::Page::<paging::sizes::Size2MiB>::from_start_address($address)
+                    .unwrap(),
+                paging::frame::PhysFrame::<paging::sizes::Size2MiB>::from_start_address($frame)
+                    .unwrap(),
+                $flags,
+                $shared,
+                $parent_flags,
+            ),
+            paging::level::PageLevel::Level2 => $table.map_with_parent_flags(
+                paging::page::Page::<paging::sizes::Size1GiB>::from_start_address($address)
+                    .unwrap(),
+                paging::frame::PhysFrame::<paging::sizes::Size1GiB>::from_start_address($frame)
+                    .unwrap(),
+                $flags,
+                $shared,
+                $parent_flags,
+            ),
+            _ => Err(paging::os_contract::PagingError::InvalidLevel),
+        }
+    }};
+}
+
+#[macro_export]
+macro_rules! unmap_at {
+    ($table:expr, $address:expr, $level:expr) => {{
+        match $level {
+            paging::level::PageLevel::Level0 => $table.unmap(
+                paging::page::Page::<paging::sizes::Size4KiB>::from_start_address($address)
+                    .unwrap(),
+                true,
+            ),
+            paging::level::PageLevel::Level1 => $table.unmap(
+                paging::page::Page::<paging::sizes::Size2MiB>::from_start_address($address)
+                    .unwrap(),
+                true,
+            ),
+            paging::level::PageLevel::Level2 => $table.unmap(
+                paging::page::Page::<paging::sizes::Size1GiB>::from_start_address($address)
+                    .unwrap(),
+                true,
+            ),
+            _ => Err(paging::os_contract::PagingError::InvalidLevel),
+        }
+    }};
+}
+
+#[macro_export]
+macro_rules! set_flags_at {
+    ($table:expr, $address:expr, $level:expr, $flags:expr, $all_cpus:expr) => {{
+        match $level {
+            paging::level::PageLevel::Level0 => $table.set_flags(
+                paging::page::Page::<paging::sizes::Size4KiB>::from_start_address($address)
+                    .unwrap(),
+                $flags,
+                $all_cpus,
+            ),
+            paging::level::PageLevel::Level1 => $table.set_flags(
+                paging::page::Page::<paging::sizes::Size2MiB>::from_start_address($address)
+                    .unwrap(),
+                $flags,
+                $all_cpus,
+            ),
+            paging::level::PageLevel::Level2 => $table.set_flags(
+                paging::page::Page::<paging::sizes::Size1GiB>::from_start_address($address)
+                    .unwrap(),
+                $flags,
+                $all_cpus,
+            ),
+            _ => Err(paging::os_contract::PagingError::InvalidLevel),
+        }
+    }};
+}
+
+pub unsafe fn entry_from_bits<A: ArchPagingMeta>(word: usize) -> PTEntry<A> {
+    unsafe { (&word as *const usize).cast::<PTEntry<A>>().read() }
+}
+
+pub unsafe fn load_entry<A: ArchPagingMeta>(entry: *const PTEntry<A>) -> PTEntry<A> {
+    let word = unsafe { AtomicUsize::from_ptr(entry.cast_mut().cast::<usize>()) };
+    unsafe { entry_from_bits(word.load(Ordering::Acquire)) }
+}
 
 /// Unencrypted memory whose TLB needs no invalidating: the host's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

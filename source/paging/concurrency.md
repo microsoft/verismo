@@ -5,15 +5,15 @@ The default `concurrent` Cargo feature selects `pagetable_concurrent.rs` as the
 `paging::pagetable` module. Without it, that module selects the sequential
 `pagetable.rs` implementation; the two implementations are not exposed together.
 
-`pagetable::PageTable<A, P, L, K, T = (), S = KernelPolicy>` keeps the sequential
+`pagetable::PageTable<A, P, L, W, T = (), S = KernelPolicy>` keeps the sequential
 page-table API's allocation and TLB conventions, but separates tree lifetime
 from content updates:
 
 | Operation | Receiver | Content lock |
 | --- | --- | --- |
 | Walk, translate, inspect root entries | `&self` | None; atomic observations |
-| Map, unmap, split, mprotect, update encryption | `&self` | Page containing the entry being edited |
-| mprotect_range | `&self` | Each table page while its affected entries are updated |
+| Map, unmap, split, set flags, update encryption | `&self` | Page containing the entry being edited |
+| `set_flags_range` | `&self` | Each table page while its affected entries are updated |
 | Free empty tables or tear down children | `&mut self` | None; exclusive access required |
 | Attach owned subtrees (kernel controllers only) | `&mut self`, unsafe | Root page |
 
@@ -55,7 +55,7 @@ entries, are not normalized.
 Atomic stores, swaps, successful compare-exchanges and bitwise updates enforce
 the disabled-mode policy. Bitwise updates use a compare-exchange loop in that
 mode to enforce preset A/D only when the resulting entry is present.
-Mapping, protection, splitting and encryption updates
+Mapping, flag updates, splitting and encryption updates
 retain the same publication and TLB protocols in both modes.
 
 With `use_ad` disabled, `from_root` validates first, then presets A/D throughout
@@ -99,9 +99,10 @@ of constructing views from arbitrary physical addresses.
 a reference with the same tree lifetime at the next lower level. Huge,
 absent and level-zero entries return their observed value rather than a child.
 
-Walks and cleanup use ordinary recursion with a level-zero base case.
-The reference type needs neither `Copy` nor `Clone`: operations borrow it. No level dispatch macros
-or traversal enum are needed. Root construction and raw entry access contain the pointer safety
+Walks use const-generic, monomorphized descent, while cleanup uses ordinary
+recursion with a level-zero base case. The reference type needs neither `Copy`
+nor `Clone`: operations borrow it. No level-dispatch macros or traversal enum
+are needed. Root construction and raw entry access contain the pointer safety
 obligations, leaving walks and child traversal safe to call. Reclamation remains
 explicitly unsafe because it requires external exclusion as well as valid
 views. A walk returns a `WalkResult` containing only the stopping `PTPagePointer`
@@ -114,7 +115,7 @@ has become a child table, returning only a leaf or absent-entry snapshot.
 `walk(vaddr)` always finds a leaf or absent entry. Each sized mutation checks
 the observed level before locking: a deeper entry means the requested slot
 already contains a subtree, which the operation rejects or leaves unchanged.
-The concurrent controller's private `walk_or_alloc` allocates and initializes
+The concurrent controller's private `map_or_alloc` allocates and initializes
 the complete missing path before locking. It then locks and rechecks the parent
 slot, publishing the prepared subtree through one link only if the slot remains
 absent. Losing preparations are reclaimed after unlocking; failed preparations
@@ -161,7 +162,7 @@ lock, since it may be a temporary invalidation during a page-size transition.
 Walks and point-mutation attempts are bounded by the root depth plus one (at
 most five). Each retry or newly published intermediate table makes the next
 walk descend further; installed child links cannot be removed under a shared
-borrow. Range protection allows two additional attempts because its leading
+borrow. Range flag updates allow two additional attempts because their leading
 and trailing leaves may each require an independent split. Exhausting these
 bounds is an invariant violation, not a recoverable mapping error.
 This does not bound waiting inside the content lock or synchronous flush hooks.
@@ -210,12 +211,12 @@ and `UserPageTable<'kernel, A, P, L, W, START, END, T = ()>`, respectively.
 The bounds are root-slot indexes, not virtual addresses. With the current
 48-bit address type, the upper half occupies `511..512` in a five-level root.
 
-User tables can walk and translate kernel mappings. Map, unmap, protection,
+User tables can walk and translate kernel mappings. Map, unmap, flag updates,
 split, and encryption updates reject kernel targets with
 `PermissionDenied`. Range mutations check the complete requested range before
 any update, so a forbidden kernel suffix cannot leave a modified user prefix.
 Unmap methods return `Result` for both policies.
-`mprotect_range` retains its error-plus-flush return shape.
+`set_flags_range` retains its error-plus-flush return shape.
 
 Raw `populate` and sequential `walk_mut` are unsafe and kernel-only; a user table never
 exposes an unrestricted inner controller. New raw subtree attachments transfer
@@ -235,7 +236,7 @@ Kernel `leak` retains its original return shape. User `leak` also returns the
 Neither the policy nor Rust borrowing discharges hardware quiescence or TLB
 obligations. Mapped data-frame ownership is still the embedder's responsibility.
 
-## Protection, splitting and encryption
+## Leaf flags, splitting and encryption
 
 Both page-table variants expose the same edit operations; the sequential
 variant takes `&mut self` for all of them.
@@ -243,34 +244,34 @@ variant takes `&mut self` for all of them.
 | Method | Effect |
 | --- | --- |
 | `split(vaddr, target, all_cpus)` | Refines a huge leaf to the requested level, preserving its mappings and attributes. Already-finer tables need no change. |
-| `mprotect(vaddr, target, flags, all_cpus)` | Changes the flags on exactly one target-sized page, splitting a larger leaf if necessary. |
-| `mprotect_range(start, end, flags, all_cpus)` | Changes a smallest-page-aligned, half-open range, retaining large leaves when fully covered. |
-| `set_shared_4k(vaddr, all_cpus)` / `set_encrypted_4k(vaddr, all_cpus)` | Changes the selected smallest page's encryption state, splitting a larger leaf if necessary. |
+| `set_flags<PS>(page, flags, all_cpus)` | Changes the flags on exactly one typed page, splitting a larger leaf if necessary. |
+| `set_flags_range(start, end, flags, all_cpus)` | Changes a smallest-page-aligned, half-open range, retaining large leaves when fully covered. |
+| `set_shared(page, all_cpus)` / `set_private(page, all_cpus)` | Changes the selected typed page's encryption state, splitting a larger leaf if necessary. |
 
 Edits return any remaining `MayNeedFlush` obligation. A live split completes its
 architecture-selected transition protocol, so its returned token is already discharged.
-Same-size protection and encryption updates can still require a later flush.
+Same-size flag and encryption updates can still require a later flush.
 `all_cpus = true` selects `flush_tlb_global_sync`; `false` selects
 `flush_tlb_global_percpu`. Both include global mappings. x86 publishes a fully
 initialized split before flushing; architectures requiring break-before-make flush
 after invalidation and before publication. Per-CPU mode requires no affected translations on another CPU and
 no migration during the operation; it does not make an SMP shootdown local.
-The same argument applies to `set_shared_4k` and `set_encrypted_4k`.
+The same argument applies to `set_shared` and `set_private`.
 
 Allocation failure while splitting does not change the original mapping.
-`mprotect` refuses an already-finer subtree with `NotLeafEntry`, rather than replacing a
+`set_flags` refuses an already-finer subtree with `NotLeafEntry`, rather than replacing a
 table pointer and stranding its children. The range helper recursively sweeps each covered
 table and retains one page-keyed guard while updating consecutive entries in that table.
 Each phase resolves a child once and processes the complete covered subrange below it
 instead of restarting at the root for every leaf. After locking a table page, it
 rereads each entry and checks whether the visited subrange covers the complete
 leaf. A partial boundary leaf is split after releasing the guard, then the sweep
-retries from that boundary. With no split, protection completes in one
+retries from that boundary. With no split, a flag update completes in one
 hierarchical sweep.
 
-Protection preserves the physical frame, confidentiality tag, PAT attribute,
+Flag updates preserve the physical frame, confidentiality tag, PAT attribute,
 page size, and accessed/dirty history. Other leaf flags are replaced.
-Map and protection requests honor `ArchPagingMeta::supported_flags`;
+Map and flag-update requests honor `ArchPagingMeta::supported_flags`;
 unnamed extension bits are retained. Pure splitting preserves inherited
 flags rather than reapplying the current feature policy.
 Ancestor permissions still restrict effective access; this API does not
@@ -281,16 +282,15 @@ page-state conversion or cache maintenance.
 Mapping initializes new parents but never widens existing ones. The default
 parent flags permit leaf-level access control; callers choosing explicit parent
 flags must allow the permissions their descendants will need. Imported trees
-must already have suitable ancestor permissions. Leaf protection cannot override
+must already have suitable ancestor permissions. Leaf flag updates cannot override
 an ancestor's missing USER/WRITABLE bits or its NX restriction.
 
-For `mprotect` and `mprotect_range`, `flags` must include `PRESENT`;
+For `set_flags` and `set_flags_range`, `flags` must include `PRESENT`;
 clearing it returns `InvalidFlags`. This is a page-table edit API, not a
 complete POSIX `mprotect` implementation: an embedder
 must separately manage `PROT_NONE` policy, VMAs, and mapped data-frame lifetimes.
-`mprotect` requires an address aligned to `target`; `split` accepts
-any address inside the selected mapping. Invalid alignment and invalid ranges
-return `InvalidAddress` and `InvalidRange`, respectively.
+`set_flags` accepts only an aligned typed `Page<PS>`; `split` accepts any
+address inside the selected mapping. Invalid ranges return `InvalidRange`.
 
 Range edits are not transactions: lock-free readers may observe intermediate
 states, and a missing mapping or allocation failure can leave a successful
@@ -305,8 +305,8 @@ use paging::os_contract::{PagingError, PagingAllocator};
 use paging::pagetable::{LockSpec, PageTable};
 use paging::ArchPagingMeta;
 
-fn protect<A, P, L, K>(
-    table: &PageTable<A, P, L, K>,
+fn update_flags<A, P, L, W>(
+    table: &PageTable<A, P, L, W>,
     start: VirtAddr,
     end: VirtAddr,
     flags: A::PTFlags,
@@ -315,9 +315,9 @@ where
     A: ArchPagingMeta,
     P: PagingAllocator,
     L: LevelSpec,
-    K: LockSpec<()>,
+    W: LockSpec<()>,
 {
-    let (result, pending) = table.mprotect_range(start, end, flags, true);
+    let (result, pending) = table.set_flags_range(start, end, flags, true);
     if pending.is_pending() {
         pending.flush_tlb_global_sync();
     }
@@ -388,8 +388,8 @@ assert_eq!(*content.lock(PhysAddr::from(0usize)), 1);
 
 ## Publication and update rules
 
-Allocators need not zero frames or initialize their contents. `PTPage::alloc`
-clears each fresh page with ordinary writes before any entry is read or published.
+`PTPage::alloc` obtains each fresh page through the provider's
+`allocate_zeroed_table_page` contract before any entry is read or published.
 Fresh construction, including its self-mapping checks, uses ordinary memory
 accesses and does not acquire content locks. The same applies to off-tree
 split children and newly allocated root entries copied from a shared tree.
@@ -422,7 +422,7 @@ table. If both boundaries belong to one original huge leaf, the first split can
 make the second boundary directly editable. No global allocator or unbounded
 list of entries is needed.
 
-Same-size protection retains compare-exchange retries to preserve hardware
+Same-size flag updates retain compare-exchange retries to preserve hardware
 accessed/dirty changes. Removal uses atomic exchange;
 single-bit encryption updates use atomic bitwise operations. Changing between two distinct
 set-bit tags uses an invalidation barrier rather than exposing an intermediate
@@ -471,15 +471,14 @@ Split builds its entire requested path off-tree before publication. Allocation
 failure leaves the original leaf intact. Ordinary map may instead leave
 empty intermediate tables on failure; exclusive cleanup can reclaim them.
 
-Unmap removes the leaf observed under its lock. If split wins first, unmap
-removes the finer leaf subsequently found; it does not remove every child of
-the former huge page. Exact-size unmap does nothing on a size mismatch.
+Typed unmap removes the requested-size leaf under its lock, splitting a larger
+leaf if needed and rejecting an already-finer subtree.
 An entry returned by unmap is not ownership of its data frame: flush stale
 translations and exclude outstanding data users before recycling that frame.
 Use `old.leaf_address(target)` to decode the clean physical frame; the raw
 `address()` field can still contain huge-page PAT.
 Range operations do not provide whole-range snapshots or rollback on every
-error. Protection excludes overlapping software writers one table page at a
+error. Flag updates exclude overlapping software writers one table page at a
 time; other range helpers retain their documented per-entry behavior.
 
 These are implementation contracts backed by host regression tests, not
@@ -495,12 +494,12 @@ use paging::os_contract::PagingAllocator;
 use paging::pagetable::{LockSpec, PageTable};
 use paging::ArchPagingMeta;
 
-fn cleanup<A, P, L, K>(table: &PageTable<A, P, L, K>, addr: VirtAddr)
+fn cleanup<A, P, L, W>(table: &PageTable<A, P, L, W>, addr: VirtAddr)
 where
     A: ArchPagingMeta,
     P: PagingAllocator,
     L: LevelSpec,
-    K: LockSpec<()>,
+    W: LockSpec<()>,
 {
     unsafe { table.free_page_table_by_addr(addr) };
 }
@@ -525,8 +524,8 @@ use paging::os_contract::PagingAllocator;
 use paging::pagetable::{LockSpec, UserPageTable};
 use paging::ArchPagingMeta;
 
-fn raw_edit<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, K: LockSpec<()>>(
-    user: &mut UserPageTable<'_, A, P, L, K, 256, 512>,
+fn raw_edit<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, W: LockSpec<()>>(
+    user: &mut UserPageTable<'_, A, P, L, W, 256, 512>,
     addr: VirtAddr,
 ) {
     let _ = user.walk_mut(addr);
@@ -542,8 +541,8 @@ use paging::os_contract::PagingAllocator;
 use paging::pagetable::{LockSpec, UserPageTable};
 use paging::ArchPagingMeta;
 
-fn attach<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, K: LockSpec<()>>(
-    user: &mut UserPageTable<'_, A, P, L, K, 256, 512>,
+fn attach<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, W: LockSpec<()>>(
+    user: &mut UserPageTable<'_, A, P, L, W, 256, 512>,
     child: PhysAddr,
 ) {
     let _ = unsafe { user.populate(0, child) };

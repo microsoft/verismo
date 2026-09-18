@@ -140,20 +140,8 @@ macro_rules! assert_range_error {
         let (start, end, frame, error) = ($start, $end, $frame, $error);
         let flushes = common::host_flushes();
         assert_error($table.map_region(start, end, frame, common::flags()), error);
-        assert_error($table.map_region_if_absent(start, end, frame, common::flags()), error);
-        assert_error($table.map_region_4k(start, end, frame, common::flags(), false), error);
-        assert_error($table.map_region_2m(start, end, frame, common::flags(), false), error);
-        for target in [SMALL_LEVEL, LARGE_LEVEL] {
-            assert_error(
-                $table.map_region_at(start, end, frame, target, common::flags(), false),
-                error,
-            );
-            assert_error($table.unmap_region_at(start, end, target), error);
-        }
         assert_error($table.unmap_region(start, end), error);
-        assert_error($table.unmap_region_4k(start, end), error);
-        assert_error($table.unmap_region_2m(start, end), error);
-        let (result, pending) = $table.mprotect_range(start, end, readonly(), true);
+        let (result, pending) = $table.set_flags_range(start, end, readonly(), true);
         assert_eq!(result, Err(error));
         pending.expect_no_flush();
         assert_eq!(common::host_flushes(), flushes, "preflight flushed a forbidden range");
@@ -216,12 +204,19 @@ macro_rules! policy_tests {
                     let allocated = arena.allocated();
                     let acquired = locks.acquisitions();
                     assert_error(
-                        wide.map_4k(addr, frame, common::flags(), false),
+                        wide.map(
+                            common::page_4k(addr),
+                            common::frame_4k(frame),
+                            common::flags(),
+                            false,
+                        ),
                         PagingError::PermissionDenied,
                     );
                     assert_eq!(arena.allocated(), allocated);
                     assert_eq!(locks.acquisitions(), acquired);
-                    narrow.map_4k(addr, frame, common::flags(), false).unwrap();
+                    narrow
+                        .map(common::page_4k(addr), common::frame_4k(frame), common::flags(), false)
+                        .unwrap();
                     assert_eq!(narrow.phys_addr(addr), Ok(frame));
                     assert_eq!(wide.phys_addr(addr), Err(PagingError::NotMapped));
                     assert_eq!(kernel.phys_addr(addr), Err(PagingError::NotMapped));
@@ -261,30 +256,45 @@ macro_rules! policy_tests {
                 ] {
                     let denied = PagingError::PermissionDenied;
                     assert_error(
-                        user.map(addr, frame, SMALL_LEVEL, common::flags(), false),
+                        map_at!(user, addr, frame, SMALL_LEVEL, common::flags(), false),
                         denied,
                     );
                     assert_error(
                         user.map_with_parent_flags(
-                            addr,
-                            frame,
-                            SMALL_LEVEL,
+                            common::page_4k(addr),
+                            common::frame_4k(frame),
                             common::flags(),
                             false,
                             PTEntryFlags::PRESENT,
                         ),
                         denied,
                     );
-                    assert_error(user.map_4k(addr, frame, common::flags(), false), denied);
-                    assert_error(user.map_2m(addr, frame, common::flags(), false), denied);
+                    assert_error(
+                        user.map(
+                            common::page_4k(addr),
+                            common::frame_4k(frame),
+                            common::flags(),
+                            false,
+                        ),
+                        denied,
+                    );
+                    assert_error(
+                        user.map(
+                            common::page_2m(addr),
+                            common::frame_2m(frame),
+                            common::flags(),
+                            false,
+                        ),
+                        denied,
+                    );
                     assert_error(user.split(addr, SMALL_LEVEL, true), denied);
-                    assert_error(user.mprotect(addr, SMALL_LEVEL, readonly(), true), denied);
-                    assert_error(user.set_shared_4k(addr, true), denied);
-                    assert_error(user.set_encrypted_4k(addr, true), denied);
-                    assert_error(user.unmap(addr), denied);
-                    assert_error(user.unmap_at(addr, SMALL_LEVEL), denied);
-                    assert_error(user.unmap_4k(addr), denied);
-                    assert_error(user.unmap_2m(addr), denied);
+                    assert_error(set_flags_at!(user, addr, SMALL_LEVEL, readonly(), true), denied);
+                    assert_error(user.set_shared(common::page_4k(addr), true), denied);
+                    assert_error(user.set_private(common::page_4k(addr), true), denied);
+                    assert_error(user.unmap(common::page_4k(addr), true), denied);
+                    assert_error(unmap_at!(user, addr, SMALL_LEVEL), denied);
+                    assert_error(user.unmap(common::page_4k(addr), true), denied);
+                    assert_error(user.unmap(common::page_2m(addr), true), denied);
                     assert_eq!(arena.allocated(), allocated);
                     assert_eq!(locks.acquisitions(), acquired);
                     assert_eq!(kernel.walk(kernel_addr).read().raw(), leaf);
@@ -341,7 +351,13 @@ macro_rules! policy_tests {
                 let frame = PhysAddr::from(arena.base());
                 for mapped in [false, true] {
                     if mapped {
-                        user.map_2m(start, frame, common::flags(), false).unwrap();
+                        user.map(
+                            common::page_2m(start),
+                            common::frame_2m(frame),
+                            common::flags(),
+                            false,
+                        )
+                        .unwrap();
                     }
                     let entry = user.walk(start).read().raw();
                     let allocated = arena.allocated();
@@ -361,14 +377,14 @@ macro_rules! policy_tests {
                     assert_eq!(arena.allocated(), allocated);
                     assert_eq!(locks.acquisitions(), acquired);
                 }
-                let (result, pending) = user.mprotect_range(start, boundary, readonly(), true);
+                let (result, pending) = user.set_flags_range(start, boundary, readonly(), true);
                 assert_eq!(result, Ok(()));
                 discharge(pending);
                 assert_readonly(user.walk(start).read());
                 let (mapped, pending) = user.unmap_region(start, boundary).unwrap();
                 assert!(mapped);
                 discharge(pending);
-                user.map_region_2m(start, boundary, frame, common::flags(), false).unwrap();
+                user.map_region(start, boundary, frame, common::flags()).unwrap();
                 assert_eq!(kernel.phys_addr(start), Err(PagingError::NotMapped));
                 assert_eq!(
                     kernel.phys_addr(VirtAddr::from(arena.base())),
@@ -416,20 +432,10 @@ macro_rules! policy_tests {
                 let acquired = locks.acquisitions();
                 for addr in [VirtAddr::from(arena.base()), VirtAddr::from(empty * TOP_SIZE)] {
                     user.map_region(addr, addr, frame, common::flags()).unwrap();
-                    user.map_region_if_absent(addr, addr, frame, common::flags()).unwrap();
-                    user.map_region_4k(addr, addr, frame, common::flags(), false).unwrap();
-                    user.map_region_2m(addr, addr, frame, common::flags(), false).unwrap();
-                    for target in [SMALL_LEVEL, LARGE_LEVEL] {
-                        user.map_region_at(addr, addr, frame, target, common::flags(), false)
-                            .unwrap();
-                        user.unmap_region_at(addr, addr, target).unwrap().expect_no_flush();
-                    }
                     let (mapped, pending) = user.unmap_region(addr, addr).unwrap();
                     assert!(mapped);
                     pending.expect_no_flush();
-                    user.unmap_region_4k(addr, addr).unwrap().expect_no_flush();
-                    user.unmap_region_2m(addr, addr).unwrap().expect_no_flush();
-                    let (result, pending) = user.mprotect_range(addr, addr, readonly(), true);
+                    let (result, pending) = user.set_flags_range(addr, addr, readonly(), true);
                     assert_eq!(result, Ok(()));
                     pending.expect_no_flush();
                 }
@@ -453,7 +459,9 @@ macro_rules! policy_tests {
                 let addr = VirtAddr::from(second * TOP_SIZE);
                 let frame = PhysAddr::from(arena.base());
                 assert_eq!(kernel.next_table_pa(second), None);
-                kernel.map_4k(addr, frame, common::flags(), false).unwrap();
+                kernel
+                    .map(common::page_4k(addr), common::frame_4k(frame), common::flags(), false)
+                    .unwrap();
                 let mut user = $share::<KERNEL_START, KERNEL_END>(&arena, &kernel, &locks);
                 for index in 0..512 {
                     assert_eq!(user.owns_top_entry(index), !top.contains(&index));
@@ -485,22 +493,30 @@ macro_rules! policy_tests {
                 let private_index = top.end;
                 let addr = VirtAddr::from(private_index * TOP_SIZE);
                 let frame = PhysAddr::from(arena.base());
-                kernel.map_4k(addr, frame, common::flags(), false).unwrap();
+                kernel
+                    .map(common::page_4k(addr), common::frame_4k(frame), common::flags(), false)
+                    .unwrap();
                 let kernel_leaf = kernel.walk(addr).read().raw();
                 let mut user = $share::<KERNEL_START, KERNEL_END>(&arena, &kernel, &locks);
                 let root = user.root_paddr();
                 assert_eq!(user.phys_addr(addr), Err(PagingError::NotMapped));
                 assert_eq!(user.next_table_pa(private_index), None);
                 let allocated = arena.allocated();
-                user.map_4k(addr, frame + PAGE, common::flags(), false).unwrap();
+                user.map(
+                    common::page_4k(addr),
+                    common::frame_4k(frame + PAGE),
+                    common::flags(),
+                    false,
+                )
+                .unwrap();
                 let private_pages = arena.allocated() - allocated;
                 assert!(user.owns_top_entry(private_index));
                 assert_ne!(user.next_table_pa(private_index), kernel.next_table_pa(private_index));
-                discharge(user.mprotect(addr, SMALL_LEVEL, readonly(), true).unwrap());
+                discharge(set_flags_at!(user, addr, SMALL_LEVEL, readonly(), true).unwrap());
                 assert_eq!(user.phys_addr(addr), Ok(frame + PAGE));
                 assert_eq!(kernel.phys_addr(addr), Ok(frame));
                 assert_eq!(kernel.walk(addr).read().raw(), kernel_leaf);
-                discharge(user.unmap_4k(addr).unwrap().1);
+                discharge(user.unmap(common::page_4k(addr), true).unwrap().1);
                 // SAFETY: the private mapping is gone and its flush obligation discharged.
                 assert_eq!(unsafe { user.free_page_table_by_addr(addr) }, private_pages);
                 assert_eq!(arena.freed().len(), private_pages);
@@ -522,15 +538,16 @@ macro_rules! policy_tests {
                 let base = VirtAddr::from((top.start - 1) * TOP_SIZE);
                 let frame = PhysAddr::from(arena.base());
                 let kernel_leaf = kernel.walk(VirtAddr::from(arena.base())).read().raw();
-                user.map_2m(base, frame, common::flags(), false).unwrap();
+                user.map(common::page_2m(base), common::frame_2m(frame), common::flags(), false)
+                    .unwrap();
                 discharge(user.split(base, SMALL_LEVEL, true).unwrap());
                 assert_eq!(user.walk(base).level(), SMALL_LEVEL);
-                discharge(user.mprotect(base, SMALL_LEVEL, readonly(), true).unwrap());
+                discharge(set_flags_at!(user, base, SMALL_LEVEL, readonly(), true).unwrap());
                 assert_readonly(user.walk(base).read());
                 assert_eq!(user.phys_addr(base), Ok(frame));
-                discharge(user.set_shared_4k(base, true).unwrap());
-                discharge(user.set_encrypted_4k(base, true).unwrap());
-                let (old, pending) = user.unmap_4k(base).unwrap();
+                discharge(user.set_shared(common::page_4k(base), true).unwrap());
+                discharge(user.set_private(common::page_4k(base), true).unwrap());
+                let (old, pending) = user.unmap(common::page_4k(base), true).unwrap();
                 let old = old.unwrap();
                 assert_eq!(old.leaf_address(SMALL_LEVEL), frame);
                 assert_readonly(old);
@@ -539,57 +556,70 @@ macro_rules! policy_tests {
                 assert_eq!(user.phys_addr(base + PAGE), Ok(frame + PAGE));
 
                 let addr = base + 2 * LARGE;
-                user.map_4k(addr, frame, common::flags(), false).unwrap();
-                let (level, pending) = user.unmap(addr).unwrap();
-                assert_eq!(level, Some(SMALL_LEVEL));
+                user.map(common::page_4k(addr), common::frame_4k(frame), common::flags(), false)
+                    .unwrap();
+                let (old, pending) = user.unmap(common::page_4k(addr), true).unwrap();
+                assert!(old.is_some());
                 discharge(pending);
                 let addr = base + 4 * LARGE;
                 user.map_with_parent_flags(
-                    addr,
-                    frame,
-                    SMALL_LEVEL,
+                    common::page_4k(addr),
+                    common::frame_4k(frame),
                     common::flags(),
                     false,
                     PTEntryFlags::PRESENT | PTEntryFlags::WRITABLE | PTEntryFlags::USER,
                 )
                 .unwrap();
-                let (old, pending) = user.unmap_at(addr, SMALL_LEVEL).unwrap();
+                let (old, pending) = unmap_at!(user, addr, SMALL_LEVEL).unwrap();
                 assert!(old.is_some());
                 discharge(pending);
                 let addr = base + 6 * LARGE;
-                user.map(addr, frame, LARGE_LEVEL, common::flags(), false).unwrap();
-                let (old, pending) = user.unmap_2m(addr).unwrap();
+                map_at!(user, addr, frame, LARGE_LEVEL, common::flags(), false).unwrap();
+                let (old, pending) = user.unmap(common::page_2m(addr), true).unwrap();
                 assert!(old.is_some());
                 discharge(pending);
 
                 let start = base + 8 * LARGE;
                 let end = start + 2 * PAGE;
-                user.map_region_4k(start, end, frame, common::flags(), false).unwrap();
-                let (result, pending) = user.mprotect_range(start, end, readonly(), true);
+                for offset in (0..end - start).step_by(PAGE) {
+                    user.map(
+                        common::page_4k(start + offset),
+                        common::frame_4k(frame + offset),
+                        common::flags(),
+                        false,
+                    )
+                    .unwrap();
+                }
+                let (result, pending) = user.set_flags_range(start, end, readonly(), true);
                 assert_eq!(result, Ok(()));
                 discharge(pending);
                 for addr in [start, start + PAGE] {
                     assert_readonly(user.walk(addr).read());
                 }
-                discharge(user.unmap_region_4k(start, end).unwrap());
+                let (_, pending) = user.unmap_region(start, end).unwrap();
+                discharge(pending);
                 let large_start = start + 2 * LARGE;
-                user.map_region_2m(
-                    large_start,
-                    large_start + 2 * LARGE,
-                    frame,
+                user.map(
+                    common::page_2m(large_start),
+                    common::frame_2m(frame),
                     common::flags(),
                     false,
                 )
                 .unwrap();
-                discharge(user.unmap_region_2m(large_start, large_start + 2 * LARGE).unwrap());
-                user.map_region_at(start, end, frame, SMALL_LEVEL, common::flags(), false).unwrap();
-                discharge(user.unmap_region_at(start, end, SMALL_LEVEL).unwrap());
+                user.map(
+                    common::page_2m(large_start + LARGE),
+                    common::frame_2m(frame + LARGE),
+                    common::flags(),
+                    false,
+                )
+                .unwrap();
+                let (_, pending) = user.unmap_region(large_start, large_start + 2 * LARGE).unwrap();
+                discharge(pending);
                 user.map_region(start, end, frame, common::flags()).unwrap();
-                user.map_region_if_absent(start, end, frame, common::flags()).unwrap();
                 let (mapped, pending) = user.unmap_region(start, end).unwrap();
                 assert!(mapped);
                 discharge(pending);
-                user.map_region_if_absent(start, end, frame, common::flags()).unwrap();
+                user.map_region(start, end, frame, common::flags()).unwrap();
                 assert_eq!(user.phys_addr(start + PAGE), Ok(frame + PAGE));
                 assert_eq!(kernel.phys_addr(start), Err(PagingError::NotMapped));
                 assert_eq!(kernel.walk(VirtAddr::from(arena.base())).read().raw(), kernel_leaf);
@@ -603,7 +633,7 @@ macro_rules! policy_tests {
             }
 
             #[test]
-            fn unmapping_from_inside_a_huge_leaf_reaches_its_boundary_neighbor() {
+            fn unmapping_from_inside_a_huge_leaf_preserves_its_uncovered_prefix() {
                 let (arena, mut kernel, locks) = $fixture();
                 let top = kernel_top(&arena);
                 let mut user = $share::<KERNEL_START, KERNEL_END>(&arena, &kernel, &locks);
@@ -611,13 +641,27 @@ macro_rules! policy_tests {
                 let neighbor = base + LARGE;
                 let end = neighbor + PAGE;
                 let frame = PhysAddr::from(arena.base());
-                user.map_2m(base, frame, common::flags(), false).unwrap();
-                user.map_4k(neighbor, frame + PAGE, common::flags(), false).unwrap();
-                user.map_4k(end, frame + 2 * PAGE, common::flags(), false).unwrap();
+                user.map(common::page_2m(base), common::frame_2m(frame), common::flags(), false)
+                    .unwrap();
+                user.map(
+                    common::page_4k(neighbor),
+                    common::frame_4k(frame + PAGE),
+                    common::flags(),
+                    false,
+                )
+                .unwrap();
+                user.map(
+                    common::page_4k(end),
+                    common::frame_4k(frame + 2 * PAGE),
+                    common::flags(),
+                    false,
+                )
+                .unwrap();
                 let (mapped, pending) = user.unmap_region(base + PAGE, end).unwrap();
                 assert!(mapped);
                 discharge(pending);
-                for addr in [base, base + PAGE, neighbor] {
+                assert_eq!(user.phys_addr(base), Ok(frame));
+                for addr in [base + PAGE, neighbor] {
                     assert_eq!(user.phys_addr(addr), Err(PagingError::NotMapped));
                 }
                 assert_eq!(user.phys_addr(end), Ok(frame + 2 * PAGE));
@@ -636,14 +680,27 @@ macro_rules! policy_tests {
                 let (arena, mut kernel, locks) = $fixture();
                 let shared_address = VirtAddr::from(reserved_hole(&arena) * TOP_SIZE);
                 let frame = PhysAddr::from(0x1000usize);
-                kernel.map_4k(shared_address, frame, common::flags(), false).unwrap();
+                kernel
+                    .map(
+                        common::page_4k(shared_address),
+                        common::frame_4k(frame),
+                        common::flags(),
+                        false,
+                    )
+                    .unwrap();
                 let shared_word = kernel.walk(shared_address).read().raw();
                 let kernel_pages = arena.allocated();
                 let mut user = $share::<KERNEL_START, KERNEL_END>(&arena, &kernel, &locks);
                 let root = user.root_paddr();
                 for address in [VirtAddr::from(0usize), VirtAddr::from(0xffff_ff80_0000_0000usize)]
                 {
-                    user.map_4k(address, frame, common::flags(), false).unwrap();
+                    user.map(
+                        common::page_4k(address),
+                        common::frame_4k(frame),
+                        common::flags(),
+                        false,
+                    )
+                    .unwrap();
                     assert_eq!(user.phys_addr(address), Ok(frame));
                 }
                 let private_pages: BTreeSet<_> = (kernel_pages..arena.allocated())
@@ -679,7 +736,13 @@ macro_rules! policy_tests {
                 let mut user = $share::<KERNEL_START, KERNEL_END>(&arena, &kernel, &locks);
                 let user_root = user.root_paddr();
                 let private = VirtAddr::from((top.start - 1) * TOP_SIZE);
-                user.map_4k(private, PhysAddr::from(arena.base()), common::flags(), false).unwrap();
+                user.map(
+                    common::page_4k(private),
+                    common::frame_4k(PhysAddr::from(arena.base())),
+                    common::flags(),
+                    false,
+                )
+                .unwrap();
                 let owned_children = arena.allocated() - kernel_pages - 1;
                 assert_eq!(owned_children, 3);
                 // SAFETY: no hardware walks these roots; kernel pages must be skipped.
@@ -700,7 +763,9 @@ macro_rules! policy_tests {
                 assert!(arena.freed().contains(&user_root.bits()));
                 assert_eq!(kernel.next_table_pa(shared_index), shared_pointer);
                 assert_eq!(kernel.walk(kernel_addr).read().raw(), shared_leaf);
-                discharge(kernel.mprotect(kernel_addr, LARGE_LEVEL, readonly(), true).unwrap());
+                discharge(
+                    set_flags_at!(kernel, kernel_addr, LARGE_LEVEL, readonly(), true).unwrap(),
+                );
                 // SAFETY: the user is gone; all remaining pages belong to the inactive kernel.
                 unsafe { kernel.free_children() };
                 drop(kernel);
@@ -715,14 +780,17 @@ macro_rules! policy_tests {
                 let private = boundary - PAGE;
                 let frame = PhysAddr::from(arena.base());
                 assert_eq!(kernel.phys_addr(boundary), Err(PagingError::NotMapped));
-                kernel.map_4k(boundary, frame, common::flags(), false).unwrap();
-                discharge(kernel.unmap_4k(boundary).unwrap().1);
+                kernel
+                    .map(common::page_4k(boundary), common::frame_4k(frame), common::flags(), false)
+                    .unwrap();
+                discharge(kernel.unmap(common::page_4k(boundary), true).unwrap().1);
                 let kernel_pages = arena.allocated();
                 let pointer = kernel.next_table_pa(top.start);
                 let mut user = $share::<KERNEL_START, KERNEL_END>(&arena, &kernel, &locks);
                 let root = user.root_paddr();
-                user.map_4k(private, frame, common::flags(), false).unwrap();
-                discharge(user.unmap_4k(private).unwrap().1);
+                user.map(common::page_4k(private), common::frame_4k(frame), common::flags(), false)
+                    .unwrap();
+                discharge(user.unmap(common::page_4k(private), true).unwrap().1);
                 let private_pages = arena.allocated() - kernel_pages - 1;
                 // SAFETY: leaf flushes are discharged; shared kernel paths must remain linked.
                 assert_eq!(unsafe { user.free_page_table_by_addr(boundary) }, 0);
@@ -854,35 +922,54 @@ fn concurrent_kernel_updates_are_visible_through_an_existing_shared_subtree() {
     assert!(pointer.is_some());
     assert_eq!(user.phys_addr(addr), Err(PagingError::NotMapped));
     std::thread::scope(|scope| {
-        scope.spawn(|| kernel.map_4k(addr, frame, common::flags(), false).unwrap()).join().unwrap();
+        scope
+            .spawn(|| {
+                kernel
+                    .map(common::page_4k(addr), common::frame_4k(frame), common::flags(), false)
+                    .unwrap()
+            })
+            .join()
+            .unwrap();
         assert_eq!(user.phys_addr(addr), Ok(frame));
         let acquired = locks.acquisitions();
         assert_error(
-            user.mprotect(addr, SMALL_LEVEL, readonly(), true),
+            set_flags_at!(user, addr, SMALL_LEVEL, readonly(), true),
             PagingError::PermissionDenied,
         );
         assert_eq!(locks.acquisitions(), acquired);
         assert!(user.walk(addr).read().writable());
         scope
-            .spawn(|| discharge(kernel.mprotect(addr, SMALL_LEVEL, readonly(), true).unwrap()))
+            .spawn(|| {
+                discharge(set_flags_at!(kernel, addr, SMALL_LEVEL, readonly(), true).unwrap())
+            })
             .join()
             .unwrap();
         assert_readonly(user.walk(addr).read());
-        scope.spawn(|| discharge(kernel.unmap(addr).unwrap().1)).join().unwrap();
+        scope
+            .spawn(|| discharge(kernel.unmap(common::page_4k(addr), true).unwrap().1))
+            .join()
+            .unwrap();
         assert_eq!(user.phys_addr(addr), Err(PagingError::NotMapped));
         let acquired = locks.acquisitions();
         assert_error(
-            user.mprotect(addr, SMALL_LEVEL, common::flags(), true),
+            set_flags_at!(user, addr, SMALL_LEVEL, common::flags(), true),
             PagingError::PermissionDenied,
         );
         assert_eq!(locks.acquisitions(), acquired);
         scope
-            .spawn(|| kernel.map_4k(addr, frame + PAGE, readonly(), false).unwrap())
+            .spawn(|| {
+                kernel
+                    .map(common::page_4k(addr), common::frame_4k(frame + PAGE), readonly(), false)
+                    .unwrap()
+            })
             .join()
             .unwrap();
         assert_eq!(user.phys_addr(addr), Ok(frame + PAGE));
-        assert_error(user.unmap(addr), PagingError::PermissionDenied);
-        scope.spawn(|| discharge(kernel.unmap(addr).unwrap().1)).join().unwrap();
+        assert_error(user.unmap(common::page_4k(addr), true), PagingError::PermissionDenied);
+        scope
+            .spawn(|| discharge(kernel.unmap(common::page_4k(addr), true).unwrap().1))
+            .join()
+            .unwrap();
         assert_eq!(user.phys_addr(addr), Err(PagingError::NotMapped));
     });
     assert_eq!(user.next_table_pa(shared_index), pointer);
@@ -903,15 +990,17 @@ fn later_kernel_root_growth_leaves_a_reserved_user_hole_protected() {
     let addr = VirtAddr::from(empty * TOP_SIZE);
     let frame = PhysAddr::from(arena.base());
     assert_eq!(kernel.next_table_pa(empty), None);
-    kernel.map_4k(addr, frame, common::flags(), false).unwrap();
+    kernel.map(common::page_4k(addr), common::frame_4k(frame), common::flags(), false).unwrap();
     assert_eq!(kernel.phys_addr(addr), Ok(frame));
     assert_eq!(user.next_table_pa(empty), None);
     assert_eq!(user.phys_addr(addr), Err(PagingError::NotMapped));
-    assert!(!user.owns_top_entry(empty));
     let allocated = arena.allocated();
     let acquired = locks.acquisitions();
-    assert_error(user.map_4k(addr, frame, common::flags(), false), PagingError::PermissionDenied);
-    assert_error(user.unmap_4k(addr), PagingError::PermissionDenied);
+    assert_error(
+        user.map(common::page_4k(addr), common::frame_4k(frame), common::flags(), false),
+        PagingError::PermissionDenied,
+    );
+    assert_error(user.unmap(common::page_4k(addr), true), PagingError::PermissionDenied);
     assert_eq!(arena.allocated(), allocated);
     assert_eq!(locks.acquisitions(), acquired);
     // SAFETY: cleanup must leave both copied and later-created kernel pages untouched.

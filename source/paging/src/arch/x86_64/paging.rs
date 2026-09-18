@@ -96,13 +96,13 @@ impl<P: X86PagingParams> ArchPagingMeta for X86Paging<P> {
     }
 
     #[inline(always)]
-    fn leaf_attribute_mask(level: PageLevel) -> usize {
-        1 << if level.is_leaf() { 7 } else { 12 }
+    fn accessed_dirty_mask() -> usize {
+        (PTEntryFlags::ACCESSED | PTEntryFlags::DIRTY).bits()
     }
 
     #[inline(always)]
-    fn accessed_dirty_mask() -> usize {
-        (PTEntryFlags::ACCESSED | PTEntryFlags::DIRTY).bits()
+    fn leaf_flags_mask() -> Self::PTFlags {
+        PTEntryFlags::WRITABLE | PTEntryFlags::USER | PTEntryFlags::GLOBAL | PTEntryFlags::NX
     }
 
     #[inline(always)]

@@ -19,7 +19,7 @@ fn exclusive_canonical_boundary_does_not_include_the_kernel_half() {
 fn ranges_cannot_hide_protected_indexes_by_wrapping_a_small_root() {
     let root = PageLevel::Level0;
     let size = root.size();
-    let span = ENTRY_COUNT * size;
+    let span = PT_ENTRY_COUNT * size;
     let policy = UserPolicy::<1, 2>::new();
     assert_eq!(
         policy.check_range(root, VirtAddr::from(0usize), VirtAddr::from(span)),
@@ -55,7 +55,7 @@ fn every_reserved_slot_is_immutable_and_non_owned() {
 fn empty_kernel_range_allows_every_slot() {
     let policy = UserPolicy::<256, 256>::new();
     assert_eq!(policy.kernel_top(), 256..256);
-    for index in 0..ENTRY_COUNT {
+    for index in 0..PT_ENTRY_COUNT {
         assert!(policy.owns_top_entry(index));
         assert_eq!(
             policy
@@ -78,5 +78,5 @@ fn reversed_bounds_are_rejected() {
 #[test]
 #[should_panic]
 fn bounds_past_the_root_are_rejected() {
-    let _ = UserPolicy::<0, { ENTRY_COUNT + 1 }>::new();
+    let _ = UserPolicy::<0, { PT_ENTRY_COUNT + 1 }>::new();
 }

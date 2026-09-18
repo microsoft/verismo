@@ -13,7 +13,8 @@ trusted verification specifications.
 - Its `packit` submodule: `98411fde7ddb76061159b4abbf0487a9adba469b`.
 - Rust/Cargo: SVSM's pinned **1.88.0**, target `x86_64-unknown-none`.
 - Verismo: the local `source/paging` crate adjacent to these fixtures, including
-  its `map`, `unmap_at`, `split`, `mprotect`, and `mprotect_range` implementations.
+  its typed `map`, `unmap`, and `set_flags` APIs, plus `split` and
+  `set_flags_range`.
 - `svsm-lock.patch` retains the exact dependency resolution used for validation.
 
 From the Verismo repository:
@@ -97,7 +98,7 @@ No commits or pushes are performed.
   overlap its virtual mapping are rejected, as are splits whose original huge
   leaf overlaps the arena even when the requested subpage does not.
 - `SvsmPaging`'s private **and shared** masks, physical-address mask, and feature
-  mask. Verismo applies that feature mask to requested mapping/protection flags,
+  mask. Verismo applies that feature mask to requested mapping and leaf-update flags,
   including SVSM's early-boot `GLOBAL` suppression; the adapter does not repeat
   that filtering.
 - SVSM's actual `TlbFlushScope`, range merge, and local/global/all-CPU flush
@@ -107,7 +108,7 @@ No commits or pushes are performed.
   rather than becoming silent no-ops.
 
 The public wrapper passes `all_cpus=true`
-to the core split, protection and range-protection operations. There is
+to the core split, flag-update and range flag-update operations. There is
 no CPU-local ownership guarantee for these SVSM mappings, including borrowed
 roots, so the adapter never substitutes a local-only transition flush.
 

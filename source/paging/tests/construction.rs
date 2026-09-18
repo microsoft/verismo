@@ -79,7 +79,10 @@ fn a_table_stays_valid_as_it_grows() {
     let frame = PhysAddr::from(arena.base());
     for page in 0..64usize {
         let vaddr = VirtAddr::from(0x4000_0000 + page * 4096);
-        assert_eq!(table.map_4k(vaddr, frame, flags(), false), Ok(()));
+        assert_eq!(
+            table.map(common::page_4k(vaddr), common::frame_4k(frame), flags(), false),
+            Ok(())
+        );
     }
     assert_eq!(table.validate_page_table(), Ok(()));
     std::mem::forget(table);
@@ -124,8 +127,8 @@ fn a_tree_missing_one_of_its_pages_is_refused() {
     #[allow(unused_mut)]
     let (arena, mut table) = table();
     let child = root_children(&table)[0];
-    let (level, flush) = table.unmap(VirtAddr::from(child.bits())).unwrap();
-    assert!(level.is_some());
+    let (entry, flush) = table.unmap(common::page_4k(VirtAddr::from(child.bits())), true).unwrap();
+    assert!(entry.is_some());
     // SAFETY: nothing runs on these tables but this test.
     unsafe { flush.ignore() };
 
@@ -173,7 +176,9 @@ fn populate_reports_what_was_already_there() {
     assert_eq!(table.next_table_pa(idx), Some(child));
     // SAFETY: no new installation occurs for the already attached subtree.
     assert_eq!(unsafe { table.populate(idx, child) }, Ok(false));
-    table.map_4k(addr, PhysAddr::from(arena.base()), flags(), false).unwrap();
+    table
+        .map(common::page_4k(addr), common::frame_4k(PhysAddr::from(arena.base())), flags(), false)
+        .unwrap();
     assert_eq!(table.phys_addr(addr), Ok(PhysAddr::from(arena.base())));
     // SAFETY: every subtree belongs to this inactive table.
     unsafe { table.free_children() };

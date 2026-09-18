@@ -18,13 +18,7 @@ impl PageLevel {
     /// How many levels lie below this one. The leaf level is 0.
     #[inline(always)]
     pub const fn depth(&self) -> usize {
-        match self {
-            PageLevel::Level0 => 0,
-            PageLevel::Level1 => 1,
-            PageLevel::Level2 => 2,
-            PageLevel::Level3 => 3,
-            PageLevel::Level4 => 4,
-        }
+        *self as usize
     }
 
     /// The level one step down, or `None` at the leaf. Refusing to descend past

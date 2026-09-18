@@ -83,11 +83,11 @@ pub const ENTRY_WIDTH: usize = 3;
 pub const ENTRY_WIDTH: usize = 2;
 
 /// How many entries a table page holds: one page, filled with entries.
-pub const ENTRY_COUNT: usize = PAGE_SIZE >> ENTRY_WIDTH;
+pub const PT_ENTRY_COUNT: usize = PAGE_SIZE >> ENTRY_WIDTH;
 
 /// How many address bits one paging level indexes. Derived from the page size
 /// rather than asked of each architecture, which could then disagree with
-/// [`ENTRY_COUNT`].
+/// [`PT_ENTRY_COUNT`].
 pub const PAGE_TABLE_INDEX_WIDTH: usize = PAGE_OFFSET_WIDTH - ENTRY_WIDTH;
 
 /// The low bits of a table index. Written by shifting in ones because `-` binds
@@ -105,6 +105,18 @@ pub const fn shift_at(level: PageLevel) -> usize {
 #[inline(always)]
 pub const fn level_size(level: PageLevel) -> usize {
     1usize << shift_at(level)
+}
+
+pub(crate) fn page_level_for_size<S: PageSize>() -> Option<PageLevel> {
+    if S::SIZE == level_size(PageLevel::Level0) {
+        Some(PageLevel::Level0)
+    } else if S::SIZE == level_size(PageLevel::Level1) {
+        Some(PageLevel::Level1)
+    } else if S::SIZE == level_size(PageLevel::Level2) {
+        Some(PageLevel::Level2)
+    } else {
+        None
+    }
 }
 
 #[inline(always)]

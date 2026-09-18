@@ -7,7 +7,7 @@ use crate::structs::arch_contract::ArchPagingMeta;
 use crate::structs::entry::{PTEntry, PTEntryRef};
 use crate::structs::level::PageLevel;
 use crate::structs::os_contract::PagingAllocator;
-use crate::structs::sizes::entry_index;
+use crate::structs::sizes::{entry_index, PT_ENTRY_COUNT};
 
 /// A non-owning page pointer; its lifetime pins memory, not entry contents.
 pub(crate) struct PTPagePointer<'tree, A: ArchPagingMeta, P: PagingAllocator> {
@@ -69,65 +69,50 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
         P::vaddr_to_paddr(VirtAddr::from(self.page.as_ptr() as usize))
     }
 
-    /// Spells out the five architectural depths so optimized callers retain a
-    /// straight-line walk instead of a runtime level loop.
     #[inline(always)]
     pub(crate) fn walk(&self, vaddr: VirtAddr) -> WalkResult<'tree, A, P> {
         let page = Self { page: self.page, level: self.level, marker: PhantomData };
-        let mut page_paddr = None;
-
-        macro_rules! descend {
-            ($page:expr, $level:expr, $child:expr) => {
-                match $page.step_at(vaddr, $level, $child) {
-                    Ok((child, child_paddr)) => {
-                        page_paddr = Some(child_paddr);
-                        child
-                    }
-                    Err(mut result) => {
-                        result.page_paddr = page_paddr;
-                        return result;
-                    }
-                }
-            };
-        }
-
         match page.level {
-            PageLevel::Level0 => page.finish_at(vaddr, PageLevel::Level0, page_paddr),
-            PageLevel::Level1 => descend!(page, PageLevel::Level1, PageLevel::Level0).finish_at(
-                vaddr,
-                PageLevel::Level0,
-                page_paddr,
-            ),
-            PageLevel::Level2 => descend!(
-                descend!(page, PageLevel::Level2, PageLevel::Level1),
-                PageLevel::Level1,
-                PageLevel::Level0
-            )
-            .finish_at(vaddr, PageLevel::Level0, page_paddr),
-            PageLevel::Level3 => descend!(
-                descend!(
-                    descend!(page, PageLevel::Level3, PageLevel::Level2),
-                    PageLevel::Level2,
-                    PageLevel::Level1
-                ),
-                PageLevel::Level1,
-                PageLevel::Level0
-            )
-            .finish_at(vaddr, PageLevel::Level0, page_paddr),
-            PageLevel::Level4 => descend!(
-                descend!(
-                    descend!(
-                        descend!(page, PageLevel::Level4, PageLevel::Level3),
-                        PageLevel::Level3,
-                        PageLevel::Level2
-                    ),
-                    PageLevel::Level2,
-                    PageLevel::Level1
-                ),
-                PageLevel::Level1,
-                PageLevel::Level0
-            )
-            .finish_at(vaddr, PageLevel::Level0, page_paddr),
+            PageLevel::Level0 => Self::walk_level::<0>(page, vaddr, None),
+            PageLevel::Level1 => Self::walk_level::<1>(page, vaddr, None),
+            PageLevel::Level2 => Self::walk_level::<2>(page, vaddr, None),
+            PageLevel::Level3 => Self::walk_level::<3>(page, vaddr, None),
+            PageLevel::Level4 => Self::walk_level::<4>(page, vaddr, None),
+        }
+    }
+
+    #[inline(always)]
+    fn walk_child<const LEVEL: usize>(
+        page: Self,
+        vaddr: VirtAddr,
+        page_paddr: PhysAddr,
+    ) -> WalkResult<'tree, A, P> {
+        match LEVEL {
+            1 => Self::walk_level::<0>(page, vaddr, Some(page_paddr)),
+            2 => Self::walk_level::<1>(page, vaddr, Some(page_paddr)),
+            3 => Self::walk_level::<2>(page, vaddr, Some(page_paddr)),
+            4 => Self::walk_level::<3>(page, vaddr, Some(page_paddr)),
+            _ => unreachable!("leaf page has no child"),
+        }
+    }
+
+    #[inline(always)]
+    fn walk_level<const LEVEL: usize>(
+        page: Self,
+        vaddr: VirtAddr,
+        page_paddr: Option<PhysAddr>,
+    ) -> WalkResult<'tree, A, P> {
+        let level = PageLevel::at::<LEVEL>();
+        if LEVEL == 0 {
+            return page.finish_at(vaddr, level, page_paddr);
+        }
+        let child_level = level.child().unwrap();
+        match page.step_at(vaddr, level, child_level) {
+            Ok((child, child_paddr)) => Self::walk_child::<LEVEL>(child, vaddr, child_paddr),
+            Err(mut result) => {
+                result.page_paddr = page_paddr;
+                result
+            }
         }
     }
 
@@ -193,7 +178,7 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
 
     #[inline(always)]
     pub(crate) fn entry(&self, index: usize) -> PTEntryRef<'tree, A> {
-        assert!(index < PTPage::<A, P>::COUNT);
+        assert!(index < PT_ENTRY_COUNT);
         // SAFETY: construction pins the page, and the checked slot remains within it.
         unsafe { PTEntryRef::from_raw(PTPage::entry_ptr_mut(self.page.as_ptr(), index)) }
     }
@@ -212,6 +197,6 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
     }
 
     pub(super) fn entries_satisfy(&self, empty_entry: &impl Fn(PTEntry<A>) -> bool) -> bool {
-        (0..PTPage::<A, P>::COUNT).all(|index| empty_entry(self.load(index)))
+        (0..PT_ENTRY_COUNT).all(|index| empty_entry(self.load(index)))
     }
 }

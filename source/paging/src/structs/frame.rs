@@ -23,6 +23,7 @@
 use core::marker::PhantomData;
 
 use builtin_macros::*;
+#[cfg(verus_only)]
 use vstd::prelude::*;
 
 use crate::structs::address::{Address, PhysAddr};
@@ -64,23 +65,6 @@ impl<S: PageSize> PhysFrame<S> {
         Ok(PhysFrame { start_address: address, size: PhantomData })
     }
 
-    /// The frame starting at `start_address`.
-    ///
-    /// Unlike the original this is safe: the alignment the `unsafe` version
-    /// asks the caller to guarantee is stated as a precondition instead, so it
-    /// is checked rather than trusted.
-    #[inline]
-    #[verus_spec(ret =>
-        requires
-            is_aligned_spec(start_address@, S::SIZE),
-        ensures
-            ret@ == start_address@,
-    )]
-    pub fn from_start_address_unchecked(start_address: PhysAddr) -> Self {
-        proof! { S::lemma_size_wf(); }
-        PhysFrame { start_address, size: PhantomData }
-    }
-
     /// The frame with the given frame number, or an error if numbering that
     /// far overflows a physical address.
     #[inline]
@@ -98,7 +82,7 @@ impl<S: PageSize> PhysFrame<S> {
                     lemma_mul_mod_zero(pfn as int, S::SIZE as int);
                 }
                 Ok(PhysFrame { start_address: PhysAddr::from(addr), size: PhantomData })
-            },
+            }
             None => Err(PfnNotValid(pfn)),
         }
     }

@@ -26,10 +26,8 @@ fn staged_commit_preserves_late_accessed_dirty_bits() {
     // SAFETY: `word` has the entry's transparent layout and is accessed atomically.
     let mut mapping =
         unsafe { MappingMut::new(Some(VirtAddr::from(0x8000usize)), PageLevel::Level0, entry) };
-    mapping
-        .staged()
-        .entry
-        .set(PhysAddr::from(0x4000usize), PTEntryFlags::PRESENT | PTEntryFlags::NX);
+    *mapping.staged().entry =
+        PTEntry::new(PhysAddr::from(0x4000usize), PTEntryFlags::PRESENT | PTEntryFlags::NX);
 
     let hardware_ad = (PTEntryFlags::ACCESSED | PTEntryFlags::DIRTY).bits();
     word.fetch_or(hardware_ad, Ordering::AcqRel);
@@ -58,7 +56,6 @@ fn staged_commit_rejects_present_leaf_table_transition() {
     // SAFETY: `word` has the entry's transparent layout and is accessed atomically.
     let mut mapping =
         unsafe { MappingMut::new(Some(VirtAddr::from(0x20_0000usize)), PageLevel::Level1, entry) };
-    *mapping.staged().entry =
-        PTEntry::new_table(PhysAddr::from(0x40_0000usize), PTEntryFlags::PRESENT);
+    *mapping.staged().entry = PTEntry::new(PhysAddr::from(0x40_0000usize), PTEntryFlags::PRESENT);
     let _ = mapping.commit();
 }

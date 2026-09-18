@@ -108,11 +108,6 @@ pub trait ArchPagingMeta: 'static + Copy {
         0
     }
 
-    /// Leaf attributes that are not permissions, such as x86 PAT.
-    fn leaf_attribute_mask(_level: PageLevel) -> usize {
-        0
-    }
-
     /// Hardware-maintained history retained when changing permissions.
     /// Without `use_ad`, all these bits are preset on every present entry;
     /// include every hardware A/D bit, without address or permission bits.
@@ -121,11 +116,15 @@ pub trait ArchPagingMeta: 'static + Copy {
         0
     }
 
+    /// Leaf access-control flags replaced by a flag update. Structural,
+    /// hardware-maintained, memory-type, and software-defined bits are excluded.
+    fn leaf_flags_mask() -> Self::PTFlags;
+
     /// Whether replacing this valid descriptor with another valid descriptor
     /// requires invalidation and completed TLB maintenance before publication.
     fn requires_break_before_make(old: usize, new: usize, level: PageLevel) -> bool;
 
-    /// Declared flags allowed in new mapping/protection requests, for example
+    /// Declared flags allowed in new mapping and leaf-flag update requests, for example
     /// excluding `GLOBAL` before CR4.PGE is enabled. Structural bits and
     /// preserved attributes remain governed by the operation's page level.
     fn supported_flags() -> Self::PTFlags {

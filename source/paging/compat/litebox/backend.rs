@@ -5,9 +5,12 @@ use litebox::mm::linux::{PageFaultError, PageRange, VmFlags, VmemPageFaultHandle
 use litebox::platform::{page_mgmt, RawConstPointer as _};
 use paging::{
     address::{Address, PhysAddr as PagingPhysAddr, VirtAddr as PagingVirtAddr},
+    frame::PhysFrame as PagingPhysFrame,
     level::{Lvl, PageLevel},
     os_contract::{PagingAllocator, PagingError},
+    page::Page as PagingPage,
     pagetable::{KernelPageTable as ConcurrentPageTable, LockSpec},
+    sizes::Size4KiB as PagingSize4KiB,
     tlb::MayNeedFlush,
     FlushScope, PTEntryFlags, X86Paging, X86PagingParams, X86TlbFlushTok,
 };
@@ -231,8 +234,12 @@ impl<M: MemoryProvider + 'static, const ALIGN: usize> X64PageTable<'_, M, ALIGN>
                 Err(PagingError::NotMapped) => continue,
                 Err(error) => panic!("cannot split mapping for unmap: {error:?}"),
             }
-            let (entry, flush) =
-                inner.unmap_4k(address).expect("kernel page-table policy permits unmapping");
+            let (entry, flush) = inner
+                .unmap(
+                    PagingPage::<PagingSize4KiB>::from_start_address(address).unwrap(),
+                    FLUSH_ALL_CPUS,
+                )
+                .expect("kernel page-table policy permits unmapping");
             flush_local::<M>(flush);
             if let Some(entry) = entry {
                 if dealloc_frames {
@@ -287,9 +294,11 @@ impl<M: MemoryProvider + 'static, const ALIGN: usize> X64PageTable<'_, M, ALIGN>
             let flags = paging_flags(host_flags(entry));
             inner
                 .map_with_parent_flags(
-                    new.into(),
-                    entry.leaf_address(PageLevel::Level0),
-                    PageLevel::Level0,
+                    PagingPage::<PagingSize4KiB>::from_start_address(new.into()).unwrap(),
+                    PagingPhysFrame::<PagingSize4KiB>::from_start_address(
+                        entry.leaf_address(PageLevel::Level0),
+                    )
+                    .unwrap(),
                     flags,
                     entry.paddr_field() & M::PRIVATE_PTE_MASK as usize == 0,
                     parent_flags(),
@@ -302,8 +311,12 @@ impl<M: MemoryProvider + 'static, const ALIGN: usize> X64PageTable<'_, M, ALIGN>
                     error => panic!("invalid destination mapping: {error:?}"),
                 })?;
             flush_local::<M>(Flush::<M>::new(new.into(), PageLevel::Level0));
-            let (removed, flush) =
-                inner.unmap_4k(old_address).expect("kernel page-table policy permits unmapping");
+            let (removed, flush) = inner
+                .unmap(
+                    PagingPage::<PagingSize4KiB>::from_start_address(old_address).unwrap(),
+                    FLUSH_ALL_CPUS,
+                )
+                .expect("kernel page-table policy permits unmapping");
             assert!(removed.is_some());
             flush_local::<M>(flush);
         }
@@ -336,7 +349,11 @@ impl<M: MemoryProvider + 'static, const ALIGN: usize> X64PageTable<'_, M, ALIGN>
             };
             let flags = paging_flags((old_flags & !Self::MPROTECT_PTE_MASK) | desired);
             let flush = inner
-                .mprotect(address, PageLevel::Level0, flags, FLUSH_ALL_CPUS)
+                .set_flags(
+                    PagingPage::<PagingSize4KiB>::from_start_address(address).unwrap(),
+                    flags,
+                    FLUSH_ALL_CPUS,
+                )
                 .unwrap_or_else(|error| panic!("cannot update page permissions: {error:?}"));
             flush_local::<M>(flush);
         }
@@ -423,9 +440,8 @@ impl<M: MemoryProvider + 'static, const ALIGN: usize> PageTableImpl<ALIGN>
         let frame =
             Platform::<M>::allocate_table_page().map_err(|_| PageFaultError::AllocationFailed)?;
         match inner.map_with_parent_flags(
-            address,
-            frame,
-            PageLevel::Level0,
+            PagingPage::<PagingSize4KiB>::from_start_address(address).unwrap(),
+            PagingPhysFrame::<PagingSize4KiB>::from_start_address(frame).unwrap(),
             paging_flags(flags | PageTableFlags::PRESENT),
             false,
             parent_flags(),

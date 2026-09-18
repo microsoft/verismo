@@ -7,7 +7,7 @@ use crate::structs::address::{Address, VirtAddr, LOW_CANONICAL_END};
 use crate::structs::level::PageLevel;
 use crate::structs::os_contract::PagingError;
 use crate::structs::sizes::entry_index;
-use crate::structs::sizes::ENTRY_COUNT;
+use crate::structs::sizes::PT_ENTRY_COUNT;
 
 mod sealed {
     /// Prevents downstream crates from defining paging ownership policies.
@@ -38,7 +38,7 @@ pub struct UserPolicy<'kernel, const START: usize, const END: usize> {
 
 impl<const START: usize, const END: usize> UserPolicy<'_, START, END> {
     pub(crate) fn new() -> Self {
-        assert!(START <= END && END <= ENTRY_COUNT);
+        assert!(START <= END && END <= PT_ENTRY_COUNT);
         Self { kernel: PhantomData }
     }
 
@@ -53,13 +53,13 @@ impl<const START: usize, const END: usize> UserPolicy<'_, START, END> {
     fn check_segment(&self, root: PageLevel, first: usize, last: usize) -> Result<(), PagingError> {
         let first_page = first / root.size();
         let last_page = last / root.size();
-        let first_index = first_page % ENTRY_COUNT;
-        let last_index = last_page % ENTRY_COUNT;
-        let denied = last_page - first_page >= ENTRY_COUNT
+        let first_index = first_page % PT_ENTRY_COUNT;
+        let last_index = last_page % PT_ENTRY_COUNT;
+        let denied = last_page - first_page >= PT_ENTRY_COUNT
             || if first_index <= last_index {
                 self.overlaps(first_index, last_index + 1)
             } else {
-                self.overlaps(first_index, ENTRY_COUNT) || self.overlaps(0, last_index + 1)
+                self.overlaps(first_index, PT_ENTRY_COUNT) || self.overlaps(0, last_index + 1)
             };
         if denied {
             Err(PagingError::PermissionDenied)
@@ -91,7 +91,7 @@ impl PagingOwnershipPolicy for KernelPolicy {
     }
 
     fn owns_top_entry(&self, index: usize) -> bool {
-        assert!(index < ENTRY_COUNT);
+        assert!(index < PT_ENTRY_COUNT);
         true
     }
 }
@@ -127,7 +127,7 @@ impl<const START: usize, const END: usize> PagingOwnershipPolicy for UserPolicy<
     }
 
     fn owns_top_entry(&self, index: usize) -> bool {
-        assert!(index < ENTRY_COUNT);
+        assert!(index < PT_ENTRY_COUNT);
         !self.kernel_top().contains(&index)
     }
 }

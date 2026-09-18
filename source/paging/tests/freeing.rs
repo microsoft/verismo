@@ -14,8 +14,8 @@ use paging::X86Paging;
 
 /// Unmaps `vaddr` and discharges the flush, which the freeing needs.
 fn unmap(table: &mut Table, vaddr: VirtAddr) {
-    let (level, flush) = table.unmap(vaddr).unwrap();
-    assert_eq!(level, Some(PageLevel::Level0));
+    let (entry, flush) = table.unmap(common::page_4k(vaddr), true).unwrap();
+    assert!(entry.is_some());
     // SAFETY: nothing runs on these tables but this test.
     unsafe { flush.ignore() };
 }
@@ -38,8 +38,8 @@ fn a_table_a_sibling_still_needs_is_kept() {
     let first = VirtAddr::from(0x4000_0000usize);
     let second = first + 4096usize;
 
-    assert_eq!(table.map_4k(first, frame, flags(), false), Ok(()));
-    assert_eq!(table.map_4k(second, frame, flags(), false), Ok(()));
+    assert_eq!(table.map(common::page_4k(first), common::frame_4k(frame), flags(), false), Ok(()));
+    assert_eq!(table.map(common::page_4k(second), common::frame_4k(frame), flags(), false), Ok(()));
     unmap(&mut table, first);
 
     // SAFETY: `first` is unmapped and its flush discharged.
@@ -56,7 +56,7 @@ fn the_last_mapping_takes_its_tables_with_it() {
     let vaddr = VirtAddr::from(0x4000_0000usize);
 
     let before = arena.allocated();
-    assert_eq!(table.map_4k(vaddr, frame, flags(), false), Ok(()));
+    assert_eq!(table.map(common::page_4k(vaddr), common::frame_4k(frame), flags(), false), Ok(()));
     let built = arena.allocated() - before;
     assert_eq!(built, 3, "a four-level tree needs three tables below the root");
 
@@ -68,7 +68,7 @@ fn the_last_mapping_takes_its_tables_with_it() {
     // What is left still describes itself, and still works.
     assert_eq!(table.validate_page_table(), Ok(()));
     assert_eq!(table.phys_addr(VirtAddr::from(arena.base())), Ok(frame));
-    assert_eq!(table.map_4k(vaddr, frame, flags(), false), Ok(()));
+    assert_eq!(table.map(common::page_4k(vaddr), common::frame_4k(frame), flags(), false), Ok(()));
     assert_eq!(table.phys_addr(vaddr), Ok(frame));
     std::mem::forget(table);
 }
@@ -78,7 +78,7 @@ fn freeing_a_path_leaves_the_arena_alone() {
     let (arena, mut table) = table();
     let frame = PhysAddr::from(arena.base());
     let vaddr = VirtAddr::from(0x4000_0000usize);
-    assert_eq!(table.map_4k(vaddr, frame, flags(), false), Ok(()));
+    assert_eq!(table.map(common::page_4k(vaddr), common::frame_4k(frame), flags(), false), Ok(()));
     unmap(&mut table, vaddr);
 
     // SAFETY: `vaddr` is unmapped and its flush discharged.
@@ -96,7 +96,7 @@ fn path_reclamation_keeps_the_root() {
     let root = table.root_paddr();
     let frame = PhysAddr::from(arena.base());
     let vaddr = VirtAddr::from(0x4000_0000usize);
-    assert_eq!(table.map_4k(vaddr, frame, flags(), false), Ok(()));
+    assert_eq!(table.map(common::page_4k(vaddr), common::frame_4k(frame), flags(), false), Ok(()));
     unmap(&mut table, vaddr);
 
     // SAFETY: `vaddr` is unmapped and its flush discharged.
@@ -113,7 +113,17 @@ fn a_range_gives_back_the_tables_that_held_it() {
     let start = VirtAddr::from(0x4000_0000usize);
     let end = start + (2 * 1024 * 1024usize);
 
-    assert_eq!(table.map_region_4k(start, end, frame, flags(), false), Ok(()));
+    for offset in (0..end - start).step_by(4096) {
+        assert_eq!(
+            table.map(
+                common::page_4k(start + offset),
+                common::frame_4k(frame + offset),
+                flags(),
+                false,
+            ),
+            Ok(())
+        );
+    }
     let (all_mapped, flush) = table.unmap_region(start, end).unwrap();
     assert!(all_mapped);
     // SAFETY: nothing runs on these tables but this test.
@@ -135,7 +145,17 @@ fn a_range_still_mapped_keeps_its_tables() {
     let start = VirtAddr::from(0x4000_0000usize);
     let end = start + 8192usize;
 
-    assert_eq!(table.map_region_4k(start, end, frame, flags(), false), Ok(()));
+    for offset in (0..end - start).step_by(4096) {
+        assert_eq!(
+            table.map(
+                common::page_4k(start + offset),
+                common::frame_4k(frame + offset),
+                flags(),
+                false,
+            ),
+            Ok(())
+        );
+    }
     arena.clear_freed();
     // SAFETY: nothing else walks these tables, and what is still mapped keeps
     // its tables by the sweep's own rule.
@@ -153,7 +173,7 @@ fn range_cleanup_reaches_sparse_paths_across_one_gib_boundaries() {
     let frame = PhysAddr::from(arena.base());
     let before = arena.allocated();
     for addr in [first, second] {
-        table.map_4k(addr, frame, flags(), false).unwrap();
+        table.map(common::page_4k(addr), common::frame_4k(frame), flags(), false).unwrap();
         unmap(&mut table, addr);
     }
     let built = arena.allocated() - before;
@@ -169,7 +189,14 @@ fn range_cleanup_keeps_its_exclusive_end_and_ignores_empty_ranges() {
     let first = VirtAddr::from(0x4000_0000usize);
     let second = first + PageLevel::Level1.size();
     for addr in [first, second] {
-        table.map_4k(addr, PhysAddr::from(arena.base()), flags(), false).unwrap();
+        table
+            .map(
+                common::page_4k(addr),
+                common::frame_4k(PhysAddr::from(arena.base())),
+                flags(),
+                false,
+            )
+            .unwrap();
         unmap(&mut table, addr);
     }
     // SAFETY: these inactive paths are unaliased and all leaf flushes discharged.
@@ -200,9 +227,16 @@ fn five_level_range_cleanup_uses_high_canonical_offsets_without_wrapping() {
     let second = first + 2 * PageLevel::Level2.size();
     let before = arena.allocated();
     for addr in [first, second] {
-        table.map_4k(addr, PhysAddr::from(arena.base()), flags(), false).unwrap();
-        let (level, pending) = table.unmap(addr).unwrap();
-        assert_eq!(level, Some(PageLevel::Level0));
+        table
+            .map(
+                common::page_4k(addr),
+                common::frame_4k(PhysAddr::from(arena.base())),
+                flags(),
+                false,
+            )
+            .unwrap();
+        let (entry, pending) = table.unmap(common::page_4k(addr), true).unwrap();
+        assert!(entry.is_some());
         // SAFETY: these host-backed tables are never installed.
         unsafe { pending.ignore() };
     }
@@ -308,10 +342,24 @@ macro_rules! owned_drop_tests {
                 let small_frame = PhysAddr::from(0x1000usize);
                 let huge_frame = PhysAddr::from(0x8000_0000usize);
                 for address in [0x4000_0000usize, 0xffff_8000_4000_0000] {
-                    table.map_4k(VirtAddr::from(address), small_frame, flags(), false).unwrap();
+                    table
+                        .map(
+                            common::page_4k(VirtAddr::from(address)),
+                            common::frame_4k(small_frame),
+                            flags(),
+                            false,
+                        )
+                        .unwrap();
                     assert_eq!(table.phys_addr(VirtAddr::from(address)), Ok(small_frame));
                 }
-                table.map_2m(VirtAddr::from(0x8000_0000usize), huge_frame, flags(), false).unwrap();
+                table
+                    .map(
+                        common::page_2m(VirtAddr::from(0x8000_0000usize)),
+                        common::frame_2m(huge_frame),
+                        flags(),
+                        false,
+                    )
+                    .unwrap();
                 assert!(arena.allocated() > <$level>::DEPTH + 1);
                 assert!(arena.freed().is_empty());
                 drop(table);
@@ -327,7 +375,9 @@ macro_rules! owned_drop_tests {
                 let (arena, mut table) = $fixture::<$level>();
                 let address = VirtAddr::from(0xffff_8000_4000_0000usize);
                 let frame = PhysAddr::from(0x1000usize);
-                table.map_4k(address, frame, flags(), false).unwrap();
+                table
+                    .map(common::page_4k(address), common::frame_4k(frame), flags(), false)
+                    .unwrap();
                 let root = table.root_paddr();
                 assert_eq!(Arc::strong_count(&arena), 1);
                 let (content, leaked_root) = $parts(table);
@@ -349,9 +399,9 @@ macro_rules! owned_drop_tests {
             fn explicit_child_teardown_then_drop_never_frees_a_table_twice() {
                 let (arena, mut table) = $fixture::<$level>();
                 table
-                    .map_4k(
-                        VirtAddr::from(0x4000_0000usize),
-                        PhysAddr::from(0x1000usize),
+                    .map(
+                        common::page_4k(VirtAddr::from(0x4000_0000usize)),
+                        common::frame_4k(PhysAddr::from(0x1000usize)),
                         flags(),
                         false,
                     )

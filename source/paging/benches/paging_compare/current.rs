@@ -4,9 +4,12 @@ use std::sync::atomic::{AtomicPtr, Ordering};
 use std::sync::Arc;
 
 use paging::address::{Address, PhysAddr, VirtAddr};
+use paging::frame::PhysFrame;
 use paging::level::{Lvl, PageLevel};
 use paging::os_contract::{DirectMappedAllocator, PagingError};
+use paging::page::Page;
 use paging::pagetable::{KernelPageTable, LockSpec};
+use paging::sizes::{Size2MiB, Size4KiB};
 use paging::{FlushScope, PTEntryFlags, X86Paging, X86PagingParams};
 
 use super::common::{Arena, ControllerMemory, MemorySnapshot, Observation, PagingAdapter};
@@ -158,9 +161,13 @@ impl PagingAdapter for CurrentAdapter {
 
     fn map_4k(&self, virtual_address: u64, physical_address: u64) {
         self.table
-            .map_4k(
-                VirtAddr::from(virtual_address as usize),
-                PhysAddr::from(physical_address as usize),
+            .map(
+                Page::<Size4KiB>::from_start_address(VirtAddr::from(virtual_address as usize))
+                    .unwrap(),
+                PhysFrame::<Size4KiB>::from_start_address(PhysAddr::from(
+                    physical_address as usize,
+                ))
+                .unwrap(),
                 flags(true),
                 false,
             )
@@ -169,19 +176,50 @@ impl PagingAdapter for CurrentAdapter {
 
     fn map_2m(&self, virtual_address: u64, physical_address: u64) {
         self.table
-            .map_2m(
-                VirtAddr::from(virtual_address as usize),
-                PhysAddr::from(physical_address as usize),
+            .map(
+                Page::<Size2MiB>::from_start_address(VirtAddr::from(virtual_address as usize))
+                    .unwrap(),
+                PhysFrame::<Size2MiB>::from_start_address(PhysAddr::from(
+                    physical_address as usize,
+                ))
+                .unwrap(),
                 flags(true),
                 false,
             )
             .expect("current map_2m");
     }
 
+    fn map_range(&self, start: u64, end: u64, physical_start: u64) {
+        self.table
+            .map_region(
+                VirtAddr::from(start as usize),
+                VirtAddr::from(end as usize),
+                PhysAddr::from(physical_start as usize),
+                flags(true),
+            )
+            .expect("current map_region");
+    }
+
     #[inline(always)]
     fn unmap_4k(&self, virtual_address: u64) {
-        let (_, flush) =
-            self.table.unmap_4k(VirtAddr::from(virtual_address as usize)).expect("current unmap");
+        let (_, flush) = self
+            .table
+            .unmap(
+                Page::<Size4KiB>::from_start_address(VirtAddr::from(virtual_address as usize))
+                    .unwrap(),
+                true,
+            )
+            .expect("current unmap");
+        // SAFETY: benchmark tables are never installed in hardware page-table roots.
+        unsafe { flush.ignore() };
+    }
+
+    fn unmap_range(&self, start: u64, end: u64) {
+        let (all_mapped, flush) = self
+            .table
+            .unmap_region(VirtAddr::from(start as usize), VirtAddr::from(end as usize))
+            .expect("current unmap_region");
+        assert!(all_mapped);
         // SAFETY: benchmark tables are never installed in hardware page-table roots.
         unsafe { flush.ignore() };
     }
@@ -215,13 +253,13 @@ impl PagingAdapter for CurrentAdapter {
     fn protect_4k(&self, virtual_address: u64, writable: bool) {
         let flush = self
             .table
-            .mprotect(
-                VirtAddr::from(virtual_address as usize),
-                PageLevel::Level0,
+            .set_flags(
+                Page::<Size4KiB>::from_start_address(VirtAddr::from(virtual_address as usize))
+                    .unwrap(),
                 flags(writable),
                 false,
             )
-            .expect("current mprotect");
+            .expect("current set_flags");
         // SAFETY: benchmark tables are never installed in hardware page-table roots.
         unsafe { flush.ignore() };
     }
@@ -236,13 +274,13 @@ impl PagingAdapter for CurrentAdapter {
     }
 
     fn protect_range(&self, start: u64, end: u64, writable: bool) {
-        let (result, flush) = self.table.mprotect_range(
+        let (result, flush) = self.table.set_flags_range(
             VirtAddr::from(start as usize),
             VirtAddr::from(end as usize),
             flags(writable),
             false,
         );
-        result.expect("current mprotect_range");
+        result.expect("current set_flags_range");
         // SAFETY: benchmark tables are never installed in hardware page-table roots.
         unsafe { flush.ignore() };
     }

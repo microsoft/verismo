@@ -9,9 +9,16 @@ use crate::platform::init_platform_type;
 use crate::platform::native::NativePlatform;
 use bootdefs::platform::SvsmPlatformType;
 use core::cell::RefCell;
+use core::sync::atomic::{AtomicUsize, Ordering};
 use paging::pagetable::{MappingMutOps as _, MappingRefOps as _};
 
 type Entry = verismo_paging::entry::PTEntry<Architecture>;
+
+unsafe fn load_entry(entry: *const Entry) -> Entry {
+    let word = unsafe { AtomicUsize::from_ptr(entry.cast_mut().cast::<usize>()) };
+    let bits = word.load(Ordering::Acquire);
+    unsafe { (&bits as *const usize).cast().read() }
+}
 
 struct EntryProbe {
     slot: *const Entry,
@@ -54,7 +61,7 @@ pub(super) fn record_transition_flush(scope: TlbFlushScope, all_cpus: bool) {
         for entry in &probe.entries {
             // SAFETY: the scoped test operation keeps these native table pages
             // alive; observing the recorded slots does not reenter its controller.
-            assert!(unsafe { Entry::load_entry(entry.slot) }.is_table(entry.level));
+            assert!(unsafe { load_entry(entry.slot) }.is_table(entry.level));
         }
         probe.calls += 1;
     });
@@ -79,7 +86,7 @@ fn probe_huge_entry(table: &PageTable<'_>, va: VirtAddr) -> EntryProbe {
         // current table page and the native allocator resolves every child page.
         let (slot, entry) = unsafe {
             let slot = page.add(index);
-            (slot, Entry::load_entry(slot))
+            (slot, load_entry(slot))
         };
         if entry.is_leaf(level) {
             assert_ne!(level, PageLevel::Level0);
@@ -111,7 +118,7 @@ fn with_transition_flush<R>(
         assert_eq!(probe.calls, 1, "Missing synchronous split flush");
         for entry in &probe.entries {
             // SAFETY: the test still owns the tree, including the recorded slots.
-            assert!(unsafe { Entry::load_entry(entry.slot) }.is_table(entry.level));
+            assert!(unsafe { load_entry(entry.slot) }.is_table(entry.level));
         }
     });
     result
@@ -179,15 +186,32 @@ fn borrowed_native_tree() {
     assert_eq!(native.0.root_pa(), root);
 
     let (pa, va, size) = crate::mm::alloc::root_memory_mapping();
-    native.0.map_region_4k(va, va + size, pa, PTEntryFlags::data(), false).unwrap();
+    native.0.map_region(va, va + size, pa, PTEntryFlags::data()).unwrap();
     let mapped = VirtAddr::from(0x9000_0000usize);
     let huge = PhysAddr::from(0x2800_0000usize);
     let adjacent = mapped + PageLevel::Level1.size();
     for address in [mapped, adjacent] {
-        native.0.map_2m(address, huge, PTEntryFlags::data(), false).unwrap();
+        native
+            .0
+            .map(
+                verismo_paging::page::Page::<verismo_paging::sizes::Size2MiB>::from_start_address(
+                    address,
+                )
+                .unwrap(),
+                verismo_paging::frame::PhysFrame::<
+                    verismo_paging::sizes::Size2MiB,
+                >::from_start_address(huge)
+                .unwrap(),
+                PTEntryFlags::data(),
+                false,
+            )
+            .unwrap();
         let mut mapping = native.0.walk_mut(address);
         let mut entry = mapping.read();
-        entry.set(PhysAddr::from(entry.paddr_field().bits() | (1 << 12)), entry.flags());
+        entry = Entry::new(
+            PhysAddr::from(entry.paddr_field() | (1 << 12)),
+            entry.flags(),
+        );
         *mapping.staged().entry = entry;
         // SAFETY: these native PAT-bearing entries have never been installed.
         unsafe { mapping.commit().ignore() };
@@ -257,7 +281,7 @@ fn borrowed_huge_arena_allows_x86_neighbor_splits() {
     let map_end = huge_end + PageLevel::Level1.size();
     native
         .0
-        .map_region_2m(map_start, map_end, pa - (va - map_start), PTEntryFlags::data(), false)
+        .map_region(map_start, map_end, pa - (va - map_start), PTEntryFlags::data())
         .unwrap();
     let mut neighbors = alloc::vec::Vec::new();
     if huge_start < va {

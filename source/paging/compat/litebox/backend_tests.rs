@@ -8,6 +8,14 @@ use litebox::platform::page_mgmt::MemoryRegionPermissions;
 
 type MockTable = X64PageTable<'static, MockKernel, 4096>;
 
+unsafe fn load_entry<A: paging::ArchPagingMeta>(
+    entry: *const paging::entry::PTEntry<A>,
+) -> paging::entry::PTEntry<A> {
+    let word = unsafe { AtomicUsize::from_ptr(entry.cast_mut().cast::<usize>()) };
+    let bits = word.load(Ordering::Acquire);
+    unsafe { (&bits as *const usize).cast().read() }
+}
+
 std::thread_local! {
     static TRANSITION_SLOT: Cell<*mut usize> = const { Cell::new(core::ptr::null_mut()) };
     static TRANSITION_FLUSHES: Cell<usize> = const { Cell::new(0) };
@@ -40,7 +48,7 @@ fn observe_transition(inner: &Tree<MockKernel>, address: PagingVirtAddr) -> Obse
                 .as_mut_ptr::<paging::entry::PTEntry<X86Paging<Platform<MockKernel>>>>()
                 .add((address.bits() >> (12 + 9 * level)) & 511)
         };
-        let entry = unsafe { paging::entry::PTEntry::load_entry(slot) };
+        let entry = unsafe { load_entry(slot) };
         assert!(entry.present());
         if level == 0 || entry.huge() {
             TRANSITION_SLOT.with(|current| assert!(current.replace(slot.cast()).is_null()));
@@ -81,7 +89,7 @@ fn ancestor_words(table: &MockTable, address: usize) -> alloc::vec::Vec<usize> {
                 .as_mut_ptr::<paging::entry::PTEntry<X86Paging<Platform<MockKernel>>>>()
                 .add(index)
         };
-        let entry = unsafe { paging::entry::PTEntry::load_entry(slot) };
+        let entry = unsafe { load_entry(slot) };
         words.push(entry.raw());
         page = entry.address().into();
     }
@@ -140,13 +148,25 @@ fn split_and_protect_preserve_neighbors_and_tlb_scope() {
     let physical = PagingPhysAddr::from(0x2000_0000usize);
     let flags = PTEntryFlags::PRESENT | PTEntryFlags::WRITABLE | PTEntryFlags::USER;
     let inner = table.inner.lock();
-    inner.map(address, physical, PageLevel::Level1, flags, false).unwrap();
+    inner
+        .map(
+            paging::page::Page::<paging::sizes::Size2MiB>::from_start_address(address).unwrap(),
+            paging::frame::PhysFrame::<paging::sizes::Size2MiB>::from_start_address(physical)
+                .unwrap(),
+            flags,
+            false,
+        )
+        .unwrap();
     let snapshot = inner.walk(address);
     let protected = address + 4096;
     let observation = observe_transition(&inner, protected);
     let flush_start = FLUSHES.lock().len();
     let flush = inner
-        .mprotect(protected, PageLevel::Level0, flags - PTEntryFlags::WRITABLE, FLUSH_ALL_CPUS)
+        .set_flags(
+            paging::page::Page::<paging::sizes::Size4KiB>::from_start_address(protected).unwrap(),
+            flags - PTEntryFlags::WRITABLE,
+            FLUSH_ALL_CPUS,
+        )
         .unwrap();
     flush.expect_no_flush();
     assert_eq!(TRANSITION_FLUSHES.with(Cell::get), 1);
@@ -164,13 +184,19 @@ fn split_and_protect_preserve_neighbors_and_tlb_scope() {
     assert_eq!(inner.phys_addr(address + 123).unwrap(), physical + 123);
 
     inner.split(address, PageLevel::Level0, FLUSH_ALL_CPUS).unwrap().expect_no_flush();
-    let flush = inner.mprotect(protected, PageLevel::Level0, flags, FLUSH_ALL_CPUS).unwrap();
+    let flush = inner
+        .set_flags(
+            paging::page::Page::<paging::sizes::Size4KiB>::from_start_address(protected).unwrap(),
+            flags,
+            FLUSH_ALL_CPUS,
+        )
+        .unwrap();
     assert!(flush.is_pending());
     flush_local::<MockKernel>(flush);
     assert!(inner.walk(protected).read().writable());
     assert_eq!(inner.phys_addr(protected).unwrap(), physical + 4096);
     assert_eq!(inner.phys_addr(address + 8192).unwrap(), physical + 8192);
-    let (result, flush) = inner.mprotect_range(
+    let (result, flush) = inner.set_flags_range(
         address,
         address + 3 * 4096,
         flags - PTEntryFlags::WRITABLE,
@@ -185,7 +211,8 @@ fn split_and_protect_preserve_neighbors_and_tlb_scope() {
         scope,
         FlushScope::Range { start, level: PageLevel::Level1, .. } if *start == address
     )));
-    flush_local::<MockKernel>(inner.unmap_region_4k(address, address + 2 * 1024 * 1024).unwrap());
+    let (_, pending) = inner.unmap_region(address, address + 2 * 1024 * 1024).unwrap();
+    flush_local::<MockKernel>(pending);
 }
 
 #[test]
@@ -238,7 +265,7 @@ fn partial_range_failure_retains_flush_obligation() {
     let range = PageRange::new(0x9000, 0xa000).unwrap();
     table.map_pages(range, VmFlags::VM_READ | VmFlags::VM_WRITE, true);
     let inner = table.inner.lock();
-    let (result, flush) = inner.mprotect_range(
+    let (result, flush) = inner.set_flags_range(
         range.start.into(),
         (range.end + 4096).into(),
         PTEntryFlags::PRESENT | PTEntryFlags::USER,
@@ -386,26 +413,21 @@ fn restrictive_imported_user_ancestors_are_rejected_without_normalization() {
                 .as_mut_ptr::<paging::entry::PTEntry<X86Paging<Platform<MockKernel>>>>()
                 .add(index)
         };
-        let entry = unsafe { paging::entry::PTEntry::load_entry(slot) };
+        let entry = unsafe { load_entry(slot) };
         let original = entry.raw();
         for restricted in [
             original & !(PageTableFlags::WRITABLE.bits() as usize),
             original & !(PageTableFlags::USER_ACCESSIBLE.bits() as usize),
             original | PageTableFlags::NO_EXECUTE.bits() as usize,
         ] {
-            unsafe {
-                paging::entry::PTEntry::store_entry(
-                    slot,
-                    paging::entry::PTEntry::from_bits(restricted),
-                )
-            };
+            unsafe { &*slot.cast::<AtomicUsize>() }.store(restricted, Ordering::Release);
             let before = crate::mm::tests::effective_flags(root, range.start);
             let flush_start = FLUSHES.lock().len();
             assert!(std::panic::catch_unwind(|| unsafe { MockTable::init(root) }).is_err());
-            assert_eq!(unsafe { paging::entry::PTEntry::load_entry(slot) }.raw(), restricted);
+            assert_eq!(unsafe { load_entry(slot) }.raw(), restricted);
             assert_eq!(crate::mm::tests::effective_flags(root, range.start), before);
             assert_eq!(FLUSHES.lock().len(), flush_start);
-            unsafe { paging::entry::PTEntry::store_entry(slot, entry) };
+            unsafe { &*slot.cast::<AtomicUsize>() }.store(entry.raw(), Ordering::Release);
         }
         page = PhysAddr::new(entry.address() as u64);
     }
@@ -426,9 +448,14 @@ fn boot_import_preserves_restrictive_kernel_subtrees_and_rejects_user_faults_the
         .inner
         .lock()
         .map_with_parent_flags(
-            kernel_address.into(),
-            (physical.as_u64() as usize).into(),
-            PageLevel::Level0,
+            paging::page::Page::<paging::sizes::Size4KiB>::from_start_address(
+                kernel_address.into(),
+            )
+            .unwrap(),
+            paging::frame::PhysFrame::<paging::sizes::Size4KiB>::from_start_address(
+                (physical.as_u64() as usize).into(),
+            )
+            .unwrap(),
             PTEntryFlags::PRESENT | PTEntryFlags::WRITABLE | PTEntryFlags::USER,
             false,
             paging_flags(PageTableFlags::PRESENT | PageTableFlags::NO_EXECUTE),
@@ -461,7 +488,17 @@ fn boot_import_preserves_restrictive_kernel_subtrees_and_rejects_user_faults_the
         Err(PageFaultError::AccessError("kernel address is not a user mapping"))
     ));
     unsafe { table.unmap_pages(user, true) }.unwrap();
-    let (_, flush) = table.inner.lock().unmap_4k(kernel_address.into()).unwrap();
+    let (_, flush) = table
+        .inner
+        .lock()
+        .unmap(
+            paging::page::Page::<paging::sizes::Size4KiB>::from_start_address(
+                kernel_address.into(),
+            )
+            .unwrap(),
+            FLUSH_ALL_CPUS,
+        )
+        .unwrap();
     flush_local::<MockKernel>(flush);
     unsafe { MockKernel::mem_free_pages(data, 0) };
 }
@@ -472,10 +509,20 @@ fn range_split_postflush_holds_whole_content_domain() {
     let address = PagingVirtAddr::from(0x6000_0000usize);
     let flags = PTEntryFlags::PRESENT | PTEntryFlags::WRITABLE | PTEntryFlags::USER;
     let inner = table.inner.lock();
-    inner.map(address, 0x5000_0000usize.into(), PageLevel::Level1, flags, false).unwrap();
+    inner
+        .map(
+            paging::page::Page::<paging::sizes::Size2MiB>::from_start_address(address).unwrap(),
+            paging::frame::PhysFrame::<paging::sizes::Size2MiB>::from_start_address(
+                0x5000_0000usize.into(),
+            )
+            .unwrap(),
+            flags,
+            false,
+        )
+        .unwrap();
     let protected = address + 4096;
     let observation = observe_transition(&inner, protected);
-    let (result, flush) = inner.mprotect_range(
+    let (result, flush) = inner.set_flags_range(
         protected,
         protected + 4096,
         flags - PTEntryFlags::WRITABLE,
@@ -497,6 +544,6 @@ fn range_split_postflush_holds_whole_content_domain() {
         );
     }
     flush_local::<MockKernel>(
-        table.inner.lock().unmap_region_4k(address, address + 2 * 1024 * 1024).unwrap(),
+        table.inner.lock().unmap_region(address, address + 2 * 1024 * 1024).unwrap().1,
     );
 }

@@ -4,7 +4,7 @@ mod common;
 
 use std::sync::Arc;
 
-use common::{Allocator, Arena, Host};
+use common::{load_entry, Allocator, Arena, Host};
 #[cfg(feature = "concurrent")]
 use common::{WholeTreeLock, ARENA};
 use paging::address::{Address, PhysAddr, VirtAddr};
@@ -46,7 +46,7 @@ unsafe fn ancestors(root: PhysAddr, addr: VirtAddr) -> Vec<PTEntry<Arch>> {
     while let Some(child) = level.child() {
         let slot = (page as *const PTEntry<Arch>).wrapping_add(entry_index(addr, level));
         // SAFETY: the caller pins this host-backed tree; no entry references escape.
-        let entry = unsafe { PTEntry::load_entry(slot) };
+        let entry = unsafe { load_entry(slot) };
         if !entry.is_table(level) {
             break;
         }
@@ -69,11 +69,18 @@ macro_rules! parent_tests {
                 let frame = PhysAddr::from(arena.base());
                 let readonly = PTEntryFlags::PRESENT | PTEntryFlags::USER | PTEntryFlags::NX;
                 let writable = PTEntryFlags::PRESENT | PTEntryFlags::USER | PTEntryFlags::WRITABLE;
-                table.map_4k(addr, frame, readonly, false).unwrap();
+                table.map(common::page_4k(addr), common::frame_4k(frame), readonly, false).unwrap();
                 // SAFETY: the inactive tree remains owned throughout these observations.
                 let before = unsafe { ancestors(table.root_paddr(), addr) };
                 for offset in [4096, 2 * 1024 * 1024] {
-                    table.map_4k(addr + offset, frame + 4096, writable, false).unwrap();
+                    table
+                        .map(
+                            common::page_4k(addr + offset),
+                            common::frame_4k(frame + 4096),
+                            writable,
+                            false,
+                        )
+                        .unwrap();
                     let leaf = table.walk(addr + offset).read();
                     assert!(leaf.flags().contains(writable));
                     assert!(!leaf.flags().contains(PTEntryFlags::NX));
@@ -82,7 +89,7 @@ macro_rules! parent_tests {
                         assert!(!parent.flags().contains(PTEntryFlags::NX));
                     }
                 }
-                discharge(table.mprotect(addr, PageLevel::Level0, writable, true).unwrap());
+                discharge(set_flags_at!(table, addr, PageLevel::Level0, writable, true).unwrap());
                 assert!(table.walk(addr).read().flags().contains(writable));
                 assert!(!table.walk(addr).read().flags().contains(PTEntryFlags::NX));
                 assert_eq!(table.phys_addr(addr), Ok(frame));
@@ -105,9 +112,8 @@ macro_rules! parent_tests {
                 let frame = PhysAddr::from(arena.base());
                 table
                     .map_with_parent_flags(
-                        addr,
-                        frame,
-                        PageLevel::Level0,
+                        common::page_4k(addr),
+                        common::frame_4k(frame),
                         common::flags(),
                         false,
                         PTEntryFlags::NX | PTEntryFlags::HUGE,
@@ -140,9 +146,8 @@ macro_rules! parent_tests {
                     | PTEntryFlags::from_bits_retain(1 << 10);
                 table
                     .map_with_parent_flags(
-                        addr,
-                        PhysAddr::from(arena.base()),
-                        PageLevel::Level0,
+                        common::page_4k(addr),
+                        common::frame_4k(PhysAddr::from(arena.base())),
                         common::flags(),
                         false,
                         parent,
@@ -153,9 +158,14 @@ macro_rules! parent_tests {
                 let allocated = arena.allocated();
                 let writable = PTEntryFlags::PRESENT | PTEntryFlags::WRITABLE | PTEntryFlags::USER;
                 table
-                    .map_4k(addr + 4096, PhysAddr::from(arena.base() + 4096), writable, false)
+                    .map(
+                        common::page_4k(addr + 4096),
+                        common::frame_4k(PhysAddr::from(arena.base() + 4096)),
+                        writable,
+                        false,
+                    )
                     .unwrap();
-                discharge(table.mprotect(addr, PageLevel::Level0, writable, true).unwrap());
+                discharge(set_flags_at!(table, addr, PageLevel::Level0, writable, true).unwrap());
                 for offset in [0, 4096] {
                     assert!(table.walk(addr + offset).read().flags().contains(writable));
                     let after = unsafe { ancestors(table.root_paddr(), addr + offset) };

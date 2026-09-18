@@ -14,17 +14,15 @@ pub enum PagingError {
     AllocFrame,
     /// The walk found no mapping for the address.
     NotMapped,
-    /// A mapping is already installed where one was asked for, of `level` and
-    /// onto `frame`. A caller that wanted that very mapping can tell from the
-    /// frame that it has nothing to do.
-    EntryAlreadyPresent { frame: PhysAddr, level: PageLevel },
+    /// A mapping is already installed where one was asked for, at `level`.
+    EntryAlreadyPresent { level: PageLevel },
     /// The tree is not deep enough for the requested page size.
     InvalidLevel,
     /// An address does not satisfy the requested page alignment.
     InvalidAddress,
     /// A range is reversed or not aligned to the smallest page size.
     InvalidRange,
-    /// The requested protection flags would remove a mapping.
+    /// The requested leaf flags would remove a mapping.
     InvalidFlags,
     /// This controller may not mutate the requested kernel mappings.
     PermissionDenied,

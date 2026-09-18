@@ -72,7 +72,7 @@ fn nonidentity_direct_map_supports_construction_translation_and_drop() {
 
     let vaddr = VirtAddr::from(0x4000_0000usize);
     let frame = PhysAddr::from(0x6000_0000usize);
-    table.map_4k(vaddr, frame, flags(), false).unwrap();
+    table.map(common::page_4k(vaddr), common::frame_4k(frame), flags(), false).unwrap();
     assert_eq!(table.phys_addr(vaddr), Ok(frame));
     assert_eq!(table.translate(vaddr).unwrap().size(), 4096);
     assert_eq!(table.validate_page_table(), Ok(()));

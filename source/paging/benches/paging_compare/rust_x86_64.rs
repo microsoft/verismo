@@ -144,11 +144,42 @@ impl PagingAdapter for RustX86Adapter {
         });
     }
 
+    fn map_range(&self, start: u64, end: u64, physical_start: u64) {
+        let arena = self.arena.clone();
+        self.with_mapper(|mapper| {
+            let mut frames = ArenaFrames(arena);
+            let mut address = start;
+            while address < end {
+                let page = Page::<Size4KiB>::from_start_address(VirtAddr::new(address)).unwrap();
+                let frame = PhysFrame::<Size4KiB>::from_start_address(PhysAddr::new(
+                    physical_start + address - start,
+                ))
+                .unwrap();
+                // SAFETY: each synthetic page and frame is unused and remains arena-backed.
+                unsafe { mapper.map_to(page, frame, flags(true), &mut frames) }
+                    .expect("x86_64 map_range")
+                    .ignore();
+                address += PAGE_SIZE;
+            }
+        });
+    }
+
     fn unmap_4k(&self, virtual_address: u64) {
         self.with_mapper(|mapper| {
             let page =
                 Page::<Size4KiB>::from_start_address(VirtAddr::new(virtual_address)).unwrap();
             mapper.unmap(page).expect("x86_64 unmap").1.ignore();
+        });
+    }
+
+    fn unmap_range(&self, start: u64, end: u64) {
+        self.with_mapper(|mapper| {
+            let mut address = start;
+            while address < end {
+                let page = Page::<Size4KiB>::from_start_address(VirtAddr::new(address)).unwrap();
+                mapper.unmap(page).expect("x86_64 unmap_range").1.ignore();
+                address += PAGE_SIZE;
+            }
         });
     }
 

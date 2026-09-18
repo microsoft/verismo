@@ -30,10 +30,12 @@ fn exclusive_low_canonical_end_succeeds_without_touching_high_memory() {
     let low = VirtAddr::from(LOW_CANONICAL_END - PAGE);
     let large = VirtAddr::from(LOW_CANONICAL_END - 2 * 1024 * 1024);
     let high = VirtAddr::from(LOW_CANONICAL_END);
-    table.map(large, PhysAddr::from(arena.base()), PageLevel::Level1, flags(), false).unwrap();
-    table.map_4k(high, PhysAddr::from(arena.base()), flags(), false).unwrap();
+    map_at!(table, large, PhysAddr::from(arena.base()), PageLevel::Level1, flags(), false).unwrap();
+    table
+        .map(common::page_4k(high), common::frame_4k(PhysAddr::from(arena.base())), flags(), false)
+        .unwrap();
 
-    let (result, pending) = table.mprotect_range(low, high, readonly(), true);
+    let (result, pending) = table.set_flags_range(low, high, readonly(), true);
 
     assert_eq!(result, Ok(()));
     discharge(pending);
@@ -49,10 +51,19 @@ fn cross_gap_range_updates_both_canonical_segments() {
     let mut table = table;
     let low = VirtAddr::from(LOW_CANONICAL_END - PAGE);
     let high = VirtAddr::from(LOW_CANONICAL_END);
-    table.map_4k(low, PhysAddr::from(arena.base()), flags(), false).unwrap();
-    table.map_4k(high, PhysAddr::from(arena.base() + PAGE), flags(), false).unwrap();
+    table
+        .map(common::page_4k(low), common::frame_4k(PhysAddr::from(arena.base())), flags(), false)
+        .unwrap();
+    table
+        .map(
+            common::page_4k(high),
+            common::frame_4k(PhysAddr::from(arena.base() + PAGE)),
+            flags(),
+            false,
+        )
+        .unwrap();
 
-    let (result, pending) = table.mprotect_range(low, high + PAGE, readonly(), true);
+    let (result, pending) = table.set_flags_range(low, high + PAGE, readonly(), true);
 
     assert_eq!(result, Ok(()));
     discharge(pending);
@@ -67,9 +78,11 @@ fn cross_gap_range_reports_an_unmapped_high_segment_after_the_valid_prefix() {
     let mut table = table;
     let low = VirtAddr::from(LOW_CANONICAL_END - PAGE);
     let high = VirtAddr::from(LOW_CANONICAL_END);
-    table.map_4k(low, PhysAddr::from(arena.base()), flags(), false).unwrap();
+    table
+        .map(common::page_4k(low), common::frame_4k(PhysAddr::from(arena.base())), flags(), false)
+        .unwrap();
 
-    let (result, pending) = table.mprotect_range(low, high + PAGE, readonly(), true);
+    let (result, pending) = table.set_flags_range(low, high + PAGE, readonly(), true);
 
     assert_eq!(result, Err(PagingError::NotMapped));
     discharge(pending);

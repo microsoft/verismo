@@ -26,7 +26,7 @@ if [[ -z "$symbol" ]]; then
             grep -F 'paging_compare::execute_thread::<paging_compare::current::CurrentAdapter>' |
             head -1 || true
     )"
-    expected_back_edges=21
+    expected_back_edges=25
 else
     expected_back_edges=0
 fi
@@ -44,7 +44,7 @@ done < <(
         sed -nE 's/^[[:space:]]*([0-9a-f]+):.*[[:space:]]j[a-z]+[[:space:]]+([0-9a-f]+).*/\1 \2/p'
 )
 
-# Translation is loop-free; the inlined benchmark body has twenty-one back edges
+# Translation is loop-free; the inlined benchmark body has twenty-five back edges
 # from its surrounding workloads and control flow.
 if ((back_edges != expected_back_edges)); then
     echo "expected $expected_back_edges translation-body back edges, found $back_edges" >&2

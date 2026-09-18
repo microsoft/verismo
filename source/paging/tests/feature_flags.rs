@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 #[cfg(feature = "concurrent")]
 use common::WholeTreeLock;
-use common::{Allocator, Arena, ARENA};
+use common::{load_entry, Allocator, Arena, ARENA};
 use paging::address::{Address, PhysAddr, VirtAddr};
 use paging::entry::PTEntry;
 use paging::level::{Lvl, PageLevel};
@@ -77,7 +77,7 @@ unsafe fn assert_parent_flags(root: PhysAddr, addr: VirtAddr) {
     loop {
         let slot = (page as *const PTEntry<Arch>).wrapping_add(entry_index(addr, level));
         // SAFETY: the caller pins the inactive, host-backed tree.
-        let entry = unsafe { PTEntry::load_entry(slot) };
+        let entry = unsafe { load_entry(slot) };
         if !entry.is_table(level) {
             return;
         }
@@ -111,7 +111,13 @@ macro_rules! feature_tests {
                     | PTEntryFlags::GLOBAL;
                 let frame = PhysAddr::from(arena.base());
                 table
-                    .map_with_parent_flags(addr, frame, PageLevel::Level0, flags, false, parent)
+                    .map_with_parent_flags(
+                        common::page_4k(addr),
+                        common::frame_4k(frame),
+                        flags,
+                        false,
+                        parent,
+                    )
                     .unwrap();
                 let mapped = table.walk(addr).read();
                 // SAFETY: no other controller or hardware uses this tree.
@@ -122,7 +128,7 @@ macro_rules! feature_tests {
                 assert_eq!(mapped.leaf_address(PageLevel::Level0), frame);
 
                 let flags = PTEntryFlags::PRESENT | PTEntryFlags::GLOBAL | opaque;
-                discharge(table.mprotect(addr, PageLevel::Level0, flags, true).unwrap());
+                discharge(set_flags_at!(table, addr, PageLevel::Level0, flags, true).unwrap());
                 let protected = table.walk(addr).read();
                 assert!(!protected
                     .flags()
@@ -130,7 +136,7 @@ macro_rules! feature_tests {
                 assert!(protected.flags().contains(
                     opaque | PTEntryFlags::HUGE | PTEntryFlags::ACCESSED | PTEntryFlags::DIRTY
                 ));
-                discharge(table.set_shared_4k(addr, true).unwrap());
+                discharge(table.set_shared(common::page_4k(addr), true).unwrap());
                 let shared = table.walk(addr).read();
                 assert!(!shared.flags().contains(PTEntryFlags::GLOBAL));
                 assert!(shared.flags().contains(
@@ -141,7 +147,7 @@ macro_rules! feature_tests {
                 assert_ne!(shared.paddr_field() & (1 << 50), 0);
                 assert_eq!(table.phys_addr(addr), Ok(frame));
 
-                let (result, pending) = table.mprotect_range(addr, addr + 4096, flags, true);
+                let (result, pending) = table.set_flags_range(addr, addr + 4096, flags, true);
                 result.unwrap();
                 discharge(pending);
                 assert!(!table.walk(addr).read().flags().contains(PTEntryFlags::GLOBAL));
@@ -167,7 +173,12 @@ macro_rules! feature_tests {
                 .unwrap();
                 let base = VirtAddr::from(0x4000_0000usize);
                 original
-                    .map_2m(base, PhysAddr::from(0x8000_0000usize), PTEntryFlags::data(), false)
+                    .map(
+                        common::page_2m(base),
+                        common::frame_2m(PhysAddr::from(0x8000_0000usize)),
+                        PTEntryFlags::data(),
+                        false,
+                    )
                     .unwrap();
                 #[cfg(feature = "concurrent")]
                 let (_locks, root) = original.leak();
@@ -179,7 +190,8 @@ macro_rules! feature_tests {
                 discharge(table.split(target, PageLevel::Level0, true).unwrap());
                 assert!(table.walk(target).read().flags().contains(PTEntryFlags::GLOBAL));
                 discharge(
-                    table.mprotect(target, PageLevel::Level0, PTEntryFlags::data(), true).unwrap(),
+                    set_flags_at!(table, target, PageLevel::Level0, PTEntryFlags::data(), true)
+                        .unwrap(),
                 );
                 assert!(!table.walk(target).read().flags().contains(PTEntryFlags::GLOBAL));
                 assert!(table.walk(base).read().flags().contains(PTEntryFlags::GLOBAL));

@@ -3,7 +3,7 @@
 //! half-written entry, and the commit is what produces the flush obligation.
 use core::marker::PhantomData;
 
-use crate::structs::address::{Address, PhysAddr, VirtAddr};
+use crate::structs::address::VirtAddr;
 use crate::structs::arch_contract::ArchPagingMeta;
 use crate::structs::entry::{PTEntry, PTEntryRef};
 use crate::structs::level::PageLevel;
@@ -55,7 +55,7 @@ impl<'a, A: ArchPagingMeta> MappingRef<'a, A> {
     /// A handle on `entry`, which sits at `level`.
     ///
     /// # Safety
-    /// `entry` must satisfy [`PTEntry::load_entry`] for all of `'a`, including
+    /// `entry` must remain allocated and atomically accessible for all of `'a`, including
     /// initialized, writable storage and atomic access without ordinary entry references.
     pub unsafe fn new(level: PageLevel, entry: *const PTEntry<A>) -> Self {
         Self::from_view(level, unsafe { PTEntryRef::from_raw(entry.cast_mut()) })
@@ -93,7 +93,7 @@ impl<'a, A: ArchPagingMeta> MappingMut<'a, A> {
     /// the commit cannot name what went stale and asks for a full flush.
     ///
     /// # Safety
-    /// `entry` must satisfy [`PTEntry::load_entry`] for all of `'a`, and other
+    /// `entry` must remain allocated and atomically accessible for all of `'a`, and other
     /// software writers must be excluded throughout this handle's lifetime.
     /// Every committed value must preserve the containing tree's level and
     /// ownership invariants. This handle cannot replace a present leaf with a
@@ -160,14 +160,10 @@ impl<'a, A: ArchPagingMeta> MappingMutOps<'a, A> for MappingMut<'a, A> {
     where
         F: FnOnce(Mapping<'_, A>) -> Result<O, PagingError>,
     {
-        let (vaddr, level) = (self.vaddr, self.level);
+        let level = self.level;
         let staged = self.staged();
         if staged.entry.present() {
-            let offset = vaddr.map_or(0, |v| v.bits() & (level.size() - 1));
-            return Err(PagingError::EntryAlreadyPresent {
-                frame: PhysAddr::from((staged.entry.address() & !(level.size() - 1)) + offset),
-                level,
-            });
+            return Err(PagingError::EntryAlreadyPresent { level });
         }
         let ret = update(staged)?;
         let entry = *self.staged().entry;

@@ -111,8 +111,25 @@ impl PagingAdapter for VeriosAdapter {
             .expect("verios map_2m");
     }
 
+    fn map_range(&self, start: u64, end: u64, physical_start: u64) {
+        self.table
+            .map_range(
+                &self.host,
+                start..end,
+                physical_start,
+                leaf_flags(true),
+                Conf::Private,
+                PageSize::Size4K,
+            )
+            .expect("verios map_range");
+    }
+
     fn unmap_4k(&self, virtual_address: u64) {
         self.table.unmap(&self.host, virtual_address, PageSize::Size4K).expect("verios unmap");
+    }
+
+    fn unmap_range(&self, start: u64, end: u64) {
+        self.table.unmap_range(&self.host, start..end).expect("verios unmap_range");
     }
 
     fn translate(&self, virtual_address: u64) -> Option<u64> {

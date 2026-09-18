@@ -15,6 +15,7 @@ use paging::traits::ArchPagingMeta as SvsmArch;
 use verismo_paging::address::{Address as _, PhysAddr as VerismoPhys, VirtAddr as VerismoVirt};
 use verismo_paging::mapping::MappingRefOps;
 use verismo_paging::os_contract::DirectMappedAllocator;
+use verismo_paging::sizes::{Size1GiB, Size2MiB, Size4KiB};
 use verismo_paging::tlb::TlbFlush;
 use verismo_paging::{ArchPagingMeta, PTEntryFlags as VerismoFlags};
 
@@ -51,12 +52,12 @@ impl ArchPagingMeta for Architecture {
         ((entry >> 12) & 1) << if level == PageLevel::Level1 { 7 } else { 12 }
     }
 
-    fn leaf_attribute_mask(level: PageLevel) -> usize {
-        1 << if level == PageLevel::Level0 { 7 } else { 12 }
-    }
-
     fn accessed_dirty_mask() -> usize {
         (VerismoFlags::ACCESSED | VerismoFlags::DIRTY).bits()
+    }
+
+    fn leaf_flags_mask() -> Self::PTFlags {
+        VerismoFlags::WRITABLE | VerismoFlags::USER | VerismoFlags::GLOBAL | VerismoFlags::NX
     }
 
     fn requires_break_before_make(_old: usize, _new: usize, _level: PageLevel) -> bool {
@@ -273,7 +274,34 @@ impl<'a> PageTable<'a> {
     ) -> Result<(), PagingError> {
         self.check_page(va, level)?;
         check_physical(pa, level)?;
-        self.inner.map(va.bits().into(), pa.bits().into(), level, convert_flags(flags)?, shared)
+        let flags = convert_flags(flags)?;
+        match level {
+            PageLevel::Level0 => self.inner.map(
+                verismo_paging::page::Page::<Size4KiB>::from_start_address(va.bits().into())
+                    .unwrap(),
+                verismo_paging::frame::PhysFrame::<Size4KiB>::from_start_address(pa.bits().into())
+                    .unwrap(),
+                flags,
+                shared,
+            ),
+            PageLevel::Level1 => self.inner.map(
+                verismo_paging::page::Page::<Size2MiB>::from_start_address(va.bits().into())
+                    .unwrap(),
+                verismo_paging::frame::PhysFrame::<Size2MiB>::from_start_address(pa.bits().into())
+                    .unwrap(),
+                flags,
+                shared,
+            ),
+            PageLevel::Level2 => self.inner.map(
+                verismo_paging::page::Page::<Size1GiB>::from_start_address(va.bits().into())
+                    .unwrap(),
+                verismo_paging::frame::PhysFrame::<Size1GiB>::from_start_address(pa.bits().into())
+                    .unwrap(),
+                flags,
+                shared,
+            ),
+            _ => Err(PagingError::InvalidLevel),
+        }
     }
 
     pub fn split(&mut self, va: VirtAddr, level: PageLevel) -> Result<Flush, PagingError> {
@@ -289,7 +317,27 @@ impl<'a> PageTable<'a> {
     ) -> Result<Flush, PagingError> {
         self.check_page(va, level)?;
         let flags = convert_flags(flags)?;
-        self.inner.mprotect(va.bits().into(), level, flags, true)
+        match level {
+            PageLevel::Level0 => self.inner.set_flags(
+                verismo_paging::page::Page::<Size4KiB>::from_start_address(va.bits().into())
+                    .unwrap(),
+                flags,
+                true,
+            ),
+            PageLevel::Level1 => self.inner.set_flags(
+                verismo_paging::page::Page::<Size2MiB>::from_start_address(va.bits().into())
+                    .unwrap(),
+                flags,
+                true,
+            ),
+            PageLevel::Level2 => self.inner.set_flags(
+                verismo_paging::page::Page::<Size1GiB>::from_start_address(va.bits().into())
+                    .unwrap(),
+                flags,
+                true,
+            ),
+            _ => Err(PagingError::InvalidLevel),
+        }
     }
 
     pub fn mprotect_range(
@@ -301,7 +349,7 @@ impl<'a> PageTable<'a> {
             .check_range(region.start().bits(), region.len())
             .and_then(|()| convert_flags(flags));
         match validated {
-            Ok(flags) => self.inner.mprotect_range(
+            Ok(flags) => self.inner.set_flags_range(
                 region.start().bits().into(),
                 region.end().bits().into(),
                 flags,
@@ -317,7 +365,25 @@ impl<'a> PageTable<'a> {
         level: PageLevel,
     ) -> Result<(Option<Mapping>, Flush), PagingError> {
         self.check_page(va, level)?;
-        let (old, flush) = self.inner.unmap_at(va.bits().into(), level)?;
+        let old = match level {
+            PageLevel::Level0 => self.inner.unmap(
+                verismo_paging::page::Page::<Size4KiB>::from_start_address(va.bits().into())
+                    .unwrap(),
+                true,
+            ),
+            PageLevel::Level1 => self.inner.unmap(
+                verismo_paging::page::Page::<Size2MiB>::from_start_address(va.bits().into())
+                    .unwrap(),
+                true,
+            ),
+            PageLevel::Level2 => self.inner.unmap(
+                verismo_paging::page::Page::<Size1GiB>::from_start_address(va.bits().into())
+                    .unwrap(),
+                true,
+            ),
+            _ => Err(PagingError::InvalidLevel),
+        };
+        let (old, flush) = old?;
         Ok((old.map(|entry| snapshot(entry, level)), flush))
     }
 

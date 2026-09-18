@@ -50,7 +50,9 @@ fn translation_uses_a_general_allocator_at_every_level() {
     let (_arena, table) = table();
     #[cfg(not(feature = "concurrent"))]
     let mut table = table;
-    table.map_4k(BASE.into(), FRAME.into(), flags(), false).unwrap();
+    table
+        .map(common::page_4k(BASE.into()), common::frame_4k(FRAME.into()), flags(), false)
+        .unwrap();
 
     #[cfg(feature = "concurrent")]
     let (locks, root) = table.leak();
