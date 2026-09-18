@@ -27,7 +27,7 @@ use paging::page::Page;
 use paging::pagetable::LockSpec;
 use paging::pagetable::{KernelPageTable, PageTable};
 use paging::policy::PagingOwnershipPolicy;
-use paging::sizes::{Size1GiB, Size2MiB, Size4KiB};
+use paging::sizes::{PageSize, Size1GiB, Size2MiB, Size4KiB};
 use paging::{ArchPagingMeta, FlushScope, PTEntryFlags, X86Paging, X86PagingParams};
 
 pub fn page_4k(address: VirtAddr) -> Page<Size4KiB> {
@@ -52,6 +52,32 @@ pub fn page_1g(address: VirtAddr) -> Page<Size1GiB> {
 
 pub fn frame_1g(address: PhysAddr) -> PhysFrame<Size1GiB> {
     PhysFrame::<Size1GiB>::from_start_address(address).unwrap()
+}
+
+pub fn range_4k(start: VirtAddr, end: VirtAddr) -> paging::page::PageRangeInclusive<Size4KiB> {
+    let start = Page::containing_address(start);
+    let end = if start.start_address() < end {
+        Page::containing_address(end - Size4KiB::SIZE)
+    } else {
+        Page::containing_address(end)
+    };
+    Page::range_inclusive(start, end)
+}
+
+pub fn contiguous_frames_4k(
+    start: PhysAddr,
+    pages: usize,
+) -> impl Iterator<Item = PhysFrame<Size4KiB>> {
+    (0..pages).map(move |offset| frame_4k(start + offset * Size4KiB::SIZE))
+}
+
+#[macro_export]
+macro_rules! map_region_4k {
+    ($table:expr, $start:expr, $end:expr, $frame:expr, $flags:expr) => {{
+        let range = common::range_4k($start, $end);
+        let mut frames = common::contiguous_frames_4k($frame, range.len());
+        $table.map_region(range, &mut frames, $flags)
+    }};
 }
 
 #[macro_export]
@@ -149,6 +175,27 @@ macro_rules! unmap_at {
                 paging::page::Page::<paging::sizes::Size1GiB>::from_start_address($address)
                     .unwrap(),
                 true,
+            ),
+            _ => Err(paging::os_contract::PagingError::InvalidLevel),
+        }
+    }};
+}
+
+#[macro_export]
+macro_rules! split_at {
+    ($table:expr, $address:expr, $level:expr, $all_cpus:expr) => {{
+        match $level {
+            paging::level::PageLevel::Level0 => $table.split(
+                paging::page::Page::<paging::sizes::Size4KiB>::containing_address($address),
+                $all_cpus,
+            ),
+            paging::level::PageLevel::Level1 => $table.split(
+                paging::page::Page::<paging::sizes::Size2MiB>::containing_address($address),
+                $all_cpus,
+            ),
+            paging::level::PageLevel::Level2 => $table.split(
+                paging::page::Page::<paging::sizes::Size1GiB>::containing_address($address),
+                $all_cpus,
             ),
             _ => Err(paging::os_contract::PagingError::InvalidLevel),
         }

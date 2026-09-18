@@ -36,7 +36,7 @@ fn ranges_cannot_hide_protected_indexes_by_wrapping_a_small_root() {
 }
 
 #[test]
-fn every_reserved_slot_is_immutable_and_non_owned() {
+fn every_reserved_entry_is_immutable_and_non_owned() {
     let policy = UserPolicy::<1, 3>::new();
     assert!(policy.owns_top_entry(0));
     assert!(!policy.owns_top_entry(1));
@@ -52,7 +52,7 @@ fn every_reserved_slot_is_immutable_and_non_owned() {
 }
 
 #[test]
-fn empty_kernel_range_allows_every_slot() {
+fn empty_kernel_range_allows_every_entry() {
     let policy = UserPolicy::<256, 256>::new();
     assert_eq!(policy.kernel_top(), 256..256);
     for index in 0..PT_ENTRY_COUNT {

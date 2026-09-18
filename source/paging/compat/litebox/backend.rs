@@ -229,7 +229,10 @@ impl<M: MemoryProvider + 'static, const ALIGN: usize> X64PageTable<'_, M, ALIGN>
         let inner = self.inner.lock();
         for address in (range.start..range.end).step_by(4096) {
             let address = PagingVirtAddr::from(address);
-            match inner.split(address, PageLevel::Level0, FLUSH_ALL_CPUS) {
+            match inner.split(
+                PagingPage::<PagingSize4KiB>::containing_address(address),
+                FLUSH_ALL_CPUS,
+            ) {
                 Ok(flush) => flush_local::<M>(flush),
                 Err(PagingError::NotMapped) => continue,
                 Err(error) => panic!("cannot split mapping for unmap: {error:?}"),
@@ -283,7 +286,10 @@ impl<M: MemoryProvider + 'static, const ALIGN: usize> X64PageTable<'_, M, ALIGN>
         }
         for old in (old_range.start..old_range.end).step_by(4096) {
             let old_address = PagingVirtAddr::from(old);
-            match inner.split(old_address, PageLevel::Level0, FLUSH_ALL_CPUS) {
+            match inner.split(
+                PagingPage::<PagingSize4KiB>::containing_address(old_address),
+                FLUSH_ALL_CPUS,
+            ) {
                 Ok(flush) => flush_local::<M>(flush),
                 Err(PagingError::NotMapped) => continue,
                 Err(PagingError::AllocFrame) => return Err(page_mgmt::RemapError::OutOfMemory),

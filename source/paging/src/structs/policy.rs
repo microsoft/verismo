@@ -30,7 +30,7 @@ pub trait PagingOwnershipPolicy: sealed::Sealed {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct KernelPolicy;
 
-/// Zero-sized policy reserving `START..END` for immutable, non-owned kernel slots.
+/// Zero-sized policy reserving `START..END` for immutable, non-owned kernel entries.
 #[derive(Debug)]
 pub struct UserPolicy<'kernel, const START: usize, const END: usize> {
     kernel: PhantomData<&'kernel ()>,

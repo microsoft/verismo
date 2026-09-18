@@ -12,7 +12,6 @@
 //! typed with. The two are deliberately separate types, so a mapping is a
 //! relation between values that cannot be confused for one another.
 //!
-//! As in `frame`, the iterator impls of the original are absent.
 use core::marker::PhantomData;
 
 use builtin_macros::*;
@@ -22,7 +21,7 @@ use vstd::prelude::*;
 #[cfg(verus_only)]
 use crate::structs::address::VADDR_UPPER_MASK;
 use crate::structs::address::{Address, VirtAddr};
-use crate::structs::sizes::{PageSize, Size4KiB};
+use crate::structs::sizes::{PageSize, Size4KiB, PT_ENTRY_COUNT};
 
 #[cfg(verus_only)]
 include!("../specs/page.rs");
@@ -102,6 +101,12 @@ impl<S: PageSize> Page<S> {
         self.start_address
     }
 
+    /// The index selected by this page at its matching page-table level.
+    #[inline(always)]
+    pub fn pt_index(self) -> usize {
+        (self.start_address.bits() >> S::SHIFT) & (PT_ENTRY_COUNT - 1)
+    }
+
     /// The size of this page in bytes.
     #[inline]
     #[verus_spec(ret =>
@@ -158,6 +163,33 @@ impl<S: PageSize> Page<S> {
     }
 }
 
+impl<S: PageSize> core::ops::Add<usize> for Page<S> {
+    type Output = Self;
+
+    #[inline]
+    fn add(self, pages: usize) -> Self::Output {
+        Page { start_address: self.start_address() + pages * S::SIZE, size: PhantomData }
+    }
+}
+
+impl<S: PageSize> core::ops::Sub for Page<S> {
+    type Output = usize;
+
+    #[inline]
+    fn sub(self, other: Self) -> Self::Output {
+        (self.start_address() - other.start_address()) / S::SIZE
+    }
+}
+
+impl<S: PageSize> core::ops::Sub<usize> for Page<S> {
+    type Output = Self;
+
+    #[inline]
+    fn sub(self, pages: usize) -> Self::Output {
+        Page { start_address: self.start_address() - pages * S::SIZE, size: PhantomData }
+    }
+}
+
 /// A range of virtual pages, `end` exclusive.
 #[verus_verify]
 #[repr(C)]
@@ -188,8 +220,7 @@ impl<S: PageSize> PageRange<S> {
     )]
     pub fn len(&self) -> usize {
         if !self.is_empty() {
-            proof! { lemma_page_number_ordered(self.start, self.end); }
-            self.end.page_number() - self.start.page_number()
+            self.end - self.start
         } else {
             0
         }
@@ -205,6 +236,20 @@ impl<S: PageSize> PageRange<S> {
     )]
     pub fn size(&self) -> usize {
         self.len() * S::SIZE
+    }
+}
+
+impl<S: PageSize> Iterator for PageRange<S> {
+    type Item = Page<S>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.is_empty() {
+            return None;
+        }
+        let page = self.start;
+        self.start = self.start + 1;
+        Some(page)
     }
 }
 
@@ -238,11 +283,7 @@ impl<S: PageSize> PageRangeInclusive<S> {
     )]
     pub fn len(&self) -> usize {
         if !self.is_empty() {
-            proof! {
-                lemma_page_number_ordered(self.start, self.end);
-                lemma_page_number_lt_max(self.end);
-            }
-            self.end.page_number() - self.start.page_number() + 1
+            self.end - self.start + 1
         } else {
             0
         }
@@ -258,6 +299,26 @@ impl<S: PageSize> PageRangeInclusive<S> {
     )]
     pub fn size(&self) -> usize {
         self.len() * S::SIZE
+    }
+}
+
+impl<S: PageSize> Iterator for PageRangeInclusive<S> {
+    type Item = Page<S>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.is_empty() {
+            return None;
+        }
+        let page = self.start;
+        let max_page_start = usize::MAX - (S::SIZE - 1);
+        if self.start.start_address().bits() < max_page_start {
+            self.start = self.start + 1;
+        } else {
+            self.end =
+                Page { start_address: self.end.start_address() - S::SIZE, size: PhantomData };
+        }
+        Some(page)
     }
 }
 

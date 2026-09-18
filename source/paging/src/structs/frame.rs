@@ -177,6 +177,15 @@ impl<S: PageSize> PhysFrame<S> {
     }
 }
 
+impl<S: PageSize> core::ops::Add<usize> for PhysFrame<S> {
+    type Output = Self;
+
+    #[inline]
+    fn add(self, frames: usize) -> Self::Output {
+        PhysFrame { start_address: self.start_address() + frames * S::SIZE, size: PhantomData }
+    }
+}
+
 /// A range of physical frames, `end` exclusive.
 #[verus_verify]
 #[repr(C)]

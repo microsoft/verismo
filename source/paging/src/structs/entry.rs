@@ -24,7 +24,7 @@ impl<A: ArchPagingMeta> PTEntry<A> {
         self.val
     }
 
-    /// Whether the entry is the null word, which is what an unused slot holds.
+    /// Whether the entry is the null word, which is what an unused entry holds.
     pub fn is_clear(&self) -> bool {
         self.val == 0
     }
@@ -188,7 +188,7 @@ pub(crate) struct PTEntryRef<'tree, A: ArchPagingMeta> {
 
 impl<'tree, A: ArchPagingMeta> PTEntryRef<'tree, A> {
     /// # Safety
-    /// The initialized, writable slot must be atomic-aligned and remain allocated
+    /// The initialized, writable entry must be atomic-aligned and remain allocated
     /// for `'tree`. Conflicting accesses must be atomic, with no ordinary entry references.
     pub(crate) unsafe fn from_raw(entry: *mut PTEntry<A>) -> Self {
         let word = unsafe { AtomicUsize::from_ptr(entry.cast::<usize>()) };

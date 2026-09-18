@@ -224,7 +224,7 @@ impl<'a> PageTable<'a> {
     ///
     /// # Safety
     /// All table pages must stay privately mapped in SVSM's root arena.
-    /// Except for the standard recursive root slot, which is rejected, the
+    /// Except for the standard recursive root entry, which is rejected, the
     /// tree must be acyclic, with no different-prefix table aliases. Exclude
     /// access through all other software controllers during this borrow.
     /// If paging's default `use_ad` feature is disabled, import sets A/D on all
@@ -306,7 +306,21 @@ impl<'a> PageTable<'a> {
 
     pub fn split(&mut self, va: VirtAddr, level: PageLevel) -> Result<Flush, PagingError> {
         self.check_page(va, level)?;
-        self.inner.split(va.bits().into(), level, true)
+        match level {
+            PageLevel::Level0 => self.inner.split(
+                verismo_paging::page::Page::<Size4KiB>::containing_address(va.bits().into()),
+                true,
+            ),
+            PageLevel::Level1 => self.inner.split(
+                verismo_paging::page::Page::<Size2MiB>::containing_address(va.bits().into()),
+                true,
+            ),
+            PageLevel::Level2 => self.inner.split(
+                verismo_paging::page::Page::<Size1GiB>::containing_address(va.bits().into()),
+                true,
+            ),
+            _ => Err(PagingError::InvalidLevel),
+        }
     }
 
     pub fn mprotect(

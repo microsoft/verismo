@@ -44,7 +44,7 @@ impl<A: ArchPagingMeta> WalkResult<A> {
     }
 }
 
-/// The internal page and slot where a page-table walk stopped.
+/// The internal page and entry where a page-table walk stopped.
 pub(crate) struct WalkPosition<'tree, A: ArchPagingMeta, P: PagingAllocator> {
     pub(crate) page: PTPagePointer<'tree, A, P>,
     pub(crate) index: usize,
@@ -207,7 +207,7 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
     #[inline(always)]
     pub(crate) fn entry(&self, index: usize) -> PTEntryRef<'tree, A> {
         assert!(index < PT_ENTRY_COUNT);
-        // SAFETY: construction pins the page, and the checked slot remains within it.
+        // SAFETY: construction pins the page, and the checked entry remains within it.
         unsafe { PTEntryRef::from_raw(PTPage::entry_ptr_mut(self.page.as_ptr(), index)) }
     }
 

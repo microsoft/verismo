@@ -71,10 +71,10 @@ fn constructor_and_flag_edits_normalize_publication() {
 unsafe fn tree_words(root: PhysAddr, level: PageLevel) -> Vec<(usize, usize, PageLevel)> {
     let mut words = Vec::new();
     for index in 0..PT_ENTRY_COUNT {
-        let slot = Page::entry_ptr(root.bits() as *const Page, index);
+        let pte = Page::entry_ptr(root.bits() as *const Page, index);
         // SAFETY: the caller pins this well-formed, identity-mapped tree without reclamation.
-        let entry = unsafe { load_entry(slot) };
-        words.push((slot as usize, entry.raw(), level));
+        let entry = unsafe { load_entry(pte) };
+        words.push((pte as usize, entry.raw(), level));
         if entry.is_table(level) {
             words.extend(unsafe {
                 tree_words(PhysAddr::from(entry.address()), level.child().unwrap())
@@ -87,9 +87,9 @@ unsafe fn tree_words(root: PhysAddr, level: PageLevel) -> Vec<(usize, usize, Pag
 unsafe fn assert_path_history(root: PhysAddr, address: VirtAddr, mut level: PageLevel) {
     let mut page = root;
     loop {
-        let slot = Page::entry_ptr(page.bits() as *const Page, entry_index(address, level));
+        let pte = Page::entry_ptr(page.bits() as *const Page, entry_index(address, level));
         // SAFETY: the caller pins the quiesced path, whose table addresses are identity-mapped.
-        let entry = unsafe { load_entry(slot) };
+        let entry = unsafe { load_entry(pte) };
         assert!(entry.present());
         assert_eq!(entry.raw() & AD, published_bits(1) & AD);
         if !entry.is_table(level) {
@@ -106,9 +106,9 @@ unsafe fn clear_history_before_import(
 ) -> Vec<(usize, usize, PageLevel)> {
     // SAFETY: all controllers and hardware users of these pages are quiesced by the caller.
     let words = unsafe { tree_words(root, level) };
-    for &(slot, word, _) in &words {
+    for &(pte, word, _) in &words {
         if word & 1 != 0 {
-            unsafe { (slot as *mut usize).write(word & !AD) };
+            unsafe { (pte as *mut usize).write(word & !AD) };
         }
     }
     let &(absent, _, _) = words.iter().find(|(_, word, _)| *word == 0).unwrap();
@@ -118,10 +118,10 @@ unsafe fn clear_history_before_import(
 
 fn assert_words(words: &[(usize, usize, PageLevel)], expected: impl Fn(usize) -> usize) {
     assert!(words.iter().any(|(_, word, _)| *word == 0xdead_0020));
-    for &(slot, before, _) in words {
-        // SAFETY: the imported controller retains these initialized, atomically accessed slots.
-        let after = unsafe { load_entry(slot as *const Entry) }.raw();
-        assert_eq!(after, expected(before), "slot {slot:#x}");
+    for &(pte, before, _) in words {
+        // SAFETY: the imported controller retains these initialized, atomically accessed entries.
+        let after = unsafe { load_entry(pte as *const Entry) }.raw();
+        assert_eq!(after, expected(before), "entry {pte:#x}");
     }
 }
 
@@ -181,7 +181,7 @@ macro_rules! ad_tests {
                     // SAFETY: the newly constructed path remains exclusively owned and inactive.
                     unsafe { assert_path_history(table.root_paddr(), address, PageLevel::Level3) };
                     if split {
-                        let pending = table.split(address, PageLevel::Level0, true).unwrap();
+                        let pending = split_at!(table, address, PageLevel::Level0, true).unwrap();
                         // SAFETY: these host tables are never installed or cached by hardware.
                         unsafe { pending.ignore() };
                     }

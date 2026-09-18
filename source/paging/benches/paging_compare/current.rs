@@ -5,11 +5,11 @@ use std::sync::Arc;
 
 use paging::address::{Address, PhysAddr, VirtAddr};
 use paging::frame::PhysFrame;
-use paging::level::{Lvl, PageLevel};
+use paging::level::Lvl;
 use paging::os_contract::{DirectMappedAllocator, PagingError};
 use paging::page::Page;
 use paging::pagetable::{KernelPageTable, LockSpec};
-use paging::sizes::{Size2MiB, Size4KiB};
+use paging::sizes::{PageSize, Size2MiB, Size4KiB};
 use paging::{FlushScope, PTEntryFlags, X86Paging, X86PagingParams};
 
 use super::common::{Arena, ControllerMemory, MemorySnapshot, Observation, PagingAdapter};
@@ -190,14 +190,19 @@ impl PagingAdapter for CurrentAdapter {
     }
 
     fn map_range(&self, start: u64, end: u64, physical_start: u64) {
-        self.table
-            .map_region(
-                VirtAddr::from(start as usize),
-                VirtAddr::from(end as usize),
-                PhysAddr::from(physical_start as usize),
-                flags(true),
-            )
-            .expect("current map_region");
+        let start = VirtAddr::from(start as usize);
+        let end = VirtAddr::from(end as usize);
+        let range = Page::<Size4KiB>::range_inclusive(
+            Page::from_start_address(start).unwrap(),
+            Page::from_start_address(end - Size4KiB::SIZE).unwrap(),
+        );
+        let mut frames = (0..range.len()).map(|offset| {
+            PhysFrame::from_start_address(PhysAddr::from(
+                physical_start as usize + offset * Size4KiB::SIZE,
+            ))
+            .unwrap()
+        });
+        self.table.map_region(range, &mut frames, flags(true)).expect("current map_region");
     }
 
     #[inline(always)]
@@ -267,7 +272,10 @@ impl PagingAdapter for CurrentAdapter {
     fn split_2m_to_4k(&self, virtual_address: u64) {
         let flush = self
             .table
-            .split(VirtAddr::from(virtual_address as usize), PageLevel::Level0, false)
+            .split(
+                Page::<Size4KiB>::containing_address(VirtAddr::from(virtual_address as usize)),
+                false,
+            )
             .expect("current split");
         // SAFETY: benchmark tables are never installed in hardware page-table roots.
         unsafe { flush.ignore() };

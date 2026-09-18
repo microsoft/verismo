@@ -44,9 +44,9 @@ unsafe fn ancestors(root: PhysAddr, addr: VirtAddr) -> Vec<PTEntry<Arch>> {
     let mut level = PageLevel::Level3;
     let mut result = Vec::new();
     while let Some(child) = level.child() {
-        let slot = (page as *const PTEntry<Arch>).wrapping_add(entry_index(addr, level));
+        let pte = (page as *const PTEntry<Arch>).wrapping_add(entry_index(addr, level));
         // SAFETY: the caller pins this host-backed tree; no entry references escape.
-        let entry = unsafe { load_entry(slot) };
+        let entry = unsafe { load_entry(pte) };
         if !entry.is_table(level) {
             break;
         }

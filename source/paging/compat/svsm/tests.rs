@@ -21,7 +21,7 @@ unsafe fn load_entry(entry: *const Entry) -> Entry {
 }
 
 struct EntryProbe {
-    slot: *const Entry,
+    pte: *const Entry,
     level: PageLevel,
 }
 
@@ -60,8 +60,8 @@ pub(super) fn record_transition_flush(scope: TlbFlushScope, all_cpus: bool) {
         assert_scope(scope, probe.scope);
         for entry in &probe.entries {
             // SAFETY: the scoped test operation keeps these native table pages
-            // alive; observing the recorded slots does not reenter its controller.
-            assert!(unsafe { load_entry(entry.slot) }.is_table(entry.level));
+            // alive; observing the recorded entries does not reenter its controller.
+            assert!(unsafe { load_entry(entry.pte) }.is_table(entry.level));
         }
         probe.calls += 1;
     });
@@ -84,13 +84,13 @@ fn probe_huge_entry(table: &PageTable<'_>, va: VirtAddr) -> EntryProbe {
         let index = verismo_paging::sizes::entry_index(va.bits().into(), level);
         // SAFETY: the validated test tree remains alive; each index is in the
         // current table page and the native allocator resolves every child page.
-        let (slot, entry) = unsafe {
-            let slot = page.add(index);
-            (slot, load_entry(slot))
+        let (pte, entry) = unsafe {
+            let pte = page.add(index);
+            (pte, load_entry(pte))
         };
         if entry.is_leaf(level) {
             assert_ne!(level, PageLevel::Level0);
-            return EntryProbe { slot, level };
+            return EntryProbe { pte, level };
         }
         assert!(entry.is_table(level));
         page = phys_to_virt(PhysAddr::from(entry.address())).as_ptr::<Entry>();
@@ -117,8 +117,8 @@ fn with_transition_flush<R>(
         let probe = state.as_ref().unwrap();
         assert_eq!(probe.calls, 1, "Missing synchronous split flush");
         for entry in &probe.entries {
-            // SAFETY: the test still owns the tree, including the recorded slots.
-            assert!(unsafe { load_entry(entry.slot) }.is_table(entry.level));
+            // SAFETY: the test still owns the tree, including the recorded entries.
+            assert!(unsafe { load_entry(entry.pte) }.is_table(entry.level));
         }
     });
     result
@@ -263,11 +263,11 @@ fn borrowed_native_tree() {
 
     // SAFETY: the tree remains unpublished and is accessed only here.
     unsafe { native.0.as_inactive().init_self_map(root) };
-    // SAFETY: the only cycle is the standard recursive slot, which is rejected.
+    // SAFETY: the only cycle is the standard recursive entry, which is rejected.
     let rejected = unsafe { PageTable::from_svsm(&mut native.0) }.unwrap_err();
-    let slot = native.0.root_vaddr().as_mut_ptr::<usize>();
+    let pte = native.0.root_vaddr().as_mut_ptr::<usize>();
     // SAFETY: remove exactly the recursive entry just inserted, before teardown.
-    unsafe { slot.add(crate::mm::PGTABLE_LVL3_IDX_PTE_SELFMAP).write(0) };
+    unsafe { pte.add(crate::mm::PGTABLE_LVL3_IDX_PTE_SELFMAP).write(0) };
     assert_eq!(rejected, PagingError::InvalidAddress);
 }
 

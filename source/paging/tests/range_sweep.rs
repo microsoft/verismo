@@ -113,7 +113,7 @@ fn contiguous_4k_mapping_descends_once_per_covered_child_table() {
     let start = VirtAddr::from(BASE + PAGE);
     let end = VirtAddr::from(BASE + (PAGES + 1) * PAGE);
     RESOLUTIONS.store(0, Ordering::Relaxed);
-    table.map_region(start, end, PhysAddr::from(FRAME + PAGE), flags()).unwrap();
+    map_region_4k!(table, start, end, PhysAddr::from(FRAME + PAGE), flags()).unwrap();
 
     let resolved = RESOLUTIONS.load(Ordering::Relaxed);
     assert!(resolved <= 24, "hierarchical mapping resolved {resolved} table pages");
@@ -131,7 +131,7 @@ fn matching_4k_mapping_is_rejected_without_rewalking_the_range() {
     let mut table = table;
     let start = VirtAddr::from(BASE + PAGE);
     let end = VirtAddr::from(BASE + (PAGES + 1) * PAGE);
-    table.map_region(start, end, PhysAddr::from(FRAME + PAGE), flags()).unwrap();
+    map_region_4k!(table, start, end, PhysAddr::from(FRAME + PAGE), flags()).unwrap();
 
     #[cfg(feature = "concurrent")]
     let (locks, root) = table.leak();
@@ -146,8 +146,8 @@ fn matching_4k_mapping_is_rejected_without_rewalking_the_range() {
 
     RESOLUTIONS.store(0, Ordering::Relaxed);
     assert!(matches!(
-        table.map_region(start, end, PhysAddr::from(FRAME + PAGE), flags()),
-        Err(PagingError::EntryAlreadyPresent { .. })
+        map_region_4k!(table, start, end, PhysAddr::from(FRAME + PAGE), flags()),
+        Err(failure) if matches!(failure.error, PagingError::EntryAlreadyPresent { .. })
     ));
 
     let resolved = RESOLUTIONS.load(Ordering::Relaxed);
@@ -161,7 +161,7 @@ fn contiguous_4k_unmapping_descends_once_per_covered_child_table() {
     let mut table = table;
     let start = VirtAddr::from(BASE + PAGE);
     let end = VirtAddr::from(BASE + (PAGES + 1) * PAGE);
-    table.map_region(start, end, PhysAddr::from(FRAME + PAGE), flags()).unwrap();
+    map_region_4k!(table, start, end, PhysAddr::from(FRAME + PAGE), flags()).unwrap();
 
     #[cfg(feature = "concurrent")]
     let (locks, root) = table.leak();

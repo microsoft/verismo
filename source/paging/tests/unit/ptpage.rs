@@ -10,9 +10,17 @@ use core::sync::atomic::AtomicUsize;
 
 use super::*;
 use crate::structs::level::{LevelSpec, Lvl};
+use crate::structs::page::Page as TypedPage;
 use crate::structs::policy::KernelPolicy;
 use crate::structs::ptpage::{free_children, reclaim_path, reclaim_range};
+use crate::structs::sizes::{PageOffset, Size1GiB};
 use crate::{FlushScope, PTEntryFlags, X86Paging, X86PagingParams};
+
+struct Size512GiB;
+
+impl PageOffset for Size512GiB {
+    const SHIFT: usize = 39;
+}
 
 impl<A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'_, A, P> {
     fn is_empty(&self) -> bool {
@@ -311,9 +319,9 @@ unsafe impl PagingAllocator for AllocationOwner {
                 if state.freed.get() & (1 << page_index) != 0 {
                     continue;
                 }
-                for slot in 0..PT_ENTRY_COUNT {
+                for index in 0..PT_ENTRY_COUNT {
                     // SAFETY: this fixture retains all initialized arena storage without concurrent access.
-                    let entry = unsafe { AllocationPage::read_entry(page.get(), slot) };
+                    let entry = unsafe { AllocationPage::read_entry(page.get(), index) };
                     assert!(
                         !entry.present() || entry.address() != paddr.bits(),
                         "freed a table while a parent still links to it"
@@ -352,8 +360,7 @@ fn owned_tree_stores_no_allocator_handle() {
     let mut tree = AllocationTree::new(PageLevel::Level2).unwrap();
     assert_eq!(size_of_val(&tree), size_of::<(PhysAddr, PageLevel)>());
     tree.grow(
-        VirtAddr::from(0usize),
-        PageLevel::Level0,
+        TypedPage::<Size4KiB>::containing_address(VirtAddr::from(0usize)),
         <TreeArch as ArchPagingMeta>::PTFlags::parent_flags(),
     )
     .unwrap();
@@ -450,7 +457,10 @@ fn typed_adoption_recursively_drops_dynamically_prepared_trees() {
         let mut prepared = AllocationTree::new(L::LEVEL).unwrap();
         let address = VirtAddr::from(0usize);
         prepared
-            .grow(address, PageLevel::Level0, <TreeArch as ArchPagingMeta>::PTFlags::parent_flags())
+            .grow(
+                TypedPage::<Size4KiB>::containing_address(address),
+                <TreeArch as ArchPagingMeta>::PTFlags::parent_flags(),
+            )
             .unwrap();
         prepared.root().walk(address).entry().store(entry_from_bits::<TreeArch>(0xdead_0001));
         let root = prepared.release();
@@ -479,7 +489,7 @@ fn owned_tree_grows_downward_reuses_paths_and_drops_tables_not_data() {
             + 4 * PageLevel::Level1.size()
             + 5 * PageLevel::Level0.size(),
     );
-    tree.grow(address, PageLevel::Level1, flags).unwrap();
+    tree.grow(TypedPage::<Size2MiB>::containing_address(address), flags).unwrap();
     assert_eq!(owner.allocated.get(), 3);
     {
         let view = owner.view(&tree, PageLevel::Level3);
@@ -506,12 +516,13 @@ fn owned_tree_grows_downward_reuses_paths_and_drops_tables_not_data() {
         );
         assert!(leaf.entries_satisfy(&|entry| entry.is_clear()));
     }
-    tree.grow(address, PageLevel::Level1, flags).unwrap();
-    tree.grow(address, PageLevel::Level2, flags).unwrap();
+    tree.grow(TypedPage::<Size2MiB>::containing_address(address), flags).unwrap();
+    tree.grow(TypedPage::<Size1GiB>::containing_address(address), flags).unwrap();
     assert_eq!(owner.allocated.get(), 3);
-    tree.grow(address, PageLevel::Level0, flags).unwrap();
+    tree.grow(TypedPage::<Size4KiB>::containing_address(address), flags).unwrap();
     assert_eq!(owner.allocated.get(), 4);
-    tree.grow(address + PageLevel::Level1.size(), PageLevel::Level0, flags).unwrap();
+    tree.grow(TypedPage::<Size4KiB>::containing_address(address + PageLevel::Level1.size()), flags)
+        .unwrap();
     assert_eq!(owner.allocated.get(), 5);
     assert_eq!(tree.root_paddr(), root);
     {
@@ -524,7 +535,7 @@ fn owned_tree_grows_downward_reuses_paths_and_drops_tables_not_data() {
         middle.store(6, entry_from_bits::<TreeArch>(0x20_0081));
         middle.store(7, entry_from_bits::<TreeArch>(0xd080));
     }
-    tree.grow(address, PageLevel::Level0, flags).unwrap();
+    tree.grow(TypedPage::<Size4KiB>::containing_address(address), flags).unwrap();
     assert_eq!(owner.allocated.get(), 5);
     assert_eq!(owner.freed.get(), 0);
     drop(tree);
@@ -537,8 +548,7 @@ fn owned_tree_release_transfers_all_pages_without_freeing() {
     let root = {
         let mut tree = AllocationTree::new(PageLevel::Level2).unwrap();
         tree.grow(
-            VirtAddr::from(0usize),
-            PageLevel::Level0,
+            TypedPage::<Size4KiB>::containing_address(VirtAddr::from(0usize)),
             <TreeArch as ArchPagingMeta>::PTFlags::parent_flags(),
         )
         .unwrap();
@@ -561,7 +571,7 @@ fn owned_tree_failed_growth_rolls_back_only_the_staged_suffix() {
         let mut tree = AllocationTree::new(PageLevel::Level4).unwrap();
         let flags = <TreeArch as ArchPagingMeta>::PTFlags::parent_flags();
         let address = VirtAddr::from(PageLevel::Level3.size());
-        tree.grow(address, PageLevel::Level3, flags).unwrap();
+        tree.grow(TypedPage::<Size512GiB>::containing_address(address), flags).unwrap();
         let root = tree.root_paddr();
         let snapshots = {
             let view = owner.view(&tree, PageLevel::Level4);
@@ -575,7 +585,7 @@ fn owned_tree_failed_growth_rolls_back_only_the_staged_suffix() {
         };
         owner.budget.set(budget);
         assert!(matches!(
-            tree.grow(address, PageLevel::Level0, flags),
+            tree.grow(TypedPage::<Size4KiB>::containing_address(address), flags),
             Err(PagingError::AllocFrame)
         ));
         assert_eq!(tree.root_paddr(), root);
@@ -593,7 +603,7 @@ fn owned_tree_failed_growth_rolls_back_only_the_staged_suffix() {
             assert_eq!(view.walk(address).page.level(), PageLevel::Level3);
         }
         owner.budget.set(3);
-        tree.grow(address, PageLevel::Level0, flags).unwrap();
+        tree.grow(TypedPage::<Size4KiB>::containing_address(address), flags).unwrap();
         assert_eq!(
             owner.view(&tree, PageLevel::Level4).walk(address).page.level(),
             PageLevel::Level0
@@ -609,11 +619,17 @@ fn owned_tree_rejects_upward_growth_and_blocking_huge_leaves() {
     let mut tree = AllocationTree::new(PageLevel::Level2).unwrap();
     let flags = <TreeArch as ArchPagingMeta>::PTFlags::parent_flags();
     let address = VirtAddr::from(0usize);
-    assert!(matches!(tree.grow(address, PageLevel::Level3, flags), Err(PagingError::InvalidLevel)));
+    assert!(matches!(
+        tree.grow(TypedPage::<Size512GiB>::containing_address(address), flags),
+        Err(PagingError::InvalidLevel)
+    ));
     assert!(owner.view(&tree, PageLevel::Level2).entries_satisfy(&|entry| entry.is_clear()));
     owner.view(&tree, PageLevel::Level2).store(0, entry_from_bits::<TreeArch>(0x8000_0081));
-    assert!(matches!(tree.grow(address, PageLevel::Level0, flags), Err(PagingError::NotLeafEntry)));
-    tree.grow(address, PageLevel::Level2, flags).unwrap();
+    assert!(matches!(
+        tree.grow(TypedPage::<Size4KiB>::containing_address(address), flags),
+        Err(PagingError::NotLeafEntry)
+    ));
+    tree.grow(TypedPage::<Size1GiB>::containing_address(address), flags).unwrap();
     assert_eq!(owner.view(&tree, PageLevel::Level2).load(0).raw(), published(0x8000_0081));
     assert_eq!(owner.allocated.get(), 1);
     assert_eq!(owner.freed.get(), 0);
@@ -758,9 +774,9 @@ unsafe impl PagingAllocator for TreeOwner {
                     PageLevel::Level3,
                     PageLevel::Level4,
                 ][page_index];
-                for slot in 0..PT_ENTRY_COUNT {
+                for entry_index in 0..PT_ENTRY_COUNT {
                     // SAFETY: this quiesced fixture retains the backing storage of its arena.
-                    let entry = unsafe { TreePage::read_entry(page.get(), slot) };
+                    let entry = unsafe { TreePage::read_entry(page.get(), entry_index) };
                     assert!(!entry.is_table(level) || entry.address() != paddr.bits());
                     if page_index == index && state.require_clear_on_free.get() {
                         assert!(entry.is_clear());
@@ -971,7 +987,7 @@ fn teardown_applies_ownership_only_at_the_supplied_root() {
     let owner = TreeFixture::new();
     let root = owner.view();
     let table = root.load(0).raw();
-    // SAFETY: selected slots are exclusively owned, with no installed hardware walks.
+    // SAFETY: selected entries are exclusively owned, with no installed hardware walks.
     unsafe { free_children(&root, |index| index != 0) };
     assert_eq!(root.load(0).raw(), table);
     assert_eq!(owner.freed.get(), 0);
@@ -1084,49 +1100,49 @@ fn atomic_publication_presets_only_present_words_and_preserves_exact_observation
     use core::sync::atomic::{AtomicUsize, Ordering};
 
     let word = AtomicUsize::new(0);
-    // SAFETY: this local atomic pins the slot; every access uses the same atomic word.
-    let slot = unsafe { PTEntryRef::<Arch>::from_raw(word.as_ptr().cast()) };
+    // SAFETY: this local atomic pins the entry; every access uses the same atomic word.
+    let pte_ref = unsafe { PTEntryRef::<Arch>::from_raw(word.as_ptr().cast()) };
     let raw =
         |result: Result<Entry, Entry>| result.map(|entry| entry.raw()).map_err(|entry| entry.raw());
     for before in [0, 0x1020, 0x1001, 0x1061] {
         for after in [0, 0x2040, 0x2001, 0x2061] {
             word.store(before, Ordering::Release);
-            assert_eq!(slot.load().raw(), before);
+            assert_eq!(pte_ref.load().raw(), before);
             assert_eq!(entry_from_bits::<Arch>(before).raw(), before);
-            slot.store(entry_from_bits::<Arch>(after));
-            assert_eq!(slot.load().raw(), published(after));
+            pte_ref.store(entry_from_bits::<Arch>(after));
+            assert_eq!(pte_ref.load().raw(), published(after));
 
             word.store(before, Ordering::Release);
-            assert_eq!(slot.swap(entry_from_bits::<Arch>(after)).raw(), before);
-            assert_eq!(slot.load().raw(), published(after));
+            assert_eq!(pte_ref.swap(entry_from_bits::<Arch>(after)).raw(), before);
+            assert_eq!(pte_ref.load().raw(), published(after));
 
             word.store(before, Ordering::Release);
             assert_eq!(
-                raw(slot.compare_exchange(
+                raw(pte_ref.compare_exchange(
                     entry_from_bits::<Arch>(before ^ 0x1000),
                     entry_from_bits::<Arch>(after),
                 )),
                 Err(before)
             );
-            assert_eq!(slot.load().raw(), before);
+            assert_eq!(pte_ref.load().raw(), before);
             assert_eq!(
-                raw(slot.compare_exchange(
+                raw(pte_ref.compare_exchange(
                     entry_from_bits::<Arch>(before),
                     entry_from_bits::<Arch>(after),
                 )),
                 Ok(before)
             );
-            assert_eq!(slot.load().raw(), published(after));
+            assert_eq!(pte_ref.load().raw(), published(after));
         }
         for mask in [usize::MAX, !0x60, !1, 0] {
             word.store(before, Ordering::Release);
-            assert_eq!(slot.fetch_and(mask).raw(), before);
-            assert_eq!(slot.load().raw(), published(before & mask));
+            assert_eq!(pte_ref.fetch_and(mask).raw(), before);
+            assert_eq!(pte_ref.load().raw(), published(before & mask));
         }
         for mask in [0, 1, 0x60, 0x2000] {
             word.store(before, Ordering::Release);
-            assert_eq!(slot.fetch_or(mask).raw(), before);
-            assert_eq!(slot.load().raw(), published(before | mask));
+            assert_eq!(pte_ref.fetch_or(mask).raw(), before);
+            assert_eq!(pte_ref.load().raw(), published(before | mask));
         }
     }
 }
@@ -1149,16 +1165,16 @@ fn compare_exchange_rejects_a_stale_snapshot_without_overwriting_updates() {
 #[test]
 fn invalidation_rollback_retains_the_old_encoding_and_late_history() {
     let owner = Owner::new();
-    let slot = owner.view().entry(0);
+    let pte_ref = owner.view().entry(0);
     let original = entry_from_bits::<Arch>(published(0x20_0181));
-    slot.store(original);
+    pte_ref.store(original);
     {
-        let invalidated = InvalidatedLeaf::new(slot);
-        assert_eq!(slot.load().raw(), original.raw() & !1);
-        slot.fetch_or(0x60);
+        let invalidated = InvalidatedLeaf::new(pte_ref);
+        assert_eq!(pte_ref.load().raw(), original.raw() & !1);
+        pte_ref.fetch_or(0x60);
         assert_eq!(invalidated.snapshot().raw(), original.raw() | 0x60);
     }
-    assert_eq!(slot.load().raw(), original.raw() | 0x60);
+    assert_eq!(pte_ref.load().raw(), original.raw() | 0x60);
 }
 
 #[test]
@@ -1239,22 +1255,21 @@ fn exchanging_two_confidentiality_tags_uses_a_barrier_and_retains_history() {
 
     type DualArch = X86Paging<DualTag>;
     WORD.store(PRIVATE | 0x2003, Ordering::Release);
-    // SAFETY: static atomic storage pins the slot; this test is its only software writer.
-    let slot = unsafe { PTEntryRef::<DualArch>::from_raw(WORD.as_ptr().cast()) };
+    // SAFETY: static atomic storage pins the entry; this test is its only software writer.
+    let pte_ref = unsafe { PTEntryRef::<DualArch>::from_raw(WORD.as_ptr().cast()) };
     for (shared, new_tag) in [(true, SHARED), (false, PRIVATE)] {
         let flush = unsafe {
             PTPage::<DualArch, NoAllocator>::update_encryption_leaf(
-                slot,
+                pte_ref,
                 PageLevel::Level0,
-                VirtAddr::from(0x2000usize),
-                PageLevel::Level0,
+                TypedPage::<Size4KiB>::containing_address(VirtAddr::from(0x2000usize)),
                 shared,
                 shared,
             )
         }
         .unwrap();
         flush.expect_no_flush();
-        assert_eq!(slot.load().raw(), new_tag | 0x2063);
+        assert_eq!(pte_ref.load().raw(), new_tag | 0x2063);
     }
     assert_eq!(SCOPES.load(Ordering::Acquire), 3);
 }

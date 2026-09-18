@@ -1,7 +1,10 @@
+use crate::sizes::PAGE_OFFSET_WIDTH;
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //
 // Copyright (c) 2022-2023 SUSE LLC
-use crate::structs::sizes::{PageOffset, PageSize, Size4KiB};
+use crate::structs::sizes::{
+    PageOffset, PageSize, Size4KiB, PAGE_TABLE_INDEX_WIDTH, PT_ENTRY_COUNT,
+};
 use crate::util::{align_down, align_up, is_aligned};
 
 use core::fmt;
@@ -218,11 +221,9 @@ impl VirtAddr {
         Self(sign_extend(addr))
     }
 
-    /// The shift and mask encode x86-64's paging geometry; this belongs with
-    /// that architecture's code, but moving it is deferred to avoid rippling
-    /// through callers here.
+    /// Returns the page-table index selected at level `L`.
     pub const fn to_pgtbl_idx<const L: usize>(&self) -> usize {
-        (self.0 >> (12 + L * 9)) & 0x1ffusize
+        (self.0 >> (PAGE_OFFSET_WIDTH + L * PAGE_TABLE_INDEX_WIDTH)) & (PT_ENTRY_COUNT - 1)
     }
 
     #[inline]

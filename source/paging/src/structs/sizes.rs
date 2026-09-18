@@ -73,7 +73,7 @@ compile_error!("target_min_page was given more than one value");
 pub const PAGE_OFFSET_WIDTH: usize = MinPageSize::SHIFT;
 
 /// Bytes in the smallest page.
-pub const PAGE_SIZE: usize = 1usize << PAGE_OFFSET_WIDTH;
+pub const PAGE_SIZE: usize = MinPageSize::SIZE;
 
 /// Bytes a table-page entry occupies, as a shift: an entry is one machine word.
 #[cfg(target_pointer_width = "64")]
@@ -107,16 +107,14 @@ pub const fn level_size(level: PageLevel) -> usize {
     1usize << shift_at(level)
 }
 
+pub(crate) fn level_for_size<S: PageSize>() -> Option<PageLevel> {
+    [PageLevel::Level0, PageLevel::Level1, PageLevel::Level2, PageLevel::Level3, PageLevel::Level4]
+        .into_iter()
+        .find(|level| S::SIZE == level_size(*level))
+}
+
 pub(crate) fn page_level_for_size<S: PageSize>() -> Option<PageLevel> {
-    if S::SIZE == level_size(PageLevel::Level0) {
-        Some(PageLevel::Level0)
-    } else if S::SIZE == level_size(PageLevel::Level1) {
-        Some(PageLevel::Level1)
-    } else if S::SIZE == level_size(PageLevel::Level2) {
-        Some(PageLevel::Level2)
-    } else {
-        None
-    }
+    level_for_size::<S>().filter(|level| *level <= PageLevel::Level2)
 }
 
 #[inline(always)]
@@ -125,8 +123,6 @@ pub const fn entry_index_bits(vaddr: usize, level: PageLevel) -> usize {
 }
 
 /// The entry `vaddr` selects at the level fixed by `L`, counted from the leaf.
-/// Deliberately not `VirtAddr::to_pgtbl_idx`, which spells out x86-64's shift
-/// and mask; the geometry here comes from the page size instead.
 pub const fn pt_entry_index_bits<const L: usize>(vaddr: usize) -> usize {
     // `let`, not an inner `const` item: that cannot name the outer `L` (E0401),
     // and `L` is fixed at monomorphization anyway.

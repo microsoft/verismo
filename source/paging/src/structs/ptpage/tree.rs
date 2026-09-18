@@ -6,8 +6,12 @@ use crate::structs::arch_contract::ArchPagingMeta;
 use crate::structs::entry::PTEntry;
 use crate::structs::level::{LevelSpec, PageLevel};
 use crate::structs::os_contract::{PagingAllocator, PagingError};
+#[cfg(any(feature = "concurrent", test))]
+use crate::structs::page::Page;
 use crate::structs::policy::{KernelPolicy, PagingOwnershipPolicy};
 use crate::structs::sizes::{entry_index, PT_ENTRY_COUNT};
+#[cfg(any(feature = "concurrent", test))]
+use crate::structs::sizes::{level_for_size, PageSize};
 
 /// Supplies either a static type-level root level or a stored runtime level.
 pub(crate) trait TreeLevel {
@@ -119,30 +123,33 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPageTree<A, P> {
     }
 
     /// Adds missing tables down to `target`, without splitting existing leaves.
-    pub(crate) fn grow(
+    #[cfg(any(feature = "concurrent", test))]
+    pub(crate) fn grow<PS: PageSize>(
         &mut self,
-        vaddr: VirtAddr,
-        target: PageLevel,
+        target_page: Page<PS>,
         parent_flags: A::PTFlags,
     ) -> Result<(), PagingError> {
+        let target = level_for_size::<PS>().ok_or(PagingError::InvalidLevel)?;
         if target > self.level {
             return Err(PagingError::InvalidLevel);
         }
         let level = self.level;
         // SAFETY: runtime-level trees are private preparations until released.
-        unsafe { Self::grow_page(self.page_mut(), level, vaddr, target, parent_flags) }
+        unsafe { Self::grow_page(self.page_mut(), level, target_page, parent_flags) }
     }
 
-    unsafe fn grow_page(
+    #[cfg(any(feature = "concurrent", test))]
+    unsafe fn grow_page<PS: PageSize>(
         page: &mut PTPage<A, P>,
         level: PageLevel,
-        vaddr: VirtAddr,
-        target: PageLevel,
+        target_page: Page<PS>,
         parent_flags: A::PTFlags,
     ) -> Result<(), PagingError> {
+        let target = level_for_size::<PS>().ok_or(PagingError::InvalidLevel)?;
         if level <= target {
             return Ok(());
         }
+        let vaddr = target_page.start_address();
         let entry = page.entry_mut(entry_index(vaddr, level));
         let child_level = level.child().unwrap();
         if entry.is_table(level) {
@@ -151,13 +158,13 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPageTree<A, P> {
                 &mut *P::paddr_to_vaddr(PhysAddr::from(entry.address()))
                     .as_mut_ptr::<PTPage<A, P>>()
             };
-            return unsafe { Self::grow_page(child, child_level, vaddr, target, parent_flags) };
+            return unsafe { Self::grow_page(child, child_level, target_page, parent_flags) };
         }
         if entry.present() {
             return Err(PagingError::NotLeafEntry);
         }
         let mut child = Self::new(child_level)?;
-        child.grow(vaddr, target, parent_flags)?;
+        child.grow(target_page, parent_flags)?;
         *entry = PTEntry::new_table(A::make_private_address(child.root_paddr()), parent_flags);
         child.release();
         Ok(())
@@ -272,7 +279,7 @@ unsafe fn reclaim_range_inner<A: ArchPagingMeta, P: PagingAllocator>(
     root.entries_satisfy(empty_entry)
 }
 
-/// Clears owned root slots and frees their descendant tables, not data frames.
+/// Clears owned root entries and frees their descendant tables, not data frames.
 /// # Safety
 /// Selected subtrees must be exclusively owned and quiesced, without
 /// surviving descendant references. All their descendants must belong to the allocator.

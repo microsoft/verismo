@@ -84,7 +84,7 @@ impl<S: PageSize> PageRange<S> {
     /// The number of pages in the range.
     pub open spec fn spec_len(&self) -> usize {
         if self.start@ < self.end@ {
-            (self.end.spec_page_number() - self.start.spec_page_number()) as usize
+            (((self.end@ - self.start@) & ((1usize << 48) - 1)) / S::SIZE) as usize
         } else {
             0
         }
@@ -95,7 +95,7 @@ impl<S: PageSize> PageRangeInclusive<S> {
     /// The number of pages in the range.
     pub open spec fn spec_len(&self) -> usize {
         if self.start@ <= self.end@ {
-            (self.end.spec_page_number() - self.start.spec_page_number() + 1) as usize
+            ((((self.end@ - self.start@) & ((1usize << 48) - 1)) / S::SIZE) + 1) as usize
         } else {
             0
         }

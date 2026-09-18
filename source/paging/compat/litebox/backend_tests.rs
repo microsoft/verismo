@@ -17,14 +17,14 @@ unsafe fn load_entry<A: paging::ArchPagingMeta>(
 }
 
 std::thread_local! {
-    static TRANSITION_SLOT: Cell<*mut usize> = const { Cell::new(core::ptr::null_mut()) };
+    static TRANSITION_PTE: Cell<*mut usize> = const { Cell::new(core::ptr::null_mut()) };
     static TRANSITION_FLUSHES: Cell<usize> = const { Cell::new(0) };
 }
 
 pub(super) fn observe_transition_flush() {
-    let slot = TRANSITION_SLOT.with(Cell::get);
-    if !slot.is_null() {
-        let word = unsafe { AtomicUsize::from_ptr(slot) }.load(Ordering::Acquire);
+    let pte = TRANSITION_PTE.with(Cell::get);
+    if !pte.is_null() {
+        let word = unsafe { AtomicUsize::from_ptr(pte) }.load(Ordering::Acquire);
         assert_ne!(word & PTEntryFlags::PRESENT.bits(), 0);
         assert_eq!(word & PTEntryFlags::HUGE.bits(), 0);
         assert!(CONTENT_LOCK.is_locked());
@@ -36,22 +36,22 @@ struct ObservedTransition<'a>(PhantomData<&'a Tree<MockKernel>>);
 
 impl Drop for ObservedTransition<'_> {
     fn drop(&mut self) {
-        TRANSITION_SLOT.with(|slot| slot.set(core::ptr::null_mut()));
+        TRANSITION_PTE.with(|pte| pte.set(core::ptr::null_mut()));
     }
 }
 
 fn observe_transition(inner: &Tree<MockKernel>, address: PagingVirtAddr) -> ObservedTransition<'_> {
     let mut page = inner.root_paddr();
     for level in (0..4).rev() {
-        let slot = unsafe {
+        let pte = unsafe {
             Platform::<MockKernel>::paddr_to_vaddr(page)
                 .as_mut_ptr::<paging::entry::PTEntry<X86Paging<Platform<MockKernel>>>>()
                 .add((address.bits() >> (12 + 9 * level)) & 511)
         };
-        let entry = unsafe { load_entry(slot) };
+        let entry = unsafe { load_entry(pte) };
         assert!(entry.present());
         if level == 0 || entry.huge() {
-            TRANSITION_SLOT.with(|current| assert!(current.replace(slot.cast()).is_null()));
+            TRANSITION_PTE.with(|current| assert!(current.replace(pte.cast()).is_null()));
             TRANSITION_FLUSHES.with(|count| count.set(0));
             return ObservedTransition(PhantomData);
         }
@@ -84,12 +84,12 @@ fn ancestor_words(table: &MockTable, address: usize) -> alloc::vec::Vec<usize> {
     let mut words = alloc::vec::Vec::new();
     for level in (1..=3).rev() {
         let index = (address >> (12 + 9 * level)) & 511;
-        let slot = unsafe {
+        let pte = unsafe {
             Platform::<MockKernel>::paddr_to_vaddr(page)
                 .as_mut_ptr::<paging::entry::PTEntry<X86Paging<Platform<MockKernel>>>>()
                 .add(index)
         };
-        let entry = unsafe { load_entry(slot) };
+        let entry = unsafe { load_entry(pte) };
         words.push(entry.raw());
         page = entry.address().into();
     }
@@ -183,7 +183,13 @@ fn split_and_protect_preserve_neighbors_and_tlb_scope() {
     assert!(inner.walk(address + 8192).read().writable());
     assert_eq!(inner.phys_addr(address + 123).unwrap(), physical + 123);
 
-    inner.split(address, PageLevel::Level0, FLUSH_ALL_CPUS).unwrap().expect_no_flush();
+    inner
+        .split(
+            PagingPage::<PagingSize4KiB>::containing_address(address),
+            FLUSH_ALL_CPUS,
+        )
+        .unwrap()
+        .expect_no_flush();
     let flush = inner
         .set_flags(
             paging::page::Page::<paging::sizes::Size4KiB>::from_start_address(protected).unwrap(),
@@ -408,26 +414,26 @@ fn restrictive_imported_user_ancestors_are_rejected_without_normalization() {
     let mut page = root;
     for level in (1..=3).rev() {
         let index = (range.start >> (12 + 9 * level)) & 511;
-        let slot = unsafe {
+        let pte = unsafe {
             MockKernel::pa_to_va(page)
                 .as_mut_ptr::<paging::entry::PTEntry<X86Paging<Platform<MockKernel>>>>()
                 .add(index)
         };
-        let entry = unsafe { load_entry(slot) };
+        let entry = unsafe { load_entry(pte) };
         let original = entry.raw();
         for restricted in [
             original & !(PageTableFlags::WRITABLE.bits() as usize),
             original & !(PageTableFlags::USER_ACCESSIBLE.bits() as usize),
             original | PageTableFlags::NO_EXECUTE.bits() as usize,
         ] {
-            unsafe { &*slot.cast::<AtomicUsize>() }.store(restricted, Ordering::Release);
+            unsafe { &*pte.cast::<AtomicUsize>() }.store(restricted, Ordering::Release);
             let before = crate::mm::tests::effective_flags(root, range.start);
             let flush_start = FLUSHES.lock().len();
             assert!(std::panic::catch_unwind(|| unsafe { MockTable::init(root) }).is_err());
-            assert_eq!(unsafe { load_entry(slot) }.raw(), restricted);
+            assert_eq!(unsafe { load_entry(pte) }.raw(), restricted);
             assert_eq!(crate::mm::tests::effective_flags(root, range.start), before);
             assert_eq!(FLUSHES.lock().len(), flush_start);
-            unsafe { &*slot.cast::<AtomicUsize>() }.store(entry.raw(), Ordering::Release);
+            unsafe { &*pte.cast::<AtomicUsize>() }.store(entry.raw(), Ordering::Release);
         }
         page = PhysAddr::new(entry.address() as u64);
     }
