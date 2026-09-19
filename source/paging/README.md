@@ -65,6 +65,53 @@ otherwise falls back to TCG. Cloud Hypervisor is skipped without KVM because it
 has no software-emulation mode. The guest uses the Xen PVH direct-boot ABI so
 both VMMs can load the same ELF without external BIOS or UEFI firmware.
 
+### Four-CPU concurrent boot test
+
+The second PVH guest, `tests/kvm/smp_guest.rs`, boots four CPUs and exercises
+the `concurrent` `PageTable` instead of the sequential one. The BSP builds one
+shared table (a minimal striped spin mutex satisfies its `LockSpec`), then
+brings up three APs one at a time: before each SIPI it publishes that AP's
+stack top and worker id, sends INIT/deassert/SIPI through the x2APIC MSR
+interface (falling back to the legacy MMIO-mapped local APIC on hosts whose
+QEMU/TCG predates x2APIC MSR support) and waits for the AP to reach Rust
+before moving on, so trampoline state is never written for two APs at once.
+The real-mode trampoline itself is linked at its ordinary address like any
+other code and copied to the fixed low physical scratch address SIPI
+requires only once the BSP is running: QEMU's PVH direct-boot loader
+miscopies images whose PT_LOAD segments sit at addresses far apart, so the
+trampoline cannot simply be linked at that low address directly.
+
+Once every AP is up, the BSP publishes the shared table and releases all four
+CPUs into a bounded (512-round) workload: each worker repeatedly maps its own
+4 KiB page, verifies the software translation, unmaps it, and confirms the
+removed entry matched what it installed. Every worker's page lives in the
+same 2 MiB region, so the shared intermediate tables down to the leaf level
+are built and contended for by all four CPUs, exercising concurrent
+structural growth alongside entry updates. The flush obligation each unmap
+returns is discharged with `unsafe { flush.ignore() }`: this is sound because
+the workload's virtual addresses are never dereferenced as data by any CPU,
+only ever touched through the crate's own map/unmap calls, so no TLB can hold
+a stale translation for them to invalidate. For the same reason the
+architecture's flush hooks stay purely local, as in the single-CPU guest.
+After every worker finishes, the BSP confirms all four pages are unmapped and
+the table is still structurally valid, then leaks it and emits
+`VERIOS_PAGETABLE_SMP_BOOT_OK`. Every stage (build, CR3 load, each AP's
+startup, workload start/completion) has its own serial marker, and every
+bounded wait has a distinct timeout marker, to make a stuck boot or a stuck
+AP diagnosable from the serial log alone.
+
+Run it from `source`:
+
+```console
+paging/tests/kvm/run-smp.sh
+```
+
+It uses the same runner as the single-CPU test (`run.sh`, parameterized by
+environment variables for the guest example, linker script, Cargo feature,
+success marker, and vCPU count), so it has the same KVM/TCG and
+Cloud-Hypervisor-needs-KVM behavior, just with `-smp 4` (`--cpus boot=4` for
+Cloud Hypervisor).
+
 ## Live page-table entry access
 
 `PTPage` always stores entries as `AtomicUsize`. Ignoring hardware-maintained

@@ -5,13 +5,17 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PAGING_DIR=$(cd -- "$SCRIPT_DIR/../.." && pwd)
 SOURCE_DIR=$(cd -- "$PAGING_DIR/.." && pwd)
 TARGET_DIR=${CARGO_TARGET_DIR:-"$SOURCE_DIR/target"}
-GUEST="$TARGET_DIR/x86_64-unknown-none/release/examples/kvm-guest"
-SUCCESS_MARKER=VERIOS_PAGETABLE_BOOT_OK
+GUEST_EXAMPLE=${GUEST_EXAMPLE:-kvm-guest}
+GUEST_FEATURE=${GUEST_FEATURE:-kvm-test}
+LINKER_SCRIPT=${LINKER_SCRIPT:-"$SCRIPT_DIR/x86_64-pvh.ld"}
+SUCCESS_MARKER=${SUCCESS_MARKER:-VERIOS_PAGETABLE_BOOT_OK}
+GUEST_SMP=${GUEST_SMP:-1}
+GUEST="$TARGET_DIR/x86_64-unknown-none/release/examples/$GUEST_EXAMPLE"
 BOOT_TIMEOUT_SECONDS=${BOOT_TIMEOUT_SECONDS:-15}
 ACTIVE_PID=
 ACTIVE_LOG=
 
-export CARGO_ENCODED_RUSTFLAGS=$'--cfg\x1ftarget_min_page="4kib"\x1f-C\x1flink-arg=-T'"$SCRIPT_DIR"$'/x86_64-pvh.ld\x1f-C\x1frelocation-model=static'
+export CARGO_ENCODED_RUSTFLAGS=$'--cfg\x1ftarget_min_page="4kib"\x1f-C\x1flink-arg=-T'"$LINKER_SCRIPT"$'\x1f-C\x1frelocation-model=static'
 export RUSTC_BOOTSTRAP=1
 
 cleanup() {
@@ -35,9 +39,9 @@ trap cleanup EXIT INT TERM
         --target x86_64-unknown-none \
         --release \
         --no-default-features \
-        --features kvm-test \
+        --features "$GUEST_FEATURE" \
         -p verios-pagetable-beta \
-        --example kvm-guest
+        --example "$GUEST_EXAMPLE"
 )
 
 run_vmm() {
@@ -83,7 +87,7 @@ if command -v qemu-system-x86_64 >/dev/null 2>&1; then
         qemu-system-x86_64 \
         "${qemu_accel[@]}" \
         -m 128M \
-        -smp 1 \
+        -smp "$GUEST_SMP" \
         -display none \
         -monitor none \
         -serial stdio \
@@ -99,7 +103,7 @@ if command -v cloud-hypervisor >/dev/null 2>&1 && [[ -r /dev/kvm && -w /dev/kvm 
     if run_vmm Cloud-Hypervisor \
         cloud-hypervisor \
         --kernel "$GUEST" \
-        --cpus boot=1 \
+        --cpus boot="$GUEST_SMP" \
         --memory size=128M \
         --serial tty \
         --console off; then

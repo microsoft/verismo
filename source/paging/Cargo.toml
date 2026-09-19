@@ -27,11 +27,17 @@ name = "kvm-guest"
 path = "tests/kvm/guest.rs"
 required-features = ["kvm-test"]
 
+[[example]]
+name = "kvm-smp-guest"
+path = "tests/kvm/smp_guest.rs"
+required-features = ["kvm-smp-test"]
+
 [features]
 default = ["concurrent"]
 ignore_access_dirty_bits = []
 concurrent = []
 kvm-test = []
+kvm-smp-test = ["concurrent"]
 verification-test = []
 
 [package.metadata.verus]
