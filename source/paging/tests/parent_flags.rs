@@ -5,32 +5,21 @@ mod common;
 use std::sync::Arc;
 
 use common::{load_entry, Allocator, Arena, Host};
-#[cfg(feature = "concurrent")]
 use common::{WholeTreeLock, ARENA};
 use paging::address::{Address, PhysAddr, VirtAddr};
 use paging::entry::PTEntry;
 use paging::level::{Lvl, PageLevel};
-#[cfg(not(feature = "concurrent"))]
-use paging::mapping::MappingRefOps;
 use paging::pagetable::PageTable;
 use paging::sizes::entry_index;
 use paging::tlb::{MayNeedFlush, TlbFlush};
 use paging::{FlushScope, PTEntryFlags, X86Paging, X86TlbFlushTok};
 
 type Arch = X86Paging<Host>;
-#[cfg(feature = "concurrent")]
 type Table = PageTable<Arch, Allocator, Lvl<3>, WholeTreeLock>;
-#[cfg(not(feature = "concurrent"))]
-type Table = PageTable<Arch, Allocator, Lvl<3>>;
 
 fn fixture() -> (Arc<Arena>, Table) {
-    #[cfg(not(feature = "concurrent"))]
-    return common::table();
-    #[cfg(feature = "concurrent")]
     let arena = Arena::new(ARENA);
-    #[cfg(feature = "concurrent")]
     let table = Table::new(WholeTreeLock::default(), common::flags()).unwrap();
-    #[cfg(feature = "concurrent")]
     (arena, table)
 }
 

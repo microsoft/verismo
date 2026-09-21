@@ -4,7 +4,6 @@ use std::collections::BTreeSet;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Arc;
 
-#[cfg(feature = "concurrent")]
 use common::WholeTreeLock;
 use common::{flags, Allocator, Arena, Host, RebasedAllocator, ARENA};
 use paging::address::{PhysAddr, VirtAddr};
@@ -13,15 +12,9 @@ use paging::os_contract::DirectMappedAllocator;
 use paging::pagetable::PageTable;
 use paging::X86Paging;
 
-#[cfg(not(feature = "concurrent"))]
-type Table = PageTable<X86Paging<Host>, RebasedAllocator, Lvl<3>>;
-#[cfg(feature = "concurrent")]
 type Table = PageTable<X86Paging<Host>, RebasedAllocator, Lvl<3>, WholeTreeLock>;
 
 fn new_table() -> Table {
-    #[cfg(not(feature = "concurrent"))]
-    return Table::new(flags()).unwrap();
-    #[cfg(feature = "concurrent")]
     Table::new(WholeTreeLock::default(), flags()).unwrap()
 }
 
@@ -60,7 +53,7 @@ fn nonidentity_direct_map_supports_construction_translation_and_drop() {
     let arena = Arena::new(ARENA);
     let physical_base = 0x2000_1000;
     arena.rebase(physical_base);
-    #[cfg_attr(feature = "concurrent", allow(unused_mut))]
+    #[allow(unused_mut)]
     let mut table = new_table();
 
     assert_eq!(table.root_paddr(), PhysAddr::from(physical_base));

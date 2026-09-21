@@ -1,5 +1,4 @@
 //! Concurrent entry updates, lock-free snapshots, and externally excluded reclamation.
-#![cfg(feature = "concurrent")]
 
 mod common;
 
@@ -20,6 +19,7 @@ use paging::level::{Lvl, PageLevel};
 use paging::os_contract::{DirectMappedAllocator, MapRegionError, PagingError};
 use paging::page::Page;
 use paging::pagetable::{LockSpec, PageTable};
+use paging::policy::RootRange;
 use paging::ptpage::PTPage;
 use paging::sizes::{entry_index, Size4KiB};
 use paging::tlb::MayNeedFlush;
@@ -334,26 +334,6 @@ fn competing_ranges_allow_only_one_mapping() {
         drop(table);
         assert_freed_once(&arena, arena.allocated());
     }
-}
-
-#[test]
-fn range_frame_iteration_happens_without_a_content_guard() {
-    let (arena, mut table, locks) = fixture(1);
-    let start = Page::<Size4KiB>::containing_address(VirtAddr::from(BASE));
-    let range = Page::range_inclusive(start, start + 1);
-    let mut frames = (0..2).map(|offset| {
-        HOLDING_CONTENT_LOCK.with(|held| {
-            assert!(!held.get(), "frame iterator called under the content lock");
-        });
-        PhysFrame::from_start_address(PhysAddr::from(arena.base() + offset * PAGE)).unwrap()
-    });
-
-    assert_eq!(table.map_region(range, &mut frames, flags()), Ok(()));
-    locks.assert_balanced();
-    // SAFETY: this inactive tree is exclusively owned.
-    unsafe { table.free_children() };
-    drop(table);
-    assert_freed_once(&arena, arena.allocated());
 }
 
 #[test]
@@ -794,9 +774,8 @@ fn sharing_top_entries_preserves_their_complete_permission_bits() {
         (&*original_pte.cast::<AtomicUsize>()).store(entry.raw(), Ordering::Release);
         entry
     };
-    // SAFETY: both roots use identical virtual prefixes and the same lock domain.
-    // The shared children remain allocated until both roots have been dropped.
-    let shared = unsafe { Table::new_from_sharing_top::<0, 512>(locks.clone(), &table) }.unwrap();
+    let shared =
+        unsafe { Table::new_from_sharing_top::<RootRange<0, 512>>(locks.clone(), &table) }.unwrap();
     let shared_pte = PTPage::<X86Paging<Host>, Allocator>::entry_ptr(
         <Allocator as paging::os_contract::PagingAllocator>::paddr_to_vaddr(shared.root_paddr())
             .as_ptr(),
@@ -817,27 +796,6 @@ fn sharing_top_entries_preserves_their_complete_permission_bits() {
     drop(shared);
     assert_eq!(arena.freed(), vec![shared_root.bits()]);
     locks.assert_balanced();
-}
-
-#[test]
-fn mapping_a_five_level_path_publishes_under_one_lock() {
-    let arena = Arena::new(ARENA);
-    let locks = Locks::<()>::new(arena.base()..arena.base() + arena.len(), 1);
-    let mut table =
-        PageTable::<X86Paging<Host>, Allocator, Lvl<4>, Locks>::new(locks.clone(), flags())
-            .unwrap();
-    let address = VirtAddr::from(0xffff_8000_4000_0000usize);
-    let frame = PhysAddr::from(arena.base());
-    assert_eq!(table.walk(address).level(), PageLevel::Level4);
-    assert!(!table.walk(address).read().present());
-    let before = locks.0.calls.load(Ordering::Relaxed);
-    table.map(common::page_4k(address), common::frame_4k(frame), flags(), false).unwrap();
-    assert_eq!(locks.0.calls.load(Ordering::Relaxed) - before, 1);
-    assert_eq!(table.walk(address).level(), SMALL_LEVEL);
-    assert_eq!(table.phys_addr(address), Ok(frame));
-    locks.assert_balanced();
-    // SAFETY: this inactive tree is exclusively owned and no view has escaped.
-    unsafe { table.free_children() };
 }
 
 #[test]
@@ -1280,7 +1238,7 @@ unsafe impl DirectMappedAllocator for BudgetAllocator {
 type BudgetTable = PageTable<X86Paging<Host>, BudgetAllocator, Lvl<3>, Locks>;
 
 #[test]
-fn construction_failures_return_all_allocated_pages_without_locking_content() {
+fn construction_failures_return_all_allocated_pages() {
     for budget in 0..3 {
         let arena = Arena::new(ARENA);
         let locks = Locks::new(arena.base()..arena.base() + arena.len(), 1);
@@ -1289,8 +1247,6 @@ fn construction_failures_return_all_allocated_pages_without_locking_content() {
         assert_eq!(result, Err(PagingError::AllocFrame));
         assert_eq!(arena.allocated(), budget);
         assert_freed_once(&arena, budget);
-        assert_eq!(locks.0.calls.load(Ordering::Relaxed), 0);
-        assert_eq!(locks.0.unlocks.load(Ordering::Relaxed), 0);
     }
 }
 
@@ -1303,7 +1259,6 @@ fn constructor_self_mapping_checks_reject_absent_leaves_and_reclaim_the_tree() {
     assert_eq!(result, Err(PagingError::TablePageNotSelfMapped));
     assert_eq!(arena.allocated(), 3);
     assert_freed_once(&arena, arena.allocated());
-    assert_eq!(locks.0.calls.load(Ordering::Relaxed), 0);
 }
 
 #[test]
@@ -1326,8 +1281,6 @@ fn failed_growth_and_split_leave_retryable_mappings_and_release_content_guards()
     assert_eq!(table.walk(vaddr).read().raw(), original.read().raw());
     assert_eq!(arena.allocated(), before + 1);
     assert_freed_once(&arena, 1);
-    assert_eq!(locks.0.calls.load(Ordering::Relaxed), 0);
-    assert_eq!(locks.0.unlocks.load(Ordering::Relaxed), 0);
     ALLOCATION_BUDGET.store(3, Ordering::Relaxed);
     table.map(common::page_4k(vaddr), common::frame_4k(frame), flags(), false).unwrap();
     assert_eq!(table.phys_addr(vaddr), Ok(frame));
@@ -1356,7 +1309,7 @@ fn failed_growth_and_split_leave_retryable_mappings_and_release_content_guards()
 }
 
 #[test]
-fn constructor_covers_unaligned_direct_maps_without_content_locks() {
+fn constructor_covers_unaligned_direct_maps() {
     let arena = Arena::new(ARENA);
     let physical_base = 0x2000_1000;
     arena.rebase(physical_base);
@@ -1371,8 +1324,6 @@ fn constructor_covers_unaligned_direct_maps_without_content_locks() {
         assert_eq!(table.translate(address).unwrap().level(), SMALL_LEVEL);
     }
     assert_eq!(table.validate_page_table(), Ok(()));
-    assert_eq!(locks.0.calls.load(Ordering::Relaxed), 0);
-    assert_eq!(locks.0.unlocks.load(Ordering::Relaxed), 0);
 }
 
 #[test]

@@ -12,12 +12,16 @@ use core::marker::PhantomData;
 use core::ptr::NonNull;
 
 use super::PTPage;
+use super::PTPageTree;
 use crate::structs::address::{PhysAddr, VirtAddr};
 use crate::structs::arch_contract::ArchPagingMeta;
 use crate::structs::entry::{PTEntry, PTEntryRef};
 use crate::structs::level::PageLevel;
 use crate::structs::os_contract::PagingAllocator;
+use crate::structs::os_contract::PagingError;
+use crate::structs::page::Page;
 use crate::structs::sizes::{entry_index, PT_ENTRY_COUNT};
+use crate::structs::sizes::{level_for_size, PageSize};
 
 /// A non-owning page pointer; its lifetime pins memory, not entry contents.
 pub(crate) struct PTPagePointer<'tree, A: ArchPagingMeta, P: PagingAllocator> {
@@ -27,15 +31,20 @@ pub(crate) struct PTPagePointer<'tree, A: ArchPagingMeta, P: PagingAllocator> {
 }
 
 /// An atomic observation returned by a concurrent page-table walk.
-#[cfg(feature = "concurrent")]
 pub struct WalkResult<A: ArchPagingMeta> {
     entry: PTEntry<A>,
     level: PageLevel,
 }
 
-#[cfg(feature = "concurrent")]
+/// The internal page and entry where a page-table walk stopped.
+pub(crate) struct WalkPosition<'tree, A: ArchPagingMeta, P: PagingAllocator> {
+    pub(crate) page: PTPagePointer<'tree, A, P>,
+    pub(crate) index: usize,
+    page_paddr: Option<PhysAddr>,
+    pub(crate) observed: PTEntry<A>,
+}
+
 impl<A: ArchPagingMeta> WalkResult<A> {
-    #[cfg(feature = "concurrent")]
     #[inline(always)]
     pub(crate) fn new(entry: PTEntry<A>, level: PageLevel) -> Self {
         Self { entry, level }
@@ -54,21 +63,11 @@ impl<A: ArchPagingMeta> WalkResult<A> {
     }
 }
 
-/// The internal page and entry where a page-table walk stopped.
-pub(crate) struct WalkPosition<'tree, A: ArchPagingMeta, P: PagingAllocator> {
-    pub(crate) page: PTPagePointer<'tree, A, P>,
-    pub(crate) index: usize,
-    page_paddr: Option<PhysAddr>,
-    #[cfg(feature = "concurrent")]
-    pub(crate) observed: PTEntry<A>,
-}
-
 impl<'tree, A: ArchPagingMeta, P: PagingAllocator> WalkPosition<'tree, A, P> {
     pub(crate) fn entry(&self) -> PTEntryRef<'tree, A> {
         self.page.entry(self.index)
     }
 
-    #[cfg(feature = "concurrent")]
     pub(crate) fn page_paddr(&self) -> PhysAddr {
         self.page_paddr.unwrap_or_else(|| self.page.paddr())
     }
@@ -96,6 +95,37 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
     fn from_vaddr(vaddr: VirtAddr, level: PageLevel) -> Self {
         let page = vaddr.as_mut_ptr();
         Self { page: NonNull::new(page).expect("null page-table view"), level, marker: PhantomData }
+    }
+
+    /// Clears selected entries and frees their descendant tables, not data frames.
+    /// # Safety
+    /// Selected subtrees must be exclusively owned and quiesced, without
+    /// surviving descendant references. All descendants must belong to `P`.
+    pub(crate) unsafe fn free_children(&self, owns_entry: impl Fn(usize) -> bool) {
+        for index in 0..PT_ENTRY_COUNT {
+            if !owns_entry(index) {
+                continue;
+            }
+            if self.level.is_leaf() {
+                self.store(index, PTEntry::empty());
+                continue;
+            }
+            let entry = self.load(index);
+            let child_pa = if entry.is_table(self.level) {
+                let paddr = PhysAddr::from(entry.address());
+                // SAFETY: selected descendants are exclusively owned and fully quiesced.
+                let child = unsafe { &mut *P::paddr_to_vaddr(paddr).as_mut_ptr::<PTPage<A, P>>() };
+                unsafe { child.free_owned_children(self.level.child().unwrap(), true) };
+                Some(paddr)
+            } else {
+                None
+            };
+            self.swap(index, PTEntry::empty());
+            if let Some(paddr) = child_pa {
+                // SAFETY: the child reference has ended and its parent link is cleared.
+                unsafe { P::deallocate_table_page(paddr) };
+            }
+        }
     }
 
     #[inline(always)]
@@ -168,15 +198,7 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
             let paddr = PhysAddr::from(observed.address());
             Ok((Self::resolve(paddr, child_level), paddr))
         } else {
-            #[cfg(not(feature = "concurrent"))]
-            let _ = observed;
-            Err(WalkPosition {
-                page: self,
-                index,
-                page_paddr: None,
-                #[cfg(feature = "concurrent")]
-                observed,
-            })
+            Err(WalkPosition { page: self, index, page_paddr: None, observed })
         }
     }
 
@@ -189,15 +211,8 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
     ) -> WalkPosition<'tree, A, P> {
         debug_assert_eq!(self.level, level);
         let index = entry_index(vaddr, level);
-        #[cfg(feature = "concurrent")]
         let observed = self.load(index);
-        WalkPosition {
-            page: self,
-            index,
-            page_paddr,
-            #[cfg(feature = "concurrent")]
-            observed,
-        }
+        WalkPosition { page: self, index, page_paddr, observed }
     }
 
     /// Returns the exact stopping observation, even if a table is published next.
@@ -218,7 +233,7 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
     pub(crate) fn entry(&self, index: usize) -> PTEntryRef<'tree, A> {
         assert!(index < PT_ENTRY_COUNT);
         // SAFETY: construction pins the page, and the checked entry remains within it.
-        unsafe { PTEntryRef::from_raw(PTPage::entry_ptr_mut(self.page.as_ptr(), index)) }
+        unsafe { self.page.as_ref() }.entry(index)
     }
 
     #[inline(always)]
@@ -236,5 +251,39 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
 
     pub(super) fn entries_satisfy(&self, empty_entry: &impl Fn(PTEntry<A>) -> bool) -> bool {
         (0..PT_ENTRY_COUNT).all(|index| empty_entry(self.load(index)))
+    }
+
+    /// Adds tables to an uninstalled tree without splitting an existing leaf.
+    pub(super) fn grow_uninstalled<PS: PageSize>(
+        &self,
+        target_page: Page<PS>,
+        parent_flags: A::PTFlags,
+    ) -> Result<(), PagingError> {
+        let target = level_for_size::<PS>().ok_or(PagingError::InvalidLevel)?;
+        if self.level <= target {
+            return Ok(());
+        }
+        let index = entry_index(target_page.start_address(), self.level);
+        match self.child(index) {
+            Ok(child) => child.grow_uninstalled(target_page, parent_flags),
+            Err(entry) if entry.present() => Err(PagingError::NotLeafEntry),
+            Err(_) => {
+                let child_level = self.level.child().unwrap();
+                let child = PTPageTree::<A, P>::new(child_level)?;
+                child.root().grow_uninstalled(target_page, parent_flags)?;
+                self.store(
+                    index,
+                    PTEntry::new_table(A::make_private_address(child.root_paddr()), parent_flags),
+                );
+                child.release();
+                Ok(())
+            }
+        }
+    }
+
+    /// # Safety
+    /// The page must be unpublished and exclusively accessible for the borrow.
+    pub(super) unsafe fn page_mut(&mut self) -> &mut PTPage<A, P> {
+        unsafe { self.page.as_mut() }
     }
 }

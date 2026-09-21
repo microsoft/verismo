@@ -1,7 +1,6 @@
 //! Mutation authority and ownership of subtrees below an owned root.
 
 use core::marker::PhantomData;
-use core::ops::Range;
 
 use crate::structs::address::{Address, VirtAddr, LOW_CANONICAL_END};
 use crate::structs::level::PageLevel;
@@ -30,47 +29,88 @@ pub trait PagingOwnershipPolicy: sealed::Sealed {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct KernelPolicy;
 
-/// Zero-sized policy reserving `START..END` for immutable, non-owned kernel entries.
-#[derive(Debug)]
-pub struct UserPolicy<'kernel, const START: usize, const END: usize> {
-    kernel: PhantomData<&'kernel ()>,
+/// Selects immutable, non-owned entries in a user page table's root.
+pub trait RootEntrySet: sealed::Sealed {
+    /// Returns whether `index` belongs to this set.
+    fn contains(index: usize) -> bool;
+
+    #[doc(hidden)]
+    fn valid() -> bool;
 }
 
-impl<const START: usize, const END: usize> UserPolicy<'_, START, END> {
+/// Root entries in the half-open interval `START..END`.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RootRange<const START: usize, const END: usize>;
+
+/// The union of two root-entry sets.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RootUnion<Left, Right>(PhantomData<(Left, Right)>);
+
+/// Zero-sized policy reserving `Reserved` as immutable, non-owned kernel entries.
+#[derive(Debug)]
+pub struct UserPolicy<'kernel, Reserved: RootEntrySet> {
+    kernel: PhantomData<&'kernel Reserved>,
+}
+
+impl<Reserved: RootEntrySet> UserPolicy<'_, Reserved> {
     pub(crate) fn new() -> Self {
-        assert!(START <= END && END <= PT_ENTRY_COUNT);
+        assert!(Reserved::valid());
         Self { kernel: PhantomData }
     }
 
-    pub fn kernel_top(&self) -> Range<usize> {
-        START..END
-    }
-
-    fn overlaps(&self, start: usize, end: usize) -> bool {
-        start < END && START < end
+    /// Returns whether this policy borrows the root entry from its kernel owner.
+    pub fn borrows_top_entry(&self, index: usize) -> bool {
+        assert!(index < PT_ENTRY_COUNT);
+        Reserved::contains(index)
     }
 
     fn check_segment(&self, root: PageLevel, first: usize, last: usize) -> Result<(), PagingError> {
         let first_page = first / root.size();
         let last_page = last / root.size();
-        let first_index = first_page % PT_ENTRY_COUNT;
-        let last_index = last_page % PT_ENTRY_COUNT;
-        let denied = last_page - first_page >= PT_ENTRY_COUNT
-            || if first_index <= last_index {
-                self.overlaps(first_index, last_index + 1)
+        if last_page - first_page >= PT_ENTRY_COUNT {
+            return if (0..PT_ENTRY_COUNT).any(Reserved::contains) {
+                Err(PagingError::PermissionDenied)
             } else {
-                self.overlaps(first_index, PT_ENTRY_COUNT) || self.overlaps(0, last_index + 1)
+                Ok(())
             };
-        if denied {
-            Err(PagingError::PermissionDenied)
-        } else {
-            Ok(())
+        }
+        let mut page = first_page;
+        loop {
+            if Reserved::contains(page % PT_ENTRY_COUNT) {
+                return Err(PagingError::PermissionDenied);
+            }
+            if page == last_page {
+                return Ok(());
+            }
+            page += 1;
         }
     }
 }
 
 impl sealed::Sealed for KernelPolicy {}
-impl<const START: usize, const END: usize> sealed::Sealed for UserPolicy<'_, START, END> {}
+impl<const START: usize, const END: usize> sealed::Sealed for RootRange<START, END> {}
+impl<Left: RootEntrySet, Right: RootEntrySet> sealed::Sealed for RootUnion<Left, Right> {}
+impl<Reserved: RootEntrySet> sealed::Sealed for UserPolicy<'_, Reserved> {}
+
+impl<const START: usize, const END: usize> RootEntrySet for RootRange<START, END> {
+    fn contains(index: usize) -> bool {
+        START <= index && index < END
+    }
+
+    fn valid() -> bool {
+        START <= END && END <= PT_ENTRY_COUNT
+    }
+}
+
+impl<Left: RootEntrySet, Right: RootEntrySet> RootEntrySet for RootUnion<Left, Right> {
+    fn contains(index: usize) -> bool {
+        Left::contains(index) || Right::contains(index)
+    }
+
+    fn valid() -> bool {
+        Left::valid() && Right::valid()
+    }
+}
 
 impl PagingOwnershipPolicy for KernelPolicy {
     fn check_address(&self, _root: PageLevel, _address: VirtAddr) -> Result<(), PagingError> {
@@ -96,9 +136,9 @@ impl PagingOwnershipPolicy for KernelPolicy {
     }
 }
 
-impl<const START: usize, const END: usize> PagingOwnershipPolicy for UserPolicy<'_, START, END> {
+impl<Reserved: RootEntrySet> PagingOwnershipPolicy for UserPolicy<'_, Reserved> {
     fn check_address(&self, root: PageLevel, address: VirtAddr) -> Result<(), PagingError> {
-        if self.kernel_top().contains(&entry_index(address, root)) {
+        if Reserved::contains(entry_index(address, root)) {
             Err(PagingError::PermissionDenied)
         } else {
             Ok(())
@@ -114,7 +154,7 @@ impl<const START: usize, const END: usize> PagingOwnershipPolicy for UserPolicy<
         if start > end {
             return Err(PagingError::InvalidRange);
         }
-        if start == end || START == END {
+        if start == end {
             return Ok(());
         }
         let last = VirtAddr::from(end.bits() - 1).bits();
@@ -127,8 +167,7 @@ impl<const START: usize, const END: usize> PagingOwnershipPolicy for UserPolicy<
     }
 
     fn owns_top_entry(&self, index: usize) -> bool {
-        assert!(index < PT_ENTRY_COUNT);
-        !self.kernel_top().contains(&index)
+        !self.borrows_top_entry(index)
     }
 }
 

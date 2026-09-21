@@ -14,6 +14,21 @@ security monitor whose mappings remain live during concurrent updates.
 This crate exists to put those requirements in the paging interfaces instead of
 leaving them as conventions at each call site.
 
+## Source organization
+
+Paging types keep lifecycle operations in a consistent reading order:
+
+1. Struct and supporting type declarations.
+2. Constructors and adoption functions.
+3. Consuming operations, teardown functions, and `Drop`.
+4. Other associated functions without a receiver.
+5. Shared-receiver (`&self`) operations.
+6. Mutable-receiver (`&mut self`) operations.
+
+Trait implementations and free helpers follow the inherent implementations.
+When different bounds require multiple `impl` blocks, the blocks still follow
+this order rather than grouping by generic signature.
+
 ## Why use this crate
 
 | Concern | Guarantee provided here |
@@ -30,11 +45,11 @@ leaving them as conventions at each call site.
 | Canonical addresses | Range iteration and adjacency handle the low/high canonical seam without traversing the noncanonical hole. |
 | Accessed/dirty history | Atomic valid-entry updates preserve racing A/D bits by default; `ignore_access_dirty_bits` makes discarding them an explicit build policy. |
 
-The sequential and concurrent controllers retain different borrowing and
-locking models but share mapping and architecture-transition semantics.
-Break-before-make and flush policy live below both controllers so they cannot
-drift between implementations. See [concurrency.md](concurrency.md) for the
-complete locking, lifetime, reclamation, and TLB contracts.
+The controller combines atomic walks with explicit content locking.
+Break-before-make and flush policy remain below the controller so every update
+path uses the same architecture-transition semantics. See
+[concurrency.md](concurrency.md) for the complete locking, lifetime,
+reclamation, and TLB contracts.
 
 This crate is most useful when page tables are live, shared, confidential-memory
 tags matter, or failure and flush behavior must be explicit. A smaller
@@ -68,8 +83,8 @@ both VMMs can load the same ELF without external BIOS or UEFI firmware.
 ### Four-CPU concurrent boot test
 
 The second PVH guest, `tests/kvm/smp_guest.rs`, boots four CPUs and exercises
-the `concurrent` `PageTable` instead of the sequential one. The BSP builds one
-shared table (a minimal striped spin mutex satisfies its `LockSpec`), then
+one shared `PageTable`. The BSP builds the table with a minimal striped spin
+mutex satisfying its `LockSpec`, then
 brings up three APs one at a time: before each SIPI it publishes that AP's
 stack top and worker id, sends INIT/deassert/SIPI through the x2APIC MSR
 interface (falling back to the legacy MMIO-mapped local APIC on hosts whose

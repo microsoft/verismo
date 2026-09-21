@@ -13,7 +13,6 @@ use std::cell::Cell;
 use std::collections::BTreeSet;
 use std::ops::Range;
 use std::sync::atomic::{AtomicUsize, Ordering};
-#[cfg(feature = "concurrent")]
 use std::sync::MutexGuard;
 use std::sync::{Arc, Condvar, Mutex};
 
@@ -23,7 +22,6 @@ use paging::frame::PhysFrame;
 use paging::level::Lvl;
 use paging::os_contract::{DirectMappedAllocator, PagingError};
 use paging::page::Page;
-#[cfg(feature = "concurrent")]
 use paging::pagetable::LockSpec;
 use paging::pagetable::{KernelPageTable, PageTable};
 use paging::policy::PagingOwnershipPolicy;
@@ -369,7 +367,6 @@ impl<T> WholeTreeLock<T> {
 }
 
 // SAFETY: all keys and clones use one mutex, with the standard borrowed RAII guard.
-#[cfg(feature = "concurrent")]
 unsafe impl<T> LockSpec<T> for WholeTreeLock<T> {
     type Guard<'a>
         = MutexGuard<'a, T>
@@ -457,20 +454,14 @@ unsafe impl DirectMappedAllocator for RebasedAllocator {
 }
 
 /// Four-level paging, the depth most of these tests care about.
-#[cfg(feature = "concurrent")]
 pub type Table = KernelPageTable<X86Paging<Host>, Allocator, Lvl<3>, WholeTreeLock>;
-#[cfg(not(feature = "concurrent"))]
-pub type Table = KernelPageTable<X86Paging<Host>, Allocator, Lvl<3>>;
 
 pub const ARENA: usize = 2 * 1024 * 1024;
 
 /// An arena and a table built over it, mapping the arena and nothing else.
 pub fn table() -> (Arc<Arena>, Table) {
     let arena = Arena::new(ARENA);
-    #[cfg(feature = "concurrent")]
     let table = Table::new(WholeTreeLock::default(), PTEntryFlags::data()).unwrap();
-    #[cfg(not(feature = "concurrent"))]
-    let table = Table::new(PTEntryFlags::data()).unwrap();
     (arena, table)
 }
 
@@ -479,16 +470,8 @@ pub fn flags() -> PTEntryFlags {
 }
 
 /// The table pages the root points at.
-#[cfg(feature = "concurrent")]
 pub fn root_children<S: PagingOwnershipPolicy>(
     table: &PageTable<X86Paging<Host>, Allocator, Lvl<3>, WholeTreeLock, (), S>,
-) -> Vec<PhysAddr> {
-    (0..512).filter_map(|idx| table.next_table_pa(idx)).collect()
-}
-
-#[cfg(not(feature = "concurrent"))]
-pub fn root_children<S: PagingOwnershipPolicy>(
-    table: &PageTable<X86Paging<Host>, Allocator, Lvl<3>, S>,
 ) -> Vec<PhysAddr> {
     (0..512).filter_map(|idx| table.next_table_pa(idx)).collect()
 }

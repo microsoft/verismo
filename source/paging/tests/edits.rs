@@ -5,30 +5,21 @@ mod common;
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::ops::Range;
-#[cfg(feature = "concurrent")]
 use std::ops::{Deref, DerefMut};
-#[cfg(feature = "concurrent")]
 use std::panic::resume_unwind;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-#[cfg(feature = "concurrent")]
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicUsize, Ordering};
-#[cfg(feature = "concurrent")]
 use std::sync::{mpsc, Barrier, MutexGuard};
 use std::sync::{Arc, Mutex};
-#[cfg(feature = "concurrent")]
 use std::thread::{self, JoinHandle};
-#[cfg(feature = "concurrent")]
 use std::time::Duration;
 
 use common::{load_entry, Allocator, Arena, ARENA};
 use paging::address::{Address, PhysAddr, VirtAddr};
 use paging::entry::PTEntry;
 use paging::level::{Lvl, PageLevel};
-#[cfg(not(feature = "concurrent"))]
-use paging::mapping::MappingRefOps;
 use paging::os_contract::{DirectMappedAllocator, PagingError};
-#[cfg(feature = "concurrent")]
 use paging::pagetable::LockSpec;
 use paging::pagetable::PageTable;
 use paging::sizes::entry_index;
@@ -45,7 +36,6 @@ const PRIVATE: usize = 1 << 51;
 const SMALL_LEVEL: PageLevel = PageLevel::Level0;
 const LARGE_LEVEL: PageLevel = PageLevel::Level1;
 const HUGE_LEVEL: PageLevel = PageLevel::Level2;
-#[cfg(feature = "concurrent")]
 const WAIT: Duration = Duration::from_secs(10);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -80,13 +70,7 @@ unsafe impl X86PagingParams for Tagged {
 type Arch = X86Paging<Tagged>;
 type Entry = PTEntry<Arch>;
 type Flush = MayNeedFlush<X86TlbFlushTok<Tagged>>;
-#[cfg(not(feature = "concurrent"))]
-type Table = PageTable<Arch, BudgetAllocator, Lvl<3>>;
-#[cfg(feature = "concurrent")]
 type Table = PageTable<Arch, BudgetAllocator, Lvl<3>, WholeTreeLock>;
-#[cfg(feature = "concurrent")]
-type ResolutionCountingTable = PageTable<Arch, ResolutionCountingAllocator, Lvl<3>, WholeTreeLock>;
-#[cfg(feature = "concurrent")]
 type TwoLevelTable = PageTable<Arch, BudgetAllocator, Lvl<1>, WholeTreeLock>;
 
 #[derive(Clone, Copy)]
@@ -124,33 +108,13 @@ impl paging::ArchPagingMeta for BbmArchitecture {
     }
 }
 
-#[cfg(not(feature = "concurrent"))]
-type BbmTable = PageTable<BbmArchitecture, BudgetAllocator, Lvl<3>>;
-#[cfg(feature = "concurrent")]
 type BbmTable = PageTable<BbmArchitecture, BudgetAllocator, Lvl<3>, WholeTreeLock>;
 type FlushHook = Box<dyn FnMut(FlushScope, bool)>;
-#[cfg(feature = "concurrent")]
 type DeallocationHook = Box<dyn FnMut(PhysAddr) + Send>;
 
 thread_local! {
     static FLUSHES: RefCell<Vec<(FlushScope, bool)>> = const { RefCell::new(Vec::new()) };
     static FLUSH_HOOK: RefCell<Option<FlushHook>> = RefCell::new(None);
-    #[cfg(feature = "concurrent")]
-    static RESOLVED_PAGES: RefCell<Vec<PhysAddr>> = const { RefCell::new(Vec::new()) };
-}
-
-#[cfg(feature = "concurrent")]
-fn take_resolved_pages() -> Vec<PhysAddr> {
-    RESOLVED_PAGES.with(|pages| std::mem::take(&mut *pages.borrow_mut()))
-}
-
-#[cfg(feature = "concurrent")]
-fn assert_resolved_once(pages: &[PhysAddr], page: PhysAddr) {
-    assert_eq!(
-        pages.iter().filter(|resolved| **resolved == page).count(),
-        1,
-        "{page:?}: {pages:?}"
-    );
 }
 
 fn observe_flush(scope: FlushScope, all_cpus: bool) {
@@ -178,9 +142,7 @@ fn clear_flush_hook() {
 
 struct BudgetAllocator;
 static ALLOCATION_BUDGET: AtomicUsize = AtomicUsize::new(usize::MAX);
-#[cfg(feature = "concurrent")]
 static ALLOCATION_GATE: Mutex<Option<Gate>> = Mutex::new(None);
-#[cfg(feature = "concurrent")]
 static DEALLOCATION_HOOK: Mutex<Option<DeallocationHook>> = Mutex::new(None);
 
 // SAFETY: the existing host allocator owns the direct map and all allocated
@@ -195,7 +157,6 @@ unsafe impl DirectMappedAllocator for BudgetAllocator {
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| left.checked_sub(1))
             .map_err(|_| PagingError::AllocFrame)?;
         let page = Allocator::allocate_table_page()?;
-        #[cfg(feature = "concurrent")]
         {
             let gate = ALLOCATION_GATE.lock().unwrap().take();
             if let Some(gate) = gate {
@@ -205,9 +166,7 @@ unsafe impl DirectMappedAllocator for BudgetAllocator {
         }
         Ok(page)
     }
-
     unsafe fn deallocate_table_page(paddr: PhysAddr) {
-        #[cfg(feature = "concurrent")]
         if let Some(hook) = DEALLOCATION_HOOK.lock().unwrap().as_mut() {
             hook(paddr);
         }
@@ -216,32 +175,6 @@ unsafe impl DirectMappedAllocator for BudgetAllocator {
     }
 }
 
-#[cfg(feature = "concurrent")]
-struct ResolutionCountingAllocator;
-
-// SAFETY: recording resolutions does not alter the active allocator domain or addresses.
-#[cfg(feature = "concurrent")]
-unsafe impl paging::os_contract::PagingAllocator for ResolutionCountingAllocator {
-    fn paddr_to_vaddr(paddr: PhysAddr) -> VirtAddr {
-        RESOLVED_PAGES.with(|pages| pages.borrow_mut().push(paddr));
-        <BudgetAllocator as paging::os_contract::PagingAllocator>::paddr_to_vaddr(paddr)
-    }
-
-    fn vaddr_to_paddr(vaddr: VirtAddr) -> PhysAddr {
-        <BudgetAllocator as paging::os_contract::PagingAllocator>::vaddr_to_paddr(vaddr)
-    }
-
-    fn allocate_table_page() -> Result<PhysAddr, PagingError> {
-        <BudgetAllocator as DirectMappedAllocator>::allocate_table_page()
-    }
-
-    unsafe fn deallocate_table_page(paddr: PhysAddr) {
-        // SAFETY: the caller transfers an unlinked page from this unchanged allocator domain.
-        unsafe { <BudgetAllocator as DirectMappedAllocator>::deallocate_table_page(paddr) };
-    }
-}
-
-#[cfg(feature = "concurrent")]
 struct Gate {
     entered: mpsc::Sender<()>,
     release: mpsc::Receiver<()>,
@@ -249,11 +182,8 @@ struct Gate {
 
 #[derive(Default)]
 struct LockState {
-    #[cfg(feature = "concurrent")]
     content: Mutex<()>,
-    #[cfg(feature = "concurrent")]
     gate: Mutex<Option<Gate>>,
-    #[cfg(feature = "concurrent")]
     attempts: Mutex<Option<mpsc::Sender<()>>>,
     page_calls: AtomicUsize,
     before_unlock: Mutex<Option<Box<dyn FnMut() + Send>>>,
@@ -263,7 +193,6 @@ struct LockState {
 struct WholeTreeLock(Arc<LockState>);
 
 impl WholeTreeLock {
-    #[cfg(feature = "concurrent")]
     fn pause_next(&self) -> (mpsc::Receiver<()>, mpsc::Sender<()>) {
         let (entered, observed) = mpsc::channel();
         let (release, resumed) = mpsc::channel();
@@ -271,7 +200,6 @@ impl WholeTreeLock {
         (observed, release)
     }
 
-    #[cfg(feature = "concurrent")]
     fn acquire(&self) -> WholeTreeGuard<'_> {
         let gate = self.0.gate.lock().unwrap().take();
         if let Some(gate) = gate {
@@ -286,13 +214,11 @@ impl WholeTreeLock {
     }
 }
 
-#[cfg(feature = "concurrent")]
 struct WholeTreeGuard<'a> {
     inner: MutexGuard<'a, ()>,
     state: &'a LockState,
 }
 
-#[cfg(feature = "concurrent")]
 impl Deref for WholeTreeGuard<'_> {
     type Target = ();
 
@@ -301,14 +227,12 @@ impl Deref for WholeTreeGuard<'_> {
     }
 }
 
-#[cfg(feature = "concurrent")]
 impl DerefMut for WholeTreeGuard<'_> {
     fn deref_mut(&mut self) -> &mut () {
         &mut self.inner
     }
 }
 
-#[cfg(feature = "concurrent")]
 impl Drop for WholeTreeGuard<'_> {
     fn drop(&mut self) {
         if let Some(hook) = self.state.before_unlock.lock().unwrap().as_mut() {
@@ -319,7 +243,6 @@ impl Drop for WholeTreeGuard<'_> {
 
 // SAFETY: every physical key uses the same stable mutex. Its borrowed guard
 // provides exclusion and releases the lock through the standard RAII path.
-#[cfg(feature = "concurrent")]
 unsafe impl LockSpec<()> for WholeTreeLock {
     type Guard<'a> = WholeTreeGuard<'a>;
 
@@ -347,7 +270,6 @@ impl Fixture {
         ALLOCATION_BUDGET.store(count, Ordering::SeqCst);
     }
 
-    #[cfg(feature = "concurrent")]
     fn pause_next_allocation(&self) -> (mpsc::Receiver<()>, mpsc::Sender<()>) {
         let (entered, observed) = mpsc::channel();
         let (release, resumed) = mpsc::channel();
@@ -365,7 +287,6 @@ impl Fixture {
         assert_eq!(freed.iter().copied().collect::<BTreeSet<_>>().len(), freed.len());
     }
 
-    #[cfg(feature = "concurrent")]
     fn check_deallocation_is_unlocked(&self) {
         let locks = self.locks.clone();
         *DEALLOCATION_HOOK.lock().unwrap() = Some(Box::new(move |_| {
@@ -376,29 +297,13 @@ impl Fixture {
 
 fn fixture() -> (Fixture, Table) {
     let fixture = Fixture::new();
-    #[cfg(not(feature = "concurrent"))]
-    let table = Table::new(PTEntryFlags::data()).unwrap();
-    #[cfg(feature = "concurrent")]
     let table = Table::new(fixture.locks.clone(), PTEntryFlags::data()).unwrap();
     (fixture, table)
 }
 
 fn bbm_fixture() -> (Fixture, BbmTable) {
     let fixture = Fixture::new();
-    #[cfg(not(feature = "concurrent"))]
-    let table = BbmTable::new(PTEntryFlags::data()).unwrap();
-    #[cfg(feature = "concurrent")]
     let table = BbmTable::new(fixture.locks.clone(), PTEntryFlags::data()).unwrap();
-    (fixture, table)
-}
-
-#[cfg(feature = "concurrent")]
-fn resolution_counting_fixture() -> (Fixture, ResolutionCountingTable) {
-    let (fixture, original) = fixture();
-    let (locks, root) = original.leak();
-    // SAFETY: leak transfers the inactive tree; the wrapper preserves its allocator and lock domains.
-    let table = unsafe { ResolutionCountingTable::from_root(locks, root) }.unwrap();
-    take_resolved_pages();
     (fixture, table)
 }
 
@@ -593,30 +498,19 @@ fn architecture_bbm_range_breaks_only_structural_boundaries() {
             let entry = unsafe { load_entry(pte as *const BbmEntry) };
             if index == 1 {
                 assert!(entry.is_leaf(HUGE_LEVEL));
-                if !cfg!(feature = "concurrent") {
-                    assert!(entry.writable());
-                }
             } else if entry.present() {
                 assert!(entry.is_leaf(HUGE_LEVEL) || entry.is_table(HUGE_LEVEL));
             } else {
                 invalid += 1;
             }
         }
-        if cfg!(feature = "concurrent") {
-            assert!(invalid <= 1);
-        } else {
-            assert_eq!(invalid, 2);
-        }
+        assert!(invalid <= 1);
     });
     let (result, flush) =
         table.set_flags_range(base + PAGE, base + 3 * HUGE - PAGE, new_flags(), true);
     result.unwrap();
-    if cfg!(feature = "concurrent") {
-        discharge(flush);
-        assert_eq!(take_flushes().len(), 2);
-    } else {
-        assert_completed(flush, BASE, BASE + 3 * HUGE, HUGE_LEVEL);
-    }
+    discharge(flush);
+    assert_eq!(take_flushes().len(), 2);
     clear_flush_hook();
     assert_eq!(table.walk(base + PAGE).level(), SMALL_LEVEL);
     assert_eq!(table.walk(base + HUGE).level(), HUGE_LEVEL);
@@ -626,7 +520,6 @@ fn architecture_bbm_range_breaks_only_structural_boundaries() {
     fixture.assert_all_reclaimed();
 }
 
-#[cfg(feature = "concurrent")]
 #[test]
 fn two_level_range_can_split_both_boundaries_before_updating() {
     let fixture = Fixture::new();
@@ -805,23 +698,12 @@ macro_rules! edit_tests {
                 assert_ne!(originals[0].0 / PAGE, originals[2].0 / PAGE);
                 set_flush_hook(move |scope, all_cpus| {
                     assert!(all_cpus);
-                    if cfg!(feature = "concurrent") {
-                        assert!(matches!(
-                            scope,
-                            FlushScope::Range { start, end, level: LARGE_LEVEL }
-                                if (start == head.into() && end == middle.into())
-                                    || (start == tail.into() && end == (tail + LARGE).into())
-                        ));
-                    } else {
-                        assert_eq!(
-                            scope,
-                            FlushScope::Range {
-                                start: head.into(),
-                                end: (tail + LARGE).into(),
-                                level: LARGE_LEVEL,
-                            }
-                        );
-                    }
+                    assert!(matches!(
+                        scope,
+                        FlushScope::Range { start, end, level: LARGE_LEVEL }
+                            if (start == head.into() && end == middle.into())
+                                || (start == tail.into() && end == (tail + LARGE).into())
+                    ));
                     for (index, (pte, _)) in originals.iter().enumerate() {
                         let entry = unsafe { load_entry(*pte as *const Entry) };
                         if index == 1 {
@@ -841,12 +723,8 @@ macro_rules! edit_tests {
                 );
                 clear_flush_hook();
                 assert_eq!(result, Ok(()));
-                if cfg!(feature = "concurrent") {
-                    discharge(flush);
-                    assert_eq!(take_flushes().len(), 2);
-                } else {
-                    assert_completed(flush, head, tail + LARGE, LARGE_LEVEL);
-                }
+                discharge(flush);
+                assert_eq!(take_flushes().len(), 2);
                 assert_eq!(fixture.arena.allocated() - allocated, 2);
                 assert_eq!(table.walk(VirtAddr::from(middle)).level(), HUGE_LEVEL);
                 assert_eq!(
@@ -1276,10 +1154,8 @@ macro_rules! edit_tests {
 
 edit_tests!(selected_controller, fixture);
 
-#[cfg(feature = "concurrent")]
 type Worker<T> = (JoinHandle<()>, mpsc::Receiver<thread::Result<T>>);
 
-#[cfg(feature = "concurrent")]
 fn spawn<T: Send + 'static>(job: impl FnOnce() -> T + Send + 'static) -> Worker<T> {
     let (send, receive) = mpsc::channel();
     let handle = thread::spawn(move || {
@@ -1289,14 +1165,12 @@ fn spawn<T: Send + 'static>(job: impl FnOnce() -> T + Send + 'static) -> Worker<
     (handle, receive)
 }
 
-#[cfg(feature = "concurrent")]
 fn finish<T>((handle, receive): Worker<T>) -> T {
     let result = receive.recv_timeout(WAIT).expect("worker exceeded the deadline");
     handle.join().unwrap();
     result.unwrap_or_else(|panic| resume_unwind(panic))
 }
 
-#[cfg(feature = "concurrent")]
 #[test]
 fn concurrent_disjoint_subpage_protections_survive_the_shared_huge_leaf_split() {
     let (fixture, table) = fixture();
@@ -1368,23 +1242,14 @@ fn concurrent_disjoint_subpage_protections_survive_the_shared_huge_leaf_split() 
     fixture.assert_all_reclaimed();
 }
 
-#[cfg(feature = "concurrent")]
 #[test]
 fn public_snapshots_remain_valid_across_table_publication() {
     for writer_offset in [0, PAGE] {
-        let (fixture, table) = resolution_counting_fixture();
+        let (fixture, table) = fixture();
         let address = VirtAddr::from(BASE);
-        let root = table.root_paddr();
-        let before = fixture.arena.allocated();
-        let calls = fixture.locks.0.page_calls.load(Ordering::SeqCst);
-        take_resolved_pages();
         let before_publication = table.walk(address);
         assert_eq!(before_publication.level(), PageLevel::Level3);
         assert!(!before_publication.read().present());
-        assert_resolved_once(&take_resolved_pages(), root);
-        assert_eq!(fixture.arena.allocated(), before);
-        assert_eq!(fixture.locks.0.page_calls.load(Ordering::SeqCst), calls);
-        assert!(fixture.locks.0.content.try_lock().is_ok());
         table
             .map(
                 common::page_4k(address + writer_offset),
@@ -1395,102 +1260,46 @@ fn public_snapshots_remain_valid_across_table_publication() {
             .unwrap();
         assert_eq!(before_publication.level(), PageLevel::Level3);
         assert!(!before_publication.read().present());
-        take_resolved_pages();
         let after_publication = table.walk(address);
         let level = after_publication.level();
         let word = after_publication.read().raw();
         assert_eq!(level, SMALL_LEVEL);
         assert_eq!(word & PTEntryFlags::PRESENT.bits() != 0, writer_offset == 0);
-        assert_resolved_once(&take_resolved_pages(), root);
-        assert_eq!(fixture.locks.0.page_calls.load(Ordering::SeqCst) - calls, 1);
-        assert!(fixture.locks.0.content.try_lock().is_ok());
-        assert_eq!(fixture.arena.allocated(), before + 3);
-        assert!(fixture.arena.freed().is_empty());
         assert_eq!(table.phys_addr(address + writer_offset), Ok(PhysAddr::from(FRAME)));
         drop(table);
         fixture.assert_all_reclaimed();
     }
 }
 
-#[cfg(feature = "concurrent")]
 #[test]
-fn uncontended_path_publication_resolves_the_root_and_existing_prefix_only_once() {
-    for initial_level in [PageLevel::Level3, HUGE_LEVEL] {
-        let (fixture, table) = resolution_counting_fixture();
-        let address = VirtAddr::from(BASE);
-        let root = table.root_paddr();
-        if initial_level == HUGE_LEVEL {
-            map_at!(table, address + HUGE, PhysAddr::from(FRAME), HUGE_LEVEL, old_flags(), false)
-                .unwrap();
-        }
-        let stopping_page = if initial_level == HUGE_LEVEL {
-            table.next_table_pa(entry_index(address, PageLevel::Level3)).unwrap()
-        } else {
-            root
-        };
-        assert_eq!(table.walk(address).level(), initial_level);
-        let before = fixture.arena.allocated();
-        let calls = fixture.locks.0.page_calls.load(Ordering::SeqCst);
-        take_resolved_pages();
-        table
-            .map(
-                common::page_4k(address),
-                common::frame_4k(PhysAddr::from(OTHER_FRAME)),
-                old_flags(),
-                false,
-            )
-            .unwrap();
-        let resolved = take_resolved_pages();
-        assert_resolved_once(&resolved, root);
-        assert_resolved_once(&resolved, stopping_page);
-        assert_eq!(fixture.arena.allocated(), before + initial_level.depth());
-        assert_eq!(fixture.locks.0.page_calls.load(Ordering::SeqCst) - calls, 1);
-        assert!(fixture.locks.0.content.try_lock().is_ok());
-        assert!(fixture.arena.freed().is_empty());
-        assert_eq!(table.phys_addr(address), Ok(PhysAddr::from(OTHER_FRAME)));
-        assert_eq!(table.validate_page_table(), Ok(()));
-        drop(table);
-        fixture.assert_all_reclaimed();
-    }
-}
-
-#[cfg(feature = "concurrent")]
-#[test]
-fn a_losing_path_publication_resumes_at_its_deeper_stopping_page_without_rewalking_the_root() {
-    let (fixture, table) = resolution_counting_fixture();
+fn competing_path_publications_preserve_both_mappings_and_reclaim_the_loser() {
+    let (fixture, table) = fixture();
     let address = VirtAddr::from(BASE);
     map_at!(table, address + HUGE, PhysAddr::from(FRAME), HUGE_LEVEL, old_flags(), false).unwrap();
-    let root = table.root_paddr();
-    let stopping_page = table.next_table_pa(entry_index(address, PageLevel::Level3)).unwrap();
     let original = table.walk(address);
     assert_eq!(original.level(), HUGE_LEVEL);
     assert!(!original.read().present());
     let before = fixture.arena.allocated();
-    let calls = fixture.locks.0.page_calls.load(Ordering::SeqCst);
     fixture.check_deallocation_is_unlocked();
     let table = Arc::new(table);
     let (entered, release) = fixture.locks.pause_next();
     let worker = spawn({
         let table = table.clone();
         move || {
-            take_resolved_pages();
-            let result = table.map(
+            table.map(
                 common::page_4k(address),
                 common::frame_4k(PhysAddr::from(OTHER_FRAME)),
                 old_flags(),
                 false,
-            );
-            (result, take_resolved_pages())
+            )
         }
     });
     entered.recv_timeout(WAIT).expect("mapping did not reach its publication lock");
     assert_eq!(fixture.arena.allocated(), before + 2);
-    assert_eq!(fixture.locks.0.page_calls.load(Ordering::SeqCst) - calls, 1);
     assert!(fixture.locks.0.content.try_lock().is_ok());
     assert!(fixture.arena.freed().is_empty());
     assert_eq!(table.walk(address).level(), original.level());
     assert_eq!(table.walk(address).read().raw(), original.read().raw());
-    take_resolved_pages();
     table
         .map(
             common::page_4k(address + PAGE),
@@ -1499,16 +1308,10 @@ fn a_losing_path_publication_resumes_at_its_deeper_stopping_page_without_rewalki
             false,
         )
         .unwrap();
-    let winner_resolved = take_resolved_pages();
     assert_eq!(fixture.arena.allocated(), before + 4);
     release.send(()).unwrap();
-    let (result, loser_resolved) = finish(worker);
+    let result = finish(worker);
     assert_eq!(result, Ok(()));
-    assert_resolved_once(&winner_resolved, root);
-    assert_resolved_once(&winner_resolved, stopping_page);
-    assert_resolved_once(&loser_resolved, root);
-    assert_resolved_once(&loser_resolved, stopping_page);
-    assert_eq!(fixture.locks.0.page_calls.load(Ordering::SeqCst) - calls, 3);
     assert!(fixture.locks.0.content.try_lock().is_ok());
     assert_eq!(fixture.arena.allocated(), before + 4);
     assert_eq!(fixture.arena.freed().len(), 2);
@@ -1524,7 +1327,6 @@ fn a_losing_path_publication_resumes_at_its_deeper_stopping_page_without_rewalki
     fixture.assert_all_reclaimed();
 }
 
-#[cfg(feature = "concurrent")]
 #[test]
 fn a_coarse_mapping_losing_to_growth_rejects_an_absent_entry_in_the_finer_subtree() {
     let (fixture, table) = fixture();
@@ -1594,7 +1396,6 @@ fn a_coarse_mapping_losing_to_growth_rejects_an_absent_entry_in_the_finer_subtre
     fixture.assert_all_reclaimed();
 }
 
-#[cfg(feature = "concurrent")]
 #[test]
 fn paused_path_allocations_publish_nothing_and_do_not_block_a_competing_mapper() {
     for target in [SMALL_LEVEL, LARGE_LEVEL] {
@@ -1669,7 +1470,6 @@ fn paused_path_allocations_publish_nothing_and_do_not_block_a_competing_mapper()
     }
 }
 
-#[cfg(feature = "concurrent")]
 #[test]
 fn a_fine_mapping_losing_to_a_huge_leaf_reclaims_its_preparation_after_unlock() {
     let (fixture, table) = fixture();
@@ -1718,7 +1518,6 @@ fn a_fine_mapping_losing_to_a_huge_leaf_reclaims_its_preparation_after_unlock() 
     fixture.assert_all_reclaimed();
 }
 
-#[cfg(feature = "concurrent")]
 #[test]
 fn failed_path_preparation_preserves_the_original_absent_entry_and_installed_tree() {
     for allowed in 0..3 {
@@ -1786,7 +1585,6 @@ fn failed_path_preparation_preserves_the_original_absent_entry_and_installed_tre
     }
 }
 
-#[cfg(feature = "concurrent")]
 #[test]
 fn unmapping_rechecks_a_split_published_before_lock_acquisition() {
     for target in [SMALL_LEVEL, LARGE_LEVEL] {
@@ -1837,7 +1635,6 @@ fn unmapping_rechecks_a_split_published_before_lock_acquisition() {
     }
 }
 
-#[cfg(feature = "concurrent")]
 #[test]
 fn a_fine_protection_retries_after_a_split_before_lock_acquisition() {
     let (fixture, table) = fixture();
@@ -1868,7 +1665,6 @@ fn a_fine_protection_retries_after_a_split_before_lock_acquisition() {
     }
 }
 
-#[cfg(feature = "concurrent")]
 #[test]
 fn a_split_waiting_for_its_lock_preserves_a_completed_same_entry_protection() {
     let (fixture, table) = fixture();
@@ -1908,7 +1704,6 @@ fn a_split_waiting_for_its_lock_preserves_a_completed_same_entry_protection() {
     assert_eq!(table.validate_page_table(), Ok(()));
 }
 
-#[cfg(feature = "concurrent")]
 #[test]
 fn a_coarse_protection_losing_to_a_split_refuses_instead_of_overwriting_children() {
     let (fixture, table) = fixture();
@@ -1947,7 +1742,6 @@ fn a_coarse_protection_losing_to_a_split_refuses_instead_of_overwriting_children
     assert_eq!(table.validate_page_table(), Ok(()));
 }
 
-#[cfg(feature = "concurrent")]
 #[test]
 fn a_range_observes_finer_levels_after_acquiring_its_whole_domain_guard() {
     let (fixture, table) = fixture();
@@ -2001,7 +1795,6 @@ fn a_range_observes_finer_levels_after_acquiring_its_whole_domain_guard() {
     fixture.assert_all_reclaimed();
 }
 
-#[cfg(feature = "concurrent")]
 #[test]
 fn concurrent_split_allocates_once_and_preserves_hardware_ad_accrued_during_preparation() {
     for protect in [false, true] {
@@ -2231,43 +2024,24 @@ macro_rules! barrier_tests {
                     }
                     let allocated = fixture.arena.allocated();
                     let arena = fixture.arena.clone();
-                    let first = bases[0];
-                    let last = bases[bases.len() - 1] + HUGE;
                     let all_cpus = pages != 3;
                     set_flush_hook(move |scope, selected| {
                         assert_eq!(selected, all_cpus);
-                        if cfg!(feature = "concurrent") {
-                            assert!(matches!(scope, FlushScope::Range { .. }));
-                            assert!(arena.allocated() <= allocated + pages);
-                            for (pte, _) in &originals {
-                                let entry = unsafe { load_entry(*pte as *const Entry) };
-                                assert!(entry.is_leaf(HUGE_LEVEL) || entry.is_table(HUGE_LEVEL));
-                            }
-                        } else {
-                            assert_eq!(
-                                scope,
-                                FlushScope::Range {
-                                    start: first.into(),
-                                    end: last.into(),
-                                    level: HUGE_LEVEL,
-                                }
-                            );
-                            assert_eq!(arena.allocated(), allocated + pages);
+                        assert!(matches!(scope, FlushScope::Range { .. }));
+                        assert!(arena.allocated() <= allocated + pages);
+                        for (pte, _) in &originals {
+                            let entry = unsafe { load_entry(*pte as *const Entry) };
+                            assert!(entry.is_leaf(HUGE_LEVEL) || entry.is_table(HUGE_LEVEL));
                         }
                     });
                     let (result, flush) =
                         table.set_flags_range(start.into(), end.into(), new_flags(), all_cpus);
                     clear_flush_hook();
                     assert_eq!(result, Ok(()));
-                    if cfg!(feature = "concurrent") {
-                        discharge(flush);
-                        let calls = take_flushes();
-                        assert!(!calls.is_empty());
-                        assert!(calls.iter().all(|(_, selected)| *selected == all_cpus));
-                    } else {
-                        flush.expect_no_flush();
-                        assert_eq!(take_flushes().len(), 1);
-                    }
+                    discharge(flush);
+                    let calls = take_flushes();
+                    assert!(!calls.is_empty());
+                    assert!(calls.iter().all(|(_, selected)| *selected == all_cpus));
                     assert_eq!(fixture.arena.allocated(), allocated + pages);
                     for (index, base) in bases.iter().copied().enumerate() {
                         let mut offset = 0;
@@ -2385,7 +2159,7 @@ macro_rules! barrier_tests {
                     fixture.locks.0.before_unlock.lock().unwrap().take();
                     assert!(result.is_err());
                     assert_eq!(take_flushes().len(), 1);
-                    let staging = if cfg!(feature = "concurrent") || operation < 4 { 2 } else { 4 };
+                    let staging = 2;
                     assert_eq!(fixture.arena.allocated(), allocated + staging);
                     assert!(fixture.arena.freed().is_empty());
                     if fixture.locks.0.page_calls.load(Ordering::SeqCst) != 0 {
@@ -2397,15 +2171,7 @@ macro_rules! barrier_tests {
                     }
                     for (index, _) in originals.into_iter().enumerate() {
                         let address = base + index * HUGE;
-                        let split = if cfg!(feature = "concurrent") {
-                            index == 0
-                        } else if operation < 4 {
-                            index == 0
-                        } else if operation == 4 {
-                            true
-                        } else {
-                            index != 1
-                        };
+                        let split = index == 0;
                         assert_eq!(
                             table
                                 .walk(address + if split && index == 0 { HUGE - PAGE } else { 0 },)
@@ -2602,7 +2368,6 @@ macro_rules! barrier_tests {
 
 barrier_tests!(selected_controller_barriers, fixture);
 
-#[cfg(feature = "concurrent")]
 #[test]
 fn paused_point_and_range_barriers_exclude_writers_but_not_lock_free_walkers() {
     for range in [false, true] {

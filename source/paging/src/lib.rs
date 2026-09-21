@@ -1,10 +1,8 @@
 //! A page table for four- and five-level paging, in plain Rust. What the OS
 //! owes it is in [`os_contract::PagingAllocator`] and what the architecture owes
 //! it in [`ArchPagingMeta`]; `arch::x86_64` discharges the latter.
-//! The default `concurrent` feature selects shared walkers, entry updates and
-//! host locking through [`pagetable`]; disabling it selects the sequential controller.
-//! The selected controllers intentionally have different constructor and lock parameters,
-//! so every consumer in one Cargo feature-unification graph must agree on `concurrent`.
+//! The controller uses shared walkers, atomic entry updates, and host locking
+//! through [`pagetable`].
 //!
 //! By default, atomic entry updates preserve hardware-updated accessed/dirty
 //! bits. `ignore_access_dirty_bits` removes that preservation guarantee.
@@ -16,7 +14,7 @@
 use vstd::prelude::*;
 
 mod arch;
-#[cfg_attr(feature = "concurrent", path = "pagetable_concurrent.rs")]
+#[path = "pagetable_concurrent.rs"]
 pub mod pagetable;
 #[cfg(verus_only)]
 mod proofs;
@@ -36,7 +34,6 @@ pub use structs::arch_contract::{ArchPagingMeta, GenericPageTableFlags};
 pub use structs::entry;
 pub use structs::frame;
 pub use structs::level;
-pub use structs::mapping;
 pub use structs::os_contract;
 pub use structs::page;
 pub use structs::policy;

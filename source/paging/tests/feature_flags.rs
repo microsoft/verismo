@@ -4,14 +4,11 @@ mod common;
 
 use std::sync::Arc;
 
-#[cfg(feature = "concurrent")]
 use common::WholeTreeLock;
 use common::{load_entry, Allocator, Arena, ARENA};
 use paging::address::{Address, PhysAddr, VirtAddr};
 use paging::entry::PTEntry;
 use paging::level::{Lvl, PageLevel};
-#[cfg(not(feature = "concurrent"))]
-use paging::mapping::MappingRefOps;
 use paging::os_contract::PagingError;
 use paging::pagetable::PageTable;
 use paging::sizes::entry_index;
@@ -43,27 +40,16 @@ unsafe impl<const GLOBAL: bool> X86PagingParams for Platform<GLOBAL> {
 }
 
 type Arch = X86Paging<Platform<false>>;
-#[cfg(feature = "concurrent")]
 type Table = PageTable<Arch, Allocator, Lvl<3>, WholeTreeLock>;
-#[cfg(not(feature = "concurrent"))]
-type Table = PageTable<Arch, Allocator, Lvl<3>>;
 
 fn fixture() -> (Arc<Arena>, Table) {
     let arena = Arena::new(ARENA);
-    #[cfg(feature = "concurrent")]
     let table = Table::new(WholeTreeLock::default(), PTEntryFlags::data()).unwrap();
-    #[cfg(not(feature = "concurrent"))]
-    let table = Table::new(PTEntryFlags::data()).unwrap();
     (arena, table)
 }
 
 unsafe fn adopt(root: PhysAddr) -> Result<Table, PagingError> {
-    #[cfg(feature = "concurrent")]
-    return unsafe { Table::from_root(WholeTreeLock::default(), root) };
-    #[cfg(not(feature = "concurrent"))]
-    unsafe {
-        Table::from_root(root)
-    }
+    unsafe { Table::from_root(WholeTreeLock::default(), root) }
 }
 
 fn discharge<T: TlbFlush>(pending: MayNeedFlush<T>) {
@@ -160,18 +146,12 @@ macro_rules! feature_tests {
             #[test]
             fn splitting_does_not_refilter_inherited_flags_in_unedited_neighbors() {
                 let _arena = Arena::new(ARENA);
-                #[cfg(feature = "concurrent")]
                 let mut original =
                     PageTable::<X86Paging<Platform<true>>, Allocator, Lvl<3>, WholeTreeLock>::new(
                         WholeTreeLock::default(),
                         PTEntryFlags::data(),
                     )
                     .unwrap();
-                #[cfg(not(feature = "concurrent"))]
-                let mut original = PageTable::<X86Paging<Platform<true>>, Allocator, Lvl<3>>::new(
-                    PTEntryFlags::data(),
-                )
-                .unwrap();
                 let base = VirtAddr::from(0x4000_0000usize);
                 original
                     .map(
@@ -181,10 +161,7 @@ macro_rules! feature_tests {
                         false,
                     )
                     .unwrap();
-                #[cfg(feature = "concurrent")]
                 let (_locks, root) = original.leak();
-                #[cfg(not(feature = "concurrent"))]
-                let root = original.leak();
                 // SAFETY: ownership transfers; only the requested-flag policy differs.
                 let mut table = unsafe { $adopt(root) }.unwrap();
                 let target = base + 7 * 4096;

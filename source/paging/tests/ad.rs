@@ -1,21 +1,18 @@
 mod common;
 
 use std::collections::BTreeSet;
-#[cfg(feature = "concurrent")]
 use std::mem::ManuallyDrop;
 use std::mem::{align_of, size_of};
 use std::sync::Arc;
 
-#[cfg(feature = "concurrent")]
 use common::WholeTreeLock;
 use common::{load_entry, Allocator, Arena, ARENA};
 use paging::address::{Address, PhysAddr, VirtAddr};
 use paging::entry::PTEntry;
 use paging::level::{LevelSpec, Lvl, PageLevel};
-#[cfg(not(feature = "concurrent"))]
-use paging::mapping::MappingRefOps;
 use paging::os_contract::{DirectMappedAllocator, PagingError};
 use paging::pagetable::PageTable;
+use paging::policy::RootRange;
 use paging::ptpage::PTPage;
 use paging::sizes::{entry_index, PT_ENTRY_COUNT};
 use paging::{FlushScope, PTEntryFlags, X86Paging, X86PagingParams};
@@ -42,10 +39,7 @@ unsafe impl X86PagingParams for Platform {
 type Arch = X86Paging<Platform>;
 type Entry = PTEntry<Arch>;
 type Page = PTPage<Arch, Allocator>;
-#[cfg(feature = "concurrent")]
 type Table<L> = PageTable<Arch, Allocator, L, WholeTreeLock>;
-#[cfg(not(feature = "concurrent"))]
-type Table<L> = PageTable<Arch, Allocator, L>;
 const AD: usize = 0x60;
 const PAGE: usize = 4096;
 const BASE: usize = 0x4000_0000;
@@ -135,20 +129,12 @@ fn assert_all_reclaimed(arena: &Arena) {
 
 fn fixture<L: LevelSpec>() -> (Arc<Arena>, Table<L>) {
     let arena = Arena::new(ARENA);
-    #[cfg(feature = "concurrent")]
     let table = Table::new(WholeTreeLock::default(), common::flags()).unwrap();
-    #[cfg(not(feature = "concurrent"))]
-    let table = Table::new(common::flags()).unwrap();
     (arena, table)
 }
 
 unsafe fn adopt<L: LevelSpec>(root: PhysAddr) -> Result<Table<L>, PagingError> {
-    #[cfg(feature = "concurrent")]
-    return unsafe { Table::from_root(WholeTreeLock::default(), root) };
-    #[cfg(not(feature = "concurrent"))]
-    unsafe {
-        Table::from_root(root)
-    }
+    unsafe { Table::from_root(WholeTreeLock::default(), root) }
 }
 
 macro_rules! ad_tests {
@@ -227,10 +213,7 @@ macro_rules! ad_tests {
                             false,
                         )
                         .unwrap();
-                    #[cfg(feature = "concurrent")]
                     let (_locks, root) = original.leak();
-                    #[cfg(not(feature = "concurrent"))]
-                    let root = original.leak();
                     // SAFETY: this leaked tree has no controllers or hardware users.
                     let before = unsafe { clear_history_before_import(root, L::LEVEL) };
                     // SAFETY: ownership transfers; no hardware runs, so no cache invalidation is needed.
@@ -319,7 +302,6 @@ macro_rules! ad_tests {
 
 ad_tests!(selected_controller, fixture, adopt);
 
-#[cfg(feature = "concurrent")]
 #[test]
 fn borrowed_import_preserves_shared_descendants() {
     let arena = Arena::new(ARENA);
@@ -333,8 +315,8 @@ fn borrowed_import_preserves_shared_descendants() {
             false,
         )
         .unwrap();
-    // SAFETY: the inactive roots share all prefixes in the same lock domain.
-    let user = unsafe { Table::new_from_sharing_top::<0, 512>(locks.clone(), &kernel) }.unwrap();
+    let user = unsafe { Table::new_from_sharing_top::<RootRange<0, 512>>(locks.clone(), &kernel) }
+        .unwrap();
     let root = user.root_paddr();
     // SAFETY: both original controllers are unused during import; no hardware ran.
     let before = unsafe { clear_history_before_import(root, PageLevel::Level3) };

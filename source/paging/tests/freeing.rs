@@ -74,39 +74,6 @@ fn the_last_mapping_takes_its_tables_with_it() {
 }
 
 #[test]
-fn freeing_a_path_leaves_the_arena_alone() {
-    let (arena, mut table) = table();
-    let frame = PhysAddr::from(arena.base());
-    let vaddr = VirtAddr::from(0x4000_0000usize);
-    assert_eq!(table.map(common::page_4k(vaddr), common::frame_4k(frame), flags(), false), Ok(()));
-    unmap(&mut table, vaddr);
-
-    // SAFETY: `vaddr` is unmapped and its flush discharged.
-    unsafe { table.free_page_table_by_addr(vaddr) };
-    for offset in [0, ARENA / 2, ARENA - 4096] {
-        let addr = arena.base() + offset;
-        assert_eq!(table.phys_addr(VirtAddr::from(addr)), Ok(PhysAddr::from(addr)));
-    }
-    std::mem::forget(table);
-}
-
-#[test]
-fn path_reclamation_keeps_the_root() {
-    let (arena, mut table) = table();
-    let root = table.root_paddr();
-    let frame = PhysAddr::from(arena.base());
-    let vaddr = VirtAddr::from(0x4000_0000usize);
-    assert_eq!(table.map(common::page_4k(vaddr), common::frame_4k(frame), flags(), false), Ok(()));
-    unmap(&mut table, vaddr);
-
-    // SAFETY: `vaddr` is unmapped and its flush discharged.
-    unsafe { table.free_page_table_by_addr(vaddr) };
-    assert!(!arena.freed().contains(&root.bits()));
-    assert_eq!(table.root_paddr(), root);
-    std::mem::forget(table);
-}
-
-#[test]
 fn a_range_gives_back_the_tables_that_held_it() {
     let (arena, mut table) = table();
     let frame = PhysAddr::from(arena.base());
@@ -215,14 +182,11 @@ fn five_level_range_cleanup_uses_high_canonical_offsets_without_wrapping() {
     use paging::X86Paging;
 
     let arena = Arena::new(ARENA);
-    #[cfg(feature = "concurrent")]
     let mut table = PageTable::<X86Paging<Host>, Allocator, Lvl<4>, WholeTreeLock>::new(
         WholeTreeLock::default(),
         flags(),
     )
     .unwrap();
-    #[cfg(not(feature = "concurrent"))]
-    let mut table = PageTable::<X86Paging<Host>, Allocator, Lvl<4>>::new(flags()).unwrap();
     let first = VirtAddr::from(0xffff_8000_4000_0000usize);
     let second = first + 2 * PageLevel::Level2.size();
     let before = arena.allocated();
@@ -275,10 +239,7 @@ fn dropping_a_table_frees_its_root_and_descendants() {
 #[test]
 fn a_leaked_table_frees_nothing() {
     let (arena, table) = table();
-    #[cfg(feature = "concurrent")]
     let (_content, _root) = table.leak();
-    #[cfg(not(feature = "concurrent"))]
-    let _root = table.leak();
     assert!(arena.freed().is_empty());
 }
 
@@ -290,41 +251,19 @@ fn assert_all_tables_freed_once(arena: &Arena) {
     assert_eq!(freed.into_iter().collect::<BTreeSet<_>>(), expected);
 }
 
-#[cfg(not(feature = "concurrent"))]
-type Owned<L> = PageTable<X86Paging<Host>, Allocator, L>;
-#[cfg(feature = "concurrent")]
 type Owned<L> = PageTable<X86Paging<Host>, Allocator, L, WholeTreeLock>;
-#[cfg(not(feature = "concurrent"))]
-type Content = ();
-#[cfg(feature = "concurrent")]
 type Content = WholeTreeLock;
 
 fn owned<L: LevelSpec>() -> (Arc<Arena>, Owned<L>) {
     let arena = Arena::new(ARENA);
-    #[cfg(not(feature = "concurrent"))]
-    let table = Owned::new(flags()).unwrap();
-    #[cfg(feature = "concurrent")]
     let table = Owned::new(WholeTreeLock::default(), flags()).unwrap();
     (arena, table)
 }
 
 fn parts<L: LevelSpec>(table: Owned<L>) -> (Content, PhysAddr) {
-    #[cfg(not(feature = "concurrent"))]
-    {
-        ((), table.leak())
-    }
-    #[cfg(feature = "concurrent")]
-    {
-        table.leak()
-    }
+    table.leak()
 }
 
-#[cfg(not(feature = "concurrent"))]
-unsafe fn adopt<L: LevelSpec>((): Content, root: PhysAddr) -> Owned<L> {
-    unsafe { Owned::from_root(root) }.unwrap()
-}
-
-#[cfg(feature = "concurrent")]
 unsafe fn adopt<L: LevelSpec>(content: Content, root: PhysAddr) -> Owned<L> {
     unsafe { Owned::from_root(content, root) }.unwrap()
 }

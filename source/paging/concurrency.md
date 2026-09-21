@@ -1,13 +1,11 @@
 
 ## The two locking levels
 
-The default `concurrent` Cargo feature selects `pagetable_concurrent.rs` as the
-`paging::pagetable` module. Without it, that module selects the sequential
-`pagetable.rs` implementation; the two implementations are not exposed together.
+`pagetable_concurrent.rs` provides the `paging::pagetable` module. The crate has
+no sequential controller or controller-selection feature.
 
-`pagetable::PageTable<A, P, L, W, T = (), S = KernelPolicy>` keeps the sequential
-page-table API's allocation and TLB conventions, but separates tree lifetime
-from content updates:
+`pagetable::PageTable<A, P, L, W, T = (), S = KernelPolicy>` separates tree
+lifetime from content updates:
 
 | Operation | Receiver | Content lock |
 | --- | --- | --- |
@@ -29,10 +27,9 @@ reference-counted; keep them allocated until all other parent links are gone.
 Other controllers borrowing the same physical root must also be quiesced;
 exclusive borrowing of one controller does not exclude those aliases.
 
-Unlike the sequential implementation, there is no public `walk_mut` returning a
-freely editable entry. `walk` returns an owned `MappingSnapshot`; it is not a
-live reference, a whole-tree snapshot, or a lifetime guarantee for a mapped
-data frame.
+There is no public `walk_mut` returning a freely editable entry. `walk` returns
+an owned `MappingSnapshot`; it is not a live reference, a whole-tree snapshot,
+or a lifetime guarantee for a mapped data frame.
 
 ## Accessed and dirty bits
 
@@ -163,19 +160,18 @@ Ordinary shared controller borrows pin installed table pages; reclamation needs
 exclusive access. Cleanup derives the same level-aware views, ends child views
 before freeing their unlinked pages, and retains the explicit hardware and
 cross-controller exclusion obligations. Private construction and
-split preparation retain ordinary writes, while sequential live access now uses
-the same atomic protocol as concurrent access. Existing unsafe raw-entry
+split preparation retain ordinary writes, while live access uses the atomic
+protocol. Existing unsafe raw-entry
 accessors delegate to that protocol too, without fabricating a tree view when
 no controller lifetime or page level is available.
 
-Tree-layer reclamation uses these references while retaining each controller's
-emptiness predicate: sequential cleanup accepts non-present entries, whereas
-concurrent cleanup requires zero words. Root ownership checks still exclude
-borrowed kernel subtrees.
+Tree-layer reclamation uses these references and requires zero entry words
+before reclaiming a table. Root ownership checks still exclude borrowed kernel
+subtrees.
 
 ## Kernel and user policies
 
-Both variants share one implementation across two controller types:
+One implementation supports two ownership policies:
 
 | Alias | Mutation authority | Reclamation |
 | --- | --- | --- |
@@ -184,18 +180,18 @@ Both variants share one implementation across two controller types:
 
 `PageTable` defaults to `KernelPolicy`. `new_from_sharing_top` is a kernel-only
 constructor returning `UserPageTable`, not another privileged controller.
-Its const-generic `START..END` range is immutable through the user controller,
-including slots that were empty when copied. `UserPolicy<'kernel, START, END>`
-is zero-sized: it contains only the kernel lifetime marker, with no stored range
-or ownership bitmap. `owns_top_entry` is false for every reserved kernel slot.
+Its `RootEntrySet` is immutable through the user controller, including slots
+that were empty when copied. `UserPolicy<'kernel, Reserved>` is zero-sized: it
+contains only the kernel lifetime marker, with no stored range or ownership
+bitmap. `owns_top_entry` is false for every reserved kernel slot.
 
-Select the bounds when sharing, for example
-`KernelPageTable::new_from_sharing_top::<256, 512>(&kernel)` for a
-sequential four-level root's upper half; the concurrent constructor also takes
-the content lock. The user aliases are `UserPageTable<'kernel, A, P, L, START, END>`
-and `UserPageTable<'kernel, A, P, L, W, START, END, T = ()>`, respectively.
-The bounds are root-slot indexes, not virtual addresses. With the current
-48-bit address type, the upper half occupies `511..512` in a five-level root.
+Select one range with `RootRange<START, END>` or combine disjoint ranges with
+`RootUnion<Left, Right>`. For example,
+`new_from_sharing_top::<RootRange<256, 512>>(&kernel)` borrows the upper half
+of a four-level root. The concurrent constructor also takes the content lock.
+The selector works on root-slot indexes, not virtual addresses. With the
+current 48-bit address type, the upper half occupies `511..512` in a five-level
+root.
 
 User tables can walk and translate kernel mappings. Map, unmap, flag updates,
 split, and encryption updates reject kernel targets with
@@ -204,16 +200,16 @@ any update, so a forbidden kernel suffix cannot leave a modified user prefix.
 Unmap methods return `Result` for both policies.
 `set_flags_range` retains its error-plus-flush return shape.
 
-Raw `populate` and sequential `walk_mut` are unsafe and kernel-only; a user table never
-exposes an unrestricted inner controller. New raw subtree attachments transfer
-ownership. Staged raw edits must preserve valid, correctly leveled and exclusively
-owned table links so later walks and destruction remain safe.
+Raw `populate` is unsafe and kernel-only; a user table never exposes an
+unrestricted inner controller. New raw subtree attachments transfer ownership.
+Staged raw edits must preserve valid, correctly leveled and exclusively owned
+table links so later walks and destruction remain safe.
 User cleanup skips the entire reserved kernel range, including when asked
 to clean the entire tree, and leaves their root pointers intact.
 
 The source borrow keeps the kernel controller alive. Shared-access kernel
-updates remain available in the concurrent variant, while exclusive kernel
-operations wait for user-table borrows to end. Root pointers are copied, not
+updates remain available, while exclusive kernel operations wait for user-table
+borrows to end. Root pointers are copied, not
 dynamically mirrored: initialize shared root slots before creating user roots
 if subsequent kernel growth must be visible in those roots.
 
@@ -224,8 +220,7 @@ obligations. Mapped data-frame ownership is still the embedder's responsibility.
 
 ## Leaf flags, splitting and encryption
 
-Both page-table variants expose the same edit operations; the sequential
-variant takes `&mut self` for all of them.
+The page-table controller exposes these edit operations:
 
 | Method | Effect |
 | --- | --- |
@@ -323,6 +318,15 @@ implementation ignores it; striped or per-page implementations use it to
 choose a lock. Distinct keys may share a lock because the page-table code
 never holds two content guards simultaneously. Every writer of a shared
 physical table page must use the same exclusion domain.
+
+A controller returned by `new_from_sharing_top` is not a writer of its
+borrowed range. `UserPolicy` rejects edits there and excludes those root
+entries from reclamation and Drop. Atomic entry reads permit concurrent updates
+through the owner, so the new controller's content-lock domain protects only
+its independently owned subtrees and may differ from the owner's lock domain.
+The constructor remains unsafe because `leak` can erase the lifetime-backed
+Drop relationship: callers must keep shared descendants allocated while the
+returned controller or a leaked root can still be used.
 
 Range edits release the current page guard before acquiring a guard for another
 table page. Consecutive leaves in one table therefore share one acquisition,
@@ -508,10 +512,11 @@ use paging::address::VirtAddr;
 use paging::level::LevelSpec;
 use paging::os_contract::PagingAllocator;
 use paging::pagetable::{LockSpec, UserPageTable};
+use paging::policy::RootRange;
 use paging::ArchPagingMeta;
 
 fn raw_edit<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, W: LockSpec<()>>(
-    user: &mut UserPageTable<'_, A, P, L, W, 256, 512>,
+    user: &mut UserPageTable<'_, A, P, L, W, RootRange<256, 512>>,
     addr: VirtAddr,
 ) {
     let _ = user.walk_mut(addr);
@@ -525,10 +530,11 @@ use paging::address::PhysAddr;
 use paging::level::LevelSpec;
 use paging::os_contract::PagingAllocator;
 use paging::pagetable::{LockSpec, UserPageTable};
+use paging::policy::RootRange;
 use paging::ArchPagingMeta;
 
 fn attach<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, W: LockSpec<()>>(
-    user: &mut UserPageTable<'_, A, P, L, W, 256, 512>,
+    user: &mut UserPageTable<'_, A, P, L, W, RootRange<256, 512>>,
     child: PhysAddr,
 ) {
     let _ = unsafe { user.populate(0, child) };
@@ -541,6 +547,7 @@ The kernel owner cannot be dropped before its user controller:
 use paging::level::LevelSpec;
 use paging::os_contract::PagingAllocator;
 use paging::pagetable::{KernelPageTable, LockSpec};
+use paging::policy::RootRange;
 use paging::ArchPagingMeta;
 
 fn retire<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, W: LockSpec<()>>(
@@ -548,30 +555,14 @@ fn retire<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, W: LockSpec<()>>(
     wperms: W,
 ) {
     let user = unsafe {
-        KernelPageTable::new_from_sharing_top::<256, 512>(wperms, &kernel)
-    }.unwrap();
+        KernelPageTable::new_from_sharing_top::<RootRange<256, 512>>(wperms, &kernel)
+    }
+    .unwrap();
     drop(kernel);
     drop(user);
 }
 ```
 
-Returning raw user-tree parts does not erase that borrow:
-
-```compile_fail,E0505
-use paging::level::LevelSpec;
-use paging::os_contract::PagingAllocator;
-use paging::pagetable::{KernelPageTable, LockSpec};
-use paging::ArchPagingMeta;
-
-fn leak_user<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, W: LockSpec<()>>(
-    kernel: KernelPageTable<A, P, L, W>,
-    wperms: W,
-) {
-    let user = unsafe {
-        KernelPageTable::new_from_sharing_top::<256, 512>(wperms, &kernel)
-    }.unwrap();
-    let (_wperms, policy, _root) = user.leak();
-    drop(kernel);
-    drop(policy);
-}
-```
+Leaking a user table returns a raw root whose shared descendants are still
+owned elsewhere. The caller must retain that owner until the leaked root is no
+longer reachable.

@@ -11,13 +11,10 @@ use common::{Allocator, Arena, Host, WholeTreeLock, ARENA};
 use paging::address::{Address, PhysAddr, VirtAddr};
 use paging::entry::PTEntry;
 use paging::level::{Lvl, PageLevel};
-#[cfg(not(feature = "concurrent"))]
-use paging::mapping::MappingRefOps;
 use paging::os_contract::{DirectMappedAllocator, PagingError};
-#[cfg(feature = "concurrent")]
 use paging::pagetable::LockSpec;
 use paging::pagetable::{KernelPageTable, UserPageTable};
-use paging::policy::{PagingOwnershipPolicy, UserPolicy};
+use paging::policy::{PagingOwnershipPolicy, RootRange, UserPolicy};
 use paging::sizes::entry_index;
 use paging::tlb::{MayNeedFlush, TlbFlush};
 use paging::{PTEntryFlags, X86Paging};
@@ -31,30 +28,15 @@ const SMALL_LEVEL: PageLevel = PageLevel::Level0;
 const LARGE_LEVEL: PageLevel = PageLevel::Level1;
 
 type Arch = X86Paging<Host>;
-#[cfg(feature = "concurrent")]
+type Reserved<const START: usize, const END: usize> = RootRange<START, END>;
 type Table = KernelPageTable<Arch, Allocator, Lvl<3>, WholeTreeLock>;
-#[cfg(not(feature = "concurrent"))]
-type Table = KernelPageTable<Arch, Allocator, Lvl<3>>;
-#[cfg(feature = "concurrent")]
 type User<'kernel, const START: usize, const END: usize> =
-    UserPageTable<'kernel, Arch, Allocator, Lvl<3>, WholeTreeLock, START, END>;
-#[cfg(not(feature = "concurrent"))]
-type User<'kernel, const START: usize, const END: usize> =
-    UserPageTable<'kernel, Arch, Allocator, Lvl<3>, START, END>;
+    UserPageTable<'kernel, Arch, Allocator, Lvl<3>, WholeTreeLock, Reserved<START, END>>;
 
 fn fixture() -> (Arc<Arena>, Table, WholeTreeLock) {
-    #[cfg(not(feature = "concurrent"))]
-    {
-        let (arena, table) = common::table();
-        (arena, table, WholeTreeLock::default())
-    }
-    #[cfg(feature = "concurrent")]
     let arena = Arena::new(ARENA);
-    #[cfg(feature = "concurrent")]
     let locks = WholeTreeLock::default();
-    #[cfg(feature = "concurrent")]
     let table = Table::new(locks.clone(), common::flags()).unwrap();
-    #[cfg(feature = "concurrent")]
     (arena, table, locks)
 }
 
@@ -64,24 +46,14 @@ fn user<'kernel, const START: usize, const END: usize>(
     locks: &WholeTreeLock,
 ) -> User<'kernel, START, END> {
     assert_direct_map_in::<START, END>(arena);
-    #[cfg(feature = "concurrent")]
-    return unsafe { Table::new_from_sharing_top::<START, END>(locks.clone(), kernel) }.unwrap();
-    #[cfg(not(feature = "concurrent"))]
-    {
-        let _ = locks;
-        unsafe { Table::new_from_sharing_top::<START, END>(kernel) }.unwrap()
-    }
+    unsafe { Table::new_from_sharing_top::<Reserved<START, END>>(locks.clone(), kernel) }.unwrap()
 }
 
 fn leak<const START: usize, const END: usize>(
     user: User<'_, START, END>,
-) -> (UserPolicy<'_, START, END>, PhysAddr) {
-    #[cfg(feature = "concurrent")]
+) -> (UserPolicy<'_, Reserved<START, END>>, PhysAddr) {
     let (_locks, policy, root) = user.leak();
-    #[cfg(feature = "concurrent")]
-    return (policy, root);
-    #[cfg(not(feature = "concurrent"))]
-    user.leak()
+    (policy, root)
 }
 
 fn kernel_top(arena: &Arena) -> Range<usize> {
@@ -805,7 +777,7 @@ macro_rules! policy_tests {
                     let root = user.root_paddr();
                     let (policy, leaked_root) = $leak(user);
                     assert_eq!(leaked_root, root);
-                    assert_eq!(policy.kernel_top(), top);
+                    assert!(top.clone().all(|index| policy.borrows_top_entry(index)));
                     assert!(!policy.owns_top_entry(direct_map_index(&arena)));
                     let empty = reserved_hole(&arena);
                     assert_eq!(kernel.next_table_pa(empty), None);
@@ -832,34 +804,32 @@ policy_tests!(selected_controller, fixture, user, leak);
 
 #[test]
 fn const_generic_user_policies_and_controllers_have_no_storage_overhead() {
-    #[cfg(not(feature = "concurrent"))]
-    assert_eq!(size_of::<Table>(), size_of::<(Allocator, PhysAddr)>());
-    #[cfg(feature = "concurrent")]
     assert_eq!(size_of::<Table>(), size_of::<(Allocator, PhysAddr, WholeTreeLock)>());
-    #[cfg(not(feature = "concurrent"))]
-    assert_eq!(
-        size_of::<KernelPageTable<Arch, Allocator, Lvl<4>>>(),
-        size_of::<(Allocator, PhysAddr)>()
-    );
-    #[cfg(feature = "concurrent")]
     assert_eq!(
         size_of::<KernelPageTable<Arch, Allocator, Lvl<4>, WholeTreeLock>>(),
         size_of::<(Allocator, PhysAddr, WholeTreeLock)>()
     );
-    assert_eq!(size_of::<UserPolicy<'static, KERNEL_START, KERNEL_END>>(), 0);
-    assert_eq!(size_of::<UserPolicy<'static, 2, 510>>(), 0);
-    assert_eq!(size_of::<UserPolicy<'static, 0, 512>>(), 0);
+    assert_eq!(size_of::<UserPolicy<'static, Reserved<KERNEL_START, KERNEL_END>>>(), 0);
+    assert_eq!(size_of::<UserPolicy<'static, Reserved<2, 510>>>(), 0);
+    assert_eq!(size_of::<UserPolicy<'static, Reserved<0, 512>>>(), 0);
     assert_eq!(size_of::<User<'static, KERNEL_START, KERNEL_END>>(), size_of::<Table>());
     assert_eq!(size_of::<User<'static, 2, 510>>(), size_of::<Table>());
-    #[cfg(feature = "concurrent")]
     assert_eq!(
-        size_of::<UserPageTable<'static, Arch, Allocator, Lvl<3>, WholeTreeLock<u64>, 2, 510, u64>>(
-        ),
+        size_of::<
+            UserPageTable<
+                'static,
+                Arch,
+                Allocator,
+                Lvl<3>,
+                WholeTreeLock<u64>,
+                Reserved<2, 510>,
+                u64,
+            >,
+        >(),
         size_of::<KernelPageTable<Arch, Allocator, Lvl<3>, WholeTreeLock<u64>, u64>>(),
     );
 }
 
-#[cfg(feature = "concurrent")]
 #[test]
 fn concurrent_user_leak_returns_policy_and_content_domain() {
     type MetadataKernel = KernelPageTable<Arch, Allocator, Lvl<3>, WholeTreeLock<u64>, u64>;
@@ -867,14 +837,14 @@ fn concurrent_user_leak_returns_policy_and_content_domain() {
     let locks = WholeTreeLock::<u64>::default();
     *locks.lock(PhysAddr::from(0usize)) = 73;
     let kernel = MetadataKernel::new(locks.clone(), common::flags()).unwrap();
-    // SAFETY: all subtrees remain borrowed from the inactive kernel in the same lock domain.
     let user =
-        unsafe { MetadataKernel::new_from_sharing_top::<0, 512>(locks.clone(), &kernel) }.unwrap();
+        unsafe { MetadataKernel::new_from_sharing_top::<Reserved<0, 512>>(locks.clone(), &kernel) }
+            .unwrap();
     let expected_root = user.root_paddr();
     let (content, policy, root) = user.leak();
     assert_eq!(root, expected_root);
     assert_eq!(Arc::strong_count(&arena), 1);
-    assert_eq!(policy.kernel_top(), 0..512);
+    assert!((0..512).all(|index| policy.borrows_top_entry(index)));
     assert!(!(0..512).any(|index| policy.owns_top_entry(index)));
     let acquired = locks.acquisitions();
     {
@@ -894,12 +864,18 @@ fn concurrent_user_leak_returns_policy_and_content_domain() {
     assert_eq!(Arc::strong_count(&arena), 1);
 }
 
-#[cfg(feature = "concurrent")]
 #[test]
-fn concurrent_kernel_updates_are_visible_through_an_existing_shared_subtree() {
+fn concurrent_kernel_updates_are_visible_with_independent_user_locks() {
     let (arena, mut kernel, locks) = fixture();
     let shared_index = direct_map_index(&arena);
-    let user = user::<KERNEL_START, KERNEL_END>(&arena, &kernel, &locks);
+    assert_direct_map_in::<KERNEL_START, KERNEL_END>(&arena);
+    let user = unsafe {
+        Table::new_from_sharing_top::<Reserved<KERNEL_START, KERNEL_END>>(
+            WholeTreeLock::default(),
+            &kernel,
+        )
+    }
+    .unwrap();
     let addr = VirtAddr::from(shared_index * TOP_SIZE);
     let frame = PhysAddr::from(arena.base());
     let pointer = user.next_table_pa(shared_index);
@@ -965,7 +941,6 @@ fn concurrent_kernel_updates_are_visible_through_an_existing_shared_subtree() {
     assert_reclaimed(&arena);
 }
 
-#[cfg(feature = "concurrent")]
 #[test]
 fn later_kernel_root_growth_leaves_a_reserved_user_hole_protected() {
     let (arena, mut kernel, locks) = fixture();

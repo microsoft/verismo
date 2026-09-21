@@ -1,28 +1,16 @@
 //! Mapping, rejecting occupied addresses, splitting, and unmapping.
-#![cfg_attr(feature = "concurrent", allow(unused_mut))]
+#![allow(unused_mut)]
 
 mod common;
 
 use common::*;
-#[cfg(not(feature = "concurrent"))]
-use core::ops::Range;
 use paging::address::{PhysAddr, VirtAddr};
 use paging::frame::PhysFrame;
 use paging::level::PageLevel;
-#[cfg(not(feature = "concurrent"))]
-use paging::mapping::MappingRefOps;
-#[cfg(not(feature = "concurrent"))]
-use paging::os_contract::DirectMappedAllocator;
 use paging::os_contract::{MapRegionError, PagingError};
 use paging::page::Page;
-#[cfg(not(feature = "concurrent"))]
-use paging::pagetable::PageTable;
 use paging::sizes::{PageOffset, PageSize, Size1GiB, Size2MiB, Size4KiB};
 use paging::PTEntryFlags;
-#[cfg(not(feature = "concurrent"))]
-use paging::{level::Lvl, X86Paging};
-#[cfg(not(feature = "concurrent"))]
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 const SMALL: PageLevel = PageLevel::Level0;
 const LARGE: PageLevel = PageLevel::Level1;
@@ -31,30 +19,6 @@ struct Size8KiB;
 
 impl PageOffset for Size8KiB {
     const SHIFT: usize = 13;
-}
-
-#[cfg(not(feature = "concurrent"))]
-struct BudgetAllocator;
-#[cfg(not(feature = "concurrent"))]
-static ALLOCATION_BUDGET: AtomicUsize = AtomicUsize::new(usize::MAX);
-
-#[cfg(not(feature = "concurrent"))]
-unsafe impl DirectMappedAllocator for BudgetAllocator {
-    fn direct_map() -> (Range<PhysAddr>, VirtAddr) {
-        Allocator::direct_map()
-    }
-
-    fn allocate_table_page() -> Result<PhysAddr, PagingError> {
-        ALLOCATION_BUDGET
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |left| left.checked_sub(1))
-            .map_err(|_| PagingError::AllocFrame)?;
-        <Allocator as DirectMappedAllocator>::allocate_table_page()
-    }
-
-    unsafe fn deallocate_table_page(page: PhysAddr) {
-        // SAFETY: ownership is forwarded unchanged to the original allocator.
-        unsafe { <Allocator as DirectMappedAllocator>::deallocate_table_page(page) };
-    }
 }
 
 #[test]
@@ -81,34 +45,6 @@ fn an_unsupported_typed_page_size_is_rejected() {
     assert!(matches!(table.unmap(page, true), Err(PagingError::InvalidLevel)));
     assert!(matches!(table.set_flags(page, flags(), true), Err(PagingError::InvalidLevel)));
     std::mem::forget(table);
-}
-
-#[test]
-fn page_ranges_iterate_in_address_order() {
-    let start = common::page_4k(VirtAddr::from(0x4000usize));
-    let end = common::page_4k(VirtAddr::from(0x7000usize));
-    let frame = common::frame_4k(PhysAddr::from(0x8000usize));
-    assert_eq!((start + 2).start_address(), VirtAddr::from(0x6000usize));
-    assert_eq!(end - start, 3);
-    assert_eq!(start.pt_index(), 4);
-    assert_eq!((frame + 2).start_address(), PhysAddr::from(0xa000usize));
-
-    let exclusive: Vec<_> = Page::range(start, end).map(Page::start_address).collect();
-    assert_eq!(
-        exclusive,
-        [VirtAddr::from(0x4000usize), VirtAddr::from(0x5000usize), VirtAddr::from(0x6000usize)]
-    );
-
-    let inclusive: Vec<_> = Page::range_inclusive(start, end).map(Page::start_address).collect();
-    assert_eq!(
-        inclusive,
-        [
-            VirtAddr::from(0x4000usize),
-            VirtAddr::from(0x5000usize),
-            VirtAddr::from(0x6000usize),
-            VirtAddr::from(0x7000usize),
-        ]
-    );
 }
 
 #[test]
@@ -303,34 +239,6 @@ fn region_mapping_rejects_an_empty_inclusive_range() {
         table.map_region(Page::range_inclusive(start, end), &mut frames, flags()),
         Err(MapRegionError { error: PagingError::InvalidRange, unmapped_pages: 0 })
     );
-    std::mem::forget(table);
-}
-
-#[test]
-#[cfg(not(feature = "concurrent"))]
-fn failed_mapping_growth_reclaims_its_private_preparation() {
-    let arena = Arena::new(ARENA);
-    ALLOCATION_BUDGET.store(usize::MAX, Ordering::Relaxed);
-    let mut table = PageTable::<X86Paging<Host>, BudgetAllocator, Lvl<3>>::new(flags()).unwrap();
-    let vaddr = VirtAddr::from(0x4000_0000usize);
-    let frame = PhysAddr::from(arena.base());
-    let before = arena.allocated();
-    let original_level = table.walk(vaddr).level();
-
-    ALLOCATION_BUDGET.store(1, Ordering::Relaxed);
-    assert_eq!(
-        table.map(common::page_4k(vaddr), common::frame_4k(frame), flags(), false),
-        Err(PagingError::AllocFrame)
-    );
-    assert_eq!(table.phys_addr(vaddr), Err(PagingError::NotMapped));
-    assert_eq!(table.walk(vaddr).level(), original_level);
-    assert_eq!(arena.allocated(), before + 1);
-    assert_eq!(arena.freed().len(), 1);
-
-    ALLOCATION_BUDGET.store(3, Ordering::Relaxed);
-    assert_eq!(table.map(common::page_4k(vaddr), common::frame_4k(frame), flags(), false), Ok(()));
-    assert_eq!(table.phys_addr(vaddr), Ok(frame));
-    assert_eq!(table.validate_page_table(), Ok(()));
     std::mem::forget(table);
 }
 

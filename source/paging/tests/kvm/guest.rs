@@ -2,15 +2,17 @@
 #![no_main]
 
 use core::arch::{asm, global_asm};
+use core::cell::UnsafeCell;
+use core::ops::{Deref, DerefMut};
 use core::panic::PanicInfo;
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use paging::address::{Address, PhysAddr, VirtAddr};
 use paging::frame::PhysFrame;
 use paging::level::Lvl;
 use paging::os_contract::{DirectMappedAllocator, PagingError};
 use paging::page::Page;
-use paging::pagetable::PageTable;
+use paging::pagetable::{LockSpec, PageTable};
 use paging::sizes::{Size2MiB, Size4KiB};
 use paging::{FlushScope, PTEntryFlags, X86Paging, X86PagingParams};
 
@@ -131,7 +133,59 @@ unsafe impl DirectMappedAllocator for GuestAllocator {
 }
 
 type Arch = X86Paging<GuestPaging>;
-type GuestPageTable = PageTable<Arch, GuestAllocator, Lvl<3>>;
+
+struct GuestLock {
+    locked: AtomicBool,
+    cell: UnsafeCell<()>,
+}
+
+impl GuestLock {
+    const fn new() -> Self {
+        Self { locked: AtomicBool::new(false), cell: UnsafeCell::new(()) }
+    }
+}
+
+struct GuestGuard<'a> {
+    lock: &'a GuestLock,
+}
+
+impl Deref for GuestGuard<'_> {
+    type Target = ();
+
+    fn deref(&self) -> &() {
+        unsafe { &*self.lock.cell.get() }
+    }
+}
+
+impl DerefMut for GuestGuard<'_> {
+    fn deref_mut(&mut self) -> &mut () {
+        unsafe { &mut *self.lock.cell.get() }
+    }
+}
+
+impl Drop for GuestGuard<'_> {
+    fn drop(&mut self) {
+        self.lock.locked.store(false, Ordering::Release);
+    }
+}
+
+// SAFETY: every page uses the same lock, whose acquire/release CAS excludes every other guard.
+unsafe impl LockSpec<()> for GuestLock {
+    type Guard<'a> = GuestGuard<'a>;
+
+    fn lock(&self, _page: PhysAddr) -> Self::Guard<'_> {
+        while self
+            .locked
+            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            core::hint::spin_loop();
+        }
+        GuestGuard { lock: self }
+    }
+}
+
+type GuestPageTable = PageTable<Arch, GuestAllocator, Lvl<3>, GuestLock>;
 
 /// Builds, activates, and exercises a page table created by the paging crate.
 #[no_mangle]
@@ -147,7 +201,7 @@ pub extern "C" fn kmain() -> ! {
     }
     serial_write("VERIOS_PAGETABLE_BOOTSTRAP_MAGIC_WRITTEN\n");
 
-    let mut table = match GuestPageTable::new(PTEntryFlags::data()) {
+    let table = match GuestPageTable::new(GuestLock::new(), PTEntryFlags::data()) {
         Ok(table) => table,
         Err(_) => fail("VERIOS_PAGETABLE_BUILD_FAILED\n"),
     };
@@ -231,7 +285,7 @@ pub extern "C" fn kmain() -> ! {
         Err(_) => fail("VERIOS_PAGETABLE_PERCPU_FLUSH_FAILED\n"),
     }
 
-    let leaked_root = table.leak();
+    let (_lock, leaked_root) = table.leak();
     if leaked_root != root {
         fail("VERIOS_PAGETABLE_ROOT_CHANGED\n");
     }

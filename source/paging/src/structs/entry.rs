@@ -177,11 +177,7 @@ pub(crate) struct PTEntryRef<'tree, A: ArchPagingMeta> {
 }
 
 impl<'tree, A: ArchPagingMeta> PTEntryRef<'tree, A> {
-    /// # Safety
-    /// The initialized, writable entry must be atomic-aligned and remain allocated
-    /// for `'tree`. Conflicting accesses must be atomic, with no ordinary entry references.
-    pub(crate) unsafe fn from_raw(entry: *mut PTEntry<A>) -> Self {
-        let word = unsafe { AtomicUsize::from_ptr(entry.cast::<usize>()) };
+    pub(crate) fn new(word: &'tree AtomicUsize) -> Self {
         Self { word, marker: PhantomData }
     }
 
