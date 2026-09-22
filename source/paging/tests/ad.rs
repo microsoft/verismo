@@ -9,11 +9,11 @@ use common::WholeTreeLock;
 use common::{load_entry, Allocator, Arena, ARENA};
 use paging::address::{Address, PhysAddr, VirtAddr};
 use paging::entry::PTEntry;
-use paging::level::{LevelSpec, Lvl, PageLevel};
+use paging::level::{Lvl, PageLevel};
 use paging::os_contract::{DirectMappedAllocator, PagingError};
 use paging::pagetable::PageTable;
 use paging::policy::RootRange;
-use paging::ptpage::PTPage;
+use paging::ptpage::{PTPage, WalkLevel};
 use paging::sizes::{entry_index, PT_ENTRY_COUNT};
 use paging::{FlushScope, PTEntryFlags, X86Paging, X86PagingParams};
 
@@ -69,7 +69,7 @@ unsafe fn tree_words(root: PhysAddr, level: PageLevel) -> Vec<(usize, usize, Pag
         // SAFETY: the caller pins this well-formed, identity-mapped tree without reclamation.
         let entry = unsafe { load_entry(pte) };
         words.push((pte as usize, entry.raw(), level));
-        if entry.is_table(level) {
+        if entry.is_present_table(level) {
             words.extend(unsafe {
                 tree_words(PhysAddr::from(entry.address()), level.child().unwrap())
             });
@@ -87,7 +87,7 @@ unsafe fn assert_path_history(root: PhysAddr, address: VirtAddr, mut level: Page
         let entry = unsafe { load_entry(pte) };
         assert!(entry.present());
         assert_eq!(entry.raw() & AD, 0);
-        if !entry.is_table(level) {
+        if !entry.is_present_table(level) {
             return;
         }
         page = PhysAddr::from(entry.address());
@@ -127,13 +127,13 @@ fn assert_all_reclaimed(arena: &Arena) {
     assert_eq!(freed.iter().copied().collect::<BTreeSet<_>>().len(), freed.len());
 }
 
-fn fixture<L: LevelSpec>() -> (Arc<Arena>, Table<L>) {
+fn fixture<L: WalkLevel>() -> (Arc<Arena>, Table<L>) {
     let arena = Arena::new(ARENA);
     let table = Table::new(WholeTreeLock::default(), common::flags()).unwrap();
     (arena, table)
 }
 
-unsafe fn adopt<L: LevelSpec>(root: PhysAddr) -> Result<Table<L>, PagingError> {
+unsafe fn adopt<L: WalkLevel>(root: PhysAddr) -> Result<Table<L>, PagingError> {
     unsafe { Table::from_root(WholeTreeLock::default(), root) }
 }
 
@@ -169,7 +169,7 @@ macro_rules! ad_tests {
                     // SAFETY: the newly constructed path remains exclusively owned and inactive.
                     unsafe { assert_path_history(table.root_paddr(), address, PageLevel::Level3) };
                     if split {
-                        let pending = split_at!(table, address, PageLevel::Level0, true).unwrap();
+                        let pending = split_at!(table, address, PageLevel::Level1, true).unwrap();
                         // SAFETY: these host tables are never installed or cached by hardware.
                         unsafe { pending.ignore() };
                     }
@@ -192,7 +192,7 @@ macro_rules! ad_tests {
                         assert_eq!(entry.is_shared(), shared);
                         assert_eq!(table.phys_addr(address), Ok(PhysAddr::from(FRAME + PAGE)));
                     }
-                    let (_, pending) = table.unmap(common::page_4k(address), true).unwrap();
+                    let (_, pending) = table.unmap(common::page_4k(address), Some(true)).unwrap();
                     unsafe { pending.ignore() };
                     assert_eq!(table.walk(address).read().raw(), 0);
                     drop(table);
@@ -202,7 +202,7 @@ macro_rules! ad_tests {
 
             #[test]
             fn imported_four_and_five_level_trees_preserve_entry_bits() {
-                fn check<L: LevelSpec>() {
+                fn check<L: WalkLevel>() {
                     let (arena, mut original) = fixture::<L>();
                     let address = VirtAddr::from(BASE);
                     original

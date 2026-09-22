@@ -3,7 +3,7 @@ use crate::sizes::PAGE_OFFSET_WIDTH;
 //
 // Copyright (c) 2022-2023 SUSE LLC
 use crate::structs::sizes::{
-    PageOffset, PageSize, Size4KiB, PAGE_TABLE_INDEX_WIDTH, PT_ENTRY_COUNT,
+    PageOffset, PageSize, Regular, PAGE_TABLE_INDEX_WIDTH, PT_ENTRY_COUNT,
 };
 use crate::util::{align_down, align_up, is_aligned};
 
@@ -100,14 +100,14 @@ pub trait Address: Copy + From<InnerAddr> + Into<InnerAddr> + Ord {
     #[inline]
     fn crosses_page(&self, size: usize) -> bool {
         let start = self.bits();
-        let x1 = start / <Size4KiB as PageSize>::SIZE;
-        let x2 = (start + (size - 1)) / <Size4KiB as PageSize>::SIZE;
+        let x1 = start / <Regular as PageSize>::SIZE;
+        let x2 = (start + (size - 1)) / <Regular as PageSize>::SIZE;
         x1 != x2
     }
 
     #[inline]
     fn pfn(&self) -> InnerAddr {
-        self.bits() >> <Size4KiB as PageOffset>::SHIFT
+        self.bits() >> <Regular as PageOffset>::SHIFT
     }
 }
 

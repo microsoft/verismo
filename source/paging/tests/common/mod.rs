@@ -25,37 +25,37 @@ use paging::page::Page;
 use paging::pagetable::LockSpec;
 use paging::pagetable::{KernelPageTable, PageTable};
 use paging::policy::PagingOwnershipPolicy;
-use paging::sizes::{PageSize, Size1GiB, Size2MiB, Size4KiB};
+use paging::sizes::{Huge, PageSize, Regular, SizeLevel2};
 use paging::{ArchPagingMeta, FlushScope, PTEntryFlags, X86Paging, X86PagingParams};
 
-pub fn page_4k(address: VirtAddr) -> Page<Size4KiB> {
-    Page::<Size4KiB>::from_start_address(address).unwrap()
+pub fn page_4k(address: VirtAddr) -> Page<Regular> {
+    Page::<Regular>::from_start_address(address).unwrap()
 }
 
-pub fn frame_4k(address: PhysAddr) -> PhysFrame<Size4KiB> {
-    PhysFrame::<Size4KiB>::from_start_address(address).unwrap()
+pub fn frame_4k(address: PhysAddr) -> PhysFrame<Regular> {
+    PhysFrame::<Regular>::from_start_address(address).unwrap()
 }
 
-pub fn page_2m(address: VirtAddr) -> Page<Size2MiB> {
-    Page::<Size2MiB>::from_start_address(address).unwrap()
+pub fn page_2m(address: VirtAddr) -> Page<Huge> {
+    Page::<Huge>::from_start_address(address).unwrap()
 }
 
-pub fn frame_2m(address: PhysAddr) -> PhysFrame<Size2MiB> {
-    PhysFrame::<Size2MiB>::from_start_address(address).unwrap()
+pub fn frame_2m(address: PhysAddr) -> PhysFrame<Huge> {
+    PhysFrame::<Huge>::from_start_address(address).unwrap()
 }
 
-pub fn page_1g(address: VirtAddr) -> Page<Size1GiB> {
-    Page::<Size1GiB>::from_start_address(address).unwrap()
+pub fn page_1g(address: VirtAddr) -> Page<SizeLevel2> {
+    Page::<SizeLevel2>::from_start_address(address).unwrap()
 }
 
-pub fn frame_1g(address: PhysAddr) -> PhysFrame<Size1GiB> {
-    PhysFrame::<Size1GiB>::from_start_address(address).unwrap()
+pub fn frame_1g(address: PhysAddr) -> PhysFrame<SizeLevel2> {
+    PhysFrame::<SizeLevel2>::from_start_address(address).unwrap()
 }
 
-pub fn range_4k(start: VirtAddr, end: VirtAddr) -> paging::page::PageRangeInclusive<Size4KiB> {
+pub fn range_4k(start: VirtAddr, end: VirtAddr) -> paging::page::PageRangeInclusive<Regular> {
     let start = Page::containing_address(start);
     let end = if start.start_address() < end {
-        Page::containing_address(end - Size4KiB::SIZE)
+        Page::containing_address(end - Regular::SIZE)
     } else {
         Page::containing_address(end)
     };
@@ -65,8 +65,8 @@ pub fn range_4k(start: VirtAddr, end: VirtAddr) -> paging::page::PageRangeInclus
 pub fn contiguous_frames_4k(
     start: PhysAddr,
     pages: usize,
-) -> impl Iterator<Item = PhysFrame<Size4KiB>> {
-    (0..pages).map(move |offset| frame_4k(start + offset * Size4KiB::SIZE))
+) -> impl Iterator<Item = PhysFrame<Regular>> {
+    (0..pages).map(move |offset| frame_4k(start + offset * Regular::SIZE))
 }
 
 #[macro_export]
@@ -83,25 +83,23 @@ macro_rules! map_at {
     ($table:expr, $address:expr, $frame:expr, $level:expr, $flags:expr, $shared:expr) => {{
         match $level {
             paging::level::PageLevel::Level0 => $table.map(
-                paging::page::Page::<paging::sizes::Size4KiB>::from_start_address($address)
-                    .unwrap(),
-                paging::frame::PhysFrame::<paging::sizes::Size4KiB>::from_start_address($frame)
+                paging::page::Page::<paging::sizes::Regular>::from_start_address($address).unwrap(),
+                paging::frame::PhysFrame::<paging::sizes::Regular>::from_start_address($frame)
                     .unwrap(),
                 $flags,
                 $shared,
             ),
             paging::level::PageLevel::Level1 => $table.map(
-                paging::page::Page::<paging::sizes::Size2MiB>::from_start_address($address)
-                    .unwrap(),
-                paging::frame::PhysFrame::<paging::sizes::Size2MiB>::from_start_address($frame)
+                paging::page::Page::<paging::sizes::Huge>::from_start_address($address).unwrap(),
+                paging::frame::PhysFrame::<paging::sizes::Huge>::from_start_address($frame)
                     .unwrap(),
                 $flags,
                 $shared,
             ),
             paging::level::PageLevel::Level2 => $table.map(
-                paging::page::Page::<paging::sizes::Size1GiB>::from_start_address($address)
+                paging::page::Page::<paging::sizes::SizeLevel2>::from_start_address($address)
                     .unwrap(),
-                paging::frame::PhysFrame::<paging::sizes::Size1GiB>::from_start_address($frame)
+                paging::frame::PhysFrame::<paging::sizes::SizeLevel2>::from_start_address($frame)
                     .unwrap(),
                 $flags,
                 $shared,
@@ -124,27 +122,25 @@ macro_rules! map_at_with_parent_flags {
     ) => {{
         match $level {
             paging::level::PageLevel::Level0 => $table.map_with_parent_flags(
-                paging::page::Page::<paging::sizes::Size4KiB>::from_start_address($address)
-                    .unwrap(),
-                paging::frame::PhysFrame::<paging::sizes::Size4KiB>::from_start_address($frame)
+                paging::page::Page::<paging::sizes::Regular>::from_start_address($address).unwrap(),
+                paging::frame::PhysFrame::<paging::sizes::Regular>::from_start_address($frame)
                     .unwrap(),
                 $flags,
                 $shared,
                 $parent_flags,
             ),
             paging::level::PageLevel::Level1 => $table.map_with_parent_flags(
-                paging::page::Page::<paging::sizes::Size2MiB>::from_start_address($address)
-                    .unwrap(),
-                paging::frame::PhysFrame::<paging::sizes::Size2MiB>::from_start_address($frame)
+                paging::page::Page::<paging::sizes::Huge>::from_start_address($address).unwrap(),
+                paging::frame::PhysFrame::<paging::sizes::Huge>::from_start_address($frame)
                     .unwrap(),
                 $flags,
                 $shared,
                 $parent_flags,
             ),
             paging::level::PageLevel::Level2 => $table.map_with_parent_flags(
-                paging::page::Page::<paging::sizes::Size1GiB>::from_start_address($address)
+                paging::page::Page::<paging::sizes::SizeLevel2>::from_start_address($address)
                     .unwrap(),
-                paging::frame::PhysFrame::<paging::sizes::Size1GiB>::from_start_address($frame)
+                paging::frame::PhysFrame::<paging::sizes::SizeLevel2>::from_start_address($frame)
                     .unwrap(),
                 $flags,
                 $shared,
@@ -160,19 +156,17 @@ macro_rules! unmap_at {
     ($table:expr, $address:expr, $level:expr) => {{
         match $level {
             paging::level::PageLevel::Level0 => $table.unmap(
-                paging::page::Page::<paging::sizes::Size4KiB>::from_start_address($address)
-                    .unwrap(),
-                true,
+                paging::page::Page::<paging::sizes::Regular>::from_start_address($address).unwrap(),
+                Some(true),
             ),
             paging::level::PageLevel::Level1 => $table.unmap(
-                paging::page::Page::<paging::sizes::Size2MiB>::from_start_address($address)
-                    .unwrap(),
-                true,
+                paging::page::Page::<paging::sizes::Huge>::from_start_address($address).unwrap(),
+                Some(true),
             ),
             paging::level::PageLevel::Level2 => $table.unmap(
-                paging::page::Page::<paging::sizes::Size1GiB>::from_start_address($address)
+                paging::page::Page::<paging::sizes::SizeLevel2>::from_start_address($address)
                     .unwrap(),
-                true,
+                Some(true),
             ),
             _ => Err(paging::os_contract::PagingError::InvalidLevel),
         }
@@ -182,20 +176,13 @@ macro_rules! unmap_at {
 #[macro_export]
 macro_rules! split_at {
     ($table:expr, $address:expr, $level:expr, $all_cpus:expr) => {{
-        match $level {
-            paging::level::PageLevel::Level0 => $table.split(
-                paging::page::Page::<paging::sizes::Size4KiB>::containing_address($address),
+        if $level == paging::level::PageLevel::Level1 {
+            $table.split(
+                paging::page::Page::<paging::sizes::Huge>::containing_address($address),
                 $all_cpus,
-            ),
-            paging::level::PageLevel::Level1 => $table.split(
-                paging::page::Page::<paging::sizes::Size2MiB>::containing_address($address),
-                $all_cpus,
-            ),
-            paging::level::PageLevel::Level2 => $table.split(
-                paging::page::Page::<paging::sizes::Size1GiB>::containing_address($address),
-                $all_cpus,
-            ),
-            _ => Err(paging::os_contract::PagingError::InvalidLevel),
+            )
+        } else {
+            Err(paging::os_contract::PagingError::InvalidLevel)
         }
     }};
 }
@@ -205,19 +192,17 @@ macro_rules! set_flags_at {
     ($table:expr, $address:expr, $level:expr, $flags:expr, $all_cpus:expr) => {{
         match $level {
             paging::level::PageLevel::Level0 => $table.set_flags(
-                paging::page::Page::<paging::sizes::Size4KiB>::from_start_address($address)
-                    .unwrap(),
+                paging::page::Page::<paging::sizes::Regular>::from_start_address($address).unwrap(),
                 $flags,
                 $all_cpus,
             ),
             paging::level::PageLevel::Level1 => $table.set_flags(
-                paging::page::Page::<paging::sizes::Size2MiB>::from_start_address($address)
-                    .unwrap(),
+                paging::page::Page::<paging::sizes::Huge>::from_start_address($address).unwrap(),
                 $flags,
                 $all_cpus,
             ),
             paging::level::PageLevel::Level2 => $table.set_flags(
-                paging::page::Page::<paging::sizes::Size1GiB>::from_start_address($address)
+                paging::page::Page::<paging::sizes::SizeLevel2>::from_start_address($address)
                     .unwrap(),
                 $flags,
                 $all_cpus,

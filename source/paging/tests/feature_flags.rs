@@ -64,7 +64,7 @@ unsafe fn assert_parent_flags(root: PhysAddr, addr: VirtAddr) {
         let pte = (page as *const PTEntry<Arch>).wrapping_add(entry_index(addr, level));
         // SAFETY: the caller pins the inactive, host-backed tree.
         let entry = unsafe { load_entry(pte) };
-        if !entry.is_table(level) {
+        if !entry.is_present_table(level) {
             return;
         }
         assert!(!entry.flags().contains(PTEntryFlags::GLOBAL));
@@ -165,7 +165,7 @@ macro_rules! feature_tests {
                 // SAFETY: ownership transfers; only the requested-flag policy differs.
                 let mut table = unsafe { $adopt(root) }.unwrap();
                 let target = base + 7 * 4096;
-                discharge(split_at!(table, target, PageLevel::Level0, true).unwrap());
+                discharge(split_at!(table, target, PageLevel::Level1, true).unwrap());
                 assert!(table.walk(target).read().flags().contains(PTEntryFlags::GLOBAL));
                 discharge(
                     set_flags_at!(table, target, PageLevel::Level0, PTEntryFlags::data(), true)

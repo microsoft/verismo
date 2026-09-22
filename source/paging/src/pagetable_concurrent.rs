@@ -11,19 +11,19 @@ use crate::structs::address::{Address, PhysAddr, VirtAddr};
 use crate::structs::arch_contract::{ArchPagingMeta, GenericPageTableFlags};
 use crate::structs::entry::{PTEntry, PTEntryRef};
 use crate::structs::frame::PhysFrame;
-use crate::structs::level::{InnerLevel, LevelSpec, Lvl, PageLevel};
+use crate::structs::level::{LevelSpec, Lvl, PageLevel};
 use crate::structs::os_contract::{
     DirectMappedAllocator, MapRegionError, PagingAllocator, PagingError,
 };
 use crate::structs::page::{Page, PageRangeInclusive};
 use crate::structs::policy::{KernelPolicy, PagingOwnershipPolicy, RootEntrySet, UserPolicy};
 use crate::structs::ptpage::{
-    reclaim_path, reclaim_range, FlushFootprint, Live, PTPage, PTPagePointer, PTPageTree,
-    Translation, WalkResult,
+    reclaim_path, reclaim_range, FlushFootprint, LeafSplitLevelImpl, Live, Mapping, PTPage,
+    PTPagePointer, PTPageTree, PageLevelVisitor, Translation, WalkLevel, WalkLevelImpl,
+    WalkPosition, WalkResult,
 };
 use crate::structs::sizes::{
-    entry_index, next_boundary, page_level_for_size, PageSize, Size1GiB, Size2MiB, Size4KiB,
-    PT_ENTRY_COUNT,
+    entry_index, next_boundary, Huge, PageSize, Regular, SizeLevel2, PT_ENTRY_COUNT,
 };
 use crate::structs::tlb::{MayNeedFlush, TlbFlush};
 
@@ -36,6 +36,19 @@ struct RangeUnmapState<'a> {
     footprint: &'a mut FlushFootprint,
 }
 
+struct UnmapRegionVisitor<'a, 'state, Arch, Alloc, MaxLevel, WP, T, Owned>
+where
+    Arch: ArchPagingMeta,
+    Alloc: PagingAllocator,
+    MaxLevel: WalkLevel,
+    Owned: PagingOwnershipPolicy,
+{
+    table: &'a PageTable<Arch, Alloc, MaxLevel, WP, T, Owned>,
+    start: VirtAddr,
+    end: VirtAddr,
+    state: &'a mut RangeUnmapState<'state>,
+}
+
 struct RangeFlagsState<T: TlbFlush> {
     cursor: usize,
     flush: MayNeedFlush<T>,
@@ -46,6 +59,38 @@ struct RangeFlagsState<T: TlbFlush> {
 }
 
 type RangeFlagsResult<T> = (Result<(), PagingError>, MayNeedFlush<T>);
+
+impl<'tree, Arch, Alloc, MaxLevel, WP, T, Owned> PageLevelVisitor<'tree, Arch, Alloc>
+    for UnmapRegionVisitor<'_, '_, Arch, Alloc, MaxLevel, WP, T, Owned>
+where
+    Arch: ArchPagingMeta,
+    Alloc: PagingAllocator,
+    MaxLevel: WalkLevel,
+    WP: LockSpec<T>,
+    Owned: PagingOwnershipPolicy,
+{
+    type Output = Result<(), PagingError>;
+
+    fn visit_l0(self, page: PTPagePointer<'tree, Arch, Alloc, Lvl<0>>) -> Self::Output {
+        self.table.unmap_region_l0(page, self.start, self.end, self.state)
+    }
+
+    fn visit_l1(self, page: PTPagePointer<'tree, Arch, Alloc, Lvl<1>>) -> Self::Output {
+        self.table.unmap_region_inner(page, self.start, self.end, self.state)
+    }
+
+    fn visit_l2(self, page: PTPagePointer<'tree, Arch, Alloc, Lvl<2>>) -> Self::Output {
+        self.table.unmap_region_inner(page, self.start, self.end, self.state)
+    }
+
+    fn visit_l3(self, page: PTPagePointer<'tree, Arch, Alloc, Lvl<3>>) -> Self::Output {
+        self.table.unmap_region_inner(page, self.start, self.end, self.state)
+    }
+
+    fn visit_l4(self, page: PTPagePointer<'tree, Arch, Alloc, Lvl<4>>) -> Self::Output {
+        self.table.unmap_region_inner(page, self.start, self.end, self.state)
+    }
+}
 
 impl<T: TlbFlush> RangeFlagsState<T> {
     /// Inputs: final result.
@@ -92,7 +137,7 @@ enum RangeUpdateError {
 pub struct PageTable<
     Arch: ArchPagingMeta,
     Alloc: PagingAllocator,
-    MaxLevel: LevelSpec,
+    MaxLevel: WalkLevel,
     WP,
     T = (),
     Owned: PagingOwnershipPolicy = KernelPolicy,
@@ -113,13 +158,15 @@ impl<Arch, Alloc, MaxLevel, WP, T> PageTable<Arch, Alloc, MaxLevel, WP, T>
 where
     Arch: ArchPagingMeta,
     Alloc: DirectMappedAllocator,
-    MaxLevel: LevelSpec,
+    MaxLevel: WalkLevel,
     WP: LockSpec<T>,
 {
     /// Direct-maps the allocator's region with ordinary memory accesses:
     /// construction has no concurrent readers and takes no content locks.
     pub fn new(wperms: WP, flags: Arch::PTFlags) -> Result<Self, PagingError> {
         let tree = PTPageTree::new_direct_mapped(flags)?;
+        tree.validate()?;
+        let tree = tree.into_live();
         Ok(Self { tree, wperms, marker: PhantomData })
     }
 }
@@ -128,7 +175,7 @@ impl<Arch, Alloc, MaxLevel, WP, T> PageTable<Arch, Alloc, MaxLevel, WP, T>
 where
     Arch: ArchPagingMeta,
     Alloc: PagingAllocator,
-    MaxLevel: LevelSpec,
+    MaxLevel: WalkLevel,
     WP: LockSpec<T>,
 {
     /// Validates an existing root before constructing its controller.
@@ -144,12 +191,9 @@ where
     /// otherwise use `ManuallyDrop` or [`Self::leak`].
     pub unsafe fn from_root(wperms: WP, root_pa: PhysAddr) -> Result<Self, PagingError> {
         // SAFETY: tree accessibility and ownership are required by this constructor.
-        let tree = unsafe {
-            PTPageTree::<Arch, Alloc, MaxLevel, KernelPolicy, Live>::from_root(
-                root_pa,
-                KernelPolicy,
-            )
-        }?;
+        let tree =
+            unsafe { PTPageTree::<Arch, Alloc, MaxLevel, KernelPolicy>::from_root(root_pa) }?
+                .into_live();
         Ok(Self { tree, wperms, marker: PhantomData })
     }
 
@@ -163,15 +207,16 @@ where
         other: &'kernel Self,
     ) -> Result<UserPageTable<'kernel, Arch, Alloc, MaxLevel, WP, Reserved, T>, PagingError> {
         let policy = UserPolicy::<Reserved>::new();
-        let tree = PTPageTree::new_root(policy)?;
+        let tree = PTPageTree::new_root(policy)?.into_live();
         let root = tree.root();
         for idx in (0..PT_ENTRY_COUNT).filter(|index| Reserved::contains(*index)) {
             let entry = other.root_view().load(idx);
-            if entry.is_table(MaxLevel::LEVEL) {
+            if entry.is_present_table(MaxLevel::LEVEL) {
                 root.store(idx, entry);
             }
         }
-        Ok(PageTable { tree: tree.finish()?, wperms, marker: PhantomData })
+        tree.validate()?;
+        Ok(PageTable { tree, wperms, marker: PhantomData })
     }
 
     /// Gives up the tree and returns its root and content-lock domain.
@@ -187,7 +232,7 @@ impl<'kernel, Arch, Alloc, MaxLevel, WP, T, Reserved>
 where
     Arch: ArchPagingMeta,
     Alloc: PagingAllocator,
-    MaxLevel: LevelSpec,
+    MaxLevel: WalkLevel,
     WP: LockSpec<T>,
     Reserved: RootEntrySet,
 {
@@ -201,7 +246,7 @@ impl<Arch, Alloc, MaxLevel, WP, T, Owned> PageTable<Arch, Alloc, MaxLevel, WP, T
 where
     Arch: ArchPagingMeta,
     Alloc: PagingAllocator,
-    MaxLevel: LevelSpec,
+    MaxLevel: WalkLevel,
     WP: LockSpec<T>,
     Owned: PagingOwnershipPolicy,
 {
@@ -222,7 +267,7 @@ where
     /// Inputs: controller borrow.
     /// Requires: live tree.
     /// Returns: pinned atomic root view.
-    fn root_view(&self) -> PTPagePointer<'_, Arch, Alloc> {
+    fn root_view(&self) -> PTPagePointer<'_, Arch, Alloc, MaxLevel> {
         self.tree.root()
     }
 
@@ -231,7 +276,7 @@ where
     #[inline(always)]
     pub fn walk(&self, vaddr: VirtAddr) -> WalkResult<Arch> {
         let position = self.tree.root().walk(vaddr);
-        WalkResult::new(position.observed, position.page.level())
+        WalkResult::new(position.observed(), position.level())
     }
 
     /// Inputs: page, frame, and flags.
@@ -246,13 +291,15 @@ where
         shared: bool,
         parent_flags: Arch::PTFlags,
     ) -> Result<(), PagingError> {
-        let target = page_level_for_size::<PS>().ok_or(PagingError::InvalidLevel)?;
+        let target = PS::LEVEL;
         let vaddr = page.start_address();
         let paddr = frame.start_address();
         self.tree.policy().check_address(MaxLevel::LEVEL, vaddr)?;
-        if target > MaxLevel::LEVEL {
+        // This implementation supports mappings only through the 1 GiB leaf level.
+        if target > PageLevel::Level2 || target > MaxLevel::LEVEL {
             return Err(PagingError::InvalidLevel);
         }
+        // Mapping a non-present entry would create an inaccessible leaf.
         assert!(flags.present());
         let flags = Arch::filter_flags(flags);
         let parent_flags = Arch::filter_flags(parent_flags);
@@ -265,50 +312,50 @@ where
         let leaf = PTEntry::new(addr, flags);
         let mut mapping = self.root_view().walk(vaddr);
         for _ in 0..=MaxLevel::LEVEL.depth() {
-            let level = mapping.page.level();
+            let level = mapping.level();
+            // A finer existing subtree cannot hold the requested larger leaf.
             if level < target {
                 return Err(PagingError::NotLeafEntry);
             }
+            // At the target level only the leaf slot itself remains to be installed.
             if level == target {
-                return self.install_leaf(&mapping.page, mapping.index, leaf);
+                return self.install_leaf(&mapping, leaf);
             }
-            if mapping.observed.is_table(level) {
-                mapping = mapping.page.walk(vaddr);
+            // Follow an intermediate table observed by this walk.
+            if mapping.observed().is_present_table(level) {
+                mapping = mapping.walk(vaddr);
                 continue;
             }
-            if mapping.observed.present() {
+            // A present larger leaf blocks creation of the requested finer mapping.
+            if mapping.observed().present() {
                 return Err(PagingError::EntryAlreadyPresent { level });
             }
-            if self.alloc_and_install_leaf(
-                &mapping.page,
-                mapping.index,
-                page,
-                parent_flags,
-                leaf,
-            )? {
+            // A new private subtree already contains the requested leaf.
+            if self.alloc_and_install_leaf(&mapping, page, parent_flags, leaf)? {
                 return Ok(());
             }
-            mapping = mapping.page.walk(vaddr);
+            // Another thread published this shared parent while mapping this or
+            // another virtual address, so continue through the winning table.
+            mapping = mapping.walk(vaddr);
         }
         unreachable!("mapping traversal exceeded the page-table depth")
     }
 
-    /// Inputs: page, index, and leaf.
-    /// Requires: live table.
-    /// Returns: leaf installation status.
+    /// Installs `leaf` if the locked slot is clear and not an invalidated child table.
     fn install_leaf(
         &self,
-        page: &PTPagePointer<'_, Arch, Alloc>,
-        index: usize,
+        mapping: &WalkPosition<'_, Arch, Alloc>,
         leaf: PTEntry<Arch>,
     ) -> Result<(), PagingError> {
-        let level = page.level();
-        let _guard = self.wperms.lock(page.paddr());
-        let pte_ref = page.entry(index);
+        let level = mapping.level();
+        let _guard = self.wperms.lock(mapping.page_paddr());
+        let pte_ref = mapping.entry();
         let entry = pte_ref.load();
+        // A concurrent split may leave a child table temporarily non-present during BBM.
         if entry.is_table(level) {
             return Err(PagingError::NotLeafEntry);
         }
+        // A concurrent map may have installed a leaf after the walk observed this slot.
         if entry.present() {
             return Err(PagingError::EntryAlreadyPresent { level });
         }
@@ -316,34 +363,61 @@ where
         Ok(())
     }
 
-    /// Inputs: parent slot and leaf.
-    /// Requires: absent path.
-    /// Returns: whether this path was installed.
+    /// Prepares the missing subtree and publishes it if the parent slot remains absent.
+    /// Returns `false` when another thread publishes the shared parent first.
     fn alloc_and_install_leaf<PS: PageSize>(
         &self,
-        parent: &PTPagePointer<'_, Arch, Alloc>,
+        mapping: &WalkPosition<'_, Arch, Alloc>,
+        page: Page<PS>,
+        parent_flags: Arch::PTFlags,
+        leaf: PTEntry<Arch>,
+    ) -> Result<bool, PagingError> {
+        match mapping {
+            WalkPosition::Level0(_) => Err(PagingError::InvalidLevel),
+            WalkPosition::Level1(stop) => {
+                self.alloc_and_install_leaf_at(&stop.page, stop.index, page, parent_flags, leaf)
+            }
+            WalkPosition::Level2(stop) => {
+                self.alloc_and_install_leaf_at(&stop.page, stop.index, page, parent_flags, leaf)
+            }
+            WalkPosition::Level3(stop) => {
+                self.alloc_and_install_leaf_at(&stop.page, stop.index, page, parent_flags, leaf)
+            }
+            WalkPosition::Level4(stop) => {
+                self.alloc_and_install_leaf_at(&stop.page, stop.index, page, parent_flags, leaf)
+            }
+        }
+    }
+
+    /// Builds and publishes a typed child subtree for one absent parent slot.
+    fn alloc_and_install_leaf_at<PS: PageSize, L: WalkLevelImpl>(
+        &self,
+        parent: &PTPagePointer<'_, Arch, Alloc, L>,
         index: usize,
         page: Page<PS>,
         parent_flags: Arch::PTFlags,
         leaf: PTEntry<Arch>,
     ) -> Result<bool, PagingError> {
-        let target = page_level_for_size::<PS>().ok_or(PagingError::InvalidLevel)?;
+        let target = PS::LEVEL;
         let vaddr = page.start_address();
-        let child_level = parent.level().child().unwrap();
-        let mut prepared = PTPageTree::<Arch, Alloc>::new(child_level)?;
+        let level = L::LEVEL;
+        let mut prepared = PTPageTree::<Arch, Alloc, L::ChildLevel>::new_root(KernelPolicy)?;
         prepared.grow(page, parent_flags)?;
         let prepared_mapping = prepared.root().walk(vaddr);
-        debug_assert_eq!(prepared_mapping.page.level(), target);
+        debug_assert_eq!(prepared_mapping.level(), target);
         prepared_mapping.entry().store(leaf);
 
         let _guard = self.wperms.lock(parent.paddr());
         let pte_ref = parent.entry(index);
         let current = pte_ref.load();
-        if current.is_table(parent.level()) {
+        // A concurrent map may publish the shared parent first; its subtree may
+        // contain a different virtual address, so the caller must follow it.
+        if current.is_present_table(level) {
             return Ok(false);
         }
+        // A concurrent larger-page map blocks this finer mapping.
         if current.present() {
-            return Err(PagingError::EntryAlreadyPresent { level: parent.level() });
+            return Err(PagingError::EntryAlreadyPresent { level });
         }
         pte_ref.store(PTEntry::new_table(
             Arch::make_private_address(prepared.root_paddr()),
@@ -369,7 +443,7 @@ where
                 level,
             ));
         }
-        if !entry.is_leaf(level) {
+        if !entry.is_present_leaf(level) {
             return Err(PagingError::NotMapped);
         }
         let offset = vaddr.bits() & (level.size() - 1);
@@ -398,8 +472,8 @@ where
         range: PageRangeInclusive<PS>,
         flags: Arch::PTFlags,
     ) -> Result<(), PagingError> {
-        let target = page_level_for_size::<PS>().ok_or(PagingError::InvalidLevel)?;
-        if target > MaxLevel::LEVEL {
+        let target = PS::LEVEL;
+        if target > PageLevel::Level2 || target > MaxLevel::LEVEL {
             return Err(PagingError::InvalidLevel);
         }
         if !flags.present() {
@@ -426,12 +500,10 @@ where
         PTEntry::new(addr, flags)
     }
 
-    /// Inputs: leaf run and frames.
-    /// Requires: one matching leaf table.
-    /// Returns: mapping status.
-    fn map_leaf_run<PS: PageSize, I: Iterator<Item = PhysFrame<PS>>>(
+    /// Maps a run contained by one table page after confirming its slots are available.
+    fn map_leaf_run<PS: PageSize, I: Iterator<Item = PhysFrame<PS>>, L: WalkLevelImpl>(
         &self,
-        page: &PTPagePointer<'_, Arch, Alloc>,
+        page: &PTPagePointer<'_, Arch, Alloc, L>,
         pages: PageRangeInclusive<PS>,
         frames: &mut I,
         flags: Arch::PTFlags,
@@ -447,7 +519,7 @@ where
             let _guard = self.wperms.lock(page.paddr());
             for index in start_index..=end_index {
                 let observed = page.load(index);
-                if observed.is_table(target) {
+                if observed.is_present_table(target) {
                     return Err(PagingError::NotLeafEntry);
                 }
                 if observed.present() {
@@ -470,14 +542,14 @@ where
         let _guard = self.wperms.lock(page.paddr());
         for index in start_index..start_index + count {
             let observed = page.load(index);
-            if observed.is_table(target) {
+            if observed.is_present_table(target) {
                 return Err(PagingError::NotLeafEntry);
             }
             if observed.present() {
                 return Err(PagingError::EntryAlreadyPresent { level: target });
             }
         }
-        let mapped_4k_per_page = PS::SIZE / Size4KiB::SIZE;
+        let mapped_4k_per_page = PS::SIZE / Regular::SIZE;
         for (offset, frame) in buffered[..count].iter().enumerate() {
             let frame = frame.expect("buffered frame");
             let index = start_index + offset;
@@ -491,54 +563,48 @@ where
         }
     }
 
-    /// Inputs: parent slot and target page.
-    /// Requires: non-leaf parent.
-    /// Returns: resolved child.
-    fn mapping_child<'tree>(
+    /// Returns the existing child or publishes a newly prepared child into an absent slot.
+    fn mapping_child<'tree, L: WalkLevelImpl>(
         &self,
-        parent: &PTPagePointer<'tree, Arch, Alloc>,
+        parent: &PTPagePointer<'tree, Arch, Alloc, L>,
         index: usize,
-    ) -> Result<PTPagePointer<'tree, Arch, Alloc>, PagingError> {
+    ) -> Result<PTPagePointer<'tree, Arch, Alloc, L::ChildLevel>, PagingError> {
         let observed = parent.load(index);
-        if observed.is_table(parent.level()) {
+        if observed.is_present_table(parent.level()) {
             return parent.child_from_observed(observed).map_err(|_| PagingError::NotLeafEntry);
         }
         if observed.present() {
             return Err(PagingError::EntryAlreadyPresent { level: parent.level() });
         }
 
-        let child_level = parent.level().child().ok_or(PagingError::InvalidLevel)?;
         let parent_flags = Arch::filter_flags(Arch::PTFlags::parent_flags());
-        let prepared = PTPageTree::<Arch, Alloc>::new(child_level)?;
+        let prepared = PTPageTree::<Arch, Alloc, L::ChildLevel>::new_root(KernelPolicy)?;
         let _guard = self.wperms.lock(parent.paddr());
         let current = parent.load(index);
-        if current.is_table(parent.level()) {
+        if current.is_present_table(parent.level()) {
             return parent.child_from_observed(current).map_err(|_| PagingError::NotLeafEntry);
         }
         if current.present() {
             return Err(PagingError::EntryAlreadyPresent { level: parent.level() });
         }
-        parent.store(
-            index,
-            PTEntry::new_table(Arch::make_private_address(prepared.root_paddr()), parent_flags),
-        );
+        let installed =
+            PTEntry::new_table(Arch::make_private_address(prepared.root_paddr()), parent_flags);
+        parent.store(index, installed);
         prepared.release();
-        parent.child(index).map_err(|_| PagingError::NotLeafEntry)
+        parent.child_from_observed(installed).map_err(|_| PagingError::NotLeafEntry)
     }
 
+    /// Partitions the range by table entry and descends through statically typed child levels.
     #[inline(always)]
-    /// Inputs: root, range, and frames.
-    /// Requires: validated range.
-    /// Returns: mapping status.
-    fn do_map_region<PS: PageSize, I: Iterator<Item = PhysFrame<PS>>>(
+    fn do_map_region<PS: PageSize, I: Iterator<Item = PhysFrame<PS>>, L: WalkLevelImpl>(
         &self,
-        ptpage: &PTPagePointer<'_, Arch, Alloc>,
+        ptpage: &PTPagePointer<'_, Arch, Alloc, L>,
         range: PageRangeInclusive<PS>,
         frames: &mut I,
         flags: Arch::PTFlags,
         mapped_pages: &mut usize,
     ) -> Result<(), PagingError> {
-        let level = ptpage.level();
+        let level = L::LEVEL;
         if level.size() == PS::SIZE {
             return self.map_leaf_run(ptpage, range, frames, flags, mapped_pages);
         }
@@ -573,13 +639,12 @@ where
     /// Returns: unmap status.
     fn unmap_region_l0(
         &self,
-        page: PTPagePointer<'_, Arch, Alloc>,
+        page: PTPagePointer<'_, Arch, Alloc, Lvl<0>>,
         start: VirtAddr,
         end: VirtAddr,
         state: &mut RangeUnmapState<'_>,
     ) -> Result<(), PagingError> {
-        debug_assert_eq!(page.level(), PageLevel::Level0);
-        let pages = Page::<Size4KiB>::range_inclusive(
+        let pages = Page::<Regular>::range_inclusive(
             Page::containing_address(start),
             Page::containing_address(end - 1),
         );
@@ -590,7 +655,7 @@ where
         for leaf in pages {
             let vaddr = leaf.start_address();
             let pte_ref = page.entry(index);
-            if pte_ref.load().is_leaf(PageLevel::Level0) {
+            if pte_ref.load().is_present_leaf(PageLevel::Level0) {
                 pte_ref.swap(PTEntry::empty());
                 first_changed.get_or_insert(vaddr);
                 last_changed = vaddr;
@@ -607,62 +672,47 @@ where
     }
 
     #[inline(always)]
-    /// Inputs: child table and range.
-    /// Requires: matching level type.
-    /// Returns: unmap status.
-    fn unmap_region_child<PL: InnerLevel>(
-        &self,
-        page: PTPagePointer<'_, Arch, Alloc>,
-        start: VirtAddr,
-        end: VirtAddr,
-        state: &mut RangeUnmapState<'_>,
-    ) -> Result<(), PagingError> {
-        match PL::DEPTH {
-            1 => self.unmap_region_l0(page, start, end, state),
-            2 => self.unmap_region_level::<Lvl<1>>(page, start, end, state),
-            3 => self.unmap_region_level::<Lvl<2>>(page, start, end, state),
-            4 => self.unmap_region_level::<Lvl<3>>(page, start, end, state),
-            _ => unreachable!("leaf page has no child"),
-        }
-    }
-
-    #[inline(always)]
     /// Inputs: inner table and range.
     /// Requires: matching level type.
     /// Returns: unmap status.
-    fn unmap_region_level<PL: InnerLevel>(
+    fn unmap_region_inner<L: WalkLevelImpl + LeafSplitLevelImpl>(
         &self,
-        page: PTPagePointer<'_, Arch, Alloc>,
+        page: PTPagePointer<'_, Arch, Alloc, L>,
         mut start: VirtAddr,
         end: VirtAddr,
         state: &mut RangeUnmapState<'_>,
     ) -> Result<(), PagingError> {
-        let level = PL::LEVEL;
-        debug_assert_eq!(page.level(), level);
+        let level = L::LEVEL;
         let page_paddr = page.paddr();
         while start < end {
             let entry_end = next_boundary(start, level, end);
             let index = entry_index(start, level);
             let pte_ref = page.entry(index);
             let mut observed = pte_ref.load();
-            if observed.is_table(level) {
+            if observed.is_present_table(level) {
                 let child =
                     page.child_from_observed(observed).map_err(|_| PagingError::NotLeafEntry)?;
-                self.unmap_region_child::<PL>(child, start, entry_end, state)?;
+                L::ChildLevel::dispatch(
+                    child,
+                    UnmapRegionVisitor { table: self, start, end: entry_end, state },
+                )?;
                 start = entry_end;
                 continue;
             }
             let guard = self.wperms.lock(page_paddr);
             observed = pte_ref.load();
-            if observed.is_table(level) {
+            if observed.is_present_table(level) {
                 let child =
                     page.child_from_observed(observed).map_err(|_| PagingError::NotLeafEntry)?;
                 drop(guard);
-                self.unmap_region_child::<PL>(child, start, entry_end, state)?;
+                L::ChildLevel::dispatch(
+                    child,
+                    UnmapRegionVisitor { table: self, start, end: entry_end, state },
+                )?;
                 start = entry_end;
                 continue;
             }
-            if !observed.is_leaf(level) {
+            if !observed.is_present_leaf(level) {
                 drop(guard);
                 *state.all_mapped = false;
                 start = entry_end;
@@ -677,36 +727,14 @@ where
             }
 
             // SAFETY: the content guard pins the pte_ref and excludes competing writers.
-            let _ = match level.child().unwrap() {
-                PageLevel::Level0 => unsafe {
-                    PTPage::<Arch, Alloc>::split_leaf(
-                        pte_ref,
-                        level,
-                        Page::<Size4KiB>::containing_address(start),
-                        true,
-                    )
-                },
-                PageLevel::Level1 => unsafe {
-                    PTPage::<Arch, Alloc>::split_leaf(
-                        pte_ref,
-                        level,
-                        Page::<Size2MiB>::containing_address(start),
-                        true,
-                    )
-                },
-                PageLevel::Level2 => unsafe {
-                    PTPage::<Arch, Alloc>::split_leaf(
-                        pte_ref,
-                        level,
-                        Page::<Size1GiB>::containing_address(start),
-                        true,
-                    )
-                },
-                _ => return Err(PagingError::InvalidLevel),
-            }?;
-            let child = page.child(index).map_err(|_| PagingError::NotLeafEntry)?;
+            unsafe { L::split_leaf_for_region::<Arch, Alloc>(pte_ref, start) }?;
+            let entry = page.load(index);
+            let child = page.child_from_observed(entry).map_err(|_| PagingError::NotLeafEntry)?;
             drop(guard);
-            self.unmap_region_child::<PL>(child, start, entry_end, state)?;
+            L::ChildLevel::dispatch(
+                child,
+                UnmapRegionVisitor { table: self, start, end: entry_end, state },
+            )?;
             start = entry_end;
         }
         Ok(())
@@ -725,13 +753,7 @@ where
             return Ok(());
         }
         let root = self.root_view();
-        match MaxLevel::LEVEL {
-            PageLevel::Level0 => self.unmap_region_l0(root, start, end, state),
-            PageLevel::Level1 => self.unmap_region_level::<Lvl<1>>(root, start, end, state),
-            PageLevel::Level2 => self.unmap_region_level::<Lvl<2>>(root, start, end, state),
-            PageLevel::Level3 => self.unmap_region_level::<Lvl<3>>(root, start, end, state),
-            PageLevel::Level4 => self.unmap_region_level::<Lvl<4>>(root, start, end, state),
-        }
+        MaxLevel::dispatch(root, UnmapRegionVisitor { table: self, start, end, state })
     }
 
     /// Maps `page` to the matching physical `frame`, building intermediate
@@ -759,95 +781,96 @@ where
         self.map_with_parent_flags(page, frame, flags, shared, Arch::PTFlags::parent_flags())
     }
 
-    /// Removes the mapping of `page`, splitting a larger leaf first if needed.
-    /// Arch mapping already represented by smaller leaves is not coalesced.
-    /// `all_cpus` selects the synchronous flush scope for any split.
-    #[inline(always)]
-    pub fn unmap<PS: PageSize>(&self, page: Page<PS>, all_cpus: bool) -> UnmapEntryResult<Arch> {
-        let target = page_level_for_size::<PS>().ok_or(PagingError::InvalidLevel)?;
+    /// Removes exactly `page`.
+    ///
+    /// Inputs: a typed page and optional split invalidation scope. `None`
+    /// forbids splitting; `Some(all_cpus)` permits it.
+    ///
+    /// Requires: `PS` must be a supported leaf level within this table, and the
+    /// ownership policy must permit the page address.
+    ///
+    /// Returns: the removed entry, if mapped, and any remaining flush obligation.
+    /// Returns [`PagingError::WrongPageSize`] when the existing mapping has a
+    /// different leaf size and cannot or may not be split to `PS`.
+    pub fn unmap<PS: PageSize>(
+        &self,
+        page: Page<PS>,
+        split_all_cpus: Option<bool>,
+    ) -> UnmapEntryResult<Arch> {
         let vaddr = page.start_address();
         self.tree.policy().check_address(MaxLevel::LEVEL, vaddr)?;
-        if target > MaxLevel::LEVEL {
-            return Err(PagingError::InvalidLevel);
-        }
-        if target == Self::SMALL {
-            return self.unmap_4k_inner(Page::containing_address(vaddr), all_cpus);
-        }
-        self.unmap_with_split(page, all_cpus)
+        self.unmap_from(&self.root_view(), page, split_all_cpus)
     }
 
-    #[inline(always)]
-    /// Inputs: 4 KiB page and flush scope.
-    /// Requires: policy-approved address.
-    /// Returns: old mapping.
-    fn unmap_4k_inner(&self, page: Page<Size4KiB>, all_cpus: bool) -> UnmapEntryResult<Arch> {
+    /// Removes `page` below a previously validated pinned subtree.
+    fn unmap_from<PS: PageSize, L: WalkLevelImpl + LeafSplitLevelImpl>(
+        &self,
+        table: &PTPagePointer<'_, Arch, Alloc, L>,
+        page: Page<PS>,
+        split_all_cpus: Option<bool>,
+    ) -> UnmapEntryResult<Arch> {
         let vaddr = page.start_address();
-        let mapping = self.root_view().walk(vaddr);
-        if mapping.page.level() != Self::SMALL {
-            return self.unmap_with_split(page, all_cpus);
+        let level = L::LEVEL;
+        if level < PS::LEVEL {
+            return Err(PagingError::WrongPageSize);
         }
+        let index = entry_index(vaddr, level);
+        let observed = table.load(index);
+        if observed.is_present_table(level) {
+            let child =
+                table.child_from_observed(observed).map_err(|_| PagingError::NotLeafEntry)?;
+            return self.unmap_from(&child, page, split_all_cpus);
+        }
+        let guard = self.wperms.lock(table.paddr());
+        let pte_ref = table.entry(index);
+        let entry = pte_ref.load();
 
-        let page_paddr = mapping.page_paddr();
-        let _guard = self.wperms.lock(page_paddr);
-        if !mapping.entry().load().is_leaf(Self::SMALL) {
+        if entry.is_present_table(level) {
+            let child = table.child_from_observed(entry).map_err(|_| PagingError::NotLeafEntry)?;
+            drop(guard);
+            return self.unmap_from(&child, page, split_all_cpus);
+        }
+        if !entry.present() {
             return Ok((None, MayNeedFlush::none()));
         }
-        let entry = mapping.entry().swap(PTEntry::empty());
-        Ok((Some(entry), PTPage::<Arch, Alloc>::flush_for_leaf(vaddr, Self::SMALL)))
-    }
-
-    /// Inputs: typed page and flush scope.
-    /// Requires: policy-approved address.
-    /// Returns: old mapping.
-    fn unmap_with_split<PS: PageSize>(
-        &self,
-        page: Page<PS>,
-        all_cpus: bool,
-    ) -> UnmapEntryResult<Arch> {
-        let target = page_level_for_size::<PS>().ok_or(PagingError::InvalidLevel)?;
-        let vaddr = page.start_address();
-        let mut flush = MayNeedFlush::none();
-        for _ in 0..=MaxLevel::LEVEL.depth() {
-            let mapping = self.root_view().walk(vaddr);
-            if mapping.page.level() < target {
-                return Err(PagingError::NotLeafEntry);
-            }
-            let page_paddr = mapping.page_paddr();
-            let _guard = self.wperms.lock(page_paddr);
-            let entry = mapping.entry().load();
-            if entry.is_table(mapping.page.level()) {
-                continue;
-            }
-            if !entry.is_leaf(mapping.page.level()) {
-                return Ok((None, flush));
-            }
-            if mapping.page.level() == target {
-                let entry = mapping.entry().swap(PTEntry::empty());
-                let pending = PTPage::<Arch, Alloc>::flush_for_leaf(vaddr, target);
-                return Ok((Some(entry), flush.and(pending)));
-            }
-            drop(_guard);
-            flush = flush.and(self.split(page, all_cpus)?);
+        if level == PS::LEVEL {
+            let entry = pte_ref.swap(PTEntry::empty());
+            return Ok((Some(entry), PTPage::<Arch, Alloc>::flush_for_leaf(vaddr, PS::LEVEL)));
         }
-        unreachable!("unmap traversal exceeded the page-table depth")
+
+        let all_cpus = split_all_cpus.ok_or(PagingError::WrongPageSize)?;
+        let flush = unsafe { L::split_leaf_to::<Arch, Alloc, PS>(pte_ref, page, all_cpus) }?;
+        let child_entry = table.load(index);
+        let child =
+            table.child_from_observed(child_entry).map_err(|_| PagingError::NotLeafEntry)?;
+        drop(guard);
+        let (entry, pending) = self.unmap_from(&child, page, None)?;
+        Ok((entry, flush.and(pending)))
     }
 
-    /// Splits a huge leaf while preserving its mappings. New pages are prepared
-    /// privately; the content guard covers publication and flushing.
-    /// `page` may start anywhere within the selected mapping.
+    /// Splits the huge leaf represented by `page` one level while preserving
+    /// its mappings. New pages are prepared privately; the content guard covers
+    /// publication and flushing.
     /// `all_cpus = false` requires no affected translations on other CPUs and
     /// no migration during the operation.
-    pub fn split<PS: PageSize>(
+    pub fn split(
         &self,
-        page: Page<PS>,
+        page: Page<Huge>,
         all_cpus: bool,
     ) -> Result<MayNeedFlush<Arch::TlbFlushTok>, PagingError> {
-        match self.with_locked_leaf(page, |entry, level| unsafe {
-            PTPage::<Arch, Alloc>::split_leaf(entry, level, page, all_cpus)
-        }) {
-            Ok(flush) => Ok(flush),
-            Err(PagingError::NotLeafEntry) => Ok(MayNeedFlush::none()),
-            Err(err) => Err(err),
+        let vaddr = page.start_address();
+        self.tree.policy().check_address(MaxLevel::LEVEL, vaddr)?;
+        let mapping = self.root_view().walk(vaddr);
+        if mapping.level() != Huge::LEVEL {
+            return Err(PagingError::InvalidLevel);
+        }
+        let _guard = self.wperms.lock(mapping.page_paddr());
+        // SAFETY: the content guard pins the entry and excludes software writers.
+        let result =
+            unsafe { PTPage::<Arch, Alloc>::split_leaf::<Huge>(mapping.entry(), vaddr, all_cpus) };
+        match result {
+            Err(PagingError::NotLeafEntry) => Err(PagingError::InvalidLevel),
+            result => result,
         }
     }
 
@@ -874,13 +897,13 @@ where
     /// Returns: flush obligation.
     fn set_flags_4k(
         &self,
-        page: Page<Size4KiB>,
+        page: Page<Regular>,
         flags: Arch::PTFlags,
         all_cpus: bool,
     ) -> Result<MayNeedFlush<Arch::TlbFlushTok>, PagingError> {
         let vaddr = page.start_address();
         let mapping = self.root_view().walk(vaddr);
-        if mapping.page.level() != Self::SMALL {
+        if mapping.level() != Self::SMALL {
             return self.with_locked_leaf(page, |entry, level| unsafe {
                 PTPage::<Arch, Alloc>::update_leaf_flags_at(entry, level, page, flags, all_cpus)
             });
@@ -889,7 +912,7 @@ where
         let page = mapping.page_paddr();
         let _guard = self.wperms.lock(page);
         let current = mapping.entry().load();
-        if !current.is_leaf(Self::SMALL) {
+        if !current.is_present_leaf(Self::SMALL) {
             return Err(PagingError::NotMapped);
         }
         // SAFETY: the pte_ref is pinned at Level0 and the content guard excludes writers.
@@ -948,7 +971,7 @@ where
             cursor: start,
             flush: MayNeedFlush::none(),
             footprint: FlushFootprint::default(),
-            descents_left: MaxLevel::DEPTH,
+            descents_left: MaxLevel::LEVEL.depth(),
             descent_cursor: start,
             partial_leaves_left: 2,
         };
@@ -971,14 +994,14 @@ where
     ) -> Option<RangeFlagsResult<Arch::TlbFlushTok>> {
         if state.cursor != state.descent_cursor {
             state.descent_cursor = state.cursor;
-            state.descents_left = MaxLevel::DEPTH;
+            state.descents_left = MaxLevel::LEVEL.depth();
         }
         let mapping = self.root_view().walk(VirtAddr::from(state.cursor));
-        if mapping.page.level() == Self::SMALL {
+        if let WalkPosition::Level0(position) = &mapping {
             return match self.set_flags_l0_run(
-                &mapping.page,
+                &position.page,
                 mapping.page_paddr(),
-                mapping.index,
+                position.index,
                 end,
                 flags,
                 state,
@@ -994,11 +1017,13 @@ where
 
         let mut locked_page = None;
         let mut guard: Option<WP::Guard<'_>> = None;
+        let root = self.root_view();
         let result = PTPage::<Arch, Alloc>::sweep_range(
-            &self.root_view(),
-            state.cursor,
-            end,
-            &mut |page, pte_ref, observed, level, entry_start, entry_end| {
+            &root,
+            VirtAddr::from(state.cursor),
+            VirtAddr::from(end),
+            &mut |page, mapping, entry_start, entry_end| {
+                let Mapping { pte_value: observed, pte_ref, level } = mapping;
                 let current = if locked_page != Some(page) {
                     guard = None;
                     guard = Some(self.wperms.lock(page));
@@ -1007,10 +1032,10 @@ where
                 } else {
                     observed
                 };
-                if current.is_table(level) {
+                if current.is_present_table(level) {
                     return Err(RangeUpdateError::Descend);
                 }
-                if !current.is_leaf(level) {
+                if !current.is_present_leaf(level) {
                     return Err(RangeUpdateError::Paging(PagingError::NotMapped));
                 }
                 let leaf_start = entry_start & !(level.size() - 1);
@@ -1041,7 +1066,7 @@ where
                     unreachable!("page-table range update exceeded its descent bound");
                 }
                 state.descents_left -= 1;
-                state.cursor = retry;
+                state.cursor = retry.bits();
                 None
             }
             Err((retry, RangeUpdateError::Split(split_address, target))) => {
@@ -1052,17 +1077,17 @@ where
                 let split_address = VirtAddr::from(split_address);
                 let update = match target {
                     PageLevel::Level0 => self.update_flags(
-                        Page::<Size4KiB>::containing_address(split_address),
+                        Page::<Regular>::containing_address(split_address),
                         flags,
                         all_cpus,
                     ),
                     PageLevel::Level1 => self.update_flags(
-                        Page::<Size2MiB>::containing_address(split_address),
+                        Page::<Huge>::containing_address(split_address),
                         flags,
                         all_cpus,
                     ),
                     PageLevel::Level2 => self.update_flags(
-                        Page::<Size1GiB>::containing_address(split_address),
+                        Page::<SizeLevel2>::containing_address(split_address),
                         flags,
                         all_cpus,
                     ),
@@ -1072,7 +1097,7 @@ where
                     Ok(pending) => {
                         let flush = core::mem::replace(&mut state.flush, MayNeedFlush::none());
                         state.flush = flush.and(pending);
-                        state.cursor = retry;
+                        state.cursor = retry.bits();
                         None
                     }
                     Err(error) => Some(state.finish(Err(error))),
@@ -1087,7 +1112,7 @@ where
     /// Returns: next cursor or error.
     fn set_flags_l0_run(
         &self,
-        page: &PTPagePointer<'_, Arch, Alloc>,
+        page: &PTPagePointer<'_, Arch, Alloc, Lvl<0>>,
         page_paddr: PhysAddr,
         start_index: usize,
         end: usize,
@@ -1101,7 +1126,7 @@ where
         for index in start_index..start_index + count {
             let pte_ref = page.entry(index);
             let current = pte_ref.load();
-            if !current.is_leaf(Self::SMALL) {
+            if !current.is_present_leaf(Self::SMALL) {
                 let run_end = start + (index - start_index) * Self::SMALL.size();
                 Self::include_l0_footprint(&mut state.footprint, changed, start, run_end);
                 return Err(PagingError::NotMapped);
@@ -1196,7 +1221,7 @@ where
         flags: Arch::PTFlags,
         all_cpus: bool,
     ) -> Result<MayNeedFlush<Arch::TlbFlushTok>, PagingError> {
-        let target = page_level_for_size::<PS>().ok_or(PagingError::InvalidLevel)?;
+        let target = PS::LEVEL;
         let vaddr = page.start_address();
         if target == Self::SMALL {
             self.tree.policy().check_address(MaxLevel::LEVEL, vaddr)?;
@@ -1218,23 +1243,23 @@ where
             PageLevel,
         ) -> Result<MayNeedFlush<Arch::TlbFlushTok>, PagingError>,
     ) -> Result<MayNeedFlush<Arch::TlbFlushTok>, PagingError> {
-        let target = page_level_for_size::<PS>().ok_or(PagingError::InvalidLevel)?;
+        let target = PS::LEVEL;
         let vaddr = page.start_address();
         self.tree.policy().check_address(MaxLevel::LEVEL, vaddr)?;
-        if target > MaxLevel::LEVEL {
+        if target > PageLevel::Level2 || target > MaxLevel::LEVEL {
             return Err(PagingError::InvalidLevel);
         }
         for _ in 0..=MaxLevel::LEVEL.depth() {
             let mapping = self.root_view().walk(vaddr);
-            if mapping.page.level() < target {
+            if mapping.level() < target {
                 return Err(PagingError::NotLeafEntry);
             }
             let page = mapping.page_paddr();
             let _guard = self.wperms.lock(page);
-            if mapping.entry().load().is_table(mapping.page.level()) {
+            if mapping.entry().load().is_present_table(mapping.level()) {
                 continue;
             }
-            return update(mapping.entry(), mapping.page.level());
+            return update(mapping.entry(), mapping.level());
         }
         unreachable!("page-table update exceeded the tree depth")
     }
@@ -1242,7 +1267,7 @@ where
     pub fn next_table_pa(&self, idx: usize) -> Option<PhysAddr> {
         let view = self.root_view();
         let entry = view.load(idx);
-        entry.is_table(view.level()).then(|| PhysAddr::from(entry.address()))
+        entry.is_present_table(view.level()).then(|| PhysAddr::from(entry.address()))
     }
 
     /// Maps each page in `range` to the next frame. A failure retains the
@@ -1256,7 +1281,7 @@ where
         frames: &mut impl Iterator<Item = PhysFrame<PS>>,
         flags: Arch::PTFlags,
     ) -> Result<(), MapRegionError> {
-        let unmapped_pages = range.len() * PS::SIZE / Size4KiB::SIZE;
+        let unmapped_pages = range.len() * PS::SIZE / Regular::SIZE;
         self.check_map_region(range, flags)
             .map_err(|error| MapRegionError { error, unmapped_pages })?;
         let mut mapped_pages = 0;
@@ -1270,10 +1295,10 @@ where
     /// A failure retains the mapped prefix across both ranges.
     pub fn map_region_mixed(
         &self,
-        range_2m: PageRangeInclusive<Size2MiB>,
-        frames_2m: &mut impl Iterator<Item = PhysFrame<Size2MiB>>,
-        range_4k: PageRangeInclusive<Size4KiB>,
-        frames_4k: &mut impl Iterator<Item = PhysFrame<Size4KiB>>,
+        range_2m: PageRangeInclusive<Huge>,
+        frames_2m: &mut impl Iterator<Item = PhysFrame<Huge>>,
+        range_4k: PageRangeInclusive<Regular>,
+        frames_4k: &mut impl Iterator<Item = PhysFrame<Regular>>,
         flags: Arch::PTFlags,
     ) -> Result<(), MapRegionError> {
         /// Inputs: two ranges.
@@ -1287,7 +1312,7 @@ where
                 && (first.end + 1).start_address() == second.start.start_address()
         }
 
-        let pages_2m = range_2m.len() * Size2MiB::SIZE / Size4KiB::SIZE;
+        let pages_2m = range_2m.len() * Huge::SIZE / Regular::SIZE;
         let pages_4k = range_4k.len();
         if range_2m.is_empty()
             || range_4k.is_empty()
@@ -1392,7 +1417,7 @@ impl<Arch, Alloc, MaxLevel, WP, T> PageTable<Arch, Alloc, MaxLevel, WP, T>
 where
     Arch: ArchPagingMeta,
     Alloc: PagingAllocator,
-    MaxLevel: LevelSpec,
+    MaxLevel: WalkLevel,
     WP: LockSpec<T>,
 {
     /// Installs an owned subtree in an absent root entry.
@@ -1415,10 +1440,10 @@ where
         let pte_ref = self.root_view().entry(idx);
         let _guard = self.wperms.lock(self.tree.root_paddr());
         let entry = pte_ref.load();
-        if entry.is_table(MaxLevel::LEVEL) && entry.address() == subpage_pa.bits() {
+        if entry.is_present_table(MaxLevel::LEVEL) && entry.address() == subpage_pa.bits() {
             return Ok(false);
         }
-        if entry.is_table(MaxLevel::LEVEL) {
+        if entry.is_present_table(MaxLevel::LEVEL) {
             return Err(PagingError::NotLeafEntry);
         }
         if entry.present() {

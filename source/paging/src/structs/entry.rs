@@ -94,17 +94,28 @@ impl<A: ArchPagingMeta> PTEntry<A> {
         self.val & A::PTFlags::user_bit() != 0
     }
 
-    /// An entry a walker may follow down to a child table. The bits alone
-    /// cannot say this, which is why the level is an argument.
+    /// Whether the level and page-size bit encode a child-table entry.
     #[inline(always)]
     pub fn is_table(&self, level: PageLevel) -> bool {
-        self.present() && !level.is_leaf() && !self.huge()
+        !self.is_clear() && !level.is_leaf() && !self.huge()
     }
 
-    /// A present entry that maps a page rather than pointing at a table.
+    /// Whether this is a present child-table entry.
+    #[inline(always)]
+    pub fn is_present_table(&self, level: PageLevel) -> bool {
+        self.present() && self.is_table(level)
+    }
+
+    /// Whether the level and page-size bit encode a mapped-leaf entry.
     #[inline(always)]
     pub fn is_leaf(&self, level: PageLevel) -> bool {
-        self.present() && (self.huge() || level.is_leaf())
+        !self.is_clear() && (self.huge() || level.is_leaf())
+    }
+
+    /// Whether this is a present mapped-leaf entry.
+    #[inline(always)]
+    pub fn is_present_leaf(&self, level: PageLevel) -> bool {
+        self.present() && self.is_leaf(level)
     }
 
     /// The all-zero entry: not present, and so neither a table nor a leaf.

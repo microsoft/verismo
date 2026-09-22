@@ -9,7 +9,7 @@ use paging::level::Lvl;
 use paging::os_contract::{DirectMappedAllocator, PagingError};
 use paging::page::Page;
 use paging::pagetable::{KernelPageTable, LockSpec};
-use paging::sizes::{PageSize, Size2MiB, Size4KiB};
+use paging::sizes::{Huge, PageSize, Regular};
 use paging::{FlushScope, PTEntryFlags, X86Paging, X86PagingParams};
 
 use super::common::{Arena, ControllerMemory, MemorySnapshot, Observation, PagingAdapter};
@@ -162,12 +162,10 @@ impl PagingAdapter for CurrentAdapter {
     fn map_4k(&self, virtual_address: u64, physical_address: u64) {
         self.table
             .map(
-                Page::<Size4KiB>::from_start_address(VirtAddr::from(virtual_address as usize))
+                Page::<Regular>::from_start_address(VirtAddr::from(virtual_address as usize))
                     .unwrap(),
-                PhysFrame::<Size4KiB>::from_start_address(PhysAddr::from(
-                    physical_address as usize,
-                ))
-                .unwrap(),
+                PhysFrame::<Regular>::from_start_address(PhysAddr::from(physical_address as usize))
+                    .unwrap(),
                 flags(true),
                 false,
             )
@@ -177,12 +175,9 @@ impl PagingAdapter for CurrentAdapter {
     fn map_2m(&self, virtual_address: u64, physical_address: u64) {
         self.table
             .map(
-                Page::<Size2MiB>::from_start_address(VirtAddr::from(virtual_address as usize))
+                Page::<Huge>::from_start_address(VirtAddr::from(virtual_address as usize)).unwrap(),
+                PhysFrame::<Huge>::from_start_address(PhysAddr::from(physical_address as usize))
                     .unwrap(),
-                PhysFrame::<Size2MiB>::from_start_address(PhysAddr::from(
-                    physical_address as usize,
-                ))
-                .unwrap(),
                 flags(true),
                 false,
             )
@@ -192,13 +187,13 @@ impl PagingAdapter for CurrentAdapter {
     fn map_range(&self, start: u64, end: u64, physical_start: u64) {
         let start = VirtAddr::from(start as usize);
         let end = VirtAddr::from(end as usize);
-        let range = Page::<Size4KiB>::range_inclusive(
+        let range = Page::<Regular>::range_inclusive(
             Page::from_start_address(start).unwrap(),
-            Page::from_start_address(end - Size4KiB::SIZE).unwrap(),
+            Page::from_start_address(end - Regular::SIZE).unwrap(),
         );
         let mut frames = (0..range.len()).map(|offset| {
             PhysFrame::from_start_address(PhysAddr::from(
-                physical_start as usize + offset * Size4KiB::SIZE,
+                physical_start as usize + offset * Regular::SIZE,
             ))
             .unwrap()
         });
@@ -210,9 +205,9 @@ impl PagingAdapter for CurrentAdapter {
         let (_, flush) = self
             .table
             .unmap(
-                Page::<Size4KiB>::from_start_address(VirtAddr::from(virtual_address as usize))
+                Page::<Regular>::from_start_address(VirtAddr::from(virtual_address as usize))
                     .unwrap(),
-                true,
+                None,
             )
             .expect("current unmap");
         // SAFETY: benchmark tables are never installed in hardware page-table roots.
@@ -241,7 +236,7 @@ impl PagingAdapter for CurrentAdapter {
         let address = VirtAddr::from(virtual_address as usize);
         let snapshot = self.table.walk(address);
         let entry = snapshot.read();
-        if !entry.is_leaf(snapshot.level()) {
+        if !entry.is_present_leaf(snapshot.level()) {
             return None;
         }
         let translation = self.table.translate(address).expect("current translate");
@@ -259,7 +254,7 @@ impl PagingAdapter for CurrentAdapter {
         let flush = self
             .table
             .set_flags(
-                Page::<Size4KiB>::from_start_address(VirtAddr::from(virtual_address as usize))
+                Page::<Regular>::from_start_address(VirtAddr::from(virtual_address as usize))
                     .unwrap(),
                 flags(writable),
                 false,
@@ -273,7 +268,7 @@ impl PagingAdapter for CurrentAdapter {
         let flush = self
             .table
             .split(
-                Page::<Size4KiB>::containing_address(VirtAddr::from(virtual_address as usize)),
+                Page::<Huge>::containing_address(VirtAddr::from(virtual_address as usize)),
                 false,
             )
             .expect("current split");

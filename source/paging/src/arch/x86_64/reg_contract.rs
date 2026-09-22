@@ -15,7 +15,7 @@ use machine_model::arch::x86_64::state::RegisterState;
 use machine_model::arch::x86_64::{Cr0Value, Cr3Value, Cr4Value, EferValue};
 
 use crate::structs::arch_contract::{ArchPagingGeometry, ArchPagingMeta};
-use crate::structs::sizes::{MinPageSize, PageOffset, PAGE_OFFSET_WIDTH};
+use crate::structs::sizes::{Regular, PageOffset, PAGE_OFFSET_WIDTH};
 
 verus! {
 

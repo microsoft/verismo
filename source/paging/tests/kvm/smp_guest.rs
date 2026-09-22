@@ -18,7 +18,7 @@ use paging::level::{Lvl, PageLevel};
 use paging::os_contract::{DirectMappedAllocator, PagingError};
 use paging::page::Page;
 use paging::pagetable::{LockSpec, PageTable};
-use paging::sizes::{PageSize, Size4KiB};
+use paging::sizes::{PageSize, Regular};
 use paging::{FlushScope, PTEntryFlags, X86Paging, X86PagingParams};
 
 const SERIAL_PORT: u16 = 0x3f8;
@@ -139,7 +139,7 @@ struct GuestAllocator;
 unsafe impl DirectMappedAllocator for GuestAllocator {
     fn direct_map() -> (core::ops::Range<PhysAddr>, VirtAddr) {
         let image_end = core::ptr::addr_of!(__boot_image_load_end) as usize;
-        let mapped_end = (image_end + Size4KiB::SIZE - 1) & !(Size4KiB::SIZE - 1);
+        let mapped_end = (image_end + Regular::SIZE - 1) & !(Regular::SIZE - 1);
         (PhysAddr::from(0usize)..PhysAddr::from(mapped_end), VirtAddr::from(0usize))
     }
 
@@ -323,9 +323,9 @@ fn configure_apic(table: &SmpTable) {
     }
 
     let mmio_base = base_msr as usize & 0xffff_f000;
-    let page = Page::<Size4KiB>::from_start_address(VirtAddr::from(mmio_base))
+    let page = Page::<Regular>::from_start_address(VirtAddr::from(mmio_base))
         .unwrap_or_else(|_| fail("VERIOS_PAGETABLE_SMP_APIC_MMIO_VA_INVALID\n"));
-    let frame = PhysFrame::<Size4KiB>::from_start_address(PhysAddr::from(mmio_base))
+    let frame = PhysFrame::<Regular>::from_start_address(PhysAddr::from(mmio_base))
         .unwrap_or_else(|_| fail("VERIOS_PAGETABLE_SMP_APIC_MMIO_FRAME_INVALID\n"));
     let flags =
         PTEntryFlags::PRESENT | PTEntryFlags::WRITABLE | PTEntryFlags::NX | PTEntryFlags::NO_CACHE;
@@ -436,12 +436,12 @@ fn start_ap(apic_id: u32) {
 /// intermediate tables down to the leaf level are built and contended for by
 /// all four CPUs.
 fn run_worker(table: &SmpTable, worker_id: usize) {
-    let vaddr = VirtAddr::from(WORKLOAD_BASE_VA + worker_id * Size4KiB::SIZE);
-    let page = Page::<Size4KiB>::from_start_address(vaddr)
+    let vaddr = VirtAddr::from(WORKLOAD_BASE_VA + worker_id * Regular::SIZE);
+    let page = Page::<Regular>::from_start_address(vaddr)
         .unwrap_or_else(|_| fail("VERIOS_PAGETABLE_SMP_VA_INVALID\n"));
     let frame_paddr =
         PhysAddr::from(unsafe { core::ptr::addr_of!(WORKER_FRAMES[worker_id]) as usize });
-    let frame = PhysFrame::<Size4KiB>::from_start_address(frame_paddr)
+    let frame = PhysFrame::<Regular>::from_start_address(frame_paddr)
         .unwrap_or_else(|_| fail("VERIOS_PAGETABLE_SMP_FRAME_INVALID\n"));
     let flags = PTEntryFlags::PRESENT
         | PTEntryFlags::WRITABLE
@@ -458,7 +458,7 @@ fn run_worker(table: &SmpTable, worker_id: usize) {
             WORKLOAD_FAILED.store(true, Ordering::Release);
             break;
         }
-        match table.unmap(page, false) {
+        match table.unmap(page, Some(false)) {
             Ok((Some(old_entry), flush)) => {
                 if old_entry.leaf_address(PageLevel::Level0) != frame_paddr {
                     WORKLOAD_FAILED.store(true, Ordering::Release);
@@ -573,7 +573,7 @@ extern "C" fn bsp_main() -> ! {
         fail("VERIOS_PAGETABLE_SMP_WORKLOAD_FAILED\n");
     }
     for worker_id in 0..NUM_WORKERS {
-        let vaddr = VirtAddr::from(WORKLOAD_BASE_VA + worker_id * Size4KiB::SIZE);
+        let vaddr = VirtAddr::from(WORKLOAD_BASE_VA + worker_id * Regular::SIZE);
         if table_ref.phys_addr(vaddr) != Err(PagingError::NotMapped) {
             fail("VERIOS_PAGETABLE_SMP_STALE_MAPPING\n");
         }

@@ -21,7 +21,7 @@ use vstd::prelude::*;
 #[cfg(verus_only)]
 use crate::structs::address::VADDR_UPPER_MASK;
 use crate::structs::address::{Address, VirtAddr};
-use crate::structs::sizes::{PageSize, Size4KiB, PT_ENTRY_COUNT};
+use crate::structs::sizes::{PageSize, Regular, PT_ENTRY_COUNT};
 
 #[cfg(verus_only)]
 include!("../specs/page.rs");
@@ -34,7 +34,7 @@ pub struct AddressNotAligned;
 /// A virtual memory page of size `S`.
 #[verus_verify]
 #[repr(C)]
-pub struct Page<S: PageSize = Size4KiB> {
+pub struct Page<S: PageSize = Regular> {
     start_address: VirtAddr,
     size: PhantomData<S>,
 }
@@ -193,7 +193,7 @@ impl<S: PageSize> core::ops::Sub<usize> for Page<S> {
 /// A range of virtual pages, `end` exclusive.
 #[verus_verify]
 #[repr(C)]
-pub struct PageRange<S: PageSize = Size4KiB> {
+pub struct PageRange<S: PageSize = Regular> {
     /// The first page of the range.
     pub start: Page<S>,
     /// The page after the last one of the range.
@@ -256,7 +256,7 @@ impl<S: PageSize> Iterator for PageRange<S> {
 /// A range of virtual pages, `end` inclusive.
 #[verus_verify]
 #[repr(C)]
-pub struct PageRangeInclusive<S: PageSize = Size4KiB> {
+pub struct PageRangeInclusive<S: PageSize = Regular> {
     /// The first page of the range.
     pub start: Page<S>,
     /// The last page of the range.

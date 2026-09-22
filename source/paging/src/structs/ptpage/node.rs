@@ -6,15 +6,17 @@ use core::sync::atomic::AtomicUsize;
 
 use bitflags::Flags;
 
-use super::{PTPagePointer, PTPageTree};
+use super::tree::StagedSplitLevel;
+use super::{PTPagePointer, PTPageTree, PageLevelVisitor, WalkLevelImpl};
 use crate::structs::address::{Address, PhysAddr, VirtAddr, LOW_CANONICAL_END};
 use crate::structs::arch_contract::{ArchPagingMeta, GenericPageTableFlags};
 use crate::structs::entry::{PTEntry, PTEntryRef};
 use crate::structs::frame::PhysFrame;
-use crate::structs::level::PageLevel;
+use crate::structs::level::{InnerLevel, LevelSpec, Lvl, PageLevel};
 use crate::structs::os_contract::{DirectMappedAllocator, PagingAllocator, PagingError};
 use crate::structs::page::Page;
-use crate::structs::sizes::{entry_index, page_level_for_size, PageSize, PT_ENTRY_COUNT};
+use crate::structs::policy::KernelPolicy;
+use crate::structs::sizes::{entry_index, PageSize, PT_ENTRY_COUNT};
 use crate::structs::tlb::{MayNeedFlush, TlbFlush};
 
 /// A page-table page: nothing but its entries.
@@ -24,12 +26,17 @@ pub struct PTPage<A: ArchPagingMeta, P: PagingAllocator> {
     dummy: PhantomData<(A, P)>,
 }
 
-/// An entry being edited, and the level it sits at. The entry it borrows is
-/// either a staged copy or a page no walker can reach yet, never a live one.
-#[derive(Debug)]
-pub struct Mapping<'a, A: ArchPagingMeta> {
-    pub level: PageLevel,
-    pub entry: &'a mut PTEntry<A>,
+/// One atomically observed entry in a pinned live tree.
+pub(crate) struct Mapping<'tree, A: ArchPagingMeta> {
+    pub(crate) pte_value: PTEntry<A>,
+    pub(crate) pte_ref: PTEntryRef<'tree, A>,
+    pub(crate) level: PageLevel,
+}
+
+/// One mutable entry in an unpublished tree.
+struct UnpublishedMapping<'a, A: ArchPagingMeta> {
+    level: PageLevel,
+    entry: &'a mut PTEntry<A>,
 }
 
 /// What a walk found: a physical address, and the size of the page it sits in.
@@ -52,7 +59,192 @@ struct RangeSplit<A: ArchPagingMeta, P: PagingAllocator> {
     base: usize,
     level: PageLevel,
     original: PTEntry<A>,
-    tree: PTPageTree<A, P>,
+    tree: RangeSplitTree<A, P>,
+}
+
+/// Owns a staged range split selected from an observed runtime leaf level.
+#[allow(dead_code)]
+enum RangeSplitTree<A: ArchPagingMeta, P: PagingAllocator> {
+    Level0(PTPageTree<A, P, Lvl<0>>),
+    Level1(PTPageTree<A, P, Lvl<1>>),
+    Level2(PTPageTree<A, P, Lvl<2>>),
+    Level3(PTPageTree<A, P, Lvl<3>>),
+}
+
+/// Refreshes staged split descendants through statically selected child levels.
+pub(crate) trait SplitRefreshLevel: InnerLevel + WalkLevelImpl
+where
+    Self::Child: WalkLevelImpl,
+{
+    unsafe fn refresh_split_child<A, P, PS, F>(
+        table: PTEntry<A>,
+        child: PTEntry<A>,
+        target_page: Page<PS>,
+        update: F,
+    ) where
+        A: ArchPagingMeta,
+        P: PagingAllocator,
+        PS: PageSize,
+        F: Fn(PTEntry<A>, PageLevel) -> PTEntry<A> + Copy;
+
+    unsafe fn refresh_range_child<A, P>(
+        table: PTEntry<A>,
+        child: PTEntry<A>,
+        from: usize,
+        to: usize,
+        flags: A::PTFlags,
+    ) where
+        A: ArchPagingMeta,
+        P: PagingAllocator;
+}
+
+impl SplitRefreshLevel for Lvl<1> {
+    unsafe fn refresh_split_child<A, P, PS, F>(_: PTEntry<A>, _: PTEntry<A>, _: Page<PS>, _: F)
+    where
+        A: ArchPagingMeta,
+        P: PagingAllocator,
+        PS: PageSize,
+        F: Fn(PTEntry<A>, PageLevel) -> PTEntry<A> + Copy,
+    {
+        unreachable!("leaf-level split cannot descend further")
+    }
+
+    unsafe fn refresh_range_child<A, P>(
+        _: PTEntry<A>,
+        _: PTEntry<A>,
+        _: usize,
+        _: usize,
+        _: A::PTFlags,
+    ) where
+        A: ArchPagingMeta,
+        P: PagingAllocator,
+    {
+        unreachable!("leaf-level range split cannot descend further")
+    }
+}
+
+unsafe fn refresh_split_child_at<A, P, L, PS, F>(
+    table: PTEntry<A>,
+    child: PTEntry<A>,
+    target_page: Page<PS>,
+    update: F,
+) where
+    A: ArchPagingMeta,
+    P: PagingAllocator,
+    L: SplitRefreshLevel,
+    L::Child: WalkLevelImpl,
+    PS: PageSize,
+    F: Fn(PTEntry<A>, PageLevel) -> PTEntry<A> + Copy,
+{
+    let child_page = unsafe {
+        &mut *P::paddr_to_vaddr(PhysAddr::from(table.address())).as_mut_ptr::<PTPage<A, P>>()
+    };
+    unsafe { child_page.refresh_split::<L, PS, F>(child, target_page, update) };
+}
+
+unsafe fn refresh_range_child_at<A, P, L>(
+    table: PTEntry<A>,
+    child: PTEntry<A>,
+    from: usize,
+    to: usize,
+    flags: A::PTFlags,
+) where
+    A: ArchPagingMeta,
+    P: PagingAllocator,
+    L: SplitRefreshLevel,
+    L::Child: WalkLevelImpl,
+{
+    let child_page = unsafe {
+        &mut *P::paddr_to_vaddr(PhysAddr::from(table.address())).as_mut_ptr::<PTPage<A, P>>()
+    };
+    unsafe { child_page.refresh_range_split::<L>(child, from, to, flags) };
+}
+
+impl SplitRefreshLevel for Lvl<2> {
+    unsafe fn refresh_split_child<A, P, PS, F>(
+        table: PTEntry<A>,
+        child: PTEntry<A>,
+        target_page: Page<PS>,
+        update: F,
+    ) where
+        A: ArchPagingMeta,
+        P: PagingAllocator,
+        PS: PageSize,
+        F: Fn(PTEntry<A>, PageLevel) -> PTEntry<A> + Copy,
+    {
+        unsafe { refresh_split_child_at::<A, P, Lvl<1>, PS, F>(table, child, target_page, update) };
+    }
+
+    unsafe fn refresh_range_child<A, P>(
+        table: PTEntry<A>,
+        child: PTEntry<A>,
+        from: usize,
+        to: usize,
+        flags: A::PTFlags,
+    ) where
+        A: ArchPagingMeta,
+        P: PagingAllocator,
+    {
+        unsafe { refresh_range_child_at::<A, P, Lvl<1>>(table, child, from, to, flags) };
+    }
+}
+
+impl SplitRefreshLevel for Lvl<3> {
+    unsafe fn refresh_split_child<A, P, PS, F>(
+        table: PTEntry<A>,
+        child: PTEntry<A>,
+        target_page: Page<PS>,
+        update: F,
+    ) where
+        A: ArchPagingMeta,
+        P: PagingAllocator,
+        PS: PageSize,
+        F: Fn(PTEntry<A>, PageLevel) -> PTEntry<A> + Copy,
+    {
+        unsafe { refresh_split_child_at::<A, P, Lvl<2>, PS, F>(table, child, target_page, update) };
+    }
+
+    unsafe fn refresh_range_child<A, P>(
+        table: PTEntry<A>,
+        child: PTEntry<A>,
+        from: usize,
+        to: usize,
+        flags: A::PTFlags,
+    ) where
+        A: ArchPagingMeta,
+        P: PagingAllocator,
+    {
+        unsafe { refresh_range_child_at::<A, P, Lvl<2>>(table, child, from, to, flags) };
+    }
+}
+
+impl SplitRefreshLevel for Lvl<4> {
+    unsafe fn refresh_split_child<A, P, PS, F>(
+        table: PTEntry<A>,
+        child: PTEntry<A>,
+        target_page: Page<PS>,
+        update: F,
+    ) where
+        A: ArchPagingMeta,
+        P: PagingAllocator,
+        PS: PageSize,
+        F: Fn(PTEntry<A>, PageLevel) -> PTEntry<A> + Copy,
+    {
+        unsafe { refresh_split_child_at::<A, P, Lvl<3>, PS, F>(table, child, target_page, update) };
+    }
+
+    unsafe fn refresh_range_child<A, P>(
+        table: PTEntry<A>,
+        child: PTEntry<A>,
+        from: usize,
+        to: usize,
+        flags: A::PTFlags,
+    ) where
+        A: ArchPagingMeta,
+        P: PagingAllocator,
+    {
+        unsafe { refresh_range_child_at::<A, P, Lvl<3>>(table, child, from, to, flags) };
+    }
 }
 
 /// Iterates the low and high canonical segments without entering the address hole.
@@ -63,10 +255,23 @@ struct CanonicalRangeCursor {
 
 /// Restores PTEs that remain invalidated if a split-range publication is interrupted.
 #[allow(dead_code)]
-struct InvalidatedPteRollbackGuard<'view, 'tree, A: ArchPagingMeta, P: PagingAllocator> {
-    root: &'view PTPagePointer<'tree, A, P>,
+struct InvalidatedPteRollbackGuard<
+    'view,
+    'tree,
+    A: ArchPagingMeta,
+    P: PagingAllocator,
+    L: WalkLevelImpl,
+> {
+    root: &'view PTPagePointer<'tree, A, P, L>,
     start: usize,
     end: usize,
+}
+
+struct SweepPageVisitor<'a, V> {
+    page_paddr: Option<PhysAddr>,
+    start: usize,
+    end: usize,
+    visit: &'a mut V,
 }
 
 /// Conservative TLB coverage accumulated from the leaves changed by a range update.
@@ -78,8 +283,8 @@ pub(crate) struct FlushFootprint {
 
 const HIGH_CANONICAL_START: usize = VirtAddr::new(LOW_CANONICAL_END).as_usize();
 
-impl<'a, A: ArchPagingMeta> Mapping<'a, A> {
-    pub fn new(level: PageLevel, entry: &'a mut PTEntry<A>) -> Self {
+impl<'a, A: ArchPagingMeta> UnpublishedMapping<'a, A> {
+    fn new(level: PageLevel, entry: &'a mut PTEntry<A>) -> Self {
         Self { level, entry }
     }
 }
@@ -125,6 +330,35 @@ impl<'tree, A: ArchPagingMeta> InvalidatedLeaf<'tree, A> {
     fn new(pte_ref: PTEntryRef<'tree, A>) -> Self {
         pte_ref.fetch_and(!A::PTFlags::present_bit());
         Self { pte_ref, active: true }
+    }
+}
+
+impl<'tree, A, P, E, V> PageLevelVisitor<'tree, A, P> for SweepPageVisitor<'_, V>
+where
+    A: ArchPagingMeta,
+    P: PagingAllocator,
+    V: FnMut(PhysAddr, Mapping<'tree, A>, usize, usize) -> Result<(), E>,
+{
+    type Output = Result<(), (usize, E)>;
+
+    fn visit_l0(self, page: PTPagePointer<'tree, A, P, Lvl<0>>) -> Self::Output {
+        PTPage::<A, P>::sweep_l0(page, self.page_paddr, self.start, self.end, self.visit)
+    }
+
+    fn visit_l1(self, page: PTPagePointer<'tree, A, P, Lvl<1>>) -> Self::Output {
+        PTPage::<A, P>::sweep_inner(page, self.page_paddr, self.start, self.end, self.visit)
+    }
+
+    fn visit_l2(self, page: PTPagePointer<'tree, A, P, Lvl<2>>) -> Self::Output {
+        PTPage::<A, P>::sweep_inner(page, self.page_paddr, self.start, self.end, self.visit)
+    }
+
+    fn visit_l3(self, page: PTPagePointer<'tree, A, P, Lvl<3>>) -> Self::Output {
+        PTPage::<A, P>::sweep_inner(page, self.page_paddr, self.start, self.end, self.visit)
+    }
+
+    fn visit_l4(self, page: PTPagePointer<'tree, A, P, Lvl<4>>) -> Self::Output {
+        PTPage::<A, P>::sweep_inner(page, self.page_paddr, self.start, self.end, self.visit)
     }
 }
 
@@ -196,22 +430,104 @@ impl Iterator for CanonicalRangeCursor {
     }
 }
 
-impl<A: ArchPagingMeta, P: PagingAllocator> Drop for InvalidatedPteRollbackGuard<'_, '_, A, P> {
+impl<A: ArchPagingMeta, P: PagingAllocator, L: WalkLevelImpl> Drop
+    for InvalidatedPteRollbackGuard<'_, '_, A, P, L>
+{
     /// Inputs: rollback guard.
     /// Requires: pinned excluded range.
     /// Returns: nothing.
     fn drop(&mut self) {
         let _ = PTPage::<A, P>::sweep_range(
             self.root,
-            self.start,
-            self.end,
-            &mut |_, pte_ref, entry, _, _, _| {
-                if !entry.present() {
-                    pte_ref.fetch_or(A::PTFlags::present_bit());
+            VirtAddr::from(self.start),
+            VirtAddr::from(self.end),
+            &mut |_, mapping, _, _| {
+                if !mapping.pte_value.present() {
+                    mapping.pte_ref.fetch_or(A::PTFlags::present_bit());
                 }
                 Ok::<(), core::convert::Infallible>(())
             },
         );
+    }
+}
+
+#[allow(dead_code)]
+impl<A: ArchPagingMeta, P: PagingAllocator> RangeSplitTree<A, P> {
+    fn new(
+        entry: PTEntry<A>,
+        level: PageLevel,
+        from: usize,
+        to: usize,
+        flags: A::PTFlags,
+    ) -> Result<Self, PagingError> {
+        match level {
+            PageLevel::Level0 => Err(PagingError::InvalidLevel),
+            PageLevel::Level1 => {
+                PTPageTree::<A, P, Lvl<1>>::new_range_split(entry, from, to, flags, KernelPolicy)
+                    .map(Self::Level0)
+            }
+            PageLevel::Level2 => {
+                PTPageTree::<A, P, Lvl<2>>::new_range_split(entry, from, to, flags, KernelPolicy)
+                    .map(Self::Level1)
+            }
+            PageLevel::Level3 => {
+                PTPageTree::<A, P, Lvl<3>>::new_range_split(entry, from, to, flags, KernelPolicy)
+                    .map(Self::Level2)
+            }
+            PageLevel::Level4 => {
+                PTPageTree::<A, P, Lvl<4>>::new_range_split(entry, from, to, flags, KernelPolicy)
+                    .map(Self::Level3)
+            }
+        }
+    }
+
+    fn root_paddr(&self) -> PhysAddr {
+        match self {
+            Self::Level0(tree) => tree.root_paddr(),
+            Self::Level1(tree) => tree.root_paddr(),
+            Self::Level2(tree) => tree.root_paddr(),
+            Self::Level3(tree) => tree.root_paddr(),
+        }
+    }
+
+    /// # Safety
+    /// The tree must remain unpublished and match the source leaf level.
+    unsafe fn refresh(&mut self, entry: PTEntry<A>, from: usize, to: usize, flags: A::PTFlags) {
+        match self {
+            Self::Level0(tree) => {
+                let mut root = tree.root();
+                unsafe { root.page_mut().refresh_range_split::<Lvl<1>>(entry, from, to, flags) };
+            }
+            Self::Level1(tree) => {
+                let mut root = tree.root();
+                unsafe { root.page_mut().refresh_range_split::<Lvl<2>>(entry, from, to, flags) };
+            }
+            Self::Level2(tree) => {
+                let mut root = tree.root();
+                unsafe { root.page_mut().refresh_range_split::<Lvl<3>>(entry, from, to, flags) };
+            }
+            Self::Level3(tree) => {
+                let mut root = tree.root();
+                unsafe { root.page_mut().refresh_range_split::<Lvl<4>>(entry, from, to, flags) };
+            }
+        }
+    }
+
+    fn release(self) {
+        match self {
+            Self::Level0(tree) => {
+                tree.release();
+            }
+            Self::Level1(tree) => {
+                tree.release();
+            }
+            Self::Level2(tree) => {
+                tree.release();
+            }
+            Self::Level3(tree) => {
+                tree.release();
+            }
+        }
     }
 }
 
@@ -271,7 +587,7 @@ impl<A: ArchPagingMeta, P: DirectMappedAllocator> PTPage<A, P> {
         let depth = level.depth();
         for _ in 0..=depth {
             let entry = page.entry_mut(entry_index(vaddr, level));
-            if entry.is_table(level) {
+            if entry.is_present_table(level) {
                 // SAFETY: this walk only follows private, exclusively owned pages.
                 page = unsafe { &mut *Self::child_of(entry).unwrap() };
                 level = level.child().unwrap();
@@ -279,7 +595,7 @@ impl<A: ArchPagingMeta, P: DirectMappedAllocator> PTPage<A, P> {
                 return Err(PagingError::EntryAlreadyPresent { level });
             } else {
                 return Self::do_map(
-                    Mapping::new(level, entry),
+                    UnpublishedMapping::new(level, entry),
                     target_page,
                     target_frame,
                     flags,
@@ -293,28 +609,6 @@ impl<A: ArchPagingMeta, P: DirectMappedAllocator> PTPage<A, P> {
 }
 
 impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
-    /// # Safety
-    /// All descendant tables must be exclusively owned, correctly leveled and
-    /// quiesced, with no surviving references; mapped data frames are not freed.
-    pub(super) unsafe fn free_owned_children(&mut self, level: PageLevel, clear_entries: bool) {
-        for idx in 0..PT_ENTRY_COUNT {
-            let entry = *self.entry_mut(idx);
-            if entry.is_table(level) {
-                let paddr = PhysAddr::from(entry.address());
-                // SAFETY: this child is exclusively owned and has no concurrent users.
-                let child = unsafe { &mut *P::paddr_to_vaddr(paddr).as_mut_ptr::<Self>() };
-                unsafe { child.free_owned_children(level.child().unwrap(), clear_entries) };
-                *self.entry_mut(idx) = PTEntry::empty();
-                // SAFETY: the child's borrow has ended and its parent no longer links it.
-                unsafe { P::deallocate_table_page(paddr) };
-                continue;
-            }
-            if clear_entries {
-                *self.entry_mut(idx) = PTEntry::empty();
-            }
-        }
-    }
-
     /// The child table `entry` points at, or `None` if it maps a page or maps
     /// nothing. Whether an entry may be followed also depends on its level,
     /// which is the caller's business.
@@ -364,53 +658,40 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
 }
 
 impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
-    /// Inputs: table segment and visitor.
-    /// Requires: pinned valid tree.
-    /// Returns: visit status.
-    fn sweep_page<'tree, E>(
-        page: &PTPagePointer<'tree, A, P>,
-        page_paddr: Option<PhysAddr>,
-        start: usize,
-        end: usize,
-        visit: &mut impl FnMut(
-            PhysAddr,
-            PTEntryRef<'tree, A>,
-            PTEntry<A>,
-            PageLevel,
-            usize,
-            usize,
-        ) -> Result<(), E>,
-    ) -> Result<(), (usize, E)> {
-        debug_assert!(start < end);
-        let level = page.level();
-        let span = level.size();
+    fn sweep_bounds<L: LevelSpec>(start: usize, end: usize) -> (usize, usize, usize) {
+        let span = L::LEVEL.size();
         let page_span = span * PT_ENTRY_COUNT;
         let full_page = start & (page_span - 1) == 0 && end - start == page_span;
         let (first_index, last_index) = if full_page {
             (0, PT_ENTRY_COUNT - 1)
         } else {
-            (entry_index(VirtAddr::from(start), level), entry_index(VirtAddr::from(end - 1), level))
+            (
+                entry_index(VirtAddr::from(start), L::LEVEL),
+                entry_index(VirtAddr::from(end - 1), L::LEVEL),
+            )
         };
+        (span, first_index, last_index)
+    }
+
+    /// Visits one leaf table segment.
+    fn sweep_l0<'tree, E>(
+        page: PTPagePointer<'tree, A, P, Lvl<0>>,
+        page_paddr: Option<PhysAddr>,
+        start: usize,
+        end: usize,
+        visit: &mut impl FnMut(PhysAddr, Mapping<'tree, A>, usize, usize) -> Result<(), E>,
+    ) -> Result<(), (usize, E)> {
+        debug_assert!(start < end);
+        let (span, first_index, last_index) = Self::sweep_bounds::<Lvl<0>>(start, end);
         debug_assert!(first_index <= last_index);
         let mut cursor = start;
         let mut entry_end = (start & !(span - 1)).saturating_add(span).min(end);
         for index in first_index..=last_index {
             let pte_ref = page.entry(index);
             let entry = pte_ref.load();
-            if entry.is_table(level) {
-                let child = Self::observed_child(page, entry);
-                Self::sweep_page(
-                    &child,
-                    Some(PhysAddr::from(entry.address())),
-                    cursor,
-                    entry_end,
-                    visit,
-                )?;
-            } else if let Err(error) = visit(
+            if let Err(error) = visit(
                 page_paddr.unwrap_or_else(|| page.paddr()),
-                pte_ref,
-                entry,
-                level,
+                Mapping { pte_value: entry, pte_ref, level: PageLevel::Level0 },
                 cursor,
                 entry_end,
             ) {
@@ -422,48 +703,86 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
         Ok(())
     }
 
-    /// Inputs: parent and table entry.
-    /// Requires: matching observed entry.
-    /// Returns: child view.
-    fn observed_child<'tree>(
-        page: &PTPagePointer<'tree, A, P>,
-        entry: PTEntry<A>,
-    ) -> PTPagePointer<'tree, A, P> {
-        match page.child_from_observed(entry) {
-            Ok(child) => child,
-            Err(_) => unreachable!("observed table entry must resolve as a child"),
-        }
-    }
-
-    pub(crate) fn sweep_range<'tree, E>(
-        root: &PTPagePointer<'tree, A, P>,
+    /// Visits one inner table segment and descends through typed children.
+    fn sweep_inner<'tree, E, L: WalkLevelImpl>(
+        page: PTPagePointer<'tree, A, P, L>,
+        page_paddr: Option<PhysAddr>,
         start: usize,
         end: usize,
-        visit: &mut impl FnMut(
-            PhysAddr,
-            PTEntryRef<'tree, A>,
-            PTEntry<A>,
-            PageLevel,
-            usize,
-            usize,
-        ) -> Result<(), E>,
-    ) -> Result<usize, (usize, E)> {
-        let mut range = CanonicalRangeCursor::new(start, end);
-        for (cursor, segment_end) in &mut range {
-            Self::sweep_page(root, None, cursor, segment_end, visit)?;
+        visit: &mut impl FnMut(PhysAddr, Mapping<'tree, A>, usize, usize) -> Result<(), E>,
+    ) -> Result<(), (usize, E)> {
+        debug_assert!(start < end);
+        let (span, first_index, last_index) = Self::sweep_bounds::<L>(start, end);
+        debug_assert!(first_index <= last_index);
+        let mut cursor = start;
+        let mut entry_end = (start & !(span - 1)).saturating_add(span).min(end);
+        for index in first_index..=last_index {
+            let pte_ref = page.entry(index);
+            let entry = pte_ref.load();
+            if entry.is_present_table(L::LEVEL) {
+                let child = page
+                    .child_from_observed(entry)
+                    .unwrap_or_else(|_| unreachable!("observed table entry must resolve"));
+                L::ChildLevel::dispatch(
+                    child,
+                    SweepPageVisitor {
+                        page_paddr: Some(PhysAddr::from(entry.address())),
+                        start: cursor,
+                        end: entry_end,
+                        visit,
+                    },
+                )?;
+            } else if let Err(error) = visit(
+                page_paddr.unwrap_or_else(|| page.paddr()),
+                Mapping { pte_value: entry, pte_ref, level: L::LEVEL },
+                cursor,
+                entry_end,
+            ) {
+                return Err((cursor, error));
+            }
+            cursor = entry_end;
+            entry_end = entry_end.saturating_add(span).min(end);
         }
-        Ok(range.position())
+        Ok(())
+    }
+
+    pub(crate) fn sweep_range<'tree, E, L: WalkLevelImpl>(
+        root: &PTPagePointer<'tree, A, P, L>,
+        start: VirtAddr,
+        end: VirtAddr,
+        visit: &mut impl FnMut(PhysAddr, Mapping<'tree, A>, usize, usize) -> Result<(), E>,
+    ) -> Result<VirtAddr, (VirtAddr, E)> {
+        let mut range = CanonicalRangeCursor::new(start.bits(), end.bits());
+        for (cursor, segment_end) in &mut range {
+            let result = L::dispatch(
+                root.duplicate(),
+                SweepPageVisitor {
+                    page_paddr: None,
+                    start: cursor,
+                    end: segment_end,
+                    visit: &mut *visit,
+                },
+            );
+            if let Err((cursor, error)) = result {
+                return Err((VirtAddr::from(cursor), error));
+            }
+        }
+        Ok(VirtAddr::from(range.position()))
     }
 
     #[allow(dead_code)]
     /// Inputs: root and bounds.
     /// Requires: nonempty valid range.
     /// Returns: split requirement.
-    fn range_needs_split(root: &PTPagePointer<'_, A, P>, start: usize, end: usize) -> bool {
+    fn range_needs_split<L: WalkLevelImpl>(
+        root: &PTPagePointer<'_, A, P, L>,
+        start: usize,
+        end: usize,
+    ) -> bool {
         let first = root.walk(VirtAddr::from(start));
-        let first_level = first.page.level();
+        let first_level = first.level();
         let first_entry = first.entry().load();
-        if first_entry.is_leaf(first_level) && start & (first_level.size() - 1) != 0 {
+        if first_entry.is_present_leaf(first_level) && start & (first_level.size() - 1) != 0 {
             return true;
         }
 
@@ -473,47 +792,52 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
             (end - 1, end)
         };
         let last = root.walk(VirtAddr::from(last));
-        let last_level = last.page.level();
+        let last_level = last.level();
         let last_entry = last.entry().load();
         let last_base = segment_end.saturating_sub(1) & !(last_level.size() - 1);
-        last_entry.is_leaf(last_level) && last_base.saturating_add(last_level.size()) != segment_end
+        last_entry.is_present_leaf(last_level)
+            && last_base.saturating_add(last_level.size()) != segment_end
     }
 
     #[allow(dead_code)]
     /// Inputs: root, range, and flags.
     /// Requires: excluded writers.
     /// Returns: status and footprint.
-    fn update_leaf_flags_in_range(
-        root: &PTPagePointer<'_, A, P>,
+    fn update_leaf_flags_in_range<L: WalkLevelImpl>(
+        root: &PTPagePointer<'_, A, P, L>,
         start: usize,
         end: usize,
         flags: A::PTFlags,
     ) -> (Result<(), PagingError>, FlushFootprint) {
         let mut footprint = FlushFootprint::default();
-        let result =
-            Self::sweep_range(root, start, end, &mut |_, pte_ref, observed, level, cursor, _| {
-                if !observed.is_leaf(level) {
+        let result = Self::sweep_range(
+            root,
+            VirtAddr::from(start),
+            VirtAddr::from(end),
+            &mut |_, mapping, cursor, _| {
+                if !mapping.pte_value.is_present_leaf(mapping.level) {
                     return Err(PagingError::NotMapped);
                 }
-                let mut current = observed;
+                let mut current = mapping.pte_value;
                 loop {
                     let mut desired = current;
                     Self::set_leaf_flags(&mut desired, flags);
                     if desired.raw() == current.raw() {
                         break;
                     }
-                    match pte_ref.compare_exchange(current, desired) {
+                    match mapping.pte_ref.compare_exchange(current, desired) {
                         Ok(_) => {
-                            footprint.include(VirtAddr::from(cursor), level);
+                            footprint.include(VirtAddr::from(cursor), mapping.level);
                             break;
                         }
                         Err(latest) => current = latest,
                     }
                 }
                 Ok(())
-            })
-            .map(|_| ())
-            .map_err(|(_, error)| error);
+            },
+        )
+        .map(|_| ())
+        .map_err(|(_, error)| error);
         (result, footprint)
     }
 }
@@ -523,11 +847,11 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
     /// Requires: private path.
     /// Returns: deepest prepared mapping.
     fn alloc_pte_down<'a, PS: PageSize>(
-        map: Mapping<'a, A>,
+        map: UnpublishedMapping<'a, A>,
         target_page: Page<PS>,
         parent_flags: A::PTFlags,
-    ) -> Result<Mapping<'a, A>, PagingError> {
-        let target = page_level_for_size::<PS>().ok_or(PagingError::InvalidLevel)?;
+    ) -> Result<UnpublishedMapping<'a, A>, PagingError> {
+        let target = PS::LEVEL;
         let vaddr = target_page.start_address();
         let mut map = map;
         while map.level > target {
@@ -542,55 +866,9 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
             // the entry written above, which nothing else holds.
             let page = unsafe { &mut *page };
             let entry = page.entry_mut(index);
-            map = Mapping::new(child_level, entry);
+            map = UnpublishedMapping::new(child_level, entry);
         }
         Ok(map)
-    }
-
-    /// Inputs: leaf, target, and update.
-    /// Requires: splittable leaf.
-    /// Returns: private replacement.
-    fn build_split<PS: PageSize, F>(
-        entry: PTEntry<A>,
-        level: PageLevel,
-        target_page: Page<PS>,
-        update: F,
-    ) -> Result<PTPageTree<A, P>, PagingError>
-    where
-        F: Fn(PTEntry<A>, PageLevel) -> PTEntry<A> + Copy,
-    {
-        let target = page_level_for_size::<PS>().ok_or(PagingError::InvalidLevel)?;
-        let vaddr = target_page.start_address();
-        let child_level = level.child().ok_or(PagingError::InvalidLevel)?;
-        let tree = PTPageTree::<A, P>::new(child_level)?;
-        let mut root = tree.root();
-        // SAFETY: this tree is newly allocated and remains wholly unpublished.
-        let page = unsafe { root.page_mut() };
-        let target_index = entry_index(vaddr, child_level);
-        for idx in 0..PT_ENTRY_COUNT {
-            let mut child = entry.split_child(level, idx);
-            let mut prepared_subtree = None;
-            if idx != target_index {
-                *page.entry_mut(idx) = child;
-                continue;
-            }
-            if child_level > target {
-                let subtree = Self::build_split(child, child_level, target_page, update)?;
-                child = PTEntry::new_table(
-                    A::make_private_address(subtree.root_paddr()),
-                    A::PTFlags::parent_flags(),
-                );
-                prepared_subtree = Some(subtree);
-            } else {
-                child = update(child, child_level);
-            }
-            *page.entry_mut(idx) = child;
-            if let Some(subtree) = prepared_subtree {
-                subtree.release();
-            }
-        }
-
-        Ok(tree)
     }
 
     /// Inputs: entry and levels.
@@ -605,9 +883,9 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
             return Err(PagingError::NotLeafEntry);
         }
         let current = pte_ref.load();
-        if current.is_leaf(level) {
+        if current.is_present_leaf(level) {
             Ok(current)
-        } else if current.is_table(level) {
+        } else if current.is_present_table(level) {
             Err(PagingError::NotLeafEntry)
         } else {
             Err(PagingError::NotMapped)
@@ -634,10 +912,9 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
     /// `pte_ref` must remain allocated at `level`, with software writers excluded.
     /// Concurrent entry access may only atomically update hardware history bits.
     /// Local flushing requires no stale remote translations or migration.
-    unsafe fn replace_leaf_mapping<F>(
+    unsafe fn replace_leaf_mapping<L: LevelSpec, F>(
         pte_ref: PTEntryRef<'_, A>,
         mut current: PTEntry<A>,
-        level: PageLevel,
         vaddr: VirtAddr,
         update: F,
         all_cpus: bool,
@@ -650,8 +927,8 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
             if desired.raw() == current.raw() {
                 return MayNeedFlush::none();
             }
-            let flush = Self::flush_for_leaf(vaddr, level);
-            if A::requires_break_before_make(current.raw(), desired.raw(), level) {
+            let flush = Self::flush_for_leaf(vaddr, L::LEVEL);
+            if A::requires_break_before_make::<L>(current.raw(), desired.raw()) {
                 let mut invalidated = InvalidatedLeaf::new(pte_ref);
                 flush_transition(flush, all_cpus);
                 let latest = invalidated.snapshot();
@@ -665,45 +942,36 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
         }
     }
 
-    /// Inputs: leaf, target, update, and scope.
-    /// Requires: pinned excluded entry.
-    /// Returns: flush.
+    /// Publishes a fully prepared private split tree.
+    ///
     /// # Safety
-    /// `pte_ref` must remain allocated at `level`, with software writers excluded.
+    /// `pte_ref` must remain allocated at `L::LEVEL`, with software writers excluded.
     /// Concurrent entry access may only atomically update hardware history bits.
     /// Exclusion must outlive unwinding. Local flushing also requires no stale
     /// remote translations and no migration through the entire transition.
-    unsafe fn publish_split<PS: PageSize, F>(
+    unsafe fn publish_prepared_split<L: InnerLevel, F>(
         pte_ref: PTEntryRef<'_, A>,
-        level: PageLevel,
-        target_page: Page<PS>,
         mut current: PTEntry<A>,
-        update: F,
+        vaddr: VirtAddr,
+        tree: PTPageTree<A, P, L::Child>,
+        refresh: F,
         all_cpus: bool,
     ) -> Result<MayNeedFlush<A::TlbFlushTok>, PagingError>
     where
-        F: Fn(PTEntry<A>, PageLevel) -> PTEntry<A> + Copy,
+        L::Child: WalkLevelImpl,
+        F: Fn(&mut PTPage<A, P>, PTEntry<A>),
     {
-        let vaddr = target_page.start_address();
-        let tree = Self::build_split(current, level, target_page, update)?;
+        let level = L::LEVEL;
         let root = tree.root_paddr();
         let replacement =
             PTEntry::new_table(A::make_private_address(root), A::PTFlags::parent_flags());
         let flush = MayNeedFlush::<A::TlbFlushTok>::new(vaddr, level);
-        if A::requires_break_before_make(current.raw(), replacement.raw(), level) {
+        if A::requires_break_before_make::<L>(current.raw(), replacement.raw()) {
             let mut invalidated = InvalidatedLeaf::new(pte_ref);
             flush_transition(flush, all_cpus);
             let mut root = tree.root();
             // SAFETY: the subtree remains private during the architecture's BBM barrier.
-            unsafe {
-                Self::refresh_split(
-                    root.page_mut(),
-                    invalidated.snapshot(),
-                    level,
-                    target_page,
-                    update,
-                )
-            };
+            refresh(unsafe { root.page_mut() }, invalidated.snapshot());
             invalidated.publish(replacement);
             tree.release();
             return Ok(MayNeedFlush::none());
@@ -715,9 +983,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
                     current = latest;
                     let mut root = tree.root();
                     // SAFETY: the subtree is private until the compare-exchange publishes it.
-                    unsafe {
-                        Self::refresh_split(root.page_mut(), current, level, target_page, update)
-                    };
+                    refresh(unsafe { root.page_mut() }, current);
                 }
             }
         }
@@ -726,20 +992,88 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
         Ok(MayNeedFlush::none())
     }
 
+    /// Builds and publishes a split whose target child receives `update`.
+    ///
     /// # Safety
-    /// `pte_ref` must stay pinned and software writers must remain excluded.
-    pub(crate) unsafe fn split_leaf<PS: PageSize>(
+    /// `pte_ref` must stay pinned at `L::LEVEL` and software writers must remain excluded.
+    unsafe fn publish_split<L: StagedSplitLevel + SplitRefreshLevel, PS: PageSize, F>(
         pte_ref: PTEntryRef<'_, A>,
-        level: PageLevel,
+        target_page: Page<PS>,
+        current: PTEntry<A>,
+        update: F,
+        all_cpus: bool,
+    ) -> Result<MayNeedFlush<A::TlbFlushTok>, PagingError>
+    where
+        L::Child: WalkLevelImpl,
+        F: Fn(PTEntry<A>, PageLevel) -> PTEntry<A> + Copy,
+    {
+        let tree = PTPageTree::<A, P, L>::new_split(current, target_page, update, KernelPolicy)?;
+        unsafe {
+            Self::publish_prepared_split::<L, _>(
+                pte_ref,
+                current,
+                target_page.start_address(),
+                tree,
+                |page, latest| {
+                    // SAFETY: publication retains exclusive ownership of the staged tree.
+                    page.refresh_split::<L, PS, F>(latest, target_page, update)
+                },
+                all_cpus,
+            )
+        }
+    }
+
+    /// Splits one leaf into its immediate typed child level.
+    ///
+    /// # Safety
+    /// `pte_ref` must stay pinned at `L::LEVEL` and software writers must remain excluded.
+    pub(crate) unsafe fn split_leaf<L: InnerLevel + WalkLevelImpl>(
+        pte_ref: PTEntryRef<'_, A>,
+        vaddr: VirtAddr,
+        all_cpus: bool,
+    ) -> Result<MayNeedFlush<A::TlbFlushTok>, PagingError>
+    where
+        L::Child: WalkLevelImpl,
+    {
+        let current = Self::leaf_for_update(pte_ref, L::LEVEL, L::Child::LEVEL)?;
+        let tree = PTPageTree::<A, P, L>::new_leaf_split(current, KernelPolicy)?;
+        unsafe {
+            Self::publish_prepared_split::<L, _>(
+                pte_ref,
+                current,
+                vaddr,
+                tree,
+                |page, latest| {
+                    // SAFETY: publication retains exclusive ownership of the staged tree.
+                    page.refresh_leaf_split::<L>(latest)
+                },
+                all_cpus,
+            )
+        }
+    }
+
+    /// Splits a leaf directly down to `PS`.
+    ///
+    /// # Safety
+    /// `pte_ref` must stay pinned at `L::LEVEL` and software writers must remain excluded.
+    pub(crate) unsafe fn split_leaf_to<L: StagedSplitLevel + SplitRefreshLevel, PS: PageSize>(
+        pte_ref: PTEntryRef<'_, A>,
         page: Page<PS>,
         all_cpus: bool,
-    ) -> Result<MayNeedFlush<A::TlbFlushTok>, PagingError> {
-        let target = page_level_for_size::<PS>().ok_or(PagingError::InvalidLevel)?;
-        let current = Self::leaf_for_update(pte_ref, level, target)?;
-        if level == target {
+    ) -> Result<MayNeedFlush<A::TlbFlushTok>, PagingError>
+    where
+        L::Child: WalkLevelImpl,
+    {
+        if L::Child::LEVEL == PS::LEVEL {
+            return unsafe { Self::split_leaf::<L>(pte_ref, page.start_address(), all_cpus) };
+        }
+        let current = Self::leaf_for_update(pte_ref, L::LEVEL, PS::LEVEL)?;
+        if L::LEVEL == PS::LEVEL {
             return Ok(MayNeedFlush::none());
         }
-        unsafe { Self::publish_split(pte_ref, level, page, current, |entry, _| entry, all_cpus) }
+        unsafe {
+            Self::publish_split::<L, PS, _>(pte_ref, page, current, |entry, _| entry, all_cpus)
+        }
     }
 
     /// # Safety
@@ -751,7 +1085,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
         shared: bool,
         all_cpus: bool,
     ) -> Result<MayNeedFlush<A::TlbFlushTok>, PagingError> {
-        let target = page_level_for_size::<PS>().ok_or(PagingError::InvalidLevel)?;
+        let target = PS::LEVEL;
         let vaddr = page.start_address();
         let current = Self::leaf_for_update(pte_ref, level, target)?;
         let update = |mut entry: PTEntry<A>, _| {
@@ -763,14 +1097,21 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
             entry
         };
         if level > target {
-            return unsafe { Self::publish_split(pte_ref, level, page, current, update, all_cpus) };
+            return match level {
+                PageLevel::Level1 => unsafe {
+                    Self::publish_split::<Lvl<1>, PS, _>(pte_ref, page, current, update, all_cpus)
+                },
+                PageLevel::Level2 => unsafe {
+                    Self::publish_split::<Lvl<2>, PS, _>(pte_ref, page, current, update, all_cpus)
+                },
+                _ => Err(PagingError::InvalidLevel),
+            };
         }
 
         Ok(unsafe {
-            Self::replace_leaf_mapping(
+            Self::replace_leaf_mapping::<PS, _>(
                 pte_ref,
                 current,
-                level,
                 vaddr,
                 |entry| update(entry, level),
                 all_cpus,
@@ -787,23 +1128,23 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
         flags: A::PTFlags,
         all_cpus: bool,
     ) -> Result<MayNeedFlush<A::TlbFlushTok>, PagingError> {
-        let target = page_level_for_size::<PS>().ok_or(PagingError::InvalidLevel)?;
+        let target = PS::LEVEL;
         let vaddr = page.start_address();
         let current = Self::leaf_for_update(pte_ref, level, target)?;
         let flags = A::filter_flags(flags);
         if level > target {
-            return unsafe {
-                Self::publish_split(
-                    pte_ref,
-                    level,
-                    page,
-                    current,
-                    |mut entry, _level| {
-                        Self::set_leaf_flags(&mut entry, flags);
-                        entry
-                    },
-                    all_cpus,
-                )
+            let update = |mut entry, _level| {
+                Self::set_leaf_flags(&mut entry, flags);
+                entry
+            };
+            return match level {
+                PageLevel::Level1 => unsafe {
+                    Self::publish_split::<Lvl<1>, PS, _>(pte_ref, page, current, update, all_cpus)
+                },
+                PageLevel::Level2 => unsafe {
+                    Self::publish_split::<Lvl<2>, PS, _>(pte_ref, page, current, update, all_cpus)
+                },
+                _ => Err(PagingError::InvalidLevel),
             };
         }
         // SAFETY: the caller excludes writers and `current` is the locked leaf snapshot.
@@ -835,24 +1176,25 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
         }
     }
 
-    /// Inputs: private tree and leaf snapshot.
+    /// Inputs: private page and leaf snapshot.
     /// Requires: matching split shape.
     /// Returns: nothing.
-    unsafe fn refresh_split<PS: PageSize, F>(
-        page: &mut Self,
+    unsafe fn refresh_split<L: SplitRefreshLevel, PS: PageSize, F>(
+        &mut self,
         entry: PTEntry<A>,
-        level: PageLevel,
         target_page: Page<PS>,
         update: F,
     ) where
+        L::Child: WalkLevelImpl,
         F: Fn(PTEntry<A>, PageLevel) -> PTEntry<A> + Copy,
     {
-        let target = page_level_for_size::<PS>().unwrap();
+        let level = L::LEVEL;
+        let target = PS::LEVEL;
         let vaddr = target_page.start_address();
-        let child_level = level.child().unwrap();
+        let child_level = L::Child::LEVEL;
         let target_index = entry_index(vaddr, child_level);
         for idx in 0..PT_ENTRY_COUNT {
-            let pte_ref = page.entry_mut(idx);
+            let pte_ref = self.entry_mut(idx);
             let mut child = entry.split_child(level, idx);
             if idx != target_index {
                 *pte_ref = child;
@@ -860,10 +1202,7 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
             }
             if child_level > target {
                 let table = *pte_ref;
-                let child_page = unsafe {
-                    &mut *P::paddr_to_vaddr(PhysAddr::from(table.address())).as_mut_ptr::<Self>()
-                };
-                unsafe { Self::refresh_split(child_page, child, child_level, target_page, update) };
+                unsafe { L::refresh_split_child::<A, P, PS, F>(table, child, target_page, update) };
                 child = table;
             } else {
                 child = update(child, child_level);
@@ -872,73 +1211,41 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
         }
     }
 
-    #[allow(dead_code)]
-    /// Inputs: leaf, local range, and flags.
-    /// Requires: splittable leaf.
-    /// Returns: private subtree.
-    fn build_range_split(
-        entry: PTEntry<A>,
-        level: PageLevel,
-        from: usize,
-        to: usize,
-        flags: A::PTFlags,
-    ) -> Result<PTPageTree<A, P>, PagingError> {
-        let child_level = level.child().ok_or(PagingError::InvalidLevel)?;
-        let tree = PTPageTree::new(child_level)?;
-        let mut root = tree.root();
-        // SAFETY: this tree retains every initialized, unpublished table page.
-        let page = unsafe { root.page_mut() };
+    /// Rebuilds one private child table from the latest parent leaf.
+    ///
+    /// # Safety
+    /// `self` must be the unpublished child table of `entry`.
+    pub(super) unsafe fn refresh_leaf_split<L: InnerLevel>(&mut self, entry: PTEntry<A>) {
+        let first = entry.split_child(L::LEVEL, 0);
+        let stride = L::Child::LEVEL.size();
         for idx in 0..PT_ENTRY_COUNT {
-            let mut child = entry.split_child(level, idx);
-            let offset = idx * child_level.size();
-            let first = from.saturating_sub(offset).min(child_level.size());
-            let last = to.saturating_sub(offset).min(child_level.size());
-            let mut subtree = None;
-            if first < last && !child_level.is_leaf() && (first != 0 || last != child_level.size())
-            {
-                subtree = Some(Self::build_range_split(child, child_level, first, last, flags)?);
-                child = PTEntry::new_table(
-                    A::make_private_address(subtree.as_ref().unwrap().root_paddr()),
-                    A::PTFlags::parent_flags(),
-                );
-            } else if first < last {
-                Self::set_leaf_flags(&mut child, flags);
-            }
-            *page.entry_mut(idx) = child;
-            if let Some(subtree) = subtree {
-                subtree.release();
-            }
+            *self.entry_mut(idx) = PTEntry::from_bits(first.raw() + idx * stride);
         }
-        Ok(tree)
     }
 
     #[allow(dead_code)]
-    /// Inputs: private tree and leaf snapshot.
+    /// Inputs: private page and leaf snapshot.
     /// Requires: matching range split.
     /// Returns: nothing.
-    unsafe fn refresh_range_split(
-        page: &mut Self,
+    unsafe fn refresh_range_split<L: SplitRefreshLevel>(
+        &mut self,
         entry: PTEntry<A>,
-        level: PageLevel,
         from: usize,
         to: usize,
         flags: A::PTFlags,
-    ) {
-        let child_level = level.child().unwrap();
+    ) where
+        L::Child: WalkLevelImpl,
+    {
+        let child_level = L::Child::LEVEL;
         for idx in 0..PT_ENTRY_COUNT {
-            let pte_ref = page.entry_mut(idx);
+            let pte_ref = self.entry_mut(idx);
             let table = *pte_ref;
-            let mut child = entry.split_child(level, idx);
+            let mut child = entry.split_child(L::LEVEL, idx);
             let offset = idx * child_level.size();
             let first = from.saturating_sub(offset).min(child_level.size());
             let last = to.saturating_sub(offset).min(child_level.size());
-            if table.is_table(child_level) {
-                let child_page = unsafe {
-                    &mut *P::paddr_to_vaddr(PhysAddr::from(table.address())).as_mut_ptr::<Self>()
-                };
-                unsafe {
-                    Self::refresh_range_split(child_page, child, child_level, first, last, flags)
-                };
+            if table.is_present_table(child_level) {
+                unsafe { L::refresh_range_child::<A, P>(table, child, first, last, flags) };
                 *pte_ref = table;
                 continue;
             }
@@ -979,7 +1286,6 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
         pte_ref: PTEntryRef<'_, A>,
         split: &mut RangeSplit<A, P>,
         mut current: PTEntry<A>,
-        level: PageLevel,
         from: usize,
         to: usize,
         flags: A::PTFlags,
@@ -989,18 +1295,14 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
             A::PTFlags::parent_flags(),
         );
         if current.raw() != split.original.raw() {
-            let mut root = split.tree.root();
-            unsafe { Self::refresh_range_split(root.page_mut(), current, level, from, to, flags) };
+            unsafe { split.tree.refresh(current, from, to, flags) };
         }
         loop {
             match pte_ref.compare_exchange(current, replacement) {
                 Ok(_) => return,
                 Err(latest) => {
                     current = latest;
-                    let mut root = split.tree.root();
-                    unsafe {
-                        Self::refresh_range_split(root.page_mut(), current, level, from, to, flags)
-                    };
+                    unsafe { split.tree.refresh(current, from, to, flags) };
                 }
             }
         }
@@ -1035,8 +1337,8 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
     /// may race. Flags and range alignment must already be checked. Local scope
     /// requires no stale remote translations or migration during the transition.
     #[allow(dead_code)]
-    pub(crate) unsafe fn update_leaf_flags_range(
-        root: PTPagePointer<'_, A, P>,
+    pub(crate) unsafe fn update_leaf_flags_range<L: WalkLevelImpl>(
+        root: PTPagePointer<'_, A, P, L>,
         start: VirtAddr,
         end: VirtAddr,
         flags: A::PTFlags,
@@ -1060,10 +1362,12 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
         // Prepare the first and last partial huge leaves before changing the live tree.
         let planning_result = Self::sweep_range(
             &root,
-            range_start,
-            range_end,
-            &mut |_, _, entry, level, cursor, next| {
-                if !entry.is_leaf(level) {
+            VirtAddr::from(range_start),
+            VirtAddr::from(range_end),
+            &mut |_, mapping, cursor, next| {
+                let entry = mapping.pte_value;
+                let level = mapping.level;
+                if !entry.is_present_leaf(level) {
                     return Err(PagingError::NotMapped);
                 }
                 let base = cursor & !(level.size() - 1);
@@ -1071,8 +1375,13 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
                 if partial {
                     let boundary =
                         Self::range_boundary_index(cursor, next, range_start, range_end)?;
-                    let tree =
-                        Self::build_range_split(entry, level, cursor - base, next - base, flags)?;
+                    let tree = RangeSplitTree::<A, P>::new(
+                        entry,
+                        level,
+                        cursor - base,
+                        next - base,
+                        flags,
+                    )?;
                     boundary_splits[boundary] =
                         Some(RangeSplit { base, level, original: entry, tree });
                 }
@@ -1081,10 +1390,10 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
             },
         );
         let prefix_end = match planning_result {
-            Ok(prefix_end) => prefix_end,
+            Ok(prefix_end) => prefix_end.bits(),
             Err((prefix_end, error)) => {
                 result = Err(error);
-                prefix_end
+                prefix_end.bits()
             }
         };
 
@@ -1101,15 +1410,32 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
                 A::make_private_address(split.tree.root_paddr()),
                 A::PTFlags::parent_flags(),
             );
-            A::requires_break_before_make(split.original.raw(), replacement.raw(), split.level)
+            match split.level {
+                PageLevel::Level0 => {
+                    A::requires_break_before_make::<Lvl<0>>(split.original.raw(), replacement.raw())
+                }
+                PageLevel::Level1 => {
+                    A::requires_break_before_make::<Lvl<1>>(split.original.raw(), replacement.raw())
+                }
+                PageLevel::Level2 => {
+                    A::requires_break_before_make::<Lvl<2>>(split.original.raw(), replacement.raw())
+                }
+                PageLevel::Level3 => {
+                    A::requires_break_before_make::<Lvl<3>>(split.original.raw(), replacement.raw())
+                }
+                PageLevel::Level4 => {
+                    A::requires_break_before_make::<Lvl<4>>(split.original.raw(), replacement.raw())
+                }
+            }
         });
 
         if !requires_bbm {
             let publication = Self::sweep_range(
                 &root,
-                range_start,
-                prefix_end,
-                &mut |_, pte_ref, entry, level, cursor, next| {
+                VirtAddr::from(range_start),
+                VirtAddr::from(prefix_end),
+                &mut |_, mapping, cursor, next| {
+                    let Mapping { pte_value: entry, pte_ref, level } = mapping;
                     let base = cursor & !(level.size() - 1);
                     if let Some(index) = boundary_splits
                         .iter()
@@ -1121,7 +1447,6 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
                                 pte_ref,
                                 split,
                                 entry,
-                                level,
                                 cursor - base,
                                 next - base,
                                 flags,
@@ -1142,16 +1467,17 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
         // Only descriptors undergoing an architecture-required transition are broken.
         let flush = footprint.token::<A::TlbFlushTok>();
         // Declared after split plans so rollback restores mappings before freeing private pages.
-        let mut invalidated = InvalidatedPteRollbackGuard::<A, P> {
+        let mut invalidated = InvalidatedPteRollbackGuard::<A, P, L> {
             root: &root,
             start: range_start,
             end: range_start,
         };
         let invalidation = Self::sweep_range(
             &root,
-            range_start,
-            prefix_end,
-            &mut |_, pte_ref, entry, level, cursor, next| {
+            VirtAddr::from(range_start),
+            VirtAddr::from(prefix_end),
+            &mut |_, mapping, cursor, next| {
+                let Mapping { pte_value: entry, pte_ref, level } = mapping;
                 let base = cursor & !(level.size() - 1);
                 if boundary_splits
                     .iter()
@@ -1171,9 +1497,10 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
         // Publish prepared boundary trees and restore updated complete leaves.
         let publication = Self::sweep_range(
             &root,
-            invalidated.start,
-            prefix_end,
-            &mut |_, pte_ref, entry, level, cursor, next| {
+            VirtAddr::from(invalidated.start),
+            VirtAddr::from(prefix_end),
+            &mut |_, mapping, cursor, next| {
+                let Mapping { pte_value: entry, pte_ref, level } = mapping;
                 invalidated.start = cursor;
                 let base = cursor & !(level.size() - 1);
                 let old = entry.with_present();
@@ -1183,18 +1510,8 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
                 {
                     let plan = boundary_splits[index].as_mut().unwrap();
                     let root = plan.tree.root_paddr();
-                    let mut root_page = plan.tree.root();
                     // SAFETY: the barrier has completed; these pages are still wholly private.
-                    unsafe {
-                        Self::refresh_range_split(
-                            root_page.page_mut(),
-                            old,
-                            level,
-                            cursor - base,
-                            next - base,
-                            flags,
-                        )
-                    };
+                    unsafe { plan.tree.refresh(old, cursor - base, next - base, flags) };
                     pte_ref.store(PTEntry::new_table(
                         A::make_private_address(root),
                         A::PTFlags::parent_flags(),
@@ -1212,15 +1529,15 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
     /// Maps `page` to `frame`, building the tables above it. The
     /// walk that got here reports an entry already present, so what this finds
     /// is either empty or a table it has to descend.
-    pub(crate) fn do_map<PS: PageSize>(
-        map: Mapping<'_, A>,
+    fn do_map<PS: PageSize>(
+        map: UnpublishedMapping<'_, A>,
         page: Page<PS>,
         frame: PhysFrame<PS>,
         flags: A::PTFlags,
         shared: bool,
         parent_flags: A::PTFlags,
     ) -> Result<(), PagingError> {
-        let target = page_level_for_size::<PS>().ok_or(PagingError::InvalidLevel)?;
+        let target = PS::LEVEL;
         let paddr = frame.start_address();
         let map = Self::alloc_pte_down(map, page, A::filter_flags(parent_flags))?;
         if map.level != target {

@@ -1,7 +1,7 @@
 [build]
 target = "x86_64-unknown-none"
 incremental = true
-# The smallest page the kernel maps; see `paging::structs::sizes::MinPageSize`.
+# The regular page size for this target; see `paging::structs::sizes::Regular`.
 # Belongs with the target, because it describes the machine, not the code.
 rustflags = ["--cfg", 'target_min_page="4kib"']
 # rustdoc does not inherit the flags above, and doctests need the same cfg.

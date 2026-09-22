@@ -7,7 +7,6 @@
 //! and grants no aliasing rights over entry contents. Each entry is observed or
 //! changed through its atomic `PTEntryRef`, with writes separately serialized
 //! by the controller when required.
-
 use core::marker::PhantomData;
 use core::ptr::NonNull;
 
@@ -16,18 +15,23 @@ use super::PTPageTree;
 use crate::structs::address::{PhysAddr, VirtAddr};
 use crate::structs::arch_contract::ArchPagingMeta;
 use crate::structs::entry::{PTEntry, PTEntryRef};
-use crate::structs::level::PageLevel;
+use crate::structs::level::{LevelSpec, Lvl, PageLevel};
 use crate::structs::os_contract::PagingAllocator;
 use crate::structs::os_contract::PagingError;
 use crate::structs::page::Page;
-use crate::structs::sizes::{entry_index, PT_ENTRY_COUNT};
-use crate::structs::sizes::{level_for_size, PageSize};
+use crate::structs::policy::KernelPolicy;
+use crate::structs::sizes::PageSize;
+use crate::structs::sizes::{entry_index, Huge, Regular, PT_ENTRY_COUNT};
+use crate::structs::tlb::MayNeedFlush;
+
+fn owns_all_entries(_: usize) -> bool {
+    true
+}
 
 /// A non-owning page pointer; its lifetime pins memory, not entry contents.
-pub(crate) struct PTPagePointer<'tree, A: ArchPagingMeta, P: PagingAllocator> {
+pub(crate) struct PTPagePointer<'tree, A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec> {
     page: NonNull<PTPage<A, P>>,
-    level: PageLevel,
-    marker: PhantomData<&'tree PTPage<A, P>>,
+    marker: PhantomData<(&'tree PTPage<A, P>, L)>,
 }
 
 /// An atomic observation returned by a concurrent page-table walk.
@@ -36,13 +40,46 @@ pub struct WalkResult<A: ArchPagingMeta> {
     level: PageLevel,
 }
 
-/// The internal page and entry where a page-table walk stopped.
-pub(crate) struct WalkPosition<'tree, A: ArchPagingMeta, P: PagingAllocator> {
-    pub(crate) page: PTPagePointer<'tree, A, P>,
+pub(crate) struct WalkStop<'tree, A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec> {
+    pub(crate) page: PTPagePointer<'tree, A, P, L>,
     pub(crate) index: usize,
     page_paddr: Option<PhysAddr>,
-    pub(crate) observed: PTEntry<A>,
+    observed: PTEntry<A>,
 }
+
+/// Dispatches one typed page view to the implementation for its static level.
+pub(crate) trait PageLevelVisitor<'tree, A: ArchPagingMeta, P: PagingAllocator> {
+    type Output;
+
+    fn visit_l0(self, page: PTPagePointer<'tree, A, P, Lvl<0>>) -> Self::Output;
+    fn visit_l1(self, page: PTPagePointer<'tree, A, P, Lvl<1>>) -> Self::Output;
+    fn visit_l2(self, page: PTPagePointer<'tree, A, P, Lvl<2>>) -> Self::Output;
+    fn visit_l3(self, page: PTPagePointer<'tree, A, P, Lvl<3>>) -> Self::Output;
+    fn visit_l4(self, page: PTPagePointer<'tree, A, P, Lvl<4>>) -> Self::Output;
+}
+
+struct FreeChildrenVisitor<F> {
+    owns_entry: F,
+}
+
+struct GrowUninstalledVisitor<A: ArchPagingMeta, PS: PageSize> {
+    target_page: Page<PS>,
+    parent_flags: A::PTFlags,
+}
+
+/// The typed page and entry where a page-table walk stopped.
+pub(crate) enum WalkPosition<'tree, A: ArchPagingMeta, P: PagingAllocator> {
+    Level0(WalkStop<'tree, A, P, Lvl<0>>),
+    Level1(WalkStop<'tree, A, P, Lvl<1>>),
+    Level2(WalkStop<'tree, A, P, Lvl<2>>),
+    Level3(WalkStop<'tree, A, P, Lvl<3>>),
+    Level4(WalkStop<'tree, A, P, Lvl<4>>),
+}
+
+type WalkStep<'tree, A, P, L> = Result<
+    (PTPagePointer<'tree, A, P, <L as WalkLevelImpl>::ChildLevel>, PhysAddr),
+    WalkPosition<'tree, A, P>,
+>;
 
 impl<A: ArchPagingMeta> WalkResult<A> {
     #[inline(always)]
@@ -64,73 +101,453 @@ impl<A: ArchPagingMeta> WalkResult<A> {
 }
 
 impl<'tree, A: ArchPagingMeta, P: PagingAllocator> WalkPosition<'tree, A, P> {
+    #[inline(always)]
+    pub(crate) fn level(&self) -> PageLevel {
+        match self {
+            Self::Level0(_) => PageLevel::Level0,
+            Self::Level1(_) => PageLevel::Level1,
+            Self::Level2(_) => PageLevel::Level2,
+            Self::Level3(_) => PageLevel::Level3,
+            Self::Level4(_) => PageLevel::Level4,
+        }
+    }
+
+    #[inline(always)]
+    pub(crate) fn observed(&self) -> PTEntry<A> {
+        match self {
+            Self::Level0(stop) => stop.observed,
+            Self::Level1(stop) => stop.observed,
+            Self::Level2(stop) => stop.observed,
+            Self::Level3(stop) => stop.observed,
+            Self::Level4(stop) => stop.observed,
+        }
+    }
+
+    #[inline(always)]
+    pub(crate) fn walk(&self, vaddr: VirtAddr) -> WalkPosition<'tree, A, P> {
+        match self {
+            Self::Level0(stop) => stop.page.walk(vaddr),
+            Self::Level1(stop) => stop.page.walk(vaddr),
+            Self::Level2(stop) => stop.page.walk(vaddr),
+            Self::Level3(stop) => stop.page.walk(vaddr),
+            Self::Level4(stop) => stop.page.walk(vaddr),
+        }
+    }
+
     pub(crate) fn entry(&self) -> PTEntryRef<'tree, A> {
-        self.page.entry(self.index)
+        match self {
+            Self::Level0(stop) => stop.page.entry(stop.index),
+            Self::Level1(stop) => stop.page.entry(stop.index),
+            Self::Level2(stop) => stop.page.entry(stop.index),
+            Self::Level3(stop) => stop.page.entry(stop.index),
+            Self::Level4(stop) => stop.page.entry(stop.index),
+        }
     }
 
     pub(crate) fn page_paddr(&self) -> PhysAddr {
-        self.page_paddr.unwrap_or_else(|| self.page.paddr())
+        match self {
+            Self::Level0(stop) => stop.page_paddr.unwrap_or_else(|| stop.page.paddr()),
+            Self::Level1(stop) => stop.page_paddr.unwrap_or_else(|| stop.page.paddr()),
+            Self::Level2(stop) => stop.page_paddr.unwrap_or_else(|| stop.page.paddr()),
+            Self::Level3(stop) => stop.page_paddr.unwrap_or_else(|| stop.page.paddr()),
+            Self::Level4(stop) => stop.page_paddr.unwrap_or_else(|| stop.page.paddr()),
+        }
+    }
+
+    fn set_page_paddr(&mut self, page_paddr: Option<PhysAddr>) {
+        match self {
+            Self::Level0(stop) => stop.page_paddr = page_paddr,
+            Self::Level1(stop) => stop.page_paddr = page_paddr,
+            Self::Level2(stop) => stop.page_paddr = page_paddr,
+            Self::Level3(stop) => stop.page_paddr = page_paddr,
+            Self::Level4(stop) => stop.page_paddr = page_paddr,
+        }
     }
 }
 
-impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
+/// Selects the supported split operation for one statically known leaf level.
+pub(crate) trait LeafSplitLevelImpl: LevelSpec + Sized {
     /// # Safety
-    /// `root_pa` must identify a table at `level`. The root and all reachable
+    /// The entry must stay pinned and exclude software writers.
+    unsafe fn split_leaf_to<A: ArchPagingMeta, P: PagingAllocator, PS: PageSize>(
+        pte_ref: PTEntryRef<'_, A>,
+        page: Page<PS>,
+        all_cpus: bool,
+    ) -> Result<MayNeedFlush<A::TlbFlushTok>, PagingError> {
+        let _ = (pte_ref, page, all_cpus);
+        Err(PagingError::InvalidLevel)
+    }
+
+    /// # Safety
+    /// The entry must stay pinned and exclude software writers.
+    unsafe fn split_leaf_for_region<A: ArchPagingMeta, P: PagingAllocator>(
+        pte_ref: PTEntryRef<'_, A>,
+        vaddr: VirtAddr,
+    ) -> Result<(), PagingError> {
+        let _ = (pte_ref, vaddr);
+        Err(PagingError::InvalidLevel)
+    }
+}
+
+pub(crate) trait WalkLevelImpl: LevelSpec + Sized {
+    type ChildLevel: WalkLevelImpl + LeafSplitLevelImpl;
+
+    fn dispatch<'tree, A, P, V>(page: PTPagePointer<'tree, A, P, Self>, visitor: V) -> V::Output
+    where
+        A: ArchPagingMeta,
+        P: PagingAllocator,
+        V: PageLevelVisitor<'tree, A, P>;
+
+    fn walk<'tree, A: ArchPagingMeta, P: PagingAllocator>(
+        page: PTPagePointer<'tree, A, P, Self>,
+        vaddr: VirtAddr,
+        page_paddr: Option<PhysAddr>,
+    ) -> WalkPosition<'tree, A, P>;
+
+    fn position<'tree, A: ArchPagingMeta, P: PagingAllocator>(
+        page: PTPagePointer<'tree, A, P, Self>,
+        index: usize,
+        page_paddr: Option<PhysAddr>,
+        observed: PTEntry<A>,
+    ) -> WalkPosition<'tree, A, P>;
+}
+
+/// A supported static root level for [`crate::pagetable::PageTable`].
+#[allow(private_bounds)]
+pub trait WalkLevel: WalkLevelImpl + LeafSplitLevelImpl {}
+
+impl<L: WalkLevelImpl + LeafSplitLevelImpl> WalkLevel for L {}
+
+impl LeafSplitLevelImpl for Lvl<0> {}
+
+impl LeafSplitLevelImpl for Lvl<1> {
+    unsafe fn split_leaf_to<A: ArchPagingMeta, P: PagingAllocator, PS: PageSize>(
+        pte_ref: PTEntryRef<'_, A>,
+        page: Page<PS>,
+        all_cpus: bool,
+    ) -> Result<MayNeedFlush<A::TlbFlushTok>, PagingError> {
+        unsafe { PTPage::<A, P>::split_leaf_to::<Self, PS>(pte_ref, page, all_cpus) }
+    }
+
+    unsafe fn split_leaf_for_region<A: ArchPagingMeta, P: PagingAllocator>(
+        pte_ref: PTEntryRef<'_, A>,
+        vaddr: VirtAddr,
+    ) -> Result<(), PagingError> {
+        unsafe {
+            PTPage::<A, P>::split_leaf_to::<Self, Regular>(
+                pte_ref,
+                Page::<Regular>::containing_address(vaddr),
+                true,
+            )
+        }
+        .map(|_| ())
+    }
+}
+
+impl LeafSplitLevelImpl for Lvl<2> {
+    unsafe fn split_leaf_to<A: ArchPagingMeta, P: PagingAllocator, PS: PageSize>(
+        pte_ref: PTEntryRef<'_, A>,
+        page: Page<PS>,
+        all_cpus: bool,
+    ) -> Result<MayNeedFlush<A::TlbFlushTok>, PagingError> {
+        unsafe { PTPage::<A, P>::split_leaf_to::<Self, PS>(pte_ref, page, all_cpus) }
+    }
+
+    unsafe fn split_leaf_for_region<A: ArchPagingMeta, P: PagingAllocator>(
+        pte_ref: PTEntryRef<'_, A>,
+        vaddr: VirtAddr,
+    ) -> Result<(), PagingError> {
+        unsafe {
+            PTPage::<A, P>::split_leaf_to::<Self, Huge>(
+                pte_ref,
+                Page::<Huge>::containing_address(vaddr),
+                true,
+            )
+        }
+        .map(|_| ())
+    }
+}
+
+impl LeafSplitLevelImpl for Lvl<3> {}
+
+impl LeafSplitLevelImpl for Lvl<4> {}
+
+impl WalkLevelImpl for Lvl<0> {
+    type ChildLevel = Lvl<0>;
+
+    #[inline(always)]
+    fn dispatch<'tree, A, P, V>(page: PTPagePointer<'tree, A, P, Self>, visitor: V) -> V::Output
+    where
+        A: ArchPagingMeta,
+        P: PagingAllocator,
+        V: PageLevelVisitor<'tree, A, P>,
+    {
+        visitor.visit_l0(page)
+    }
+
+    #[inline(always)]
+    fn walk<'tree, A: ArchPagingMeta, P: PagingAllocator>(
+        page: PTPagePointer<'tree, A, P, Self>,
+        vaddr: VirtAddr,
+        page_paddr: Option<PhysAddr>,
+    ) -> WalkPosition<'tree, A, P> {
+        page.finish_at(vaddr, page_paddr)
+    }
+
+    #[inline(always)]
+    fn position<'tree, A: ArchPagingMeta, P: PagingAllocator>(
+        page: PTPagePointer<'tree, A, P, Self>,
+        index: usize,
+        page_paddr: Option<PhysAddr>,
+        observed: PTEntry<A>,
+    ) -> WalkPosition<'tree, A, P> {
+        WalkPosition::Level0(WalkStop { page, index, page_paddr, observed })
+    }
+}
+
+#[inline(always)]
+fn walk_inner<'tree, A: ArchPagingMeta, P: PagingAllocator, L: WalkLevelImpl>(
+    page: PTPagePointer<'tree, A, P, L>,
+    vaddr: VirtAddr,
+    page_paddr: Option<PhysAddr>,
+) -> WalkPosition<'tree, A, P>
+where
+{
+    match page.step_at(vaddr) {
+        Ok((child, child_paddr)) => L::ChildLevel::walk(child, vaddr, Some(child_paddr)),
+        Err(mut result) => {
+            result.set_page_paddr(page_paddr);
+            result
+        }
+    }
+}
+
+impl WalkLevelImpl for Lvl<1> {
+    type ChildLevel = Lvl<0>;
+
+    #[inline(always)]
+    fn dispatch<'tree, A, P, V>(page: PTPagePointer<'tree, A, P, Self>, visitor: V) -> V::Output
+    where
+        A: ArchPagingMeta,
+        P: PagingAllocator,
+        V: PageLevelVisitor<'tree, A, P>,
+    {
+        visitor.visit_l1(page)
+    }
+
+    #[inline(always)]
+    fn walk<'tree, A: ArchPagingMeta, P: PagingAllocator>(
+        page: PTPagePointer<'tree, A, P, Self>,
+        vaddr: VirtAddr,
+        page_paddr: Option<PhysAddr>,
+    ) -> WalkPosition<'tree, A, P> {
+        walk_inner(page, vaddr, page_paddr)
+    }
+
+    #[inline(always)]
+    fn position<'tree, A: ArchPagingMeta, P: PagingAllocator>(
+        page: PTPagePointer<'tree, A, P, Self>,
+        index: usize,
+        page_paddr: Option<PhysAddr>,
+        observed: PTEntry<A>,
+    ) -> WalkPosition<'tree, A, P> {
+        WalkPosition::Level1(WalkStop { page, index, page_paddr, observed })
+    }
+}
+
+impl WalkLevelImpl for Lvl<2> {
+    type ChildLevel = Lvl<1>;
+
+    #[inline(always)]
+    fn dispatch<'tree, A, P, V>(page: PTPagePointer<'tree, A, P, Self>, visitor: V) -> V::Output
+    where
+        A: ArchPagingMeta,
+        P: PagingAllocator,
+        V: PageLevelVisitor<'tree, A, P>,
+    {
+        visitor.visit_l2(page)
+    }
+
+    #[inline(always)]
+    fn walk<'tree, A: ArchPagingMeta, P: PagingAllocator>(
+        page: PTPagePointer<'tree, A, P, Self>,
+        vaddr: VirtAddr,
+        page_paddr: Option<PhysAddr>,
+    ) -> WalkPosition<'tree, A, P> {
+        walk_inner(page, vaddr, page_paddr)
+    }
+
+    #[inline(always)]
+    fn position<'tree, A: ArchPagingMeta, P: PagingAllocator>(
+        page: PTPagePointer<'tree, A, P, Self>,
+        index: usize,
+        page_paddr: Option<PhysAddr>,
+        observed: PTEntry<A>,
+    ) -> WalkPosition<'tree, A, P> {
+        WalkPosition::Level2(WalkStop { page, index, page_paddr, observed })
+    }
+}
+
+impl WalkLevelImpl for Lvl<3> {
+    type ChildLevel = Lvl<2>;
+
+    #[inline(always)]
+    fn dispatch<'tree, A, P, V>(page: PTPagePointer<'tree, A, P, Self>, visitor: V) -> V::Output
+    where
+        A: ArchPagingMeta,
+        P: PagingAllocator,
+        V: PageLevelVisitor<'tree, A, P>,
+    {
+        visitor.visit_l3(page)
+    }
+
+    #[inline(always)]
+    fn walk<'tree, A: ArchPagingMeta, P: PagingAllocator>(
+        page: PTPagePointer<'tree, A, P, Self>,
+        vaddr: VirtAddr,
+        page_paddr: Option<PhysAddr>,
+    ) -> WalkPosition<'tree, A, P> {
+        walk_inner(page, vaddr, page_paddr)
+    }
+
+    #[inline(always)]
+    fn position<'tree, A: ArchPagingMeta, P: PagingAllocator>(
+        page: PTPagePointer<'tree, A, P, Self>,
+        index: usize,
+        page_paddr: Option<PhysAddr>,
+        observed: PTEntry<A>,
+    ) -> WalkPosition<'tree, A, P> {
+        WalkPosition::Level3(WalkStop { page, index, page_paddr, observed })
+    }
+}
+
+impl WalkLevelImpl for Lvl<4> {
+    type ChildLevel = Lvl<3>;
+
+    #[inline(always)]
+    fn dispatch<'tree, A, P, V>(page: PTPagePointer<'tree, A, P, Self>, visitor: V) -> V::Output
+    where
+        A: ArchPagingMeta,
+        P: PagingAllocator,
+        V: PageLevelVisitor<'tree, A, P>,
+    {
+        visitor.visit_l4(page)
+    }
+
+    #[inline(always)]
+    fn walk<'tree, A: ArchPagingMeta, P: PagingAllocator>(
+        page: PTPagePointer<'tree, A, P, Self>,
+        vaddr: VirtAddr,
+        page_paddr: Option<PhysAddr>,
+    ) -> WalkPosition<'tree, A, P> {
+        walk_inner(page, vaddr, page_paddr)
+    }
+
+    #[inline(always)]
+    fn position<'tree, A: ArchPagingMeta, P: PagingAllocator>(
+        page: PTPagePointer<'tree, A, P, Self>,
+        index: usize,
+        page_paddr: Option<PhysAddr>,
+        observed: PTEntry<A>,
+    ) -> WalkPosition<'tree, A, P> {
+        WalkPosition::Level4(WalkStop { page, index, page_paddr, observed })
+    }
+}
+
+impl<'tree, A, P, F> PageLevelVisitor<'tree, A, P> for FreeChildrenVisitor<F>
+where
+    A: ArchPagingMeta,
+    P: PagingAllocator,
+    F: Fn(usize) -> bool,
+{
+    type Output = ();
+
+    fn visit_l0(self, page: PTPagePointer<'tree, A, P, Lvl<0>>) {
+        for index in 0..PT_ENTRY_COUNT {
+            if (self.owns_entry)(index) {
+                page.swap(index, PTEntry::empty());
+            }
+        }
+    }
+
+    fn visit_l1(self, page: PTPagePointer<'tree, A, P, Lvl<1>>) {
+        unsafe { page.free_inner(self.owns_entry) };
+    }
+
+    fn visit_l2(self, page: PTPagePointer<'tree, A, P, Lvl<2>>) {
+        unsafe { page.free_inner(self.owns_entry) };
+    }
+
+    fn visit_l3(self, page: PTPagePointer<'tree, A, P, Lvl<3>>) {
+        unsafe { page.free_inner(self.owns_entry) };
+    }
+
+    fn visit_l4(self, page: PTPagePointer<'tree, A, P, Lvl<4>>) {
+        unsafe { page.free_inner(self.owns_entry) };
+    }
+}
+
+impl<'tree, A, P, PS> PageLevelVisitor<'tree, A, P> for GrowUninstalledVisitor<A, PS>
+where
+    A: ArchPagingMeta,
+    P: PagingAllocator,
+    PS: PageSize,
+{
+    type Output = Result<(), PagingError>;
+
+    fn visit_l0(self, _: PTPagePointer<'tree, A, P, Lvl<0>>) -> Self::Output {
+        Ok(())
+    }
+
+    fn visit_l1(self, page: PTPagePointer<'tree, A, P, Lvl<1>>) -> Self::Output {
+        page.grow_inner(self.target_page, self.parent_flags)
+    }
+
+    fn visit_l2(self, page: PTPagePointer<'tree, A, P, Lvl<2>>) -> Self::Output {
+        page.grow_inner(self.target_page, self.parent_flags)
+    }
+
+    fn visit_l3(self, page: PTPagePointer<'tree, A, P, Lvl<3>>) -> Self::Output {
+        page.grow_inner(self.target_page, self.parent_flags)
+    }
+
+    fn visit_l4(self, page: PTPagePointer<'tree, A, P, Lvl<4>>) -> Self::Output {
+        page.grow_inner(self.target_page, self.parent_flags)
+    }
+}
+
+impl<'tree, A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec> PTPagePointer<'tree, A, P, L> {
+    /// # Safety
+    /// `root_pa` must identify a table at `L`. The root and all reachable
     /// table pages and links must remain well-formed, initialized, writable and
     /// pinned for the views that can reach them.
     /// Entries must be atomic-aligned; conflicting accesses must be atomic,
     /// without ordinary references into live pages. Exclusive, quiesced teardown
     /// may reclaim descendants only after ending their views and unlinking them.
-    pub(crate) unsafe fn from_root(root_pa: PhysAddr, level: PageLevel) -> Self {
-        Self::resolve(root_pa, level)
+    pub(crate) unsafe fn from_root(root_pa: PhysAddr) -> Self {
+        Self::resolve(root_pa)
     }
 
     #[inline(always)]
-    fn resolve(paddr: PhysAddr, level: PageLevel) -> Self {
+    fn resolve(paddr: PhysAddr) -> Self {
         let vaddr = P::paddr_to_vaddr(paddr);
-        Self::from_vaddr(vaddr, level)
+        Self::from_vaddr(vaddr)
     }
 
     #[inline(always)]
-    fn from_vaddr(vaddr: VirtAddr, level: PageLevel) -> Self {
+    fn from_vaddr(vaddr: VirtAddr) -> Self {
         let page = vaddr.as_mut_ptr();
-        Self { page: NonNull::new(page).expect("null page-table view"), level, marker: PhantomData }
+        Self { page: NonNull::new(page).expect("null page-table view"), marker: PhantomData }
     }
 
-    /// Clears selected entries and frees their descendant tables, not data frames.
-    /// # Safety
-    /// Selected subtrees must be exclusively owned and quiesced, without
-    /// surviving descendant references. All descendants must belong to `P`.
-    pub(crate) unsafe fn free_children(&self, owns_entry: impl Fn(usize) -> bool) {
-        for index in 0..PT_ENTRY_COUNT {
-            if !owns_entry(index) {
-                continue;
-            }
-            if self.level.is_leaf() {
-                self.store(index, PTEntry::empty());
-                continue;
-            }
-            let entry = self.load(index);
-            let child_pa = if entry.is_table(self.level) {
-                let paddr = PhysAddr::from(entry.address());
-                // SAFETY: selected descendants are exclusively owned and fully quiesced.
-                let child = unsafe { &mut *P::paddr_to_vaddr(paddr).as_mut_ptr::<PTPage<A, P>>() };
-                unsafe { child.free_owned_children(self.level.child().unwrap(), true) };
-                Some(paddr)
-            } else {
-                None
-            };
-            self.swap(index, PTEntry::empty());
-            if let Some(paddr) = child_pa {
-                // SAFETY: the child reference has ended and its parent link is cleared.
-                unsafe { P::deallocate_table_page(paddr) };
-            }
-        }
+    #[inline(always)]
+    pub(super) fn duplicate(&self) -> Self {
+        Self { page: self.page, marker: PhantomData }
     }
 
     #[inline(always)]
     pub(crate) fn level(&self) -> PageLevel {
-        self.level
+        L::LEVEL
     }
 
     pub(crate) fn paddr(&self) -> PhysAddr {
@@ -138,95 +555,22 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
     }
 
     #[inline(always)]
-    pub(crate) fn walk(&self, vaddr: VirtAddr) -> WalkPosition<'tree, A, P> {
-        let page = Self { page: self.page, level: self.level, marker: PhantomData };
-        match page.level {
-            PageLevel::Level0 => Self::walk_level::<0>(page, vaddr, None),
-            PageLevel::Level1 => Self::walk_level::<1>(page, vaddr, None),
-            PageLevel::Level2 => Self::walk_level::<2>(page, vaddr, None),
-            PageLevel::Level3 => Self::walk_level::<3>(page, vaddr, None),
-            PageLevel::Level4 => Self::walk_level::<4>(page, vaddr, None),
-        }
+    pub(crate) fn walk(&self, vaddr: VirtAddr) -> WalkPosition<'tree, A, P>
+    where
+        L: WalkLevelImpl,
+    {
+        L::walk(self.duplicate(), vaddr, None)
     }
 
     #[inline(always)]
-    fn walk_child<const LEVEL: usize>(
-        page: Self,
-        vaddr: VirtAddr,
-        page_paddr: PhysAddr,
-    ) -> WalkPosition<'tree, A, P> {
-        match LEVEL {
-            1 => Self::walk_level::<0>(page, vaddr, Some(page_paddr)),
-            2 => Self::walk_level::<1>(page, vaddr, Some(page_paddr)),
-            3 => Self::walk_level::<2>(page, vaddr, Some(page_paddr)),
-            4 => Self::walk_level::<3>(page, vaddr, Some(page_paddr)),
-            _ => unreachable!("leaf page has no child"),
-        }
-    }
-
-    #[inline(always)]
-    fn walk_level<const LEVEL: usize>(
-        page: Self,
-        vaddr: VirtAddr,
-        page_paddr: Option<PhysAddr>,
-    ) -> WalkPosition<'tree, A, P> {
-        let level = PageLevel::at::<LEVEL>();
-        if LEVEL == 0 {
-            return page.finish_at(vaddr, level, page_paddr);
-        }
-        let child_level = level.child().unwrap();
-        match page.step_at(vaddr, level, child_level) {
-            Ok((child, child_paddr)) => Self::walk_child::<LEVEL>(child, vaddr, child_paddr),
-            Err(mut result) => {
-                result.page_paddr = page_paddr;
-                result
-            }
-        }
-    }
-
-    #[inline(always)]
-    fn step_at(
-        self,
-        vaddr: VirtAddr,
-        level: PageLevel,
-        child_level: PageLevel,
-    ) -> Result<(Self, PhysAddr), WalkPosition<'tree, A, P>> {
-        debug_assert_eq!(self.level, level);
+    fn finish_at(self, vaddr: VirtAddr, page_paddr: Option<PhysAddr>) -> WalkPosition<'tree, A, P>
+    where
+        L: WalkLevelImpl,
+    {
+        let level = self.level();
         let index = entry_index(vaddr, level);
         let observed = self.load(index);
-        if observed.is_table(level) {
-            let paddr = PhysAddr::from(observed.address());
-            Ok((Self::resolve(paddr, child_level), paddr))
-        } else {
-            Err(WalkPosition { page: self, index, page_paddr: None, observed })
-        }
-    }
-
-    #[inline(always)]
-    fn finish_at(
-        self,
-        vaddr: VirtAddr,
-        level: PageLevel,
-        page_paddr: Option<PhysAddr>,
-    ) -> WalkPosition<'tree, A, P> {
-        debug_assert_eq!(self.level, level);
-        let index = entry_index(vaddr, level);
-        let observed = self.load(index);
-        WalkPosition { page: self, index, page_paddr, observed }
-    }
-
-    /// Returns the exact stopping observation, even if a table is published next.
-    pub(crate) fn child(&self, index: usize) -> Result<Self, PTEntry<A>> {
-        self.child_from_observed(self.load(index))
-    }
-
-    #[inline(always)]
-    pub(crate) fn child_from_observed(&self, entry: PTEntry<A>) -> Result<Self, PTEntry<A>> {
-        if entry.is_table(self.level) {
-            Ok(Self::resolve(PhysAddr::from(entry.address()), self.level.child().unwrap()))
-        } else {
-            Err(entry)
-        }
+        L::position(self, index, page_paddr, observed)
     }
 
     #[inline(always)]
@@ -249,27 +593,102 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
         self.entry(index).swap(value)
     }
 
+    /// # Safety
+    /// The page must be unpublished and exclusively accessible for the borrow.
+    pub(super) unsafe fn page_mut(&mut self) -> &mut PTPage<A, P> {
+        unsafe { self.page.as_mut() }
+    }
+
     pub(super) fn entries_satisfy(&self, empty_entry: &impl Fn(PTEntry<A>) -> bool) -> bool {
         (0..PT_ENTRY_COUNT).all(|index| empty_entry(self.load(index)))
     }
+}
 
-    /// Adds tables to an uninstalled tree without splitting an existing leaf.
+impl<'tree, A: ArchPagingMeta, P: PagingAllocator, L: WalkLevelImpl> PTPagePointer<'tree, A, P, L> {
+    #[inline(always)]
+    fn step_at(self, vaddr: VirtAddr) -> WalkStep<'tree, A, P, L> {
+        let level = self.level();
+        let index = entry_index(vaddr, level);
+        let observed = self.load(index);
+        if observed.is_present_table(level) {
+            let paddr = PhysAddr::from(observed.address());
+            Ok((PTPagePointer::resolve(paddr), paddr))
+        } else {
+            Err(L::position(self, index, None, observed))
+        }
+    }
+}
+
+impl<'tree, A: ArchPagingMeta, P: PagingAllocator, L: WalkLevelImpl> PTPagePointer<'tree, A, P, L> {
+    /// Resolves the observed child table without reloading its parent entry.
+    #[inline(always)]
+    pub(crate) fn child_from_observed(
+        &self,
+        entry: PTEntry<A>,
+    ) -> Result<PTPagePointer<'tree, A, P, L::ChildLevel>, PTEntry<A>> {
+        if entry.is_present_table(self.level()) {
+            Ok(PTPagePointer::resolve(PhysAddr::from(entry.address())))
+        } else {
+            Err(entry)
+        }
+    }
+
+    /// Clears selected entries and frees their descendant tables, not data frames.
+    /// # Safety
+    /// Selected subtrees must be exclusively owned and quiesced, without
+    /// surviving descendant references. All descendants must belong to `P`.
+    pub(crate) unsafe fn free_children(&self, owns_entry: impl Fn(usize) -> bool) {
+        L::dispatch(self.duplicate(), FreeChildrenVisitor { owns_entry });
+    }
+
+    unsafe fn free_inner(&self, owns_entry: impl Fn(usize) -> bool) {
+        for index in 0..PT_ENTRY_COUNT {
+            if !owns_entry(index) {
+                continue;
+            }
+            let entry = self.load(index);
+            let child_pa = if entry.is_present_table(L::LEVEL) {
+                let child = self
+                    .child_from_observed(entry)
+                    .unwrap_or_else(|_| unreachable!("observed table entry must resolve"));
+                let paddr = child.paddr();
+                // SAFETY: selected descendants are exclusively owned and fully quiesced.
+                unsafe { child.free_children(owns_all_entries as fn(usize) -> bool) };
+                Some(paddr)
+            } else {
+                None
+            };
+            self.swap(index, PTEntry::empty());
+            if let Some(paddr) = child_pa {
+                // SAFETY: the child view has ended and the parent link is clear.
+                unsafe { P::deallocate_table_page(paddr) };
+            }
+        }
+    }
+
     pub(super) fn grow_uninstalled<PS: PageSize>(
         &self,
         target_page: Page<PS>,
         parent_flags: A::PTFlags,
     ) -> Result<(), PagingError> {
-        let target = level_for_size::<PS>().ok_or(PagingError::InvalidLevel)?;
-        if self.level <= target {
+        L::dispatch(self.duplicate(), GrowUninstalledVisitor { target_page, parent_flags })
+    }
+
+    fn grow_inner<PS: PageSize>(
+        &self,
+        target_page: Page<PS>,
+        parent_flags: A::PTFlags,
+    ) -> Result<(), PagingError> {
+        if L::LEVEL == PS::LEVEL {
             return Ok(());
         }
-        let index = entry_index(target_page.start_address(), self.level);
-        match self.child(index) {
+        let index = entry_index(target_page.start_address(), self.level());
+        let entry = self.load(index);
+        match self.child_from_observed(entry) {
             Ok(child) => child.grow_uninstalled(target_page, parent_flags),
             Err(entry) if entry.present() => Err(PagingError::NotLeafEntry),
             Err(_) => {
-                let child_level = self.level.child().unwrap();
-                let child = PTPageTree::<A, P>::new(child_level)?;
+                let child = PTPageTree::<A, P, L::ChildLevel>::new_root(KernelPolicy)?;
                 child.root().grow_uninstalled(target_page, parent_flags)?;
                 self.store(
                     index,
@@ -279,11 +698,5 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator> PTPagePointer<'tree, A, P> {
                 Ok(())
             }
         }
-    }
-
-    /// # Safety
-    /// The page must be unpublished and exclusively accessible for the borrow.
-    pub(super) unsafe fn page_mut(&mut self) -> &mut PTPage<A, P> {
-        unsafe { self.page.as_mut() }
     }
 }

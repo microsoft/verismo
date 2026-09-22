@@ -150,8 +150,8 @@ fn split_and_protect_preserve_neighbors_and_tlb_scope() {
     let inner = table.inner.lock();
     inner
         .map(
-            paging::page::Page::<paging::sizes::Size2MiB>::from_start_address(address).unwrap(),
-            paging::frame::PhysFrame::<paging::sizes::Size2MiB>::from_start_address(physical)
+            paging::page::Page::<paging::sizes::Huge>::from_start_address(address).unwrap(),
+            paging::frame::PhysFrame::<paging::sizes::Huge>::from_start_address(physical)
                 .unwrap(),
             flags,
             false,
@@ -163,7 +163,7 @@ fn split_and_protect_preserve_neighbors_and_tlb_scope() {
     let flush_start = FLUSHES.lock().len();
     let flush = inner
         .set_flags(
-            paging::page::Page::<paging::sizes::Size4KiB>::from_start_address(protected).unwrap(),
+            paging::page::Page::<paging::sizes::Regular>::from_start_address(protected).unwrap(),
             flags - PTEntryFlags::WRITABLE,
             FLUSH_ALL_CPUS,
         )
@@ -185,14 +185,13 @@ fn split_and_protect_preserve_neighbors_and_tlb_scope() {
 
     inner
         .split(
-            PagingPage::<PagingSize4KiB>::containing_address(address),
+            PagingPage::<PagingHuge>::containing_address(address),
             FLUSH_ALL_CPUS,
         )
-        .unwrap()
-        .expect_no_flush();
+        .expect_err("the mapping is already finer than Huge");
     let flush = inner
         .set_flags(
-            paging::page::Page::<paging::sizes::Size4KiB>::from_start_address(protected).unwrap(),
+            paging::page::Page::<paging::sizes::Regular>::from_start_address(protected).unwrap(),
             flags,
             FLUSH_ALL_CPUS,
         )
@@ -454,11 +453,11 @@ fn boot_import_preserves_restrictive_kernel_subtrees_and_rejects_user_faults_the
         .inner
         .lock()
         .map_with_parent_flags(
-            paging::page::Page::<paging::sizes::Size4KiB>::from_start_address(
+            paging::page::Page::<paging::sizes::Regular>::from_start_address(
                 kernel_address.into(),
             )
             .unwrap(),
-            paging::frame::PhysFrame::<paging::sizes::Size4KiB>::from_start_address(
+            paging::frame::PhysFrame::<paging::sizes::Regular>::from_start_address(
                 (physical.as_u64() as usize).into(),
             )
             .unwrap(),
@@ -498,11 +497,11 @@ fn boot_import_preserves_restrictive_kernel_subtrees_and_rejects_user_faults_the
         .inner
         .lock()
         .unmap(
-            paging::page::Page::<paging::sizes::Size4KiB>::from_start_address(
+            paging::page::Page::<paging::sizes::Regular>::from_start_address(
                 kernel_address.into(),
             )
             .unwrap(),
-            FLUSH_ALL_CPUS,
+            Some(FLUSH_ALL_CPUS),
         )
         .unwrap();
     flush_local::<MockKernel>(flush);
@@ -517,8 +516,8 @@ fn range_split_postflush_holds_whole_content_domain() {
     let inner = table.inner.lock();
     inner
         .map(
-            paging::page::Page::<paging::sizes::Size2MiB>::from_start_address(address).unwrap(),
-            paging::frame::PhysFrame::<paging::sizes::Size2MiB>::from_start_address(
+            paging::page::Page::<paging::sizes::Huge>::from_start_address(address).unwrap(),
+            paging::frame::PhysFrame::<paging::sizes::Huge>::from_start_address(
                 0x5000_0000usize.into(),
             )
             .unwrap(),

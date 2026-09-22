@@ -114,16 +114,19 @@ and finer subtrees are never replaced by path allocation.
 
 Both controllers contain a private `PTPageTree<A, P, L, S>` that stores the root
 and ownership policy. Its allocator parameter names a stateless global provider.
-Its level type `L: LevelSpec` has zero-sized
+Its level type `L: WalkLevel` has zero-sized
 storage: the root level comes from `L::LEVEL`, with no runtime level field.
 The concurrent controller additionally retains its content lock and metadata
 marker. Neither controller duplicates the root or policy.
 
-Private preparations use the same owner as `PTPageTree<A, P>`, defaulting to
-`PageLevel` and `KernelPolicy`. Their runtime root level is needed because a
-walk discovers the missing subtree's level dynamically. A small internal
-`TreeLevel` trait selects zero-sized or runtime level storage; traversal still
-uses runtime node references without type-dispatch macros.
+Private preparations also use a statically leveled
+`PTPageTree<A, P, L, KernelPolicy>`. Walk positions dispatch once to the
+observed typed parent, then subtree growth and traversal recurse through
+`PTPagePointer<L::ChildLevel>`. Boundary range edits retain a small staged-tree
+enum because the live leaf level is observed at runtime; each variant owns a
+typed tree. Mapping, unmapping, sweeping, validation, reclamation, teardown,
+split construction, and split refresh all recurse through statically selected
+child levels.
 
 The allocator is a stateless type-level provider backed by one global allocation
 and address-translation domain. `new` allocates a zeroed root rather than accepting
@@ -281,9 +284,9 @@ that obligation before propagating the error, for example:
 
 ```rust
 use paging::address::VirtAddr;
-use paging::level::LevelSpec;
 use paging::os_contract::{PagingError, PagingAllocator};
 use paging::pagetable::{LockSpec, PageTable};
+use paging::ptpage::WalkLevel;
 use paging::ArchPagingMeta;
 
 fn update_flags<A, P, L, W>(
@@ -295,7 +298,7 @@ fn update_flags<A, P, L, W>(
 where
     A: ArchPagingMeta,
     P: PagingAllocator,
-    L: LevelSpec,
+    L: WalkLevel,
     W: LockSpec<()>,
 {
     let (result, pending) = table.set_flags_range(start, end, flags, true);
@@ -479,16 +482,16 @@ Cleanup cannot be called through a shared tree borrow:
 
 ```compile_fail,E0596
 use paging::address::VirtAddr;
-use paging::level::LevelSpec;
 use paging::os_contract::PagingAllocator;
 use paging::pagetable::{LockSpec, PageTable};
+use paging::ptpage::WalkLevel;
 use paging::ArchPagingMeta;
 
 fn cleanup<A, P, L, W>(table: &PageTable<A, P, L, W>, addr: VirtAddr)
 where
     A: ArchPagingMeta,
     P: PagingAllocator,
-    L: LevelSpec,
+    L: WalkLevel,
     W: LockSpec<()>,
 {
     unsafe { table.free_page_table_by_addr(addr) };
@@ -509,13 +512,13 @@ A user controller cannot expose a mutable raw entry:
 
 ```compile_fail,E0599
 use paging::address::VirtAddr;
-use paging::level::LevelSpec;
 use paging::os_contract::PagingAllocator;
 use paging::pagetable::{LockSpec, UserPageTable};
 use paging::policy::RootRange;
+use paging::ptpage::WalkLevel;
 use paging::ArchPagingMeta;
 
-fn raw_edit<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, W: LockSpec<()>>(
+fn raw_edit<A: ArchPagingMeta, P: PagingAllocator, L: WalkLevel, W: LockSpec<()>>(
     user: &mut UserPageTable<'_, A, P, L, W, RootRange<256, 512>>,
     addr: VirtAddr,
 ) {
@@ -527,13 +530,13 @@ Nor can it attach an unchecked subtree:
 
 ```compile_fail,E0599
 use paging::address::PhysAddr;
-use paging::level::LevelSpec;
 use paging::os_contract::PagingAllocator;
 use paging::pagetable::{LockSpec, UserPageTable};
 use paging::policy::RootRange;
+use paging::ptpage::WalkLevel;
 use paging::ArchPagingMeta;
 
-fn attach<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, W: LockSpec<()>>(
+fn attach<A: ArchPagingMeta, P: PagingAllocator, L: WalkLevel, W: LockSpec<()>>(
     user: &mut UserPageTable<'_, A, P, L, W, RootRange<256, 512>>,
     child: PhysAddr,
 ) {
@@ -544,13 +547,13 @@ fn attach<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, W: LockSpec<()>>(
 The kernel owner cannot be dropped before its user controller:
 
 ```compile_fail,E0505
-use paging::level::LevelSpec;
 use paging::os_contract::PagingAllocator;
 use paging::pagetable::{KernelPageTable, LockSpec};
 use paging::policy::RootRange;
+use paging::ptpage::WalkLevel;
 use paging::ArchPagingMeta;
 
-fn retire<A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec, W: LockSpec<()>>(
+fn retire<A: ArchPagingMeta, P: PagingAllocator, L: WalkLevel, W: LockSpec<()>>(
     kernel: KernelPageTable<A, P, L, W>,
     wperms: W,
 ) {

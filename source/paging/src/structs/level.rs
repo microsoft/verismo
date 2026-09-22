@@ -1,7 +1,7 @@
 //! Which level of the tree a table page sits at, as a value ([`PageLevel`]) and
 //! as a type ([`Lvl`]). Level 0 is the leaf; the root of a four-level tree is
 //! level 3.
-use crate::structs::sizes::level_size;
+use crate::structs::sizes::{PAGE_OFFSET_WIDTH, PAGE_TABLE_INDEX_WIDTH};
 
 /// The level of a page-table page, counted from the leaf. x86 walks at most
 /// five levels.
@@ -19,6 +19,18 @@ impl PageLevel {
     #[inline(always)]
     pub const fn depth(&self) -> usize {
         *self as usize
+    }
+
+    /// The bit shift corresponding to this level's address span.
+    #[inline(always)]
+    pub const fn shift(&self) -> usize {
+        PAGE_OFFSET_WIDTH + self.depth() * PAGE_TABLE_INDEX_WIDTH
+    }
+
+    /// How much address space one entry at this level covers.
+    #[inline(always)]
+    pub const fn size(&self) -> usize {
+        1usize << self.shift()
     }
 
     /// The level one step down, or `None` at the leaf. Refusing to descend past
@@ -47,12 +59,6 @@ impl PageLevel {
         }
     }
 
-    /// How much address space one entry at this level covers.
-    #[inline(always)]
-    pub fn size(&self) -> usize {
-        level_size(*self)
-    }
-
     #[inline(always)]
     pub fn is_leaf(&self) -> bool {
         matches!(self, PageLevel::Level0)
@@ -73,13 +79,11 @@ impl PageLevel {
 
 /// A level of the tree as a type: `L` is the depth above the leaf, so `Lvl<0>`
 /// is the leaf and `Lvl<4>` the root of a five-level tree. The numbering
-/// matches `PageLevel::depth` and the shift in `sizes::shift_at`.
+/// matches [`PageLevel::depth`].
 pub struct Lvl<const L: usize>;
 
-/// What a level marker knows: its depth, and the same level as a value.
+/// A page-table level known at compile time.
 pub trait LevelSpec: 'static {
-    const DEPTH: usize;
-
     const LEVEL: PageLevel;
 }
 
@@ -91,14 +95,10 @@ pub trait InnerLevel: LevelSpec {
 }
 
 impl LevelSpec for Lvl<0> {
-    const DEPTH: usize = 0;
-
     const LEVEL: PageLevel = PageLevel::Level0;
 }
 
 impl LevelSpec for Lvl<1> {
-    const DEPTH: usize = 1;
-
     const LEVEL: PageLevel = PageLevel::Level1;
 }
 
@@ -107,8 +107,6 @@ impl InnerLevel for Lvl<1> {
 }
 
 impl LevelSpec for Lvl<2> {
-    const DEPTH: usize = 2;
-
     const LEVEL: PageLevel = PageLevel::Level2;
 }
 
@@ -117,8 +115,6 @@ impl InnerLevel for Lvl<2> {
 }
 
 impl LevelSpec for Lvl<3> {
-    const DEPTH: usize = 3;
-
     const LEVEL: PageLevel = PageLevel::Level3;
 }
 
@@ -127,8 +123,6 @@ impl InnerLevel for Lvl<3> {
 }
 
 impl LevelSpec for Lvl<4> {
-    const DEPTH: usize = 4;
-
     const LEVEL: PageLevel = PageLevel::Level4;
 }
 

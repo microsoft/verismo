@@ -47,6 +47,6 @@ unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(verus_only)',
     'cfg(verus_keep_ghost)',
     'cfg(verus_keep_ghost_body)',
-    # The smallest page this build maps; see `structs::sizes::MinPageSize`.
+    # The regular page size for this target; see `structs::sizes::Regular`.
     'cfg(target_min_page, values("4kib", "2mib", "1gib"))',
 ] }

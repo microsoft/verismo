@@ -18,7 +18,7 @@ use std::time::Duration;
 use common::{load_entry, Allocator, Arena, ARENA};
 use paging::address::{Address, PhysAddr, VirtAddr};
 use paging::entry::PTEntry;
-use paging::level::{Lvl, PageLevel};
+use paging::level::{LevelSpec, Lvl, PageLevel};
 use paging::os_contract::{DirectMappedAllocator, PagingError};
 use paging::pagetable::LockSpec;
 use paging::pagetable::PageTable;
@@ -73,6 +73,23 @@ type Flush = MayNeedFlush<X86TlbFlushTok<Tagged>>;
 type Table = PageTable<Arch, BudgetAllocator, Lvl<3>, WholeTreeLock>;
 type TwoLevelTable = PageTable<Arch, BudgetAllocator, Lvl<1>, WholeTreeLock>;
 
+#[test]
+fn entry_shape_is_independent_of_presence() {
+    let empty = Entry::empty();
+    assert!(!empty.is_leaf(SMALL_LEVEL));
+    assert!(!empty.is_present_leaf(SMALL_LEVEL));
+    assert!(!empty.is_table(LARGE_LEVEL));
+    assert!(!empty.is_present_table(LARGE_LEVEL));
+
+    let table = Entry::new(PhysAddr::from(FRAME), PTEntryFlags::empty());
+    assert!(table.is_table(LARGE_LEVEL));
+    assert!(!table.is_present_table(LARGE_LEVEL));
+
+    let leaf = Entry::new(PhysAddr::from(FRAME), PTEntryFlags::HUGE);
+    assert!(leaf.is_leaf(LARGE_LEVEL));
+    assert!(!leaf.is_present_leaf(LARGE_LEVEL));
+}
+
 #[derive(Clone, Copy)]
 struct BbmArchitecture;
 
@@ -100,7 +117,7 @@ impl paging::ArchPagingMeta for BbmArchitecture {
         PTEntryFlags::WRITABLE | PTEntryFlags::USER | PTEntryFlags::GLOBAL | PTEntryFlags::NX
     }
 
-    fn requires_break_before_make(old: usize, new: usize, _: PageLevel) -> bool {
+    fn requires_break_before_make<L: LevelSpec>(old: usize, new: usize) -> bool {
         let mapping_mask = Self::address_mask() | PTEntryFlags::HUGE.bits();
         old & PTEntryFlags::PRESENT.bits() != 0
             && new & PTEntryFlags::PRESENT.bits() != 0
@@ -385,7 +402,7 @@ unsafe fn leaf_pte(root: PhysAddr, address: VirtAddr) -> (*mut Entry, PageLevel)
         // SAFETY: the caller owns this live host-backed tree; table addresses
         // are identity-mapped, and no references into PTE storage are created.
         let entry = unsafe { load_entry(pte) };
-        if !entry.is_table(level) {
+        if !entry.is_present_table(level) {
             return (pte, level);
         }
         page = entry.address();
@@ -398,7 +415,7 @@ unsafe fn seed_pat(root: PhysAddr, address: VirtAddr) {
     // SAFETY: the caller exclusively owns the tree during this fixture edit.
     let (pte, level) = unsafe { leaf_pte(root, address) };
     let entry = unsafe { load_entry(pte) };
-    assert!(entry.is_leaf(level));
+    assert!(entry.is_present_leaf(level));
     unsafe { &*pte.cast::<AtomicUsize>() }.store(entry.raw() | pat_bit(level), Ordering::Release);
 }
 
@@ -409,8 +426,8 @@ unsafe fn assert_permissive_ancestors(root: PhysAddr, address: VirtAddr) {
         let pte = (page as *const Entry).wrapping_add(entry_index(address, level));
         // SAFETY: the caller pins the tree, and all accesses use atomic loads.
         let entry = unsafe { load_entry(pte) };
-        if !entry.is_table(level) {
-            assert!(entry.is_leaf(level));
+        if !entry.is_present_table(level) {
+            assert!(entry.is_present_leaf(level));
             return;
         }
         assert!(entry.writable(), "ancestor at {level:?} blocks write permission");
@@ -431,16 +448,16 @@ fn architecture_policy_can_require_break_before_make_for_a_split() {
 
     let (fixture, mut table) = bbm_fixture();
     let base = VirtAddr::from(BASE);
-    map_at!(table, base, FRAME.into(), HUGE_LEVEL, old_flags(), false).unwrap();
+    map_at!(table, base, FRAME.into(), LARGE_LEVEL, old_flags(), false).unwrap();
     let (pte, level) = unsafe { leaf_pte(table.root_paddr(), base) };
-    assert_eq!(level, HUGE_LEVEL);
+    assert_eq!(level, LARGE_LEVEL);
     let old = table.walk(base).read().raw();
     let pte = pte as usize;
     set_flush_hook(move |_, _| {
         let entry = unsafe { load_entry(pte as *const BbmEntry) };
         assert_eq!(entry.raw(), old & !PTEntryFlags::PRESENT.bits());
     });
-    split_at!(table, base + PAGE, SMALL_LEVEL, true).unwrap().expect_no_flush();
+    split_at!(table, base + PAGE, LARGE_LEVEL, true).unwrap().expect_no_flush();
     clear_flush_hook();
     assert_eq!(table.walk(base + PAGE).level(), SMALL_LEVEL);
     unsafe { table.free_children() };
@@ -497,9 +514,9 @@ fn architecture_bbm_range_breaks_only_structural_boundaries() {
         for (index, pte) in entries.iter().copied().enumerate() {
             let entry = unsafe { load_entry(pte as *const BbmEntry) };
             if index == 1 {
-                assert!(entry.is_leaf(HUGE_LEVEL));
+                assert!(entry.is_present_leaf(HUGE_LEVEL));
             } else if entry.present() {
-                assert!(entry.is_leaf(HUGE_LEVEL) || entry.is_table(HUGE_LEVEL));
+                assert!(entry.is_present_leaf(HUGE_LEVEL) || entry.is_present_table(HUGE_LEVEL));
             } else {
                 invalid += 1;
             }
@@ -707,10 +724,11 @@ macro_rules! edit_tests {
                     for (index, (pte, _)) in originals.iter().enumerate() {
                         let entry = unsafe { load_entry(*pte as *const Entry) };
                         if index == 1 {
-                            assert!(entry.is_leaf(HUGE_LEVEL));
+                            assert!(entry.is_present_leaf(HUGE_LEVEL));
                         } else {
                             assert!(
-                                entry.is_leaf(LARGE_LEVEL) || entry.is_table(LARGE_LEVEL)
+                                entry.is_present_leaf(LARGE_LEVEL)
+                                    || entry.is_present_table(LARGE_LEVEL)
                             );
                         }
                     }
@@ -876,11 +894,14 @@ macro_rules! edit_tests {
             fn failed_private_splits_leave_the_original_leaf_unchanged_and_reclaim_staging() {
                 let (fixture, mut table) = $fixture();
                 for operation in 0..4 {
-                    for allowed in [0, 1] {
+                    let budgets: &[usize] = if operation == 0 { &[0] } else { &[0, 1] };
+                    for &allowed in budgets {
                         fixture.allow_allocations(usize::MAX);
                         let base = BASE + (operation * 2 + allowed) * HUGE;
                         let address = VirtAddr::from(base + 7 * PAGE);
-                        map_at!(table, VirtAddr::from(base), PhysAddr::from(FRAME), HUGE_LEVEL, old_flags(), false)
+                        let mapping_level =
+                            if operation == 0 { LARGE_LEVEL } else { HUGE_LEVEL };
+                        map_at!(table, VirtAddr::from(base), PhysAddr::from(FRAME), mapping_level, old_flags(), false)
                             .unwrap();
                         // SAFETY: the test owns the tree without concurrent users.
                         unsafe { seed_pat(table.root_paddr(), address) };
@@ -889,19 +910,19 @@ macro_rules! edit_tests {
                         let freed = fixture.arena.freed().len();
                         fixture.allow_allocations(allowed);
                         let result = match operation {
-                            0 => split_at!(table, address, SMALL_LEVEL, true).map(discharge),
+                            0 => split_at!(table, address, LARGE_LEVEL, true).map(discharge),
                             1 => set_flags_at!(table, address, SMALL_LEVEL, new_flags(), true)
                                 .map(discharge),
                             2 => table.set_shared(common::page_4k(address), true).map(discharge),
                             _ => table.set_private(common::page_4k(address), true).map(discharge),
                         };
                         assert_eq!(result, Err(PagingError::AllocFrame));
-                        assert_eq!(table.walk(address).level(), HUGE_LEVEL);
+                        assert_eq!(table.walk(address).level(), mapping_level);
                         assert_eq!(table.walk(address).read().raw(), original);
                         assert_eq!(fixture.arena.allocated() - allocated, allowed);
                         assert_eq!(fixture.arena.freed().len() - freed, allowed);
                         assert!(take_flushes().is_empty());
-                        for offset in [0, 7 * PAGE, LARGE, HUGE - 1] {
+                        for offset in [0, 7 * PAGE, mapping_level.size() - PAGE] {
                             assert_eq!(
                                 table.phys_addr(VirtAddr::from(base + offset)),
                                 Ok(PhysAddr::from(FRAME + offset))
@@ -975,57 +996,44 @@ macro_rules! edit_tests {
             }
 
             #[test]
-            fn split_is_idempotent_preserves_every_mapping_and_remains_reclaimable() {
+            fn split_requires_a_huge_leaf_and_preserves_every_mapping() {
                 let (fixture, mut table) = $fixture();
                 let start = VirtAddr::from(BASE);
-                let target = start + LARGE + 7 * PAGE;
+                let target = start + 7 * PAGE;
                 assert!(matches!(
                     split_at!(table, target, SMALL_LEVEL, true),
-                    Err(PagingError::NotMapped)
+                    Err(PagingError::InvalidLevel)
                 ));
                 let allocated = fixture.arena.allocated();
-                map_at!(table, start, PhysAddr::from(FRAME), HUGE_LEVEL, old_flags(), false).unwrap();
+                map_at!(table, start, PhysAddr::from(FRAME), LARGE_LEVEL, old_flags(), false)
+                    .unwrap();
                 // SAFETY: this fixture has no other users.
                 unsafe { seed_pat(table.root_paddr(), start) };
-                let flush = split_at!(table, target, SMALL_LEVEL, true).unwrap();
-                assert_completed(flush, BASE, BASE + HUGE, HUGE_LEVEL);
-                split_at!(table, target, SMALL_LEVEL, true).unwrap().expect_no_flush();
-                split_at!(table, start, HUGE_LEVEL, true).unwrap().expect_no_flush();
-                for large in 0..512 {
-                    if large == 1 {
-                        for small in 0..512 {
-                            let offset = LARGE + small * PAGE;
-                            let address = start + offset;
-                            assert_eq!(table.walk(address).level(), SMALL_LEVEL);
-                            assert_eq!(
-                                table.walk(address).read().raw(),
-                                leaf_word(FRAME + offset, SMALL_LEVEL, old_flags(), false, true)
-                            );
-                            assert_eq!(
-                                table.phys_addr(address + PAGE - 1),
-                                Ok(PhysAddr::from(FRAME + offset + PAGE - 1))
-                            );
-                        }
-                    } else {
-                        let offset = large * LARGE;
-                        let address = start + offset;
-                        assert_eq!(table.walk(address).level(), LARGE_LEVEL);
-                        assert_eq!(
-                            table.walk(address).read().raw(),
-                            leaf_word(FRAME + offset, LARGE_LEVEL, old_flags(), false, true)
-                        );
-                        assert_eq!(
-                            table.phys_addr(address + LARGE - 1),
-                            Ok(PhysAddr::from(FRAME + offset + LARGE - 1))
-                        );
-                    }
+                let flush = split_at!(table, target, LARGE_LEVEL, true).unwrap();
+                assert_completed(flush, BASE, BASE + LARGE, LARGE_LEVEL);
+                assert!(matches!(
+                    split_at!(table, target, LARGE_LEVEL, true),
+                    Err(PagingError::InvalidLevel)
+                ));
+                for small in 0..512 {
+                    let offset = small * PAGE;
+                    let address = start + offset;
+                    assert_eq!(table.walk(address).level(), SMALL_LEVEL);
+                    assert_eq!(
+                        table.walk(address).read().raw(),
+                        leaf_word(FRAME + offset, SMALL_LEVEL, old_flags(), false, true)
+                    );
+                    assert_eq!(
+                        table.phys_addr(address + PAGE - 1),
+                        Ok(PhysAddr::from(FRAME + offset + PAGE - 1))
+                    );
                 }
                 let built = fixture.arena.allocated() - allocated;
-                let (mapped, flush) = table.unmap_region(start, start + HUGE).unwrap();
+                let (mapped, flush) = table.unmap_region(start, start + LARGE).unwrap();
                 assert!(mapped);
-                assert_flush_covers(flush, BASE, BASE + HUGE);
+                assert_flush_covers(flush, BASE, BASE + LARGE);
                 // SAFETY: the unmapped range has no walkers or outstanding host TLB state.
-                unsafe { table.free_page_table_by_range(start, start + HUGE) };
+                unsafe { table.free_page_table_by_range(start, start + LARGE) };
                 assert_eq!(fixture.arena.freed().len(), built);
                 assert_eq!(table.phys_addr(target), Err(PagingError::NotMapped));
                 assert_eq!(table.validate_page_table(), Ok(()));
@@ -1057,7 +1065,7 @@ macro_rules! edit_tests {
                     ));
                     assert!(matches!(
                         split_at!(table, missing, SMALL_LEVEL, true),
-                        Err(PagingError::NotMapped)
+                        Err(PagingError::InvalidLevel)
                     ));
                     assert!(matches!(
                         table.set_shared(common::page_4k(missing), true),
@@ -1125,11 +1133,11 @@ macro_rules! edit_tests {
                         Err(PagingError::InvalidFlags)
                     ));
                 }
-                assert!(paging::page::Page::<paging::sizes::Size4KiB>::from_start_address(
+                assert!(paging::page::Page::<paging::sizes::Regular>::from_start_address(
                     address + 1
                 )
                 .is_err());
-                assert!(paging::page::Page::<paging::sizes::Size2MiB>::from_start_address(
+                assert!(paging::page::Page::<paging::sizes::Huge>::from_start_address(
                     address + PAGE
                 )
                 .is_err());
@@ -1385,8 +1393,8 @@ fn a_coarse_mapping_losing_to_growth_rejects_an_absent_entry_in_the_finer_subtre
         set_flags_at!(table, address, LARGE_LEVEL, new_flags(), true),
         Err(PagingError::NotLeafEntry)
     ));
-    assert!(matches!(unmap_at!(table, address, LARGE_LEVEL), Err(PagingError::NotLeafEntry)));
-    split_at!(table, address, LARGE_LEVEL, true).unwrap().expect_no_flush();
+    assert!(matches!(unmap_at!(table, address, LARGE_LEVEL), Err(PagingError::WrongPageSize)));
+    assert!(matches!(split_at!(table, address, LARGE_LEVEL, true), Err(PagingError::InvalidLevel)));
     assert_eq!(fixture.locks.0.page_calls.load(Ordering::SeqCst), calls);
     assert_eq!(table.phys_addr(address + PAGE), Ok(PhysAddr::from(FRAME)));
     let mut table = Arc::try_unwrap(table).ok().unwrap();
@@ -1610,7 +1618,7 @@ fn unmapping_rechecks_a_split_published_before_lock_acquisition() {
         });
         entered.recv_timeout(WAIT).expect("unmapping did not reach its content lock");
         assert_completed(
-            split_at!(table, selected, SMALL_LEVEL, true).unwrap(),
+            split_at!(table, selected, LARGE_LEVEL, true).unwrap(),
             BASE,
             BASE + LARGE,
             LARGE_LEVEL,
@@ -1618,7 +1626,7 @@ fn unmapping_rechecks_a_split_published_before_lock_acquisition() {
         release.send(()).unwrap();
         let result = finish(worker);
         if target == LARGE_LEVEL {
-            assert_eq!(result, Err(PagingError::NotLeafEntry));
+            assert_eq!(result, Err(PagingError::WrongPageSize));
             assert_eq!(table.phys_addr(selected), Ok(PhysAddr::from(FRAME + 7 * PAGE)));
         } else {
             let (removed, flush) = result.unwrap();
@@ -1651,7 +1659,7 @@ fn a_fine_protection_retries_after_a_split_before_lock_acquisition() {
     });
     entered.recv_timeout(WAIT).expect("protection did not reach its content lock");
     assert_completed(
-        split_at!(table, selected, SMALL_LEVEL, true).unwrap(),
+        split_at!(table, selected, LARGE_LEVEL, true).unwrap(),
         BASE,
         BASE + LARGE,
         LARGE_LEVEL,
@@ -1677,7 +1685,7 @@ fn a_split_waiting_for_its_lock_preserves_a_completed_same_entry_protection() {
     let worker = spawn({
         let table = table.clone();
         move || {
-            let flush = split_at!(table, address + 7 * PAGE, SMALL_LEVEL, true);
+            let flush = split_at!(table, address + 7 * PAGE, LARGE_LEVEL, true);
             (flush, take_flushes())
         }
     });
@@ -1719,7 +1727,7 @@ fn a_coarse_protection_losing_to_a_split_refuses_instead_of_overwriting_children
     });
     entered.recv_timeout(WAIT).expect("protection did not reach its content lock");
     assert_completed(
-        split_at!(table, address + 7 * PAGE, SMALL_LEVEL, true).unwrap(),
+        split_at!(table, address + 7 * PAGE, LARGE_LEVEL, true).unwrap(),
         BASE,
         BASE + LARGE,
         LARGE_LEVEL,
@@ -1758,7 +1766,13 @@ fn a_range_observes_finer_levels_after_acquiring_its_whole_domain_guard() {
     entered.recv_timeout(WAIT).expect("range did not reach its content lock");
     let target = address + LARGE + 7 * PAGE;
     assert_completed(
-        split_at!(table, target, SMALL_LEVEL, true).unwrap(),
+        table
+            .set_flags(
+                paging::page::Page::<paging::sizes::Huge>::containing_address(target),
+                old_flags(),
+                true,
+            )
+            .unwrap(),
         BASE,
         BASE + HUGE,
         HUGE_LEVEL,
@@ -1768,24 +1782,20 @@ fn a_range_observes_finer_levels_after_acquiring_its_whole_domain_guard() {
     assert_eq!(result, Ok(()));
     assert_flush_covers(flush, BASE, BASE + HUGE);
     for large in 0..512 {
-        let count = if large == 1 { 512 } else { 1 };
-        let level = if large == 1 { SMALL_LEVEL } else { LARGE_LEVEL };
-        for small in 0..count {
-            let offset = large * LARGE + small * PAGE;
-            let current = address + offset;
-            assert_eq!(table.walk(current).level(), level);
-            assert_eq!(
-                table.walk(current).read().raw(),
-                protected_word(
-                    leaf_word(FRAME + offset, level, old_flags(), false, true),
-                    new_flags()
-                )
-            );
-            assert_eq!(
-                table.phys_addr(current + level.size() - 1),
-                Ok(PhysAddr::from(FRAME + offset + level.size() - 1))
-            );
-        }
+        let offset = large * LARGE;
+        let current = address + offset;
+        assert_eq!(table.walk(current).level(), LARGE_LEVEL);
+        assert_eq!(
+            table.walk(current).read().raw(),
+            protected_word(
+                leaf_word(FRAME + offset, LARGE_LEVEL, old_flags(), false, true),
+                new_flags()
+            )
+        );
+        assert_eq!(
+            table.phys_addr(current + LARGE - 1),
+            Ok(PhysAddr::from(FRAME + offset + LARGE - 1))
+        );
     }
     assert_eq!(table.validate_page_table(), Ok(()));
     let mut table = Arc::try_unwrap(table).ok().unwrap();
@@ -1800,18 +1810,18 @@ fn concurrent_split_allocates_once_and_preserves_hardware_ad_accrued_during_prep
     for protect in [false, true] {
         let (fixture, table) = fixture();
         let address = VirtAddr::from(BASE);
-        let target_offset = LARGE + 7 * PAGE;
+        let target_offset = 7 * PAGE;
         let target = address + target_offset;
         let history = PTEntryFlags::ACCESSED | PTEntryFlags::DIRTY;
         let flags = old_flags() & !history;
-        map_at!(table, address, PhysAddr::from(FRAME), HUGE_LEVEL, flags, false).unwrap();
+        map_at!(table, address, PhysAddr::from(FRAME), LARGE_LEVEL, flags, false).unwrap();
         // SAFETY: the fixture edit precedes sharing this exclusively owned tree.
         unsafe { seed_pat(table.root_paddr(), address) };
-        let original = leaf_word(FRAME, HUGE_LEVEL, flags, false, true);
+        let original = leaf_word(FRAME, LARGE_LEVEL, flags, false, true);
         assert_eq!(table.walk(address).read().raw(), original);
         // SAFETY: the concurrent tree pins the entry throughout the worker's edit.
         let (pte, level) = unsafe { leaf_pte(table.root_paddr(), address) };
-        assert_eq!(level, HUGE_LEVEL);
+        assert_eq!(level, LARGE_LEVEL);
         let allocated = fixture.arena.allocated();
         assert!(fixture.arena.freed().is_empty());
         let table = Arc::new(table);
@@ -1822,16 +1832,16 @@ fn concurrent_split_allocates_once_and_preserves_hardware_ad_accrued_during_prep
                 if protect {
                     set_flags_at!(table, target, SMALL_LEVEL, new_flags(), true)
                 } else {
-                    split_at!(table, target, SMALL_LEVEL, true)
+                    split_at!(table, target, LARGE_LEVEL, true)
                 }
             }
         });
         entered.recv_timeout(WAIT).expect("split did not reach its first private allocation");
         assert_eq!(fixture.arena.allocated(), allocated + 1);
         assert!(fixture.arena.freed().is_empty());
-        for offset in [0, PAGE, target_offset, HUGE - 1] {
+        for offset in [0, PAGE, target_offset, LARGE - 1] {
             let current = address + offset;
-            assert_eq!(table.walk(current).level(), HUGE_LEVEL);
+            assert_eq!(table.walk(current).level(), LARGE_LEVEL);
             assert_eq!(table.walk(current).read().raw(), original);
             assert_eq!(table.phys_addr(current), Ok(PhysAddr::from(FRAME + offset)));
         }
@@ -1841,37 +1851,33 @@ fn concurrent_split_allocates_once_and_preserves_hardware_ad_accrued_during_prep
         let observed = unsafe { AtomicUsize::from_ptr(pte.cast::<usize>()) }
             .fetch_or(history.bits(), Ordering::SeqCst);
         assert_eq!(observed, original);
-        assert_eq!(table.walk(target).level(), HUGE_LEVEL);
+        assert_eq!(table.walk(target).level(), LARGE_LEVEL);
         assert_eq!(table.walk(target).read().raw(), original | history.bits());
         assert_eq!(table.phys_addr(target), Ok(PhysAddr::from(FRAME + target_offset)));
         release.send(()).unwrap();
 
         finish(worker).unwrap().expect_no_flush();
-        assert_eq!(fixture.arena.allocated(), allocated + 2);
+        assert_eq!(fixture.arena.allocated(), allocated + 1);
         assert!(fixture.arena.freed().is_empty(), "private split allocation was retried");
-        for large in 0..512 {
-            let count = if large == 1 { 512 } else { 1 };
-            let level = if large == 1 { SMALL_LEVEL } else { LARGE_LEVEL };
-            for small in 0..count {
-                let offset = large * LARGE + small * PAGE;
-                let current = address + offset;
-                let updated = leaf_word(FRAME + offset, level, flags | history, false, true);
-                let expected = if protect && offset == target_offset {
-                    protected_word(updated, new_flags())
-                } else {
-                    updated
-                };
-                assert_eq!(table.walk(current).level(), level);
-                assert_eq!(
-                    table.walk(current).read().raw(),
-                    expected,
-                    "protect={protect}, offset={offset:#x}"
-                );
-                assert_eq!(
-                    table.phys_addr(current + level.size() - 1),
-                    Ok(PhysAddr::from(FRAME + offset + level.size() - 1))
-                );
-            }
+        for small in 0..512 {
+            let offset = small * PAGE;
+            let current = address + offset;
+            let updated = leaf_word(FRAME + offset, SMALL_LEVEL, flags | history, false, true);
+            let expected = if protect && offset == target_offset {
+                protected_word(updated, new_flags())
+            } else {
+                updated
+            };
+            assert_eq!(table.walk(current).level(), SMALL_LEVEL);
+            assert_eq!(
+                table.walk(current).read().raw(),
+                expected,
+                "protect={protect}, offset={offset:#x}"
+            );
+            assert_eq!(
+                table.phys_addr(current + PAGE - 1),
+                Ok(PhysAddr::from(FRAME + offset + PAGE - 1))
+            );
         }
         // SAFETY: the only worker joined, and this inactive tree is still pinned.
         unsafe { assert_permissive_ancestors(table.root_paddr(), target) };
@@ -1896,6 +1902,9 @@ macro_rules! barrier_tests {
                 for all_cpus in [false, true] {
                     for level in [LARGE_LEVEL, HUGE_LEVEL] {
                         for operation in 0..4 {
+                            if operation == 0 && level != LARGE_LEVEL {
+                                continue;
+                            }
                             let (fixture, mut table) = $fixture();
                             let base = VirtAddr::from(BASE);
                             let offset =
@@ -1911,6 +1920,7 @@ macro_rules! barrier_tests {
                                 unsafe { leaf_pte(table.root_paddr(), target) };
                             assert_eq!(observed_level, level);
                             let allocated = fixture.arena.allocated();
+                            let split_allocations = if operation == 0 { 1 } else { level.depth() };
                             let arena = fixture.arena.clone();
                             let pte = pte as usize;
                             set_flush_hook(move |scope, selected| {
@@ -1926,11 +1936,11 @@ macro_rules! barrier_tests {
                                 let published = unsafe { load_entry(pte as *const Entry) };
                                 assert!(published.present());
                                 assert_eq!(published.raw() & PTEntryFlags::HUGE.bits(), 0);
-                                assert_eq!(arena.allocated(), allocated + level.depth());
+                                assert_eq!(arena.allocated(), allocated + split_allocations);
                                 assert!(arena.freed().is_empty());
                             });
                             let flush = match operation {
-                                0 => split_at!(table, target, SMALL_LEVEL, all_cpus).unwrap(),
+                                0 => split_at!(table, target, level, all_cpus).unwrap(),
                                 1 => {
                                     set_flags_at!(table, target, SMALL_LEVEL, new_flags(), all_cpus)
                                         .unwrap()
@@ -1951,7 +1961,7 @@ macro_rules! barrier_tests {
                                     all_cpus
                                 )]
                             );
-                            assert_eq!(fixture.arena.allocated(), allocated + level.depth());
+                            assert_eq!(fixture.arena.allocated(), allocated + split_allocations);
                             assert!(fixture.arena.freed().is_empty());
                             for current in
                                 [0, offset - PAGE, offset, offset + PAGE, level.size() - PAGE]
@@ -2031,7 +2041,10 @@ macro_rules! barrier_tests {
                         assert!(arena.allocated() <= allocated + pages);
                         for (pte, _) in &originals {
                             let entry = unsafe { load_entry(*pte as *const Entry) };
-                            assert!(entry.is_leaf(HUGE_LEVEL) || entry.is_table(HUGE_LEVEL));
+                            assert!(
+                                entry.is_present_leaf(HUGE_LEVEL)
+                                    || entry.is_present_table(HUGE_LEVEL)
+                            );
                         }
                     });
                     let (result, flush) =
@@ -2088,23 +2101,26 @@ macro_rules! barrier_tests {
                     let (fixture, mut table) = $fixture();
                     let base = VirtAddr::from(BASE);
                     let original_count = if operation == 5 { 3 } else { 2 };
+                    let level = if operation == 0 { LARGE_LEVEL } else { HUGE_LEVEL };
+                    let span = level.size();
                     for index in 0..original_count {
                         map_at!(
                             table,
-                            base + index * HUGE,
-                            (FRAME + index * HUGE).into(),
-                            HUGE_LEVEL,
+                            base + index * span,
+                            (FRAME + index * span).into(),
+                            level,
                             old_flags(),
                             false
                         )
                         .unwrap();
-                        unsafe { seed_pat(table.root_paddr(), base + index * HUGE) };
+                        unsafe { seed_pat(table.root_paddr(), base + index * span) };
                     }
                     let originals: Vec<_> = (0..original_count)
                         .map(|index| {
-                            let address = base + index * HUGE;
-                            let (pte, level) = unsafe { leaf_pte(table.root_paddr(), address) };
-                            assert_eq!(level, HUGE_LEVEL);
+                            let address = base + index * span;
+                            let (pte, observed_level) =
+                                unsafe { leaf_pte(table.root_paddr(), address) };
+                            assert_eq!(observed_level, level);
                             (pte as usize, table.walk(address).read().raw())
                         })
                         .collect();
@@ -2130,9 +2146,9 @@ macro_rules! barrier_tests {
                         }
                         panic!("injected synchronous invalidation failure");
                     });
-                    let target = base + HUGE - PAGE;
+                    let target = base + span - PAGE;
                     let result = catch_unwind(AssertUnwindSafe(|| match operation {
-                        0 => split_at!(table, target, SMALL_LEVEL, true).unwrap().expect_no_flush(),
+                        0 => split_at!(table, target, LARGE_LEVEL, true).unwrap().expect_no_flush(),
                         1 => set_flags_at!(table, target, SMALL_LEVEL, new_flags(), true)
                             .unwrap()
                             .expect_no_flush(),
@@ -2159,7 +2175,7 @@ macro_rules! barrier_tests {
                     fixture.locks.0.before_unlock.lock().unwrap().take();
                     assert!(result.is_err());
                     assert_eq!(take_flushes().len(), 1);
-                    let staging = 2;
+                    let staging = if operation == 0 { 1 } else { 2 };
                     assert_eq!(fixture.arena.allocated(), allocated + staging);
                     assert!(fixture.arena.freed().is_empty());
                     if fixture.locks.0.page_calls.load(Ordering::SeqCst) != 0 {
@@ -2170,17 +2186,17 @@ macro_rules! barrier_tests {
                         );
                     }
                     for (index, _) in originals.into_iter().enumerate() {
-                        let address = base + index * HUGE;
+                        let address = base + index * span;
                         let split = index == 0;
                         assert_eq!(
                             table
-                                .walk(address + if split && index == 0 { HUGE - PAGE } else { 0 },)
+                                .walk(address + if split && index == 0 { span - PAGE } else { 0 },)
                                 .level(),
-                            if split { SMALL_LEVEL } else { HUGE_LEVEL }
+                            if split { SMALL_LEVEL } else { level }
                         );
                         assert_eq!(
-                            table.phys_addr(address + HUGE - 1),
-                            Ok((FRAME + (index + 1) * HUGE - 1).into())
+                            table.phys_addr(address + span - 1),
+                            Ok((FRAME + (index + 1) * span - 1).into())
                         );
                     }
                     assert_eq!(table.validate_page_table(), Ok(()));
@@ -2208,7 +2224,10 @@ macro_rules! barrier_tests {
                 let old = table.walk(base).read().raw();
                 let encrypted = table.walk(base + PAGE).read().raw();
                 let allocated = fixture.arena.allocated();
-                split_at!(table, base, SMALL_LEVEL, false).unwrap().expect_no_flush();
+                assert!(matches!(
+                    split_at!(table, base, SMALL_LEVEL, false),
+                    Err(PagingError::InvalidLevel)
+                ));
                 set_flags_at!(table, base, SMALL_LEVEL, new_flags(), false)
                     .unwrap()
                     .expect_no_flush();
@@ -2226,10 +2245,10 @@ macro_rules! barrier_tests {
             #[test]
             fn overflow_uses_one_whole_tlb_barrier_and_returns_no_pending_split() {
                 let (_fixture, mut table) = $fixture();
-                let base = VirtAddr::from(usize::MAX & !(HUGE - 1));
-                map_at!(table, base, FRAME.into(), HUGE_LEVEL, old_flags(), false).unwrap();
+                let base = VirtAddr::from(usize::MAX & !(LARGE - 1));
+                map_at!(table, base, FRAME.into(), LARGE_LEVEL, old_flags(), false).unwrap();
                 let (pte, level) = unsafe { leaf_pte(table.root_paddr(), base) };
-                assert_eq!(level, HUGE_LEVEL);
+                assert_eq!(level, LARGE_LEVEL);
                 let pte = pte as usize;
                 set_flush_hook(move |scope, all_cpus| {
                     assert_eq!(scope, FlushScope::All);
@@ -2240,14 +2259,14 @@ macro_rules! barrier_tests {
                         PTEntryFlags::PRESENT.bits()
                     );
                 });
-                split_at!(table, VirtAddr::from(usize::MAX), SMALL_LEVEL, false)
+                split_at!(table, VirtAddr::from(usize::MAX), LARGE_LEVEL, false)
                     .unwrap()
                     .expect_no_flush();
                 clear_flush_hook();
                 assert_eq!(take_flushes(), vec![(FlushScope::All, false)]);
                 assert_eq!(
                     table.phys_addr(VirtAddr::from(usize::MAX)),
-                    Ok((FRAME + HUGE - 1).into())
+                    Ok((FRAME + LARGE - 1).into())
                 );
                 assert_eq!(table.walk(VirtAddr::from(usize::MAX)).level(), SMALL_LEVEL);
             }
@@ -2376,7 +2395,8 @@ fn paused_point_and_range_barriers_exclude_writers_but_not_lock_free_walkers() {
         let left = VirtAddr::from(boundary - HUGE);
         let right = VirtAddr::from(boundary);
         for (address, frame) in [(left, FRAME), (right, FRAME + HUGE)] {
-            map_at!(table, address, frame.into(), HUGE_LEVEL, old_flags(), false).unwrap();
+            let level = if !range && address == right { LARGE_LEVEL } else { HUGE_LEVEL };
+            map_at!(table, address, frame.into(), level, old_flags(), false).unwrap();
         }
         let table = Arc::new(table);
         let page_calls = fixture.locks.0.page_calls.load(Ordering::SeqCst);
@@ -2400,7 +2420,7 @@ fn paused_point_and_range_barriers_exclude_writers_but_not_lock_free_walkers() {
                 let result = if range {
                     table.set_flags_range(right - PAGE, right + PAGE, new_flags(), true)
                 } else {
-                    (Ok(()), split_at!(table, right + PAGE, SMALL_LEVEL, true).unwrap())
+                    (Ok(()), split_at!(table, right + PAGE, LARGE_LEVEL, true).unwrap())
                 };
                 clear_flush_hook();
                 (result, take_flushes())
@@ -2443,7 +2463,7 @@ fn paused_point_and_range_barriers_exclude_writers_but_not_lock_free_walkers() {
             assert_eq!(
                 calls,
                 vec![(
-                    FlushScope::Range { start: right, end: right + HUGE, level: HUGE_LEVEL },
+                    FlushScope::Range { start: right, end: right + LARGE, level: LARGE_LEVEL },
                     true
                 )]
             );

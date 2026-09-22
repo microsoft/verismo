@@ -5,21 +5,14 @@ mod common;
 
 use common::*;
 use paging::address::{PhysAddr, VirtAddr};
-use paging::frame::PhysFrame;
 use paging::level::PageLevel;
 use paging::os_contract::{MapRegionError, PagingError};
 use paging::page::Page;
-use paging::sizes::{PageOffset, PageSize, Size1GiB, Size2MiB, Size4KiB};
+use paging::sizes::{Huge, PageSize, Regular, SizeLevel2};
 use paging::PTEntryFlags;
 
 const SMALL: PageLevel = PageLevel::Level0;
 const LARGE: PageLevel = PageLevel::Level1;
-
-struct Size8KiB;
-
-impl PageOffset for Size8KiB {
-    const SHIFT: usize = 13;
-}
 
 #[test]
 fn a_mapping_can_be_read_back() {
@@ -31,19 +24,6 @@ fn a_mapping_can_be_read_back() {
     assert_eq!(table.phys_addr(vaddr), Ok(frame));
     assert_eq!(table.translate(vaddr).map(|found| found.size()), Ok(SMALL.size()));
     assert_eq!(table.phys_addr(vaddr + 4096usize), Err(PagingError::NotMapped));
-    std::mem::forget(table);
-}
-
-#[test]
-fn an_unsupported_typed_page_size_is_rejected() {
-    let (_arena, mut table) = table();
-    let page = Page::<Size8KiB>::from_start_address(VirtAddr::from(0x4000_0000usize)).unwrap();
-    let frame =
-        PhysFrame::<Size8KiB>::from_start_address(PhysAddr::from(0x8000_0000usize)).unwrap();
-
-    assert_eq!(table.map(page, frame, flags(), false), Err(PagingError::InvalidLevel));
-    assert!(matches!(table.unmap(page, true), Err(PagingError::InvalidLevel)));
-    assert!(matches!(table.set_flags(page, flags(), true), Err(PagingError::InvalidLevel)));
     std::mem::forget(table);
 }
 
@@ -116,7 +96,7 @@ fn mapping_a_different_frame_requires_an_unmap_first() {
     let vaddr = VirtAddr::from(0x4000_0000usize);
 
     assert_eq!(table.map(common::page_4k(vaddr), common::frame_4k(frame), flags(), false), Ok(()));
-    let (entry, flush) = table.unmap(common::page_4k(vaddr), true).unwrap();
+    let (entry, flush) = table.unmap(common::page_4k(vaddr), Some(true)).unwrap();
     assert!(entry.is_some());
     // SAFETY: nothing runs on these tables but this test.
     unsafe { flush.ignore() };
@@ -132,11 +112,24 @@ fn unmapping_a_small_page_splits_a_larger_mapping() {
     let vaddr = VirtAddr::from(0x4000_0000usize);
 
     assert_eq!(table.map(common::page_2m(vaddr), common::frame_2m(frame), flags(), false), Ok(()));
-    let (entry, flush) = table.unmap(common::page_4k(vaddr), true).unwrap();
+    let (entry, flush) = table.unmap(common::page_4k(vaddr), Some(true)).unwrap();
     assert_eq!(entry.unwrap().leaf_address(SMALL), frame);
     // SAFETY: nothing runs on these tables but this test.
     unsafe { flush.ignore() };
     assert_eq!(table.phys_addr(vaddr), Err(PagingError::NotMapped));
+    assert_eq!(table.phys_addr(vaddr + 4096), Ok(frame + 4096));
+    std::mem::forget(table);
+}
+
+#[test]
+fn unmapping_without_split_rejects_a_larger_mapping() {
+    let (arena, mut table) = table();
+    let frame = PhysAddr::from(arena.base());
+    let vaddr = VirtAddr::from(0x4000_0000usize);
+
+    table.map(common::page_2m(vaddr), common::frame_2m(frame), flags(), false).unwrap();
+    assert!(matches!(table.unmap(common::page_4k(vaddr), None), Err(PagingError::WrongPageSize)));
+    assert_eq!(table.phys_addr(vaddr), Ok(frame));
     assert_eq!(table.phys_addr(vaddr + 4096), Ok(frame + 4096));
     std::mem::forget(table);
 }
@@ -148,7 +141,10 @@ fn unmapping_a_large_page_rejects_finer_leaves() {
     let vaddr = VirtAddr::from(0x4000_0000usize);
 
     table.map(common::page_4k(vaddr), common::frame_4k(frame), flags(), false).unwrap();
-    assert!(matches!(table.unmap(common::page_2m(vaddr), true), Err(PagingError::NotLeafEntry)));
+    assert!(matches!(
+        table.unmap(common::page_2m(vaddr), Some(true)),
+        Err(PagingError::WrongPageSize)
+    ));
     assert_eq!(table.phys_addr(vaddr), Ok(frame));
     std::mem::forget(table);
 }
@@ -174,15 +170,31 @@ fn splitting_a_large_page_keeps_every_address_it_mapped() {
 }
 
 #[test]
+fn split_requires_the_page_type_to_match_the_huge_leaf() {
+    let (arena, mut table) = table();
+    let frame = PhysAddr::from(arena.base());
+    let vaddr = VirtAddr::from(0x4000_0000usize);
+    table.map(common::page_4k(vaddr), common::frame_4k(frame), flags(), false).unwrap();
+    assert!(matches!(table.split(common::page_2m(vaddr), true), Err(PagingError::InvalidLevel)));
+
+    let vaddr = vaddr + Huge::SIZE;
+    table.map(common::page_2m(vaddr), common::frame_2m(frame), flags(), false).unwrap();
+    let flush = table.split(common::page_2m(vaddr), true).unwrap();
+    // SAFETY: nothing runs on these tables but this test.
+    unsafe { flush.ignore() };
+    assert_eq!(table.walk(vaddr).level(), SMALL);
+    assert!(matches!(table.split(common::page_2m(vaddr), true), Err(PagingError::InvalidLevel)));
+    std::mem::forget(table);
+}
+
+#[test]
 fn a_fixed_two_mib_region_uses_two_mib_leaves() {
     let (arena, mut table) = table();
     let frame = PhysAddr::from(arena.base());
     let start = VirtAddr::from(0x4000_0000usize);
     let end = start + (4 * 1024 * 1024usize);
-    let range =
-        Page::range_inclusive(common::page_2m(start), common::page_2m(end - Size2MiB::SIZE));
-    let mut frames =
-        (0..range.len()).map(|offset| common::frame_2m(frame + offset * Size2MiB::SIZE));
+    let range = Page::range_inclusive(common::page_2m(start), common::page_2m(end - Huge::SIZE));
+    let mut frames = (0..range.len()).map(|offset| common::frame_2m(frame + offset * Huge::SIZE));
 
     assert_eq!(table.map_region(range, &mut frames, flags()), Ok(()));
     assert_eq!(table.translate(start).map(|found| found.size()), Ok(LARGE.size()));
@@ -196,35 +208,15 @@ fn a_fixed_two_mib_region_uses_two_mib_leaves() {
 #[test]
 fn an_aligned_one_gib_region_uses_a_one_gib_leaf() {
     let (_arena, mut table) = table();
-    let start = VirtAddr::from(Size1GiB::SIZE);
-    let end = start + Size1GiB::SIZE;
-    let frame = PhysAddr::from(2 * Size1GiB::SIZE);
+    let start = VirtAddr::from(SizeLevel2::SIZE);
+    let end = start + SizeLevel2::SIZE;
+    let frame = PhysAddr::from(2 * SizeLevel2::SIZE);
     let range = Page::range_inclusive(common::page_1g(start), common::page_1g(start));
     let mut frames = core::iter::once(common::frame_1g(frame));
 
     assert_eq!(table.map_region(range, &mut frames, flags()), Ok(()));
-    assert_eq!(table.translate(start).map(|found| found.size()), Ok(Size1GiB::SIZE));
-    assert_eq!(table.phys_addr(end - Size4KiB::SIZE), Ok(frame + Size1GiB::SIZE - Size4KiB::SIZE));
-    std::mem::forget(table);
-}
-
-#[test]
-fn region_mapping_rejects_an_unsupported_page_size() {
-    let (arena, mut table) = table();
-    let start = VirtAddr::from(0x4000_0000usize);
-    let range = Page::range_inclusive(
-        Page::<Size8KiB>::from_start_address(start).unwrap(),
-        Page::<Size8KiB>::from_start_address(start).unwrap(),
-    );
-    let mut frames = core::iter::once(
-        PhysFrame::<Size8KiB>::from_start_address(PhysAddr::from(arena.base())).unwrap(),
-    );
-
-    assert_eq!(
-        table.map_region(range, &mut frames, flags()),
-        Err(MapRegionError { error: PagingError::InvalidLevel, unmapped_pages: 2 })
-    );
-    assert_eq!(table.phys_addr(start), Err(PagingError::NotMapped));
+    assert_eq!(table.translate(start).map(|found| found.size()), Ok(SizeLevel2::SIZE));
+    assert_eq!(table.phys_addr(end - Regular::SIZE), Ok(frame + SizeLevel2::SIZE - Regular::SIZE));
     std::mem::forget(table);
 }
 
@@ -334,12 +326,12 @@ fn mixed_region_maps_either_adjacent_order() {
             common::range_4k(two_mib_start - 2 * SMALL.size(), two_mib_start)
         } else {
             common::range_4k(
-                two_mib_start + Size2MiB::SIZE,
-                two_mib_start + Size2MiB::SIZE + 2 * SMALL.size(),
+                two_mib_start + Huge::SIZE,
+                two_mib_start + Huge::SIZE + 2 * SMALL.size(),
             )
         };
         let frame_2m = PhysAddr::from(arena.base());
-        let frame_4k = frame_2m + 2 * Size2MiB::SIZE;
+        let frame_4k = frame_2m + 2 * Huge::SIZE;
         let mut frames_2m = core::iter::once(common::frame_2m(frame_2m));
         let mut frames_4k = common::contiguous_frames_4k(frame_4k, range_4k.len());
 
@@ -360,7 +352,7 @@ fn mixed_region_treats_the_canonical_seam_as_adjacent() {
     let low = common::page_2m(VirtAddr::from(0x0000_7fff_ffe0_0000usize));
     let high = common::page_4k(VirtAddr::from(0xffff_8000_0000_0000usize));
     let frame_2m = PhysAddr::from(arena.base());
-    let frame_4k = frame_2m + Size2MiB::SIZE;
+    let frame_4k = frame_2m + Huge::SIZE;
     let mut frames_2m = core::iter::once(common::frame_2m(frame_2m));
     let mut frames_4k = core::iter::once(common::frame_4k(frame_4k));
 
@@ -385,10 +377,9 @@ fn mixed_region_rejects_nonadjacent_ranges_without_consuming_frames() {
     let (arena, mut table) = table();
     let start = VirtAddr::from(0x4040_0000usize);
     let range_2m = Page::range_inclusive(common::page_2m(start), common::page_2m(start));
-    let range_4k =
-        common::range_4k(start + Size2MiB::SIZE + SMALL.size(), start + Size2MiB::SIZE + 8192);
+    let range_4k = common::range_4k(start + Huge::SIZE + SMALL.size(), start + Huge::SIZE + 8192);
     let frame_2m = common::frame_2m(PhysAddr::from(arena.base()));
-    let frame_4k = common::frame_4k(PhysAddr::from(arena.base()) + Size2MiB::SIZE);
+    let frame_4k = common::frame_4k(PhysAddr::from(arena.base()) + Huge::SIZE);
     let mut frames_2m = core::iter::once(frame_2m);
     let mut frames_4k = core::iter::once(frame_4k);
 
@@ -437,13 +428,13 @@ fn failed_region_mapping_reports_the_unmapped_suffix() {
     let (arena, mut table) = table();
     let start = VirtAddr::from(0x4000_0000usize);
     let split = start + PageLevel::Level1.size();
-    let end = split + 2 * Size4KiB::SIZE;
+    let end = split + 2 * Regular::SIZE;
     let frame = PhysAddr::from(arena.base());
     let occupied_frame = frame + 3 * PageLevel::Level1.size();
 
     table
         .map(
-            common::page_4k(split + Size4KiB::SIZE),
+            common::page_4k(split + Regular::SIZE),
             common::frame_4k(occupied_frame),
             flags(),
             false,
@@ -458,7 +449,7 @@ fn failed_region_mapping_reports_the_unmapped_suffix() {
     );
     assert_eq!(table.phys_addr(start), Ok(frame));
     assert_eq!(table.phys_addr(split), Err(PagingError::NotMapped));
-    assert_eq!(table.phys_addr(split + Size4KiB::SIZE), Ok(occupied_frame));
+    assert_eq!(table.phys_addr(split + Regular::SIZE), Ok(occupied_frame));
     std::mem::forget(table);
 }
 
@@ -467,12 +458,11 @@ fn mixed_region_failure_counts_the_untouched_second_range() {
     let (arena, mut table) = table();
     let start = VirtAddr::from(0x4040_0000usize);
     let range_2m = Page::range_inclusive(common::page_2m(start), common::page_2m(start));
-    let range_4k =
-        common::range_4k(start + Size2MiB::SIZE, start + Size2MiB::SIZE + 2 * SMALL.size());
+    let range_4k = common::range_4k(start + Huge::SIZE, start + Huge::SIZE + 2 * SMALL.size());
     let frame = PhysAddr::from(arena.base());
     assert_eq!(map_at!(table, start, frame, PageLevel::Level1, flags(), false), Ok(()));
-    let mut frames_2m = core::iter::once(common::frame_2m(frame + Size2MiB::SIZE));
-    let mut frames_4k = common::contiguous_frames_4k(frame + 2 * Size2MiB::SIZE, range_4k.len());
+    let mut frames_2m = core::iter::once(common::frame_2m(frame + Huge::SIZE));
+    let mut frames_4k = common::contiguous_frames_4k(frame + 2 * Huge::SIZE, range_4k.len());
 
     assert_eq!(
         table.map_region_mixed(range_2m, &mut frames_2m, range_4k, &mut frames_4k, flags(),),
@@ -489,13 +479,13 @@ fn mixed_region_failure_counts_the_untouched_second_range() {
 fn mixed_region_failure_after_first_range_keeps_that_range() {
     let (arena, mut table) = table();
     let start = VirtAddr::from(0x4040_0000usize);
-    let four_k_start = start + Size2MiB::SIZE;
+    let four_k_start = start + Huge::SIZE;
     let range_2m = Page::range_inclusive(common::page_2m(start), common::page_2m(start));
     let range_4k = common::range_4k(four_k_start, four_k_start + SMALL.size());
     let frame = PhysAddr::from(arena.base());
     assert_eq!(map_at!(table, four_k_start, frame, PageLevel::Level0, flags(), false), Ok(()));
-    let mut frames_2m = core::iter::once(common::frame_2m(frame + Size2MiB::SIZE));
-    let mut frames_4k = core::iter::once(common::frame_4k(frame + 2 * Size2MiB::SIZE));
+    let mut frames_2m = core::iter::once(common::frame_2m(frame + Huge::SIZE));
+    let mut frames_4k = core::iter::once(common::frame_4k(frame + 2 * Huge::SIZE));
 
     assert_eq!(
         table.map_region_mixed(range_2m, &mut frames_2m, range_4k, &mut frames_4k, flags(),),
@@ -504,7 +494,7 @@ fn mixed_region_failure_after_first_range_keeps_that_range() {
             unmapped_pages: 1,
         })
     );
-    assert_eq!(table.phys_addr(start), Ok(frame + Size2MiB::SIZE));
+    assert_eq!(table.phys_addr(start), Ok(frame + Huge::SIZE));
 
     std::mem::forget(table);
 }
@@ -518,8 +508,8 @@ fn a_region_can_be_unmapped_whatever_sizes_map_it() {
 
     let range_2m = Page::range_inclusive(common::page_2m(start), common::page_2m(start));
     let mut frames_2m = core::iter::once(common::frame_2m(frame));
-    let range_4k = common::range_4k(start + Size2MiB::SIZE, end);
-    let mut frames_4k = common::contiguous_frames_4k(frame + Size2MiB::SIZE, range_4k.len());
+    let range_4k = common::range_4k(start + Huge::SIZE, end);
+    let mut frames_4k = common::contiguous_frames_4k(frame + Huge::SIZE, range_4k.len());
     assert_eq!(
         table.map_region_mixed(range_2m, &mut frames_2m, range_4k, &mut frames_4k, flags(),),
         Ok(())

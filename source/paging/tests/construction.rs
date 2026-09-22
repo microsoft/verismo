@@ -57,7 +57,8 @@ fn a_tree_missing_one_of_its_pages_is_refused() {
     #[allow(unused_mut)]
     let (arena, mut table) = table();
     let child = root_children(&table)[0];
-    let (entry, flush) = table.unmap(common::page_4k(VirtAddr::from(child.bits())), true).unwrap();
+    let (entry, flush) =
+        table.unmap(common::page_4k(VirtAddr::from(child.bits())), Some(true)).unwrap();
     assert!(entry.is_some());
     // SAFETY: nothing runs on these tables but this test.
     unsafe { flush.ignore() };

@@ -13,7 +13,7 @@ use paging::level::Lvl;
 use paging::os_contract::{DirectMappedAllocator, PagingError};
 use paging::page::Page;
 use paging::pagetable::{LockSpec, PageTable};
-use paging::sizes::{Size2MiB, Size4KiB};
+use paging::sizes::{Huge, Regular};
 use paging::{FlushScope, PTEntryFlags, X86Paging, X86PagingParams};
 
 const ALIAS_ADDRESS: usize = 0x4000_0000;
@@ -206,9 +206,9 @@ pub extern "C" fn kmain() -> ! {
         Err(_) => fail("VERIOS_PAGETABLE_BUILD_FAILED\n"),
     };
 
-    let identity_page = Page::<Size2MiB>::from_start_address(VirtAddr::from(0usize))
+    let identity_page = Page::<Huge>::from_start_address(VirtAddr::from(0usize))
         .unwrap_or_else(|_| fail("VERIOS_PAGETABLE_IDENTITY_PAGE_INVALID\n"));
-    let identity_frame = PhysFrame::<Size2MiB>::from_start_address(PhysAddr::from(0usize))
+    let identity_frame = PhysFrame::<Huge>::from_start_address(PhysAddr::from(0usize))
         .unwrap_or_else(|_| fail("VERIOS_PAGETABLE_IDENTITY_FRAME_INVALID\n"));
     if table
         .map(
@@ -231,9 +231,9 @@ pub extern "C" fn kmain() -> ! {
         fail("VERIOS_PAGETABLE_DIRECT_MAP_WALK_FAILED\n");
     }
 
-    let page = Page::<Size4KiB>::from_start_address(VirtAddr::from(ALIAS_ADDRESS))
+    let page = Page::<Regular>::from_start_address(VirtAddr::from(ALIAS_ADDRESS))
         .unwrap_or_else(|_| fail("VERIOS_PAGETABLE_ALIAS_INVALID\n"));
-    let frame = PhysFrame::<Size4KiB>::from_start_address(PhysAddr::from(test_paddr))
+    let frame = PhysFrame::<Regular>::from_start_address(PhysAddr::from(test_paddr))
         .unwrap_or_else(|_| fail("VERIOS_PAGETABLE_FRAME_INVALID\n"));
     let initial_alias_flags = PTEntryFlags::PRESENT
         | PTEntryFlags::WRITABLE

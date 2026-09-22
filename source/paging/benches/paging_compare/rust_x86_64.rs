@@ -5,7 +5,8 @@ use x86_64::structures::paging::mapper::{
     MappedPageTable, Mapper, PageTableFrameMapping, Translate, TranslateResult,
 };
 use x86_64::structures::paging::{
-    FrameAllocator, Page, PageSize, PageTable, PageTableFlags, PhysFrame, Size2MiB, Size4KiB,
+    FrameAllocator, Page, PageSize, PageTable, PageTableFlags, PhysFrame, Size2MiB as Huge,
+    Size4KiB as Regular,
 };
 use x86_64::{PhysAddr, VirtAddr};
 
@@ -28,8 +29,8 @@ unsafe impl PageTableFrameMapping for ArenaMapping {
 struct ArenaFrames(Arc<Arena>);
 
 // SAFETY: the arena returns unique aligned frames backed for the adapter lifetime.
-unsafe impl FrameAllocator<Size4KiB> for ArenaFrames {
-    fn allocate_frame(&mut self) -> Option<PhysFrame<Size4KiB>> {
+unsafe impl FrameAllocator<Regular> for ArenaFrames {
+    fn allocate_frame(&mut self) -> Option<PhysFrame<Regular>> {
         let address = self.0.allocate_page()? as u64;
         PhysFrame::from_start_address(PhysAddr::new(address)).ok()
     }
@@ -75,19 +76,19 @@ impl RustX86Adapter {
         let leaf = &mut p2[address.p2_index()];
         let old_flags = leaf.flags();
         assert!(old_flags.contains(PageTableFlags::PRESENT | PageTableFlags::HUGE_PAGE));
-        let physical_base = leaf.addr().align_down(Size2MiB::SIZE);
+        let physical_base = leaf.addr().align_down(Huge::SIZE);
         let child_address = arena.allocate_page().expect("x86_64 split table");
         // SAFETY: this fresh aligned arena page is exclusively owned and zeroed.
         let child = unsafe { &mut *(child_address as *mut PageTable) };
         let child_flags = old_flags - PageTableFlags::HUGE_PAGE;
         for (index, entry) in child.iter_mut().enumerate() {
             let frame =
-                PhysFrame::<Size4KiB>::from_start_address(physical_base + index as u64 * PAGE_SIZE)
+                PhysFrame::<Regular>::from_start_address(physical_base + index as u64 * PAGE_SIZE)
                     .expect("split frame");
             entry.set_frame(frame, child_flags);
         }
         let child_frame =
-            PhysFrame::<Size4KiB>::from_start_address(PhysAddr::new(child_address as u64))
+            PhysFrame::<Regular>::from_start_address(PhysAddr::new(child_address as u64))
                 .expect("split table frame");
         let parent_flags = old_flags
             & (PageTableFlags::PRESENT
@@ -117,10 +118,9 @@ impl PagingAdapter for RustX86Adapter {
     fn map_4k(&self, virtual_address: u64, physical_address: u64) {
         let arena = self.arena.clone();
         self.with_mapper(|mapper| {
-            let page =
-                Page::<Size4KiB>::from_start_address(VirtAddr::new(virtual_address)).unwrap();
+            let page = Page::<Regular>::from_start_address(VirtAddr::new(virtual_address)).unwrap();
             let frame =
-                PhysFrame::<Size4KiB>::from_start_address(PhysAddr::new(physical_address)).unwrap();
+                PhysFrame::<Regular>::from_start_address(PhysAddr::new(physical_address)).unwrap();
             let mut frames = ArenaFrames(arena);
             // SAFETY: the synthetic page and frame are unused and remain arena-backed.
             unsafe { mapper.map_to(page, frame, flags(true), &mut frames) }
@@ -132,10 +132,9 @@ impl PagingAdapter for RustX86Adapter {
     fn map_2m(&self, virtual_address: u64, physical_address: u64) {
         let arena = self.arena.clone();
         self.with_mapper(|mapper| {
-            let page =
-                Page::<Size2MiB>::from_start_address(VirtAddr::new(virtual_address)).unwrap();
+            let page = Page::<Huge>::from_start_address(VirtAddr::new(virtual_address)).unwrap();
             let frame =
-                PhysFrame::<Size2MiB>::from_start_address(PhysAddr::new(physical_address)).unwrap();
+                PhysFrame::<Huge>::from_start_address(PhysAddr::new(physical_address)).unwrap();
             let mut frames = ArenaFrames(arena);
             // SAFETY: the synthetic page and frame are unused and remain arena-backed.
             unsafe { mapper.map_to(page, frame, flags(true), &mut frames) }
@@ -150,8 +149,8 @@ impl PagingAdapter for RustX86Adapter {
             let mut frames = ArenaFrames(arena);
             let mut address = start;
             while address < end {
-                let page = Page::<Size4KiB>::from_start_address(VirtAddr::new(address)).unwrap();
-                let frame = PhysFrame::<Size4KiB>::from_start_address(PhysAddr::new(
+                let page = Page::<Regular>::from_start_address(VirtAddr::new(address)).unwrap();
+                let frame = PhysFrame::<Regular>::from_start_address(PhysAddr::new(
                     physical_start + address - start,
                 ))
                 .unwrap();
@@ -166,8 +165,7 @@ impl PagingAdapter for RustX86Adapter {
 
     fn unmap_4k(&self, virtual_address: u64) {
         self.with_mapper(|mapper| {
-            let page =
-                Page::<Size4KiB>::from_start_address(VirtAddr::new(virtual_address)).unwrap();
+            let page = Page::<Regular>::from_start_address(VirtAddr::new(virtual_address)).unwrap();
             mapper.unmap(page).expect("x86_64 unmap").1.ignore();
         });
     }
@@ -176,7 +174,7 @@ impl PagingAdapter for RustX86Adapter {
         self.with_mapper(|mapper| {
             let mut address = start;
             while address < end {
-                let page = Page::<Size4KiB>::from_start_address(VirtAddr::new(address)).unwrap();
+                let page = Page::<Regular>::from_start_address(VirtAddr::new(address)).unwrap();
                 mapper.unmap(page).expect("x86_64 unmap_range").1.ignore();
                 address += PAGE_SIZE;
             }
@@ -207,8 +205,7 @@ impl PagingAdapter for RustX86Adapter {
 
     fn protect_4k(&self, virtual_address: u64, writable: bool) {
         self.with_mapper(|mapper| {
-            let page =
-                Page::<Size4KiB>::from_start_address(VirtAddr::new(virtual_address)).unwrap();
+            let page = Page::<Regular>::from_start_address(VirtAddr::new(virtual_address)).unwrap();
             // SAFETY: setup created this mapping and the mapper mutex excludes other mutations.
             unsafe { mapper.update_flags(page, flags(writable)) }
                 .expect("x86_64 update_flags")
@@ -225,7 +222,7 @@ impl PagingAdapter for RustX86Adapter {
         self.with_mapper(|mapper| {
             let mut address = start;
             while address < end {
-                let page = Page::<Size4KiB>::from_start_address(VirtAddr::new(address)).unwrap();
+                let page = Page::<Regular>::from_start_address(VirtAddr::new(address)).unwrap();
                 // SAFETY: setup created this mapping and the mapper mutex excludes other mutations.
                 unsafe { mapper.update_flags(page, flags(writable)) }
                     .expect("x86_64 range update_flags")

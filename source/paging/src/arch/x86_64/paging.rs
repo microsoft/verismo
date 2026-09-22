@@ -5,7 +5,7 @@
 use super::pt_flags::PTEntryFlags;
 use super::tlb::{FlushScope, X86TlbFlushTok};
 use crate::structs::arch_contract::ArchPagingMeta;
-use crate::structs::level::PageLevel;
+use crate::structs::level::{LevelSpec, PageLevel};
 
 /// Platform tag encoding, allowed request flags, and translation invalidation.
 ///
@@ -106,7 +106,7 @@ impl<P: X86PagingParams> ArchPagingMeta for X86Paging<P> {
     }
 
     #[inline(always)]
-    fn requires_break_before_make(_old: usize, _new: usize, _level: PageLevel) -> bool {
+    fn requires_break_before_make<L: LevelSpec>(_old: usize, _new: usize) -> bool {
         false
     }
 

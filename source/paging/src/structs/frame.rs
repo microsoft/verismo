@@ -28,7 +28,7 @@ use vstd::prelude::*;
 
 use crate::structs::address::{Address, PhysAddr};
 use crate::structs::page::AddressNotAligned;
-use crate::structs::sizes::{PageSize, Size4KiB};
+use crate::structs::sizes::{PageSize, Regular};
 
 #[cfg(verus_only)]
 include!("../specs/frame.rs");
@@ -36,7 +36,7 @@ include!("../specs/frame.rs");
 /// A physical memory frame of size `S`.
 #[verus_verify]
 #[repr(C)]
-pub struct PhysFrame<S: PageSize = Size4KiB> {
+pub struct PhysFrame<S: PageSize = Regular> {
     start_address: PhysAddr,
     size: PhantomData<S>,
 }
@@ -189,7 +189,7 @@ impl<S: PageSize> core::ops::Add<usize> for PhysFrame<S> {
 /// A range of physical frames, `end` exclusive.
 #[verus_verify]
 #[repr(C)]
-pub struct PhysFrameRange<S: PageSize = Size4KiB> {
+pub struct PhysFrameRange<S: PageSize = Regular> {
     /// The first frame of the range.
     pub start: PhysFrame<S>,
     /// The frame after the last one of the range.
@@ -239,7 +239,7 @@ impl<S: PageSize> PhysFrameRange<S> {
 /// A range of physical frames, `end` inclusive.
 #[verus_verify]
 #[repr(C)]
-pub struct PhysFrameRangeInclusive<S: PageSize = Size4KiB> {
+pub struct PhysFrameRangeInclusive<S: PageSize = Regular> {
     /// The first frame of the range.
     pub start: PhysFrame<S>,
     /// The last frame of the range.

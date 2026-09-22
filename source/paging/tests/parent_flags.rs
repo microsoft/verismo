@@ -36,7 +36,7 @@ unsafe fn ancestors(root: PhysAddr, addr: VirtAddr) -> Vec<PTEntry<Arch>> {
         let pte = (page as *const PTEntry<Arch>).wrapping_add(entry_index(addr, level));
         // SAFETY: the caller pins this host-backed tree; no entry references escape.
         let entry = unsafe { load_entry(pte) };
-        if !entry.is_table(level) {
+        if !entry.is_present_table(level) {
             break;
         }
         result.push(entry);

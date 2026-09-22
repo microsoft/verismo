@@ -10,7 +10,7 @@ use paging::{
     os_contract::{PagingAllocator, PagingError},
     page::Page as PagingPage,
     pagetable::{KernelPageTable as ConcurrentPageTable, LockSpec},
-    sizes::Size4KiB as PagingSize4KiB,
+    sizes::{Huge as PagingHuge, Regular as PagingRegular},
     tlb::MayNeedFlush,
     FlushScope, PTEntryFlags, X86Paging, X86PagingParams, X86TlbFlushTok,
 };
@@ -18,7 +18,7 @@ use spin::mutex::{SpinMutex, SpinMutexGuard};
 use x86_64::{
     structures::{
         idt::PageFaultErrorCode,
-        paging::{Page, PageTable, PageTableFlags, Size4KiB},
+        paging::{Page, PageTable, PageTableFlags, Regular},
     },
     PhysAddr, VirtAddr,
 };
@@ -185,6 +185,29 @@ fn flush_local<M: MemoryProvider + 'static>(flush: Flush<M>) {
 }
 
 impl<M: MemoryProvider + 'static, const ALIGN: usize> X64PageTable<'_, M, ALIGN> {
+    fn split_to_4k(inner: &Tree<M>, address: PagingVirtAddr) -> Result<(), PagingError> {
+        loop {
+            let mapping = inner.walk(address);
+            if !mapping.read().present() {
+                return Err(PagingError::NotMapped);
+            }
+            let flush = match mapping.level() {
+                PageLevel::Level0 => return Ok(()),
+                PageLevel::Level1 => inner.split(
+                    PagingPage::<PagingHuge>::containing_address(address),
+                    FLUSH_ALL_CPUS,
+                ),
+                PageLevel::Level2 => inner.set_flags(
+                    PagingPage::<PagingRegular>::containing_address(address),
+                    mapping.read().flags(),
+                    FLUSH_ALL_CPUS,
+                ),
+                _ => return Err(PagingError::InvalidLevel),
+            }?;
+            flush_local::<M>(flush);
+        }
+    }
+
     /// # Safety
     /// Boot-root imports preserve existing entry bits. Keep the tree stable
     /// during validation and coordinate all hardware and software users.
@@ -228,18 +251,10 @@ impl<M: MemoryProvider + 'static, const ALIGN: usize> X64PageTable<'_, M, ALIGN>
         let inner = self.inner.lock();
         for address in (range.start..range.end).step_by(4096) {
             let address = PagingVirtAddr::from(address);
-            match inner.split(
-                PagingPage::<PagingSize4KiB>::containing_address(address),
-                FLUSH_ALL_CPUS,
-            ) {
-                Ok(flush) => flush_local::<M>(flush),
-                Err(PagingError::NotMapped) => continue,
-                Err(error) => panic!("cannot split mapping for unmap: {error:?}"),
-            }
             let (entry, flush) = inner
                 .unmap(
-                    PagingPage::<PagingSize4KiB>::from_start_address(address).unwrap(),
-                    FLUSH_ALL_CPUS,
+                    PagingPage::<PagingRegular>::from_start_address(address).unwrap(),
+                    Some(FLUSH_ALL_CPUS),
                 )
                 .expect("kernel page-table policy permits unmapping");
             flush_local::<M>(flush);
@@ -285,11 +300,8 @@ impl<M: MemoryProvider + 'static, const ALIGN: usize> X64PageTable<'_, M, ALIGN>
         }
         for old in (old_range.start..old_range.end).step_by(4096) {
             let old_address = PagingVirtAddr::from(old);
-            match inner.split(
-                PagingPage::<PagingSize4KiB>::containing_address(old_address),
-                FLUSH_ALL_CPUS,
-            ) {
-                Ok(flush) => flush_local::<M>(flush),
+            match Self::split_to_4k(&inner, old_address) {
+                Ok(()) => {}
                 Err(PagingError::NotMapped) => continue,
                 Err(PagingError::AllocFrame) => return Err(page_mgmt::RemapError::OutOfMemory),
                 Err(error) => panic!("invalid source mapping: {error:?}"),
@@ -299,8 +311,8 @@ impl<M: MemoryProvider + 'static, const ALIGN: usize> X64PageTable<'_, M, ALIGN>
             let flags = paging_flags(host_flags(entry));
             inner
                 .map_with_parent_flags(
-                    PagingPage::<PagingSize4KiB>::from_start_address(new.into()).unwrap(),
-                    PagingPhysFrame::<PagingSize4KiB>::from_start_address(
+                    PagingPage::<PagingRegular>::from_start_address(new.into()).unwrap(),
+                    PagingPhysFrame::<PagingRegular>::from_start_address(
                         entry.leaf_address(PageLevel::Level0),
                     )
                     .unwrap(),
@@ -318,8 +330,8 @@ impl<M: MemoryProvider + 'static, const ALIGN: usize> X64PageTable<'_, M, ALIGN>
             flush_local::<M>(Flush::<M>::new(new.into(), PageLevel::Level0));
             let (removed, flush) = inner
                 .unmap(
-                    PagingPage::<PagingSize4KiB>::from_start_address(old_address).unwrap(),
-                    FLUSH_ALL_CPUS,
+                    PagingPage::<PagingRegular>::from_start_address(old_address).unwrap(),
+                    Some(FLUSH_ALL_CPUS),
                 )
                 .expect("kernel page-table policy permits unmapping");
             assert!(removed.is_some());
@@ -342,7 +354,7 @@ impl<M: MemoryProvider + 'static, const ALIGN: usize> X64PageTable<'_, M, ALIGN>
         for address in (range.start..range.end).step_by(4096) {
             let address = PagingVirtAddr::from(address);
             let mapping = inner.walk(address);
-            if !mapping.read().is_leaf(mapping.level()) {
+            if !mapping.read().is_present_leaf(mapping.level()) {
                 continue;
             }
             let old_flags = host_flags(mapping.read());
@@ -355,7 +367,7 @@ impl<M: MemoryProvider + 'static, const ALIGN: usize> X64PageTable<'_, M, ALIGN>
             let flags = paging_flags((old_flags & !Self::MPROTECT_PTE_MASK) | desired);
             let flush = inner
                 .set_flags(
-                    PagingPage::<PagingSize4KiB>::from_start_address(address).unwrap(),
+                    PagingPage::<PagingRegular>::from_start_address(address).unwrap(),
                     flags,
                     FLUSH_ALL_CPUS,
                 )
@@ -389,23 +401,23 @@ impl<M: MemoryProvider + 'static, const ALIGN: usize> PageTableImpl<ALIGN>
     #[cfg(test)]
     fn translate(&self, address: VirtAddr) -> crate::arch::TranslateResult {
         use crate::arch::{MappedFrame, TranslateResult};
-        use x86_64::structures::paging::{PhysFrame, Size1GiB, Size2MiB};
+        use x86_64::structures::paging::{PhysFrame, SizeLevel2, Huge};
         let inner = self.inner.lock();
         let mapping = inner.walk((address.as_u64() as usize).into());
         let entry = mapping.read();
-        if !entry.is_leaf(mapping.level()) {
+        if !entry.is_present_leaf(mapping.level()) {
             return TranslateResult::NotMapped;
         }
         let physical = PhysAddr::new((entry.paddr_field() & !(mapping.level().size() - 1)) as u64);
         let frame = match mapping.level() {
             PageLevel::Level0 => {
-                MappedFrame::Size4KiB(PhysFrame::<Size4KiB>::from_start_address(physical).unwrap())
+                MappedFrame::Regular(PhysFrame::<Regular>::from_start_address(physical).unwrap())
             }
             PageLevel::Level1 => {
-                MappedFrame::Size2MiB(PhysFrame::<Size2MiB>::from_start_address(physical).unwrap())
+                MappedFrame::Huge(PhysFrame::<Huge>::from_start_address(physical).unwrap())
             }
             PageLevel::Level2 => {
-                MappedFrame::Size1GiB(PhysFrame::<Size1GiB>::from_start_address(physical).unwrap())
+                MappedFrame::SizeLevel2(PhysFrame::<SizeLevel2>::from_start_address(physical).unwrap())
             }
             level => panic!("invalid x86 leaf level: {level:?}"),
         };
@@ -418,7 +430,7 @@ impl<M: MemoryProvider + 'static, const ALIGN: usize> PageTableImpl<ALIGN>
 
     unsafe fn handle_page_fault(
         &self,
-        page: Page<Size4KiB>,
+        page: Page<Regular>,
         flags: PageTableFlags,
         error_code: PageFaultErrorCode,
     ) -> Result<(), PageFaultError> {
@@ -445,8 +457,8 @@ impl<M: MemoryProvider + 'static, const ALIGN: usize> PageTableImpl<ALIGN>
         let frame =
             Platform::<M>::allocate_table_page().map_err(|_| PageFaultError::AllocationFailed)?;
         match inner.map_with_parent_flags(
-            PagingPage::<PagingSize4KiB>::from_start_address(address).unwrap(),
-            PagingPhysFrame::<PagingSize4KiB>::from_start_address(frame).unwrap(),
+            PagingPage::<PagingRegular>::from_start_address(address).unwrap(),
+            PagingPhysFrame::<PagingRegular>::from_start_address(frame).unwrap(),
             paging_flags(flags | PageTableFlags::PRESENT),
             false,
             parent_flags(),

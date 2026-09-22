@@ -3,7 +3,7 @@
 use bitflags::Flags;
 
 use crate::structs::address::{Address, PhysAddr};
-use crate::structs::level::PageLevel;
+use crate::structs::level::{LevelSpec, PageLevel};
 use crate::structs::tlb::TlbFlush;
 
 /// A page table entry's flag word.
@@ -123,7 +123,7 @@ pub trait ArchPagingMeta: 'static + Copy {
     /// Whether changing a valid mapping's structure, output frame, or address
     /// tags requires completed TLB maintenance before publication. Flag-only
     /// updates never call this hook and must exclude attributes requiring BBM.
-    fn requires_break_before_make(old: usize, new: usize, level: PageLevel) -> bool;
+    fn requires_break_before_make<L: LevelSpec>(old: usize, new: usize) -> bool;
 
     /// Declared flags allowed in new mapping and leaf-flag update requests, for example
     /// excluding `GLOBAL` before CR4.PGE is enabled. Structural bits and

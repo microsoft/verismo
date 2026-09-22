@@ -10,11 +10,12 @@ use paging::address::{Address, PhysAddr, VirtAddr};
 use paging::level::{LevelSpec, Lvl, PageLevel};
 use paging::os_contract::PagingError;
 use paging::pagetable::PageTable;
+use paging::ptpage::WalkLevel;
 use paging::X86Paging;
 
 /// Unmaps `vaddr` and discharges the flush, which the freeing needs.
 fn unmap(table: &mut Table, vaddr: VirtAddr) {
-    let (entry, flush) = table.unmap(common::page_4k(vaddr), true).unwrap();
+    let (entry, flush) = table.unmap(common::page_4k(vaddr), Some(true)).unwrap();
     assert!(entry.is_some());
     // SAFETY: nothing runs on these tables but this test.
     unsafe { flush.ignore() };
@@ -199,7 +200,7 @@ fn five_level_range_cleanup_uses_high_canonical_offsets_without_wrapping() {
                 false,
             )
             .unwrap();
-        let (entry, pending) = table.unmap(common::page_4k(addr), true).unwrap();
+        let (entry, pending) = table.unmap(common::page_4k(addr), Some(true)).unwrap();
         assert!(entry.is_some());
         // SAFETY: these host-backed tables are never installed.
         unsafe { pending.ignore() };
@@ -254,17 +255,17 @@ fn assert_all_tables_freed_once(arena: &Arena) {
 type Owned<L> = PageTable<X86Paging<Host>, Allocator, L, WholeTreeLock>;
 type Content = WholeTreeLock;
 
-fn owned<L: LevelSpec>() -> (Arc<Arena>, Owned<L>) {
+fn owned<L: WalkLevel>() -> (Arc<Arena>, Owned<L>) {
     let arena = Arena::new(ARENA);
     let table = Owned::new(WholeTreeLock::default(), flags()).unwrap();
     (arena, table)
 }
 
-fn parts<L: LevelSpec>(table: Owned<L>) -> (Content, PhysAddr) {
+fn parts<L: WalkLevel>(table: Owned<L>) -> (Content, PhysAddr) {
     table.leak()
 }
 
-unsafe fn adopt<L: LevelSpec>(content: Content, root: PhysAddr) -> Owned<L> {
+unsafe fn adopt<L: WalkLevel>(content: Content, root: PhysAddr) -> Owned<L> {
     unsafe { Owned::from_root(content, root) }.unwrap()
 }
 
@@ -299,7 +300,7 @@ macro_rules! owned_drop_tests {
                         false,
                     )
                     .unwrap();
-                assert!(arena.allocated() > <$level>::DEPTH + 1);
+                assert!(arena.allocated() > <$level>::LEVEL.depth() + 1);
                 assert!(arena.freed().is_empty());
                 drop(table);
                 assert_all_tables_freed_once(&arena);

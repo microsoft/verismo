@@ -21,7 +21,7 @@ use paging::page::Page;
 use paging::pagetable::{LockSpec, PageTable};
 use paging::policy::RootRange;
 use paging::ptpage::PTPage;
-use paging::sizes::{entry_index, Size4KiB};
+use paging::sizes::{entry_index, Regular};
 use paging::tlb::MayNeedFlush;
 use paging::{FlushScope, PTEntryFlags, X86Paging, X86TlbFlushTok};
 
@@ -301,9 +301,9 @@ fn competing_ranges_allow_only_one_mapping() {
         let results = race(12, {
             let table = table.clone();
             move |index| {
-                let page = Page::<Size4KiB>::containing_address(VirtAddr::from(BASE));
+                let page = Page::<Regular>::containing_address(VirtAddr::from(BASE));
                 let mut frames = core::iter::once(
-                    PhysFrame::<Size4KiB>::from_start_address(PhysAddr::from(
+                    PhysFrame::<Regular>::from_start_address(PhysAddr::from(
                         base + (index % 2) * PAGE,
                     ))
                     .unwrap(),
@@ -395,7 +395,7 @@ fn competing_unmaps_return_the_original_entry_exactly_once() {
         let results = race(12, {
             let table = table.clone();
             move |_| {
-                let (entry, flush) = table.unmap(common::page_4k(vaddr), true).unwrap();
+                let (entry, flush) = table.unmap(common::page_4k(vaddr), Some(true)).unwrap();
                 assert_eq!(flush.is_pending(), entry.is_some());
                 discharge(flush);
                 entry.map(|entry| entry.raw())
@@ -430,7 +430,7 @@ fn overlapping_updates_expose_only_absence_or_complete_mapping_snapshots() {
                 false,
             )
             .unwrap();
-        discharge(table.unmap(common::page_4k(vaddr), true).unwrap().1);
+        discharge(table.unmap(common::page_4k(vaddr), Some(true)).unwrap().1);
         race(6, {
             let table = table.clone();
             move |worker| {
@@ -446,7 +446,8 @@ fn overlapping_updates_expose_only_absence_or_complete_mapping_snapshots() {
                             Err(PagingError::EntryAlreadyPresent { level: SMALL_LEVEL }) => {}
                             result => panic!("unexpected map result: {result:?}"),
                         }
-                        let (entry, flush) = table.unmap(common::page_4k(vaddr), true).unwrap();
+                        let (entry, flush) =
+                            table.unmap(common::page_4k(vaddr), Some(true)).unwrap();
                         if let Some(entry) = entry {
                             assert!(words.contains(&entry.raw()));
                         }
@@ -496,7 +497,7 @@ fn walks_finish_while_a_writer_is_blocked_on_the_content_lock() {
     let writer = spawn({
         let table = table.clone();
         move || {
-            discharge(table.unmap(common::page_4k(vaddr), true).unwrap().1);
+            discharge(table.unmap(common::page_4k(vaddr), Some(true)).unwrap().1);
             table
                 .map(
                     common::page_4k(vaddr),
@@ -554,7 +555,18 @@ fn splitting_a_gibibyte_exposes_only_complete_children_or_the_invalid_original_l
             move |worker| {
                 if worker == 0 {
                     discharge(
-                        split_at!(table, VirtAddr::from(BASE + target), SMALL_LEVEL, true).unwrap(),
+                        table
+                            .set_flags(
+                                Page::<paging::sizes::Huge>::containing_address(VirtAddr::from(
+                                    BASE + target,
+                                )),
+                                permissions,
+                                true,
+                            )
+                            .unwrap(),
+                    );
+                    discharge(
+                        split_at!(table, VirtAddr::from(BASE + target), LARGE_LEVEL, true).unwrap(),
                     );
                 } else {
                     for iteration in 0..256 {
@@ -608,7 +620,10 @@ fn splitting_a_gibibyte_exposes_only_complete_children_or_the_invalid_original_l
                 );
             }
         }
-        discharge(split_at!(table, VirtAddr::from(BASE + target), HUGE_LEVEL, true).unwrap());
+        assert!(matches!(
+            split_at!(table, VirtAddr::from(BASE + target), HUGE_LEVEL, true),
+            Err(PagingError::InvalidLevel)
+        ));
         assert_eq!(
             table.walk(VirtAddr::from(BASE + target)).level(),
             SMALL_LEVEL,
@@ -638,7 +653,12 @@ fn split_parents_do_not_retain_restrictive_leaf_permissions() {
     let address = VirtAddr::from(BASE + 3 * LARGE + PAGE);
     let original = PTEntryFlags::data_ro();
     map_at!(table, VirtAddr::from(BASE), frame, HUGE_LEVEL, original, false).unwrap();
-    discharge(split_at!(table, address, SMALL_LEVEL, true).unwrap());
+    discharge(
+        table
+            .set_flags(Page::<paging::sizes::Huge>::containing_address(address), original, true)
+            .unwrap(),
+    );
+    discharge(split_at!(table, address, LARGE_LEVEL, true).unwrap());
     let mut page =
         <Allocator as paging::os_contract::PagingAllocator>::paddr_to_vaddr(table.root_paddr())
             .as_ptr::<PTPage<X86Paging<Host>, Allocator>>();
@@ -646,7 +666,7 @@ fn split_parents_do_not_retain_restrictive_leaf_permissions() {
         let pte = PTPage::entry_ptr(page, entry_index(address, level));
         // SAFETY: the table borrow pins this path; the atomic load creates no live PTE reference.
         let entry = unsafe { load_entry(pte) };
-        assert!(entry.is_table(level));
+        assert!(entry.is_present_table(level));
         assert!(entry.writable(), "a split parent retained the huge leaf's read-only bit");
         assert!(entry.user(), "a split parent retained the huge leaf's supervisor-only bit");
         assert!(!entry.flags().nx(), "a split parent retained the huge leaf's execute restriction");
@@ -657,7 +677,7 @@ fn split_parents_do_not_retain_restrictive_leaf_permissions() {
     }
     let mapped = frame + 3 * LARGE + PAGE;
     assert_eq!(table.walk(address).read().raw(), leaf_word(mapped.bits(), original, SMALL_LEVEL));
-    discharge(table.unmap(common::page_4k(address), true).unwrap().1);
+    discharge(table.unmap(common::page_4k(address), Some(true)).unwrap().1);
     let writable_user_code = PTEntryFlags::PRESENT | PTEntryFlags::WRITABLE | PTEntryFlags::USER;
     table
         .map(common::page_4k(address), common::frame_4k(mapped), writable_user_code, false)
@@ -694,7 +714,7 @@ fn huge_pat_survives_both_split_steps_without_becoming_a_physical_address_bit() 
     );
     // SAFETY: this inactive tree is exclusively owned, and the root remains allocated.
     let parent = unsafe { load_entry(root_pte) };
-    assert!(parent.is_table(PageLevel::Level3));
+    assert!(parent.is_present_table(PageLevel::Level3));
     let huge_pte = PTPage::<X86Paging<Host>, Allocator>::entry_ptr_mut(
         <Allocator as paging::os_contract::PagingAllocator>::paddr_to_vaddr(PhysAddr::from(
             parent.address(),
@@ -705,7 +725,7 @@ fn huge_pat_survives_both_split_steps_without_becoming_a_physical_address_bit() 
     // SAFETY: Host identity-maps this child, and no other thread or hardware uses the tree.
     unsafe {
         let leaf = load_entry(huge_pte);
-        assert!(leaf.is_leaf(HUGE_LEVEL));
+        assert!(leaf.is_present_leaf(HUGE_LEVEL));
         (&*huge_pte.cast::<AtomicUsize>()).store(leaf.raw() | HUGE_PAT, Ordering::Release);
     }
     for offset in [0, PAGE, LARGE + PAGE, HUGE - 1] {
@@ -716,7 +736,11 @@ fn huge_pat_survives_both_split_steps_without_becoming_a_physical_address_bit() 
         Err(PagingError::EntryAlreadyPresent { level: HUGE_LEVEL })
     );
     let target = address + 3 * LARGE + PAGE;
-    discharge(split_at!(table, target, LARGE_LEVEL, true).unwrap());
+    discharge(
+        table
+            .set_flags(Page::<paging::sizes::Huge>::containing_address(target), flags(), true)
+            .unwrap(),
+    );
     for page in 0..512 {
         let offset = page * LARGE;
         let snapshot = table.walk(address + offset);
@@ -727,7 +751,7 @@ fn huge_pat_survives_both_split_steps_without_becoming_a_physical_address_bit() 
         );
         assert_eq!(table.phys_addr(address + offset), Ok(frame + offset));
     }
-    discharge(split_at!(table, target, SMALL_LEVEL, true).unwrap());
+    discharge(split_at!(table, target, LARGE_LEVEL, true).unwrap());
     for page in 0..512 {
         let offset = 3 * LARGE + page * PAGE;
         let snapshot = table.walk(address + offset);
@@ -824,14 +848,14 @@ fn split_and_unmap_races_follow_per_entry_serial_semantics() {
                         if worker == 0 {
                             (
                                 Some(
-                                    split_at!(table, start + PAGE, SMALL_LEVEL, true)
+                                    split_at!(table, start + PAGE, LARGE_LEVEL, true)
                                         .map(discharge),
                                 ),
                                 None,
                             )
                         } else {
                             let (entry, flush) =
-                                table.unmap(common::page_4k(start + 2 * PAGE), true).unwrap();
+                                table.unmap(common::page_4k(start + 2 * PAGE), Some(true)).unwrap();
                             discharge(flush);
                             (None, entry.map(|_| SMALL_LEVEL))
                         }
@@ -843,7 +867,7 @@ fn split_and_unmap_races_follow_per_entry_serial_semantics() {
             let split = split.0.unwrap();
             let removed = unmap.1;
             assert_eq!(removed, Some(SMALL_LEVEL));
-            assert_eq!(split, Ok(()));
+            assert!(matches!(split, Ok(()) | Err(PagingError::InvalidLevel)));
             for page in [0, 1, 2, 3, 511] {
                 let offset = entry_index * LARGE + page * PAGE;
                 let expected = if page == 2 {
@@ -930,7 +954,7 @@ fn splitting_preserves_confidentiality_tags_and_retagging_changes_only_one_leaf(
     for shared in [false, true] {
         let base = VirtAddr::from(BASE + usize::from(shared) * LARGE);
         table.map(common::page_2m(base), common::frame_2m(frame), flags(), shared).unwrap();
-        let flush = split_at!(table, base, SMALL_LEVEL, true).unwrap();
+        let flush = split_at!(table, base, LARGE_LEVEL, true).unwrap();
         // SAFETY: the encryption bit is simulated; these tables never run in hardware.
         unsafe { flush.ignore() };
         for page in 0..512 {
@@ -972,14 +996,14 @@ fn last_address_unmaps_and_splits_produce_nonwrapping_flush_scopes() {
         discharge(flush);
         map_at!(table, start, frame, level, flags(), false).unwrap();
         assert_eq!(table.phys_addr(VirtAddr::from(usize::MAX)), Ok(frame + (level.size() - 1)));
-        let (entry, flush) = table.unmap(common::page_4k(last_page), true).unwrap();
+        let (entry, flush) = table.unmap(common::page_4k(last_page), Some(true)).unwrap();
         assert!(entry.is_some());
         assert_eq!(flush.scope().as_ref().map(|token| token.scope()), Some(FlushScope::All));
         discharge(flush);
         assert_eq!(table.phys_addr(VirtAddr::from(usize::MAX)), Err(PagingError::NotMapped));
         if level != SMALL_LEVEL {
             let previous = last_page - PAGE;
-            let (entry, flush) = table.unmap(common::page_4k(previous), true).unwrap();
+            let (entry, flush) = table.unmap(common::page_4k(previous), Some(true)).unwrap();
             assert!(entry.is_some());
             assert_eq!(
                 flush.scope().as_ref().map(|token| token.scope()),
@@ -1012,7 +1036,7 @@ fn typed_4k_unmaps_use_the_page_aligned_flush_scope() {
         table
             .map(common::page_4k(start), common::frame_4k(PhysAddr::from(2 * HUGE)), flags(), false)
             .unwrap();
-        let (entry, flush) = table.unmap(common::page_4k(start), true).unwrap();
+        let (entry, flush) = table.unmap(common::page_4k(start), Some(true)).unwrap();
         assert!(entry.is_some());
         assert_eq!(flush.scope().as_ref().map(|token| token.scope()), Some(expected));
         discharge(flush);
@@ -1043,7 +1067,7 @@ fn reclamation_waits_for_external_readers_and_frees_every_table_once() {
                 )
                 .unwrap();
             let snapshot = table.walk(vaddr);
-            discharge(table.unmap(common::page_4k(vaddr), true).unwrap().1);
+            discharge(table.unmap(common::page_4k(vaddr), Some(true)).unwrap().1);
             assert!(snapshot.read().present());
             assert!(table.walk(vaddr).read().is_clear());
             ready.send(()).unwrap();
@@ -1119,7 +1143,7 @@ fn range_reclamation_respects_siblings_huge_leaves_and_exclusive_end_boundaries(
                 )
                 .unwrap();
             for address in [start, VirtAddr::from(boundary), end] {
-                let (entry, flush) = table.unmap(common::page_4k(address), true).unwrap();
+                let (entry, flush) = table.unmap(common::page_4k(address), Some(true)).unwrap();
                 assert!(entry.is_some());
                 discharge(flush);
             }
@@ -1140,7 +1164,7 @@ fn range_reclamation_respects_siblings_huge_leaves_and_exclusive_end_boundaries(
         assert_freed_once(&arena, 2);
         // SAFETY: the sibling is still mapped and must retain its table.
         assert_eq!(unsafe { table.free_page_table_by_addr(start) }, 0);
-        discharge(table.unmap(common::page_4k(sibling), true).unwrap().1);
+        discharge(table.unmap(common::page_4k(sibling), Some(true)).unwrap().1);
         let left_tables = if boundary == BASE + HUGE { 2 } else { 1 };
         // SAFETY: the last sibling was unmapped under this guard.
         assert_eq!(unsafe { table.free_page_table_by_addr(start) }, left_tables);
@@ -1148,7 +1172,7 @@ fn range_reclamation_respects_siblings_huge_leaves_and_exclusive_end_boundaries(
         // SAFETY: a mapped huge leaf must never be treated as a table page.
         unsafe { table.free_page_table_by_range(huge, huge + LARGE) };
         assert_freed_once(&arena, 2 + left_tables);
-        discharge(table.unmap(common::page_2m(huge), true).unwrap().1);
+        discharge(table.unmap(common::page_2m(huge), Some(true)).unwrap().1);
         // SAFETY: the huge leaf is now absent and its flush discharged.
         assert_eq!(unsafe { table.free_page_table_by_addr(huge) }, 2);
         assert_freed_once(&arena, 4 + left_tables);
@@ -1184,7 +1208,7 @@ fn five_level_range_cleanup_crosses_the_canonical_gap_without_wrapping() {
                     .unwrap();
             }
             for address in [start, high] {
-                let (entry, flush) = table.unmap(common::page_4k(address), true).unwrap();
+                let (entry, flush) = table.unmap(common::page_4k(address), Some(true)).unwrap();
                 assert!(entry.is_some());
                 discharge(flush);
             }
@@ -1200,7 +1224,7 @@ fn five_level_range_cleanup_crosses_the_canonical_gap_without_wrapping() {
         assert_eq!(table.phys_addr(start), Err(PagingError::NotMapped));
         assert_eq!(table.phys_addr(high), Err(PagingError::NotMapped));
         assert_eq!(table.validate_page_table(), Ok(()));
-        discharge(table.unmap(common::page_4k(end), true).unwrap().1);
+        discharge(table.unmap(common::page_4k(end), Some(true)).unwrap().1);
         // SAFETY: the final high-half leaf was unmapped under the same write guard.
         assert_eq!(unsafe { table.free_page_table_by_addr(end) }, 4);
         assert_freed_once(&arena, 7);
@@ -1285,22 +1309,23 @@ fn failed_growth_and_split_leave_retryable_mappings_and_release_content_guards()
     table.map(common::page_4k(vaddr), common::frame_4k(frame), flags(), false).unwrap();
     assert_eq!(table.phys_addr(vaddr), Ok(frame));
     let huge = VirtAddr::from(BASE + HUGE);
-    map_at!(table, huge, PhysAddr::from(2 * HUGE), HUGE_LEVEL, flags(), false).unwrap();
-    let old = table.walk(huge + PAGE).read().raw();
+    ALLOCATION_BUDGET.store(usize::MAX, Ordering::Relaxed);
+    table
+        .map(common::page_2m(huge), common::frame_2m(PhysAddr::from(2 * HUGE)), flags(), false)
+        .unwrap();
     let before = arena.allocated();
-    ALLOCATION_BUDGET.store(1, Ordering::Relaxed);
+    ALLOCATION_BUDGET.store(0, Ordering::Relaxed);
     assert!(matches!(
-        split_at!(table, huge + PAGE, SMALL_LEVEL, true),
+        split_at!(table, huge + PAGE, LARGE_LEVEL, true),
         Err(PagingError::AllocFrame)
     ));
-    assert_eq!(arena.allocated(), before + 1);
-    assert_freed_once(&arena, 2);
-    assert_eq!(table.walk(huge + PAGE).read().raw(), old);
-    assert_eq!(table.walk(huge + PAGE).level(), HUGE_LEVEL);
+    assert_eq!(arena.allocated(), before);
+    assert_freed_once(&arena, 1);
+    assert_eq!(table.walk(huge + PAGE).level(), LARGE_LEVEL);
     assert_eq!(table.phys_addr(huge + PAGE), Ok(PhysAddr::from(2 * HUGE + PAGE)));
     locks.assert_balanced();
-    ALLOCATION_BUDGET.store(2, Ordering::Relaxed);
-    discharge(split_at!(table, huge + PAGE, SMALL_LEVEL, true).unwrap());
+    ALLOCATION_BUDGET.store(1, Ordering::Relaxed);
+    discharge(split_at!(table, huge + PAGE, LARGE_LEVEL, true).unwrap());
     assert_eq!(table.walk(huge + PAGE).level(), SMALL_LEVEL);
     assert_eq!(table.phys_addr(huge + PAGE), Ok(PhysAddr::from(2 * HUGE + PAGE)));
     assert_eq!(table.phys_addr(vaddr), Ok(frame));

@@ -5,7 +5,7 @@ use core::ops::Range;
 
 use crate::structs::address::{Address, PhysAddr, VirtAddr};
 use crate::structs::level::PageLevel;
-use crate::structs::sizes::{PageSize, Size4KiB};
+use crate::structs::sizes::{PageSize, Regular};
 
 /// Why an operation could not be carried out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,6 +32,8 @@ pub enum PagingError {
     /// A table pointer sits where a mapping was expected. Overwriting one would
     /// strand the subtree below it, so no operation on a leaf will.
     NotLeafEntry,
+    /// A leaf exists, but its page size does not match the requested operation.
+    WrongPageSize,
 }
 
 /// A failed range mapping and the number of 4 KiB pages not inserted.
@@ -76,7 +78,7 @@ pub unsafe trait PagingAllocator: 'static {
         let paddr = Self::allocate_table_page()?;
         let page = Self::paddr_to_vaddr(paddr).as_mut_ptr::<u8>();
         // SAFETY: successful allocation returns a unique, writable table page.
-        unsafe { page.write_bytes(0, Size4KiB::SIZE) };
+        unsafe { page.write_bytes(0, Regular::SIZE) };
         Ok(paddr)
     }
 
@@ -125,7 +127,7 @@ pub unsafe trait DirectMappedAllocator: 'static {
         let paddr = Self::allocate_table_page()?;
         let page = Self::resolve_paddr(paddr).as_mut_ptr::<u8>();
         // SAFETY: successful allocation returns a unique, writable table page.
-        unsafe { page.write_bytes(0, Size4KiB::SIZE) };
+        unsafe { page.write_bytes(0, Regular::SIZE) };
         Ok(paddr)
     }
 
