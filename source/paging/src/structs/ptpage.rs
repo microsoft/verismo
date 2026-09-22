@@ -9,6 +9,7 @@ pub use node::{PTPage, Translation};
 pub use node_pointer::WalkLevel;
 pub use node_pointer::WalkResult;
 pub(crate) use node_pointer::{
-    LeafSplitLevelImpl, PTPagePointer, PageLevelVisitor, WalkLevelImpl, WalkPosition,
+    LeafSplitLevelImpl, PTPagePointer, PageLevelHandler, StableVisit, StableVisitor, WalkLevelImpl,
+    WalkPosition,
 };
 pub(crate) use tree::{reclaim_path, reclaim_range, Live, PTPageTree};

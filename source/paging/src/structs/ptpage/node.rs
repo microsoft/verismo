@@ -2,12 +2,15 @@
 //! entry can undergo. Entries of a live table are only ever read and written
 //! atomically, one word at a time, because the MMU writes them too.
 use core::marker::PhantomData;
+use core::ops::ControlFlow;
 use core::sync::atomic::AtomicUsize;
 
 use bitflags::Flags;
 
 use super::tree::StagedSplitLevel;
-use super::{PTPagePointer, PTPageTree, PageLevelVisitor, WalkLevelImpl};
+use super::{
+    LeafSplitLevelImpl, PTPagePointer, PTPageTree, StableVisit, StableVisitor, WalkLevelImpl,
+};
 use crate::structs::address::{Address, PhysAddr, VirtAddr, LOW_CANONICAL_END};
 use crate::structs::arch_contract::{ArchPagingMeta, GenericPageTableFlags};
 use crate::structs::entry::{PTEntry, PTEntryRef};
@@ -268,9 +271,6 @@ struct InvalidatedPteRollbackGuard<
 }
 
 struct SweepPageVisitor<'a, V> {
-    page_paddr: Option<PhysAddr>,
-    start: usize,
-    end: usize,
     visit: &'a mut V,
 }
 
@@ -333,32 +333,61 @@ impl<'tree, A: ArchPagingMeta> InvalidatedLeaf<'tree, A> {
     }
 }
 
-impl<'tree, A, P, E, V> PageLevelVisitor<'tree, A, P> for SweepPageVisitor<'_, V>
+impl<'tree, A, P, E, V> StableVisitor<'tree, A, P> for SweepPageVisitor<'_, V>
 where
     A: ArchPagingMeta,
     P: PagingAllocator,
     V: FnMut(PhysAddr, Mapping<'tree, A>, usize, usize) -> Result<(), E>,
 {
-    type Output = Result<(), (usize, E)>;
+    type Break = (usize, E);
 
-    fn visit_l0(self, page: PTPagePointer<'tree, A, P, Lvl<0>>) -> Self::Output {
-        PTPage::<A, P>::sweep_l0(page, self.page_paddr, self.start, self.end, self.visit)
+    fn visit_l0_entry(
+        &mut self,
+        page: &PTPagePointer<'tree, A, P, Lvl<0>>,
+        page_paddr: PhysAddr,
+        index: usize,
+        entry: PTEntry<A>,
+        start: usize,
+        end: usize,
+    ) -> ControlFlow<Self::Break, StableVisit> {
+        sweep_visit_entry(self, page, page_paddr, index, entry, start, end)
     }
 
-    fn visit_l1(self, page: PTPagePointer<'tree, A, P, Lvl<1>>) -> Self::Output {
-        PTPage::<A, P>::sweep_inner(page, self.page_paddr, self.start, self.end, self.visit)
+    fn visit_inner_entry<L: InnerLevel + LeafSplitLevelImpl + WalkLevelImpl>(
+        &mut self,
+        page: &PTPagePointer<'tree, A, P, L>,
+        page_paddr: PhysAddr,
+        index: usize,
+        entry: PTEntry<A>,
+        start: usize,
+        end: usize,
+    ) -> ControlFlow<Self::Break, StableVisit>
+    where
+        L::Child: WalkLevelImpl,
+    {
+        sweep_visit_entry(self, page, page_paddr, index, entry, start, end)
     }
+}
 
-    fn visit_l2(self, page: PTPagePointer<'tree, A, P, Lvl<2>>) -> Self::Output {
-        PTPage::<A, P>::sweep_inner(page, self.page_paddr, self.start, self.end, self.visit)
-    }
-
-    fn visit_l3(self, page: PTPagePointer<'tree, A, P, Lvl<3>>) -> Self::Output {
-        PTPage::<A, P>::sweep_inner(page, self.page_paddr, self.start, self.end, self.visit)
-    }
-
-    fn visit_l4(self, page: PTPagePointer<'tree, A, P, Lvl<4>>) -> Self::Output {
-        PTPage::<A, P>::sweep_inner(page, self.page_paddr, self.start, self.end, self.visit)
+fn sweep_visit_entry<'tree, A, P, E, V, L>(
+    visitor: &mut SweepPageVisitor<'_, V>,
+    page: &PTPagePointer<'tree, A, P, L>,
+    page_paddr: PhysAddr,
+    index: usize,
+    entry: PTEntry<A>,
+    start: usize,
+    end: usize,
+) -> ControlFlow<(usize, E), StableVisit>
+where
+    A: ArchPagingMeta,
+    P: PagingAllocator,
+    L: LevelSpec,
+    V: FnMut(PhysAddr, Mapping<'tree, A>, usize, usize) -> Result<(), E>,
+{
+    let mapping = Mapping { pte_value: entry, pte_ref: page.entry(index), level: L::LEVEL };
+    match (visitor.visit)(page_paddr, mapping, start, end) {
+        Ok(()) => ControlFlow::Continue(StableVisit::Continue),
+        Err(error) => ControlFlow::Break((start, error)),
     }
 }
 
@@ -658,94 +687,6 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
 }
 
 impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
-    fn sweep_bounds<L: LevelSpec>(start: usize, end: usize) -> (usize, usize, usize) {
-        let span = L::LEVEL.size();
-        let page_span = span * PT_ENTRY_COUNT;
-        let full_page = start & (page_span - 1) == 0 && end - start == page_span;
-        let (first_index, last_index) = if full_page {
-            (0, PT_ENTRY_COUNT - 1)
-        } else {
-            (
-                entry_index(VirtAddr::from(start), L::LEVEL),
-                entry_index(VirtAddr::from(end - 1), L::LEVEL),
-            )
-        };
-        (span, first_index, last_index)
-    }
-
-    /// Visits one leaf table segment.
-    fn sweep_l0<'tree, E>(
-        page: PTPagePointer<'tree, A, P, Lvl<0>>,
-        page_paddr: Option<PhysAddr>,
-        start: usize,
-        end: usize,
-        visit: &mut impl FnMut(PhysAddr, Mapping<'tree, A>, usize, usize) -> Result<(), E>,
-    ) -> Result<(), (usize, E)> {
-        debug_assert!(start < end);
-        let (span, first_index, last_index) = Self::sweep_bounds::<Lvl<0>>(start, end);
-        debug_assert!(first_index <= last_index);
-        let mut cursor = start;
-        let mut entry_end = (start & !(span - 1)).saturating_add(span).min(end);
-        for index in first_index..=last_index {
-            let pte_ref = page.entry(index);
-            let entry = pte_ref.load();
-            if let Err(error) = visit(
-                page_paddr.unwrap_or_else(|| page.paddr()),
-                Mapping { pte_value: entry, pte_ref, level: PageLevel::Level0 },
-                cursor,
-                entry_end,
-            ) {
-                return Err((cursor, error));
-            }
-            cursor = entry_end;
-            entry_end = entry_end.saturating_add(span).min(end);
-        }
-        Ok(())
-    }
-
-    /// Visits one inner table segment and descends through typed children.
-    fn sweep_inner<'tree, E, L: WalkLevelImpl>(
-        page: PTPagePointer<'tree, A, P, L>,
-        page_paddr: Option<PhysAddr>,
-        start: usize,
-        end: usize,
-        visit: &mut impl FnMut(PhysAddr, Mapping<'tree, A>, usize, usize) -> Result<(), E>,
-    ) -> Result<(), (usize, E)> {
-        debug_assert!(start < end);
-        let (span, first_index, last_index) = Self::sweep_bounds::<L>(start, end);
-        debug_assert!(first_index <= last_index);
-        let mut cursor = start;
-        let mut entry_end = (start & !(span - 1)).saturating_add(span).min(end);
-        for index in first_index..=last_index {
-            let pte_ref = page.entry(index);
-            let entry = pte_ref.load();
-            if entry.is_present_table(L::LEVEL) {
-                let child = page
-                    .child_from_observed(entry)
-                    .unwrap_or_else(|_| unreachable!("observed table entry must resolve"));
-                L::ChildLevel::dispatch(
-                    child,
-                    SweepPageVisitor {
-                        page_paddr: Some(PhysAddr::from(entry.address())),
-                        start: cursor,
-                        end: entry_end,
-                        visit,
-                    },
-                )?;
-            } else if let Err(error) = visit(
-                page_paddr.unwrap_or_else(|| page.paddr()),
-                Mapping { pte_value: entry, pte_ref, level: L::LEVEL },
-                cursor,
-                entry_end,
-            ) {
-                return Err((cursor, error));
-            }
-            cursor = entry_end;
-            entry_end = entry_end.saturating_add(span).min(end);
-        }
-        Ok(())
-    }
-
     pub(crate) fn sweep_range<'tree, E, L: WalkLevelImpl>(
         root: &PTPagePointer<'tree, A, P, L>,
         start: VirtAddr,
@@ -753,17 +694,10 @@ impl<A: ArchPagingMeta, P: PagingAllocator> PTPage<A, P> {
         visit: &mut impl FnMut(PhysAddr, Mapping<'tree, A>, usize, usize) -> Result<(), E>,
     ) -> Result<VirtAddr, (VirtAddr, E)> {
         let mut range = CanonicalRangeCursor::new(start.bits(), end.bits());
+        let mut visitor = SweepPageVisitor { visit };
         for (cursor, segment_end) in &mut range {
-            let result = L::dispatch(
-                root.duplicate(),
-                SweepPageVisitor {
-                    page_paddr: None,
-                    start: cursor,
-                    end: segment_end,
-                    visit: &mut *visit,
-                },
-            );
-            if let Err((cursor, error)) = result {
+            let result = L::visit_stable(root.duplicate(), None, cursor, segment_end, &mut visitor);
+            if let ControlFlow::Break((cursor, error)) = result {
                 return Err((VirtAddr::from(cursor), error));
             }
         }

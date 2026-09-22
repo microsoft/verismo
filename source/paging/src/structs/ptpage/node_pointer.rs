@@ -8,14 +8,15 @@
 //! changed through its atomic `PTEntryRef`, with writes separately serialized
 //! by the controller when required.
 use core::marker::PhantomData;
+use core::ops::ControlFlow;
 use core::ptr::NonNull;
 
 use super::PTPage;
 use super::PTPageTree;
-use crate::structs::address::{PhysAddr, VirtAddr};
+use crate::structs::address::{Address, PhysAddr, VirtAddr};
 use crate::structs::arch_contract::ArchPagingMeta;
 use crate::structs::entry::{PTEntry, PTEntryRef};
-use crate::structs::level::{LevelSpec, Lvl, PageLevel};
+use crate::structs::level::{InnerLevel, LevelSpec, Lvl, PageLevel};
 use crate::structs::os_contract::PagingAllocator;
 use crate::structs::os_contract::PagingError;
 use crate::structs::page::Page;
@@ -47,8 +48,8 @@ pub(crate) struct WalkStop<'tree, A: ArchPagingMeta, P: PagingAllocator, L: Leve
     observed: PTEntry<A>,
 }
 
-/// Dispatches one typed page view to the implementation for its static level.
-pub(crate) trait PageLevelVisitor<'tree, A: ArchPagingMeta, P: PagingAllocator> {
+/// Handles one page whose level is selected by [`WalkLevelImpl::dispatch`].
+pub(crate) trait PageLevelHandler<'tree, A: ArchPagingMeta, P: PagingAllocator> {
     type Output;
 
     fn visit_l0(self, page: PTPagePointer<'tree, A, P, Lvl<0>>) -> Self::Output;
@@ -56,6 +57,301 @@ pub(crate) trait PageLevelVisitor<'tree, A: ArchPagingMeta, P: PagingAllocator> 
     fn visit_l2(self, page: PTPagePointer<'tree, A, P, Lvl<2>>) -> Self::Output;
     fn visit_l3(self, page: PTPagePointer<'tree, A, P, Lvl<3>>) -> Self::Output;
     fn visit_l4(self, page: PTPagePointer<'tree, A, P, Lvl<4>>) -> Self::Output;
+}
+
+/// Controls traversal after a stable visitor handles a non-table entry.
+pub(crate) enum StableVisit {
+    Continue,
+    Revisit,
+}
+
+/// Traverses pinned tables while existing child-table links remain installed.
+///
+/// Implementations may update leaves or publish new child tables. They must
+/// not unlink or reclaim a table page reachable by this traversal.
+pub(crate) trait StableVisitor<'tree, A: ArchPagingMeta, P: PagingAllocator>: Sized {
+    type Break;
+
+    #[inline(always)]
+    fn visit_l0(
+        &mut self,
+        page: PTPagePointer<'tree, A, P, Lvl<0>>,
+        page_paddr: Option<PhysAddr>,
+        start: usize,
+        end: usize,
+    ) -> ControlFlow<Self::Break> {
+        stable_walk_l0(self, page, page_paddr, start, end)
+    }
+
+    #[inline(always)]
+    fn visit_l1(
+        &mut self,
+        page: PTPagePointer<'tree, A, P, Lvl<1>>,
+        page_paddr: Option<PhysAddr>,
+        start: usize,
+        end: usize,
+    ) -> ControlFlow<Self::Break> {
+        stable_walk_inner(self, page, page_paddr, start, end)
+    }
+
+    #[inline(always)]
+    fn visit_l2(
+        &mut self,
+        page: PTPagePointer<'tree, A, P, Lvl<2>>,
+        page_paddr: Option<PhysAddr>,
+        start: usize,
+        end: usize,
+    ) -> ControlFlow<Self::Break> {
+        stable_walk_inner(self, page, page_paddr, start, end)
+    }
+
+    #[inline(always)]
+    fn visit_l3(
+        &mut self,
+        page: PTPagePointer<'tree, A, P, Lvl<3>>,
+        page_paddr: Option<PhysAddr>,
+        start: usize,
+        end: usize,
+    ) -> ControlFlow<Self::Break> {
+        stable_walk_inner(self, page, page_paddr, start, end)
+    }
+
+    #[inline(always)]
+    fn visit_l4(
+        &mut self,
+        page: PTPagePointer<'tree, A, P, Lvl<4>>,
+        page_paddr: Option<PhysAddr>,
+        start: usize,
+        end: usize,
+    ) -> ControlFlow<Self::Break> {
+        stable_walk_inner(self, page, page_paddr, start, end)
+    }
+
+    #[inline(always)]
+    fn visit_point_l0(
+        &mut self,
+        page: PTPagePointer<'tree, A, P, Lvl<0>>,
+        page_paddr: Option<PhysAddr>,
+        vaddr: VirtAddr,
+    ) -> ControlFlow<Self::Break> {
+        stable_visit_point_l0(self, page, page_paddr, vaddr)
+    }
+
+    #[inline(always)]
+    fn visit_point_l1(
+        &mut self,
+        page: PTPagePointer<'tree, A, P, Lvl<1>>,
+        page_paddr: Option<PhysAddr>,
+        vaddr: VirtAddr,
+    ) -> ControlFlow<Self::Break> {
+        stable_visit_point_inner(self, page, page_paddr, vaddr)
+    }
+
+    #[inline(always)]
+    fn visit_point_l2(
+        &mut self,
+        page: PTPagePointer<'tree, A, P, Lvl<2>>,
+        page_paddr: Option<PhysAddr>,
+        vaddr: VirtAddr,
+    ) -> ControlFlow<Self::Break> {
+        stable_visit_point_inner(self, page, page_paddr, vaddr)
+    }
+
+    #[inline(always)]
+    fn visit_point_l3(
+        &mut self,
+        page: PTPagePointer<'tree, A, P, Lvl<3>>,
+        page_paddr: Option<PhysAddr>,
+        vaddr: VirtAddr,
+    ) -> ControlFlow<Self::Break> {
+        stable_visit_point_inner(self, page, page_paddr, vaddr)
+    }
+
+    #[inline(always)]
+    fn visit_point_l4(
+        &mut self,
+        page: PTPagePointer<'tree, A, P, Lvl<4>>,
+        page_paddr: Option<PhysAddr>,
+        vaddr: VirtAddr,
+    ) -> ControlFlow<Self::Break> {
+        stable_visit_point_inner(self, page, page_paddr, vaddr)
+    }
+
+    fn visit_l0_entry(
+        &mut self,
+        page: &PTPagePointer<'tree, A, P, Lvl<0>>,
+        page_paddr: PhysAddr,
+        index: usize,
+        entry: PTEntry<A>,
+        start: usize,
+        end: usize,
+    ) -> ControlFlow<Self::Break, StableVisit>;
+
+    fn visit_inner_entry<L: InnerLevel + LeafSplitLevelImpl + WalkLevelImpl>(
+        &mut self,
+        page: &PTPagePointer<'tree, A, P, L>,
+        page_paddr: PhysAddr,
+        index: usize,
+        entry: PTEntry<A>,
+        start: usize,
+        end: usize,
+    ) -> ControlFlow<Self::Break, StableVisit>
+    where
+        L::Child: WalkLevelImpl;
+}
+
+#[inline(always)]
+fn stable_entry_bounds(level: PageLevel, start: usize, end: usize) -> (usize, usize) {
+    let page_span = level.size() * PT_ENTRY_COUNT;
+    if start & (page_span - 1) == 0 && end - start == page_span {
+        (0, PT_ENTRY_COUNT - 1)
+    } else {
+        (entry_index(VirtAddr::from(start), level), entry_index(VirtAddr::from(end - 1), level))
+    }
+}
+
+#[inline(always)]
+fn stable_walk_l0<'tree, A, P, V>(
+    visitor: &mut V,
+    page: PTPagePointer<'tree, A, P, Lvl<0>>,
+    page_paddr: Option<PhysAddr>,
+    start: usize,
+    end: usize,
+) -> ControlFlow<V::Break>
+where
+    A: ArchPagingMeta,
+    P: PagingAllocator,
+    V: StableVisitor<'tree, A, P>,
+{
+    let level = PageLevel::Level0;
+    let span = level.size();
+    let (first, last) = stable_entry_bounds(level, start, end);
+    let page_paddr = page_paddr.unwrap_or_else(|| page.paddr());
+    let mut cursor = start;
+    let mut entry_end = (start & !(span - 1)).saturating_add(span).min(end);
+    for index in first..=last {
+        loop {
+            let entry = page.load(index);
+            match visitor.visit_l0_entry(&page, page_paddr, index, entry, cursor, entry_end) {
+                ControlFlow::Continue(StableVisit::Continue) => break,
+                ControlFlow::Continue(StableVisit::Revisit) => {}
+                ControlFlow::Break(value) => return ControlFlow::Break(value),
+            }
+        }
+        cursor = entry_end;
+        entry_end = entry_end.saturating_add(span).min(end);
+    }
+    ControlFlow::Continue(())
+}
+
+#[inline(always)]
+fn stable_walk_inner<'tree, A, P, L, V>(
+    visitor: &mut V,
+    page: PTPagePointer<'tree, A, P, L>,
+    page_paddr: Option<PhysAddr>,
+    start: usize,
+    end: usize,
+) -> ControlFlow<V::Break>
+where
+    A: ArchPagingMeta,
+    P: PagingAllocator,
+    L: InnerLevel + LeafSplitLevelImpl + WalkLevelImpl,
+    L::Child: WalkLevelImpl,
+    V: StableVisitor<'tree, A, P>,
+{
+    let level = L::LEVEL;
+    let span = level.size();
+    let (first, last) = stable_entry_bounds(level, start, end);
+    let page_paddr = page_paddr.unwrap_or_else(|| page.paddr());
+    let mut cursor = start;
+    let mut entry_end = (start & !(span - 1)).saturating_add(span).min(end);
+    for index in first..=last {
+        loop {
+            let entry = page.load(index);
+            if let Ok(child) = page.child_from_observed(entry) {
+                L::ChildLevel::visit_stable(
+                    child,
+                    Some(PhysAddr::from(entry.address())),
+                    cursor,
+                    entry_end,
+                    visitor,
+                )?;
+                break;
+            }
+            match visitor.visit_inner_entry(&page, page_paddr, index, entry, cursor, entry_end) {
+                ControlFlow::Continue(StableVisit::Continue) => break,
+                ControlFlow::Continue(StableVisit::Revisit) => {}
+                ControlFlow::Break(value) => return ControlFlow::Break(value),
+            }
+        }
+        cursor = entry_end;
+        entry_end = entry_end.saturating_add(span).min(end);
+    }
+    ControlFlow::Continue(())
+}
+
+#[inline(always)]
+fn stable_visit_point_l0<'tree, A, P, V>(
+    visitor: &mut V,
+    page: PTPagePointer<'tree, A, P, Lvl<0>>,
+    page_paddr: Option<PhysAddr>,
+    vaddr: VirtAddr,
+) -> ControlFlow<V::Break>
+where
+    A: ArchPagingMeta,
+    P: PagingAllocator,
+    V: StableVisitor<'tree, A, P>,
+{
+    let level = PageLevel::Level0;
+    let index = entry_index(vaddr, level);
+    let page_paddr = page_paddr.unwrap_or_else(|| page.paddr());
+    let start = vaddr.bits() & !(level.size() - 1);
+    let end = start.saturating_add(level.size());
+    loop {
+        let entry = page.load(index);
+        match visitor.visit_l0_entry(&page, page_paddr, index, entry, start, end) {
+            ControlFlow::Continue(StableVisit::Continue) => return ControlFlow::Continue(()),
+            ControlFlow::Continue(StableVisit::Revisit) => {}
+            ControlFlow::Break(value) => return ControlFlow::Break(value),
+        }
+    }
+}
+
+#[inline(always)]
+fn stable_visit_point_inner<'tree, A, P, L, V>(
+    visitor: &mut V,
+    page: PTPagePointer<'tree, A, P, L>,
+    page_paddr: Option<PhysAddr>,
+    vaddr: VirtAddr,
+) -> ControlFlow<V::Break>
+where
+    A: ArchPagingMeta,
+    P: PagingAllocator,
+    L: InnerLevel + LeafSplitLevelImpl + WalkLevelImpl,
+    L::Child: WalkLevelImpl,
+    V: StableVisitor<'tree, A, P>,
+{
+    let level = L::LEVEL;
+    let index = entry_index(vaddr, level);
+    loop {
+        let entry = page.load(index);
+        if let Ok(child) = page.child_from_observed(entry) {
+            return L::ChildLevel::visit_stable_point(
+                child,
+                Some(PhysAddr::from(entry.address())),
+                vaddr,
+                visitor,
+            );
+        }
+        let page_paddr = page_paddr.unwrap_or_else(|| page.paddr());
+        let start = vaddr.bits() & !(level.size() - 1);
+        let end = start.saturating_add(level.size());
+        match visitor.visit_inner_entry(&page, page_paddr, index, entry, start, end) {
+            ControlFlow::Continue(StableVisit::Continue) => return ControlFlow::Continue(()),
+            ControlFlow::Continue(StableVisit::Revisit) => {}
+            ControlFlow::Break(value) => return ControlFlow::Break(value),
+        }
+    }
 }
 
 struct FreeChildrenVisitor<F> {
@@ -196,7 +492,30 @@ pub(crate) trait WalkLevelImpl: LevelSpec + Sized {
     where
         A: ArchPagingMeta,
         P: PagingAllocator,
-        V: PageLevelVisitor<'tree, A, P>;
+        V: PageLevelHandler<'tree, A, P>;
+
+    fn visit_stable<'tree, A, P, V>(
+        page: PTPagePointer<'tree, A, P, Self>,
+        page_paddr: Option<PhysAddr>,
+        start: usize,
+        end: usize,
+        visitor: &mut V,
+    ) -> ControlFlow<V::Break>
+    where
+        A: ArchPagingMeta,
+        P: PagingAllocator,
+        V: StableVisitor<'tree, A, P>;
+
+    fn visit_stable_point<'tree, A, P, V>(
+        page: PTPagePointer<'tree, A, P, Self>,
+        page_paddr: Option<PhysAddr>,
+        vaddr: VirtAddr,
+        visitor: &mut V,
+    ) -> ControlFlow<V::Break>
+    where
+        A: ArchPagingMeta,
+        P: PagingAllocator,
+        V: StableVisitor<'tree, A, P>;
 
     fn walk<'tree, A: ArchPagingMeta, P: PagingAllocator>(
         page: PTPagePointer<'tree, A, P, Self>,
@@ -280,9 +599,40 @@ impl WalkLevelImpl for Lvl<0> {
     where
         A: ArchPagingMeta,
         P: PagingAllocator,
-        V: PageLevelVisitor<'tree, A, P>,
+        V: PageLevelHandler<'tree, A, P>,
     {
         visitor.visit_l0(page)
+    }
+
+    #[inline(always)]
+    fn visit_stable<'tree, A, P, V>(
+        page: PTPagePointer<'tree, A, P, Self>,
+        page_paddr: Option<PhysAddr>,
+        start: usize,
+        end: usize,
+        visitor: &mut V,
+    ) -> ControlFlow<V::Break>
+    where
+        A: ArchPagingMeta,
+        P: PagingAllocator,
+        V: StableVisitor<'tree, A, P>,
+    {
+        visitor.visit_l0(page, page_paddr, start, end)
+    }
+
+    #[inline(always)]
+    fn visit_stable_point<'tree, A, P, V>(
+        page: PTPagePointer<'tree, A, P, Self>,
+        page_paddr: Option<PhysAddr>,
+        vaddr: VirtAddr,
+        visitor: &mut V,
+    ) -> ControlFlow<V::Break>
+    where
+        A: ArchPagingMeta,
+        P: PagingAllocator,
+        V: StableVisitor<'tree, A, P>,
+    {
+        visitor.visit_point_l0(page, page_paddr, vaddr)
     }
 
     #[inline(always)]
@@ -330,9 +680,40 @@ impl WalkLevelImpl for Lvl<1> {
     where
         A: ArchPagingMeta,
         P: PagingAllocator,
-        V: PageLevelVisitor<'tree, A, P>,
+        V: PageLevelHandler<'tree, A, P>,
     {
         visitor.visit_l1(page)
+    }
+
+    #[inline(always)]
+    fn visit_stable<'tree, A, P, V>(
+        page: PTPagePointer<'tree, A, P, Self>,
+        page_paddr: Option<PhysAddr>,
+        start: usize,
+        end: usize,
+        visitor: &mut V,
+    ) -> ControlFlow<V::Break>
+    where
+        A: ArchPagingMeta,
+        P: PagingAllocator,
+        V: StableVisitor<'tree, A, P>,
+    {
+        visitor.visit_l1(page, page_paddr, start, end)
+    }
+
+    #[inline(always)]
+    fn visit_stable_point<'tree, A, P, V>(
+        page: PTPagePointer<'tree, A, P, Self>,
+        page_paddr: Option<PhysAddr>,
+        vaddr: VirtAddr,
+        visitor: &mut V,
+    ) -> ControlFlow<V::Break>
+    where
+        A: ArchPagingMeta,
+        P: PagingAllocator,
+        V: StableVisitor<'tree, A, P>,
+    {
+        visitor.visit_point_l1(page, page_paddr, vaddr)
     }
 
     #[inline(always)]
@@ -363,9 +744,40 @@ impl WalkLevelImpl for Lvl<2> {
     where
         A: ArchPagingMeta,
         P: PagingAllocator,
-        V: PageLevelVisitor<'tree, A, P>,
+        V: PageLevelHandler<'tree, A, P>,
     {
         visitor.visit_l2(page)
+    }
+
+    #[inline(always)]
+    fn visit_stable<'tree, A, P, V>(
+        page: PTPagePointer<'tree, A, P, Self>,
+        page_paddr: Option<PhysAddr>,
+        start: usize,
+        end: usize,
+        visitor: &mut V,
+    ) -> ControlFlow<V::Break>
+    where
+        A: ArchPagingMeta,
+        P: PagingAllocator,
+        V: StableVisitor<'tree, A, P>,
+    {
+        visitor.visit_l2(page, page_paddr, start, end)
+    }
+
+    #[inline(always)]
+    fn visit_stable_point<'tree, A, P, V>(
+        page: PTPagePointer<'tree, A, P, Self>,
+        page_paddr: Option<PhysAddr>,
+        vaddr: VirtAddr,
+        visitor: &mut V,
+    ) -> ControlFlow<V::Break>
+    where
+        A: ArchPagingMeta,
+        P: PagingAllocator,
+        V: StableVisitor<'tree, A, P>,
+    {
+        visitor.visit_point_l2(page, page_paddr, vaddr)
     }
 
     #[inline(always)]
@@ -396,9 +808,40 @@ impl WalkLevelImpl for Lvl<3> {
     where
         A: ArchPagingMeta,
         P: PagingAllocator,
-        V: PageLevelVisitor<'tree, A, P>,
+        V: PageLevelHandler<'tree, A, P>,
     {
         visitor.visit_l3(page)
+    }
+
+    #[inline(always)]
+    fn visit_stable<'tree, A, P, V>(
+        page: PTPagePointer<'tree, A, P, Self>,
+        page_paddr: Option<PhysAddr>,
+        start: usize,
+        end: usize,
+        visitor: &mut V,
+    ) -> ControlFlow<V::Break>
+    where
+        A: ArchPagingMeta,
+        P: PagingAllocator,
+        V: StableVisitor<'tree, A, P>,
+    {
+        visitor.visit_l3(page, page_paddr, start, end)
+    }
+
+    #[inline(always)]
+    fn visit_stable_point<'tree, A, P, V>(
+        page: PTPagePointer<'tree, A, P, Self>,
+        page_paddr: Option<PhysAddr>,
+        vaddr: VirtAddr,
+        visitor: &mut V,
+    ) -> ControlFlow<V::Break>
+    where
+        A: ArchPagingMeta,
+        P: PagingAllocator,
+        V: StableVisitor<'tree, A, P>,
+    {
+        visitor.visit_point_l3(page, page_paddr, vaddr)
     }
 
     #[inline(always)]
@@ -429,9 +872,40 @@ impl WalkLevelImpl for Lvl<4> {
     where
         A: ArchPagingMeta,
         P: PagingAllocator,
-        V: PageLevelVisitor<'tree, A, P>,
+        V: PageLevelHandler<'tree, A, P>,
     {
         visitor.visit_l4(page)
+    }
+
+    #[inline(always)]
+    fn visit_stable<'tree, A, P, V>(
+        page: PTPagePointer<'tree, A, P, Self>,
+        page_paddr: Option<PhysAddr>,
+        start: usize,
+        end: usize,
+        visitor: &mut V,
+    ) -> ControlFlow<V::Break>
+    where
+        A: ArchPagingMeta,
+        P: PagingAllocator,
+        V: StableVisitor<'tree, A, P>,
+    {
+        visitor.visit_l4(page, page_paddr, start, end)
+    }
+
+    #[inline(always)]
+    fn visit_stable_point<'tree, A, P, V>(
+        page: PTPagePointer<'tree, A, P, Self>,
+        page_paddr: Option<PhysAddr>,
+        vaddr: VirtAddr,
+        visitor: &mut V,
+    ) -> ControlFlow<V::Break>
+    where
+        A: ArchPagingMeta,
+        P: PagingAllocator,
+        V: StableVisitor<'tree, A, P>,
+    {
+        visitor.visit_point_l4(page, page_paddr, vaddr)
     }
 
     #[inline(always)]
@@ -454,7 +928,7 @@ impl WalkLevelImpl for Lvl<4> {
     }
 }
 
-impl<'tree, A, P, F> PageLevelVisitor<'tree, A, P> for FreeChildrenVisitor<F>
+impl<'tree, A, P, F> PageLevelHandler<'tree, A, P> for FreeChildrenVisitor<F>
 where
     A: ArchPagingMeta,
     P: PagingAllocator,
@@ -487,7 +961,7 @@ where
     }
 }
 
-impl<'tree, A, P, PS> PageLevelVisitor<'tree, A, P> for GrowUninstalledVisitor<A, PS>
+impl<'tree, A, P, PS> PageLevelHandler<'tree, A, P> for GrowUninstalledVisitor<A, PS>
 where
     A: ArchPagingMeta,
     P: PagingAllocator,
@@ -541,7 +1015,7 @@ impl<'tree, A: ArchPagingMeta, P: PagingAllocator, L: LevelSpec> PTPagePointer<'
     }
 
     #[inline(always)]
-    pub(super) fn duplicate(&self) -> Self {
+    pub(crate) fn duplicate(&self) -> Self {
         Self { page: self.page, marker: PhantomData }
     }
 

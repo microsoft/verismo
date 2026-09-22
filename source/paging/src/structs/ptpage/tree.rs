@@ -1,7 +1,7 @@
 use core::marker::PhantomData;
 use core::mem::ManuallyDrop;
 
-use super::{PTPage, PTPagePointer, PageLevelVisitor, WalkLevelImpl};
+use super::{PTPage, PTPagePointer, PageLevelHandler, WalkLevelImpl};
 use crate::structs::address::{Address, PhysAddr, VirtAddr};
 use crate::structs::arch_contract::{ArchPagingMeta, GenericPageTableFlags};
 use crate::structs::entry::PTEntry;
@@ -272,7 +272,7 @@ where
     tree: &'a PTPageTree<A, P, L, S, State>,
 }
 
-impl<'tree, A, P, L, S, State> PageLevelVisitor<'tree, A, P>
+impl<'tree, A, P, L, S, State> PageLevelHandler<'tree, A, P>
     for ValidateChildrenVisitor<'_, A, P, L, S, State>
 where
     A: ArchPagingMeta,
@@ -666,7 +666,7 @@ struct ReclaimRangeVisitor<'a, 'b, Owns, Empty> {
     empty_entry: &'b Empty,
 }
 
-impl<'tree, A, P, F> PageLevelVisitor<'tree, A, P> for ReclaimPathVisitor<'_, F>
+impl<'tree, A, P, F> PageLevelHandler<'tree, A, P> for ReclaimPathVisitor<'_, F>
 where
     A: ArchPagingMeta,
     P: PagingAllocator,
@@ -695,7 +695,7 @@ where
     }
 }
 
-impl<'tree, A, P, Owns, Empty> PageLevelVisitor<'tree, A, P>
+impl<'tree, A, P, Owns, Empty> PageLevelHandler<'tree, A, P>
     for ReclaimRangeVisitor<'_, '_, Owns, Empty>
 where
     A: ArchPagingMeta,
@@ -774,11 +774,15 @@ unsafe fn reclaim_path_inner<A: ArchPagingMeta, P: PagingAllocator, L: WalkLevel
     (root.entries_satisfy(empty_entry), count)
 }
 
+/// Reclaims empty table pages intersecting `[start, end)` without freeing
+/// `root`. `owns_entry` selects which root entries may be reclaimed; all
+/// descendants of a selected entry are treated as owned. This is the typed
+/// entry point used after range unmapping and its flush obligations are complete.
+///
 /// # Safety
-/// The nonempty range must be within this root's local offsets. Selected
-/// subtrees must be exclusively owned and quiesced, without surviving child
-/// references. `empty_entry` must reject every live mapping; ownership applies
-/// only to root entries, with every descendant owned.
+/// The nonempty range must use offsets local to `root`. Selected subtrees must
+/// be exclusively owned and quiesced, without surviving child references.
+/// `empty_entry` must reject every live mapping.
 pub(crate) unsafe fn reclaim_range<A: ArchPagingMeta, P: PagingAllocator, L: WalkLevelImpl>(
     root: &PTPagePointer<'_, A, P, L>,
     start: usize,
@@ -792,9 +796,13 @@ pub(crate) unsafe fn reclaim_range<A: ArchPagingMeta, P: PagingAllocator, L: Wal
     );
 }
 
-/// Inputs: root, offsets, and predicates.
-/// Requires: exclusive selected subtrees.
-/// Returns: emptiness.
+/// Reclaims empty child tables intersecting `[start, end)` and reports whether
+/// every entry in `root` satisfies `empty_entry` afterward. `owns_entry`
+/// filters this page only; every descendant of a selected child is owned.
+///
+/// # Safety
+/// Selected child subtrees must be exclusively owned and quiesced, with no
+/// references surviving removal of their parent links.
 unsafe fn reclaim_range_inner<A: ArchPagingMeta, P: PagingAllocator, L: WalkLevelImpl>(
     root: PTPagePointer<'_, A, P, L>,
     start: usize,

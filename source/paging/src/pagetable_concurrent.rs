@@ -5,13 +5,14 @@
 #![doc = include_str!("../concurrency.md")]
 
 use core::marker::PhantomData;
+use core::ops::ControlFlow;
 use core::ops::{Deref, DerefMut};
 
-use crate::structs::address::{Address, PhysAddr, VirtAddr};
+use crate::structs::address::{Address, PhysAddr, VirtAddr, LOW_CANONICAL_END};
 use crate::structs::arch_contract::{ArchPagingMeta, GenericPageTableFlags};
 use crate::structs::entry::{PTEntry, PTEntryRef};
 use crate::structs::frame::PhysFrame;
-use crate::structs::level::{LevelSpec, Lvl, PageLevel};
+use crate::structs::level::{InnerLevel, LevelSpec, Lvl, PageLevel};
 use crate::structs::os_contract::{
     DirectMappedAllocator, MapRegionError, PagingAllocator, PagingError,
 };
@@ -19,12 +20,10 @@ use crate::structs::page::{Page, PageRangeInclusive};
 use crate::structs::policy::{KernelPolicy, PagingOwnershipPolicy, RootEntrySet, UserPolicy};
 use crate::structs::ptpage::{
     reclaim_path, reclaim_range, FlushFootprint, LeafSplitLevelImpl, Live, Mapping, PTPage,
-    PTPagePointer, PTPageTree, PageLevelVisitor, Translation, WalkLevel, WalkLevelImpl,
+    PTPagePointer, PTPageTree, StableVisit, StableVisitor, Translation, WalkLevel, WalkLevelImpl,
     WalkPosition, WalkResult,
 };
-use crate::structs::sizes::{
-    entry_index, next_boundary, Huge, PageSize, Regular, SizeLevel2, PT_ENTRY_COUNT,
-};
+use crate::structs::sizes::{entry_index, Huge, PageSize, Regular, SizeLevel2, PT_ENTRY_COUNT};
 use crate::structs::tlb::{MayNeedFlush, TlbFlush};
 
 /// A removed entry paired with any TLB invalidation it leaves outstanding.
@@ -44,9 +43,33 @@ where
     Owned: PagingOwnershipPolicy,
 {
     table: &'a PageTable<Arch, Alloc, MaxLevel, WP, T, Owned>,
-    start: VirtAddr,
-    end: VirtAddr,
     state: &'a mut RangeUnmapState<'state>,
+}
+
+struct UnmapVisitor<'a, Arch, Alloc, MaxLevel, WP, T, Owned, PS>
+where
+    Arch: ArchPagingMeta,
+    Alloc: PagingAllocator,
+    MaxLevel: WalkLevel,
+    Owned: PagingOwnershipPolicy,
+    PS: PageSize,
+{
+    table: &'a PageTable<Arch, Alloc, MaxLevel, WP, T, Owned>,
+    page: Page<PS>,
+    split_all_cpus: Option<bool>,
+    pending: MayNeedFlush<Arch::TlbFlushTok>,
+}
+
+struct SplitVisitor<'a, Arch, Alloc, MaxLevel, WP, T, Owned>
+where
+    Arch: ArchPagingMeta,
+    Alloc: PagingAllocator,
+    MaxLevel: WalkLevel,
+    Owned: PagingOwnershipPolicy,
+{
+    table: &'a PageTable<Arch, Alloc, MaxLevel, WP, T, Owned>,
+    vaddr: VirtAddr,
+    all_cpus: bool,
 }
 
 struct RangeFlagsState<T: TlbFlush> {
@@ -60,7 +83,7 @@ struct RangeFlagsState<T: TlbFlush> {
 
 type RangeFlagsResult<T> = (Result<(), PagingError>, MayNeedFlush<T>);
 
-impl<'tree, Arch, Alloc, MaxLevel, WP, T, Owned> PageLevelVisitor<'tree, Arch, Alloc>
+impl<'tree, Arch, Alloc, MaxLevel, WP, T, Owned> StableVisitor<'tree, Arch, Alloc>
     for UnmapRegionVisitor<'_, '_, Arch, Alloc, MaxLevel, WP, T, Owned>
 where
     Arch: ArchPagingMeta,
@@ -69,26 +92,251 @@ where
     WP: LockSpec<T>,
     Owned: PagingOwnershipPolicy,
 {
-    type Output = Result<(), PagingError>;
+    type Break = PagingError;
 
-    fn visit_l0(self, page: PTPagePointer<'tree, Arch, Alloc, Lvl<0>>) -> Self::Output {
-        self.table.unmap_region_l0(page, self.start, self.end, self.state)
+    #[inline(always)]
+    fn visit_l0(
+        &mut self,
+        page: PTPagePointer<'tree, Arch, Alloc, Lvl<0>>,
+        page_paddr: Option<PhysAddr>,
+        start: usize,
+        end: usize,
+    ) -> ControlFlow<Self::Break> {
+        let level = PageLevel::Level0;
+        let first = entry_index(VirtAddr::from(start), level);
+        let last = entry_index(VirtAddr::from(end - 1), level);
+        let mut first_changed = None;
+        let mut last_changed = start;
+        let mut cursor = start;
+        let _guard = self.table.wperms.lock(page_paddr.unwrap_or_else(|| page.paddr()));
+        for index in first..=last {
+            let pte_ref = page.entry(index);
+            if pte_ref.load().is_present_leaf(level) {
+                pte_ref.swap(PTEntry::empty());
+                first_changed.get_or_insert(cursor);
+                last_changed = cursor;
+            } else {
+                *self.state.all_mapped = false;
+            }
+            cursor = cursor.saturating_add(level.size());
+        }
+        if let Some(first) = first_changed {
+            self.state.footprint.include(VirtAddr::from(first), level);
+            self.state.footprint.include(VirtAddr::from(last_changed), level);
+        }
+        ControlFlow::Continue(())
     }
 
-    fn visit_l1(self, page: PTPagePointer<'tree, Arch, Alloc, Lvl<1>>) -> Self::Output {
-        self.table.unmap_region_inner(page, self.start, self.end, self.state)
+    fn visit_l0_entry(
+        &mut self,
+        page: &PTPagePointer<'tree, Arch, Alloc, Lvl<0>>,
+        page_paddr: PhysAddr,
+        index: usize,
+        _: PTEntry<Arch>,
+        start: usize,
+        _: usize,
+    ) -> ControlFlow<Self::Break, StableVisit> {
+        let pte_ref = page.entry(index);
+        let _guard = self.table.wperms.lock(page_paddr);
+        let current = pte_ref.load();
+        if current.is_present_table(PageLevel::Level0) {
+            return ControlFlow::Continue(StableVisit::Revisit);
+        }
+        if current.is_present_leaf(PageLevel::Level0) {
+            pte_ref.swap(PTEntry::empty());
+            self.state.footprint.include(VirtAddr::from(start), PageLevel::Level0);
+        } else {
+            *self.state.all_mapped = false;
+        }
+        ControlFlow::Continue(StableVisit::Continue)
     }
 
-    fn visit_l2(self, page: PTPagePointer<'tree, Arch, Alloc, Lvl<2>>) -> Self::Output {
-        self.table.unmap_region_inner(page, self.start, self.end, self.state)
+    fn visit_inner_entry<L: InnerLevel + LeafSplitLevelImpl + WalkLevelImpl>(
+        &mut self,
+        page: &PTPagePointer<'tree, Arch, Alloc, L>,
+        page_paddr: PhysAddr,
+        index: usize,
+        _: PTEntry<Arch>,
+        start: usize,
+        end: usize,
+    ) -> ControlFlow<Self::Break, StableVisit>
+    where
+        L::Child: WalkLevelImpl,
+    {
+        let level = L::LEVEL;
+        let pte_ref = page.entry(index);
+        let _guard = self.table.wperms.lock(page_paddr);
+        let current = pte_ref.load();
+        if current.is_present_table(level) {
+            return ControlFlow::Continue(StableVisit::Revisit);
+        }
+        if !current.is_present_leaf(level) {
+            *self.state.all_mapped = false;
+            return ControlFlow::Continue(StableVisit::Continue);
+        }
+        let start = VirtAddr::from(start);
+        if start.is_aligned(level.size()) && end - start.bits() >= level.size() {
+            pte_ref.swap(PTEntry::empty());
+            self.state.footprint.include(start, level);
+            return ControlFlow::Continue(StableVisit::Continue);
+        }
+
+        // SAFETY: the content guard pins the entry and excludes competing writers.
+        match unsafe { L::split_leaf_for_region::<Arch, Alloc>(pte_ref, start) } {
+            Ok(()) => ControlFlow::Continue(StableVisit::Revisit),
+            Err(error) => ControlFlow::Break(error),
+        }
+    }
+}
+
+impl<'tree, Arch, Alloc, MaxLevel, WP, T, Owned, PS> StableVisitor<'tree, Arch, Alloc>
+    for UnmapVisitor<'_, Arch, Alloc, MaxLevel, WP, T, Owned, PS>
+where
+    Arch: ArchPagingMeta,
+    Alloc: PagingAllocator,
+    MaxLevel: WalkLevel,
+    WP: LockSpec<T>,
+    Owned: PagingOwnershipPolicy,
+    PS: PageSize,
+{
+    type Break = UnmapEntryResult<Arch>;
+
+    #[inline(always)]
+    fn visit_l0_entry(
+        &mut self,
+        page: &PTPagePointer<'tree, Arch, Alloc, Lvl<0>>,
+        page_paddr: PhysAddr,
+        index: usize,
+        _: PTEntry<Arch>,
+        _: usize,
+        _: usize,
+    ) -> ControlFlow<Self::Break, StableVisit> {
+        unmap_entry(self, page, page_paddr, index)
     }
 
-    fn visit_l3(self, page: PTPagePointer<'tree, Arch, Alloc, Lvl<3>>) -> Self::Output {
-        self.table.unmap_region_inner(page, self.start, self.end, self.state)
+    #[inline(always)]
+    fn visit_inner_entry<L: InnerLevel + LeafSplitLevelImpl + WalkLevelImpl>(
+        &mut self,
+        page: &PTPagePointer<'tree, Arch, Alloc, L>,
+        page_paddr: PhysAddr,
+        index: usize,
+        _: PTEntry<Arch>,
+        _: usize,
+        _: usize,
+    ) -> ControlFlow<Self::Break, StableVisit>
+    where
+        L::Child: WalkLevelImpl,
+    {
+        unmap_entry(self, page, page_paddr, index)
+    }
+}
+
+#[inline(always)]
+fn unmap_entry<'tree, Arch, Alloc, MaxLevel, WP, T, Owned, PS, L>(
+    visitor: &mut UnmapVisitor<'_, Arch, Alloc, MaxLevel, WP, T, Owned, PS>,
+    table: &PTPagePointer<'tree, Arch, Alloc, L>,
+    table_paddr: PhysAddr,
+    index: usize,
+) -> ControlFlow<UnmapEntryResult<Arch>, StableVisit>
+where
+    Arch: ArchPagingMeta,
+    Alloc: PagingAllocator,
+    MaxLevel: WalkLevel,
+    WP: LockSpec<T>,
+    Owned: PagingOwnershipPolicy,
+    PS: PageSize,
+    L: LeafSplitLevelImpl + WalkLevelImpl,
+{
+    let level = L::LEVEL;
+    if level < PS::LEVEL {
+        return ControlFlow::Break(Err(PagingError::WrongPageSize));
+    }
+    let _guard = visitor.table.wperms.lock(table_paddr);
+    let pte_ref = table.entry(index);
+    let entry = pte_ref.load();
+    if entry.is_present_table(level) {
+        return ControlFlow::Continue(StableVisit::Revisit);
+    }
+    if !entry.present() {
+        let pending = core::mem::replace(&mut visitor.pending, MayNeedFlush::none());
+        return ControlFlow::Break(Ok((None, pending)));
+    }
+    if level == PS::LEVEL {
+        let entry = pte_ref.swap(PTEntry::empty());
+        let flush = PTPage::<Arch, Alloc>::flush_for_leaf(visitor.page.start_address(), level);
+        let pending = core::mem::replace(&mut visitor.pending, MayNeedFlush::none());
+        return ControlFlow::Break(Ok((Some(entry), pending.and(flush))));
     }
 
-    fn visit_l4(self, page: PTPagePointer<'tree, Arch, Alloc, Lvl<4>>) -> Self::Output {
-        self.table.unmap_region_inner(page, self.start, self.end, self.state)
+    let Some(all_cpus) = visitor.split_all_cpus else {
+        return ControlFlow::Break(Err(PagingError::WrongPageSize));
+    };
+    // SAFETY: the content guard pins the entry and excludes competing writers.
+    match unsafe { L::split_leaf_to::<Arch, Alloc, PS>(pte_ref, visitor.page, all_cpus) } {
+        Ok(flush) => {
+            let pending = core::mem::replace(&mut visitor.pending, MayNeedFlush::none());
+            visitor.pending = pending.and(flush);
+            visitor.split_all_cpus = None;
+            ControlFlow::Continue(StableVisit::Revisit)
+        }
+        Err(error) => ControlFlow::Break(Err(error)),
+    }
+}
+
+impl<'tree, Arch, Alloc, MaxLevel, WP, T, Owned> StableVisitor<'tree, Arch, Alloc>
+    for SplitVisitor<'_, Arch, Alloc, MaxLevel, WP, T, Owned>
+where
+    Arch: ArchPagingMeta,
+    Alloc: PagingAllocator,
+    MaxLevel: WalkLevel,
+    WP: LockSpec<T>,
+    Owned: PagingOwnershipPolicy,
+{
+    type Break = Result<MayNeedFlush<Arch::TlbFlushTok>, PagingError>;
+
+    #[inline(always)]
+    fn visit_l0_entry(
+        &mut self,
+        _: &PTPagePointer<'tree, Arch, Alloc, Lvl<0>>,
+        _: PhysAddr,
+        _: usize,
+        _: PTEntry<Arch>,
+        _: usize,
+        _: usize,
+    ) -> ControlFlow<Self::Break, StableVisit> {
+        ControlFlow::Break(Err(PagingError::InvalidLevel))
+    }
+
+    #[inline(always)]
+    fn visit_inner_entry<L: InnerLevel + LeafSplitLevelImpl + WalkLevelImpl>(
+        &mut self,
+        page: &PTPagePointer<'tree, Arch, Alloc, L>,
+        page_paddr: PhysAddr,
+        index: usize,
+        _: PTEntry<Arch>,
+        _: usize,
+        _: usize,
+    ) -> ControlFlow<Self::Break, StableVisit>
+    where
+        L::Child: WalkLevelImpl,
+    {
+        if L::LEVEL != Huge::LEVEL {
+            return ControlFlow::Break(Err(PagingError::InvalidLevel));
+        }
+        let _guard = self.table.wperms.lock(page_paddr);
+        let pte_ref = page.entry(index);
+        let entry = pte_ref.load();
+        if entry.is_present_table(L::LEVEL) {
+            return ControlFlow::Continue(StableVisit::Revisit);
+        }
+        // SAFETY: the content guard pins the entry and excludes software writers.
+        let result = unsafe {
+            PTPage::<Arch, Alloc>::split_leaf::<Huge>(pte_ref, self.vaddr, self.all_cpus)
+        };
+        ControlFlow::Break(match result {
+            Err(PagingError::NotLeafEntry) => Err(PagingError::InvalidLevel),
+            result => result,
+        })
     }
 }
 
@@ -633,116 +881,7 @@ where
         unreachable!("range spans more entries than one page-table page")
     }
 
-    #[inline(always)]
-    /// Inputs: L0 table and range.
-    /// Requires: range intersects table.
-    /// Returns: unmap status.
-    fn unmap_region_l0(
-        &self,
-        page: PTPagePointer<'_, Arch, Alloc, Lvl<0>>,
-        start: VirtAddr,
-        end: VirtAddr,
-        state: &mut RangeUnmapState<'_>,
-    ) -> Result<(), PagingError> {
-        let pages = Page::<Regular>::range_inclusive(
-            Page::containing_address(start),
-            Page::containing_address(end - 1),
-        );
-        let mut index = entry_index(start, PageLevel::Level0);
-        let mut first_changed = None;
-        let mut last_changed = start;
-        let _guard = self.wperms.lock(page.paddr());
-        for leaf in pages {
-            let vaddr = leaf.start_address();
-            let pte_ref = page.entry(index);
-            if pte_ref.load().is_present_leaf(PageLevel::Level0) {
-                pte_ref.swap(PTEntry::empty());
-                first_changed.get_or_insert(vaddr);
-                last_changed = vaddr;
-            } else {
-                *state.all_mapped = false;
-            }
-            index = (index + 1) & (PT_ENTRY_COUNT - 1);
-        }
-        if let Some(first) = first_changed {
-            state.footprint.include(first, PageLevel::Level0);
-            state.footprint.include(last_changed, PageLevel::Level0);
-        }
-        Ok(())
-    }
-
-    #[inline(always)]
-    /// Inputs: inner table and range.
-    /// Requires: matching level type.
-    /// Returns: unmap status.
-    fn unmap_region_inner<L: WalkLevelImpl + LeafSplitLevelImpl>(
-        &self,
-        page: PTPagePointer<'_, Arch, Alloc, L>,
-        mut start: VirtAddr,
-        end: VirtAddr,
-        state: &mut RangeUnmapState<'_>,
-    ) -> Result<(), PagingError> {
-        let level = L::LEVEL;
-        let page_paddr = page.paddr();
-        while start < end {
-            let entry_end = next_boundary(start, level, end);
-            let index = entry_index(start, level);
-            let pte_ref = page.entry(index);
-            let mut observed = pte_ref.load();
-            if observed.is_present_table(level) {
-                let child =
-                    page.child_from_observed(observed).map_err(|_| PagingError::NotLeafEntry)?;
-                L::ChildLevel::dispatch(
-                    child,
-                    UnmapRegionVisitor { table: self, start, end: entry_end, state },
-                )?;
-                start = entry_end;
-                continue;
-            }
-            let guard = self.wperms.lock(page_paddr);
-            observed = pte_ref.load();
-            if observed.is_present_table(level) {
-                let child =
-                    page.child_from_observed(observed).map_err(|_| PagingError::NotLeafEntry)?;
-                drop(guard);
-                L::ChildLevel::dispatch(
-                    child,
-                    UnmapRegionVisitor { table: self, start, end: entry_end, state },
-                )?;
-                start = entry_end;
-                continue;
-            }
-            if !observed.is_present_leaf(level) {
-                drop(guard);
-                *state.all_mapped = false;
-                start = entry_end;
-                continue;
-            }
-            if start.is_aligned(level.size()) && end - start >= level.size() {
-                pte_ref.swap(PTEntry::empty());
-                drop(guard);
-                state.footprint.include(start, level);
-                start = entry_end;
-                continue;
-            }
-
-            // SAFETY: the content guard pins the pte_ref and excludes competing writers.
-            unsafe { L::split_leaf_for_region::<Arch, Alloc>(pte_ref, start) }?;
-            let entry = page.load(index);
-            let child = page.child_from_observed(entry).map_err(|_| PagingError::NotLeafEntry)?;
-            drop(guard);
-            L::ChildLevel::dispatch(
-                child,
-                UnmapRegionVisitor { table: self, start, end: entry_end, state },
-            )?;
-            start = entry_end;
-        }
-        Ok(())
-    }
-
-    /// Inputs: validated range and state.
-    /// Requires: ordered bounds.
-    /// Returns: unmap status.
+    /// Traverses a validated range while retaining every installed table link.
     fn unmap_region_sweep(
         &self,
         start: VirtAddr,
@@ -753,7 +892,24 @@ where
             return Ok(());
         }
         let root = self.root_view();
-        MaxLevel::dispatch(root, UnmapRegionVisitor { table: self, start, end, state })
+        let mut visitor = UnmapRegionVisitor { table: self, state };
+        let high_start = VirtAddr::new(LOW_CANONICAL_END).bits();
+        let mut visit = |first: usize, last: usize| match MaxLevel::visit_stable(
+            root.duplicate(),
+            None,
+            first,
+            last,
+            &mut visitor,
+        ) {
+            ControlFlow::Continue(()) => Ok(()),
+            ControlFlow::Break(error) => Err(error),
+        };
+        if start.bits() < LOW_CANONICAL_END && end.bits() >= high_start {
+            visit(start.bits(), LOW_CANONICAL_END)?;
+            visit(high_start, end.bits())
+        } else {
+            visit(start.bits(), end.bits())
+        }
     }
 
     /// Maps `page` to the matching physical `frame`, building intermediate
@@ -799,53 +955,12 @@ where
     ) -> UnmapEntryResult<Arch> {
         let vaddr = page.start_address();
         self.tree.policy().check_address(MaxLevel::LEVEL, vaddr)?;
-        self.unmap_from(&self.root_view(), page, split_all_cpus)
-    }
-
-    /// Removes `page` below a previously validated pinned subtree.
-    fn unmap_from<PS: PageSize, L: WalkLevelImpl + LeafSplitLevelImpl>(
-        &self,
-        table: &PTPagePointer<'_, Arch, Alloc, L>,
-        page: Page<PS>,
-        split_all_cpus: Option<bool>,
-    ) -> UnmapEntryResult<Arch> {
-        let vaddr = page.start_address();
-        let level = L::LEVEL;
-        if level < PS::LEVEL {
-            return Err(PagingError::WrongPageSize);
+        let mut visitor =
+            UnmapVisitor { table: self, page, split_all_cpus, pending: MayNeedFlush::none() };
+        match MaxLevel::visit_stable_point(self.root_view(), None, vaddr, &mut visitor) {
+            ControlFlow::Break(result) => result,
+            ControlFlow::Continue(()) => unreachable!("point unmap did not reach an entry"),
         }
-        let index = entry_index(vaddr, level);
-        let observed = table.load(index);
-        if observed.is_present_table(level) {
-            let child =
-                table.child_from_observed(observed).map_err(|_| PagingError::NotLeafEntry)?;
-            return self.unmap_from(&child, page, split_all_cpus);
-        }
-        let guard = self.wperms.lock(table.paddr());
-        let pte_ref = table.entry(index);
-        let entry = pte_ref.load();
-
-        if entry.is_present_table(level) {
-            let child = table.child_from_observed(entry).map_err(|_| PagingError::NotLeafEntry)?;
-            drop(guard);
-            return self.unmap_from(&child, page, split_all_cpus);
-        }
-        if !entry.present() {
-            return Ok((None, MayNeedFlush::none()));
-        }
-        if level == PS::LEVEL {
-            let entry = pte_ref.swap(PTEntry::empty());
-            return Ok((Some(entry), PTPage::<Arch, Alloc>::flush_for_leaf(vaddr, PS::LEVEL)));
-        }
-
-        let all_cpus = split_all_cpus.ok_or(PagingError::WrongPageSize)?;
-        let flush = unsafe { L::split_leaf_to::<Arch, Alloc, PS>(pte_ref, page, all_cpus) }?;
-        let child_entry = table.load(index);
-        let child =
-            table.child_from_observed(child_entry).map_err(|_| PagingError::NotLeafEntry)?;
-        drop(guard);
-        let (entry, pending) = self.unmap_from(&child, page, None)?;
-        Ok((entry, flush.and(pending)))
     }
 
     /// Splits the huge leaf represented by `page` one level while preserving
@@ -860,17 +975,10 @@ where
     ) -> Result<MayNeedFlush<Arch::TlbFlushTok>, PagingError> {
         let vaddr = page.start_address();
         self.tree.policy().check_address(MaxLevel::LEVEL, vaddr)?;
-        let mapping = self.root_view().walk(vaddr);
-        if mapping.level() != Huge::LEVEL {
-            return Err(PagingError::InvalidLevel);
-        }
-        let _guard = self.wperms.lock(mapping.page_paddr());
-        // SAFETY: the content guard pins the entry and excludes software writers.
-        let result =
-            unsafe { PTPage::<Arch, Alloc>::split_leaf::<Huge>(mapping.entry(), vaddr, all_cpus) };
-        match result {
-            Err(PagingError::NotLeafEntry) => Err(PagingError::InvalidLevel),
-            result => result,
+        let mut visitor = SplitVisitor { table: self, vaddr, all_cpus };
+        match MaxLevel::visit_stable_point(self.root_view(), None, vaddr, &mut visitor) {
+            ControlFlow::Break(result) => result,
+            ControlFlow::Continue(()) => Err(PagingError::InvalidLevel),
         }
     }
 

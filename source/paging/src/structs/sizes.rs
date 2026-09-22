@@ -109,8 +109,3 @@ pub fn entry_index(vaddr: VirtAddr, level: PageLevel) -> usize {
 pub fn entry_index_at<const L: usize>(vaddr: VirtAddr) -> usize {
     pt_entry_index_bits::<L>(vaddr.bits())
 }
-
-pub(crate) fn next_boundary(vaddr: VirtAddr, level: PageLevel, end: VirtAddr) -> VirtAddr {
-    let base = vaddr.bits() & !(level.size() - 1);
-    VirtAddr::from(base.saturating_add(level.size()).min(end.bits()))
-}
