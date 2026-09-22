@@ -594,8 +594,9 @@ fn register_adapter<A: PagingAdapter>(criterion: &mut Criterion, config: &Config
     for workload in WORKLOADS {
         let mut group = criterion.benchmark_group(workload.criterion_name(plan.range_pages));
         for &threads in &config.threads {
+            let items_per_thread = plan.items(workload);
             let api_ops = threads
-                .checked_mul(plan.items(workload))
+                .checked_mul(items_per_thread)
                 .and_then(|items| items.checked_mul(workload.api_ops_per_item()))
                 .expect("benchmark operation count overflow");
             group.throughput(Throughput::Elements(
@@ -604,7 +605,7 @@ fn register_adapter<A: PagingAdapter>(criterion: &mut Criterion, config: &Config
             let arena_pages = config.arena_pages(workload, threads);
             let benchmark_plan = plan.clone();
             group.bench_with_input(
-                BenchmarkId::new(A::NAME, format!("{threads}t")),
+                BenchmarkId::new(A::NAME, format!("{threads}t-{items_per_thread}items_per_thread")),
                 &threads,
                 move |bencher, &threads| {
                     bencher.iter_batched(

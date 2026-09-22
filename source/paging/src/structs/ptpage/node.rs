@@ -9,7 +9,7 @@ use bitflags::Flags;
 
 use super::tree::StagedSplitLevel;
 use super::{
-    LeafSplitLevelImpl, PTPagePointer, PTPageTree, StableVisit, StableVisitor, WalkLevelImpl,
+    LeafSplitLevelImpl, PTPagePointer, PTPageTree, StableInnerVisit, StableVisitor, WalkLevelImpl,
 };
 use crate::structs::address::{Address, PhysAddr, VirtAddr, LOW_CANONICAL_END};
 use crate::structs::arch_contract::{ArchPagingMeta, GenericPageTableFlags};
@@ -349,7 +349,7 @@ where
         entry: PTEntry<A>,
         start: usize,
         end: usize,
-    ) -> ControlFlow<Self::Break, StableVisit> {
+    ) -> ControlFlow<Self::Break> {
         sweep_visit_entry(self, page, page_paddr, index, entry, start, end)
     }
 
@@ -361,11 +361,14 @@ where
         entry: PTEntry<A>,
         start: usize,
         end: usize,
-    ) -> ControlFlow<Self::Break, StableVisit>
+    ) -> ControlFlow<Self::Break, StableInnerVisit<'tree, A, P, L>>
     where
         L::Child: WalkLevelImpl,
     {
-        sweep_visit_entry(self, page, page_paddr, index, entry, start, end)
+        match sweep_visit_entry(self, page, page_paddr, index, entry, start, end) {
+            ControlFlow::Continue(()) => ControlFlow::Continue(StableInnerVisit::Continue),
+            ControlFlow::Break(value) => ControlFlow::Break(value),
+        }
     }
 }
 
@@ -377,7 +380,7 @@ fn sweep_visit_entry<'tree, A, P, E, V, L>(
     entry: PTEntry<A>,
     start: usize,
     end: usize,
-) -> ControlFlow<(usize, E), StableVisit>
+) -> ControlFlow<(usize, E)>
 where
     A: ArchPagingMeta,
     P: PagingAllocator,
@@ -386,7 +389,7 @@ where
 {
     let mapping = Mapping { pte_value: entry, pte_ref: page.entry(index), level: L::LEVEL };
     match (visitor.visit)(page_paddr, mapping, start, end) {
-        Ok(()) => ControlFlow::Continue(StableVisit::Continue),
+        Ok(()) => ControlFlow::Continue(()),
         Err(error) => ControlFlow::Break((start, error)),
     }
 }

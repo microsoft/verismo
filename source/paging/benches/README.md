@@ -62,9 +62,10 @@ thread gets a disjoint address region and a fixed number of work items. Worker
 threads announce readiness and spin on a shared start flag. Criterion excludes
 adapter construction, workload setup, and worker creation through batched
 setup; the measured routine releases the workers, performs the paging work,
-and joins them. Benchmark paths include the workload, implementation, and
-thread count. Throughput is reported in paging API operations. Range benchmark
-names include the number of 4 KiB leaves affected by each range API operation.
+and joins them. Benchmark paths include the workload, implementation, thread count, and items per thread, preventing
+Criterion from comparing runs with different workload sizes. Throughput is
+reported in paging API operations. Range benchmark names include the number of
+4 KiB leaves affected by each range API operation.
 
 All adapters use the same aligned, prefaulted arena design and the same
 synthetic virtual addresses, frames, and permissions. Setup is outside the
