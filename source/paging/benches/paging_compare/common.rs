@@ -23,7 +23,7 @@ pub struct MemorySnapshot {
     pub peak_pages: usize,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Persistent controller memory outside allocated page-table pages.
 pub struct ControllerMemory {
     pub inline_bytes: usize,

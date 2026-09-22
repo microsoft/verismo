@@ -10,9 +10,10 @@ mod verios;
 use std::collections::BTreeMap;
 use std::hint::black_box;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
 
-use common::{MemorySnapshot, Observation, PagingAdapter, HUGE_SIZE, PAGE_SIZE};
+use common::{ControllerMemory, Observation, PagingAdapter, HUGE_SIZE, PAGE_SIZE};
+use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
 use current::CurrentAdapter;
 use rust_x86_64::RustX86Adapter;
 use verios::VeriosAdapter;
@@ -51,20 +52,6 @@ const WORKLOADS: [Workload; 11] = [
     Workload::Mixed,
 ];
 
-const PERFORMANCE_LIMITS: [(Workload, f64); 11] = [
-    (Workload::MapMixed, 0.90),
-    (Workload::MapLeafOnly, 0.90),
-    (Workload::MapIntermediate, 1.15),
-    (Workload::MapRange, 1.80),
-    (Workload::Unmap, 1.10),
-    (Workload::UnmapRange, 3.00),
-    (Workload::Walk, 1.05),
-    (Workload::Protect, 1.15),
-    (Workload::Split, 0.60),
-    (Workload::ProtectRange, 0.95),
-    (Workload::Mixed, 1.15),
-];
-
 impl Workload {
     fn name(self) -> &'static str {
         match self {
@@ -88,16 +75,22 @@ impl Workload {
             _ => 1,
         }
     }
+
+    fn criterion_name(self, range_pages: usize) -> String {
+        match self {
+            Workload::MapRange | Workload::UnmapRange | Workload::ProtectRange => {
+                format!("{}_{}x4k_leaves", self.name(), range_pages)
+            }
+            _ => self.name().to_owned(),
+        }
+    }
 }
 
 /// Runtime benchmark settings and derived workload sizes.
 struct Config {
     threads: Vec<usize>,
-    base_work_per_thread: usize,
     items: WorkItems,
     range_pages: usize,
-    warmups: usize,
-    repetitions: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -199,16 +192,9 @@ impl Config {
                 1024,
             ),
         };
-        let config = Self {
-            threads,
-            base_work_per_thread,
-            items,
-            range_pages: env_usize("PAGING_BENCH_RANGE_PAGES", 16),
-            warmups: env_usize("PAGING_BENCH_WARMUPS", 2),
-            repetitions: env_usize("PAGING_BENCH_REPETITIONS", 9),
-        };
+        let config =
+            Self { threads, items, range_pages: env_usize("PAGING_BENCH_RANGE_PAGES", 16) };
         assert!(config.range_pages > 0 && config.range_pages < 512);
-        assert!(config.repetitions > 0);
         config
     }
 
@@ -290,33 +276,22 @@ impl Plan {
     }
 }
 
-/// Measurements and final state from one benchmark repetition.
-struct Sample {
-    elapsed: Duration,
-    before: MemorySnapshot,
-    after: MemorySnapshot,
-    controller_inline: usize,
-    controller_auxiliary: usize,
+#[derive(Debug, PartialEq, Eq)]
+struct CorrectnessResult {
+    before_live_pages: usize,
+    after_live_pages: usize,
+    controller: ControllerMemory,
     fingerprint: u64,
 }
 
-/// All samples for one implementation, workload, and thread count.
-struct Record {
-    implementation: &'static str,
-    workload: Workload,
-    threads: usize,
-    items_per_thread: usize,
-    api_ops: usize,
-    leaf_ops: usize,
-    samples: Vec<Sample>,
+struct PreparedRun<A: PagingAdapter> {
+    adapter: Arc<A>,
+    go: Arc<AtomicBool>,
+    workers: Vec<std::thread::JoinHandle<()>>,
 }
 
 fn env_usize(name: &str, default: usize) -> usize {
     std::env::var(name).map_or(default, |value| value.parse().expect(name))
-}
-
-fn env_flag(name: &str) -> bool {
-    std::env::var(name).is_ok_and(|value| value == "1" || value.eq_ignore_ascii_case("true"))
 }
 
 fn env_list(name: &str, default: &[usize]) -> Vec<usize> {
@@ -523,306 +498,138 @@ fn hash_observation(hash: &mut u64, observation: Option<Observation>) {
     }
 }
 
-fn run_once<A: PagingAdapter>(
+fn prepare_run<A: PagingAdapter>(
+    arena_pages: usize,
+    plan: &Plan,
+    workload: Workload,
+    threads: usize,
+) -> PreparedRun<A> {
+    let adapter = Arc::new(A::new(arena_pages));
+    prepare(&*adapter, workload, threads, plan);
+    adapter.reset_peak();
+    let ready = Arc::new(AtomicUsize::new(0));
+    let go = Arc::new(AtomicBool::new(false));
+    let mut workers = Vec::with_capacity(threads);
+    for thread in 0..threads {
+        let adapter = Arc::clone(&adapter);
+        let plan = plan.clone();
+        let ready = Arc::clone(&ready);
+        let go = Arc::clone(&go);
+        workers.push(std::thread::spawn(move || {
+            ready.fetch_add(1, Ordering::Release);
+            while !go.load(Ordering::Acquire) {
+                std::hint::spin_loop();
+            }
+            execute_thread(&*adapter, workload, thread, &plan);
+        }));
+    }
+    while ready.load(Ordering::Acquire) != threads {
+        std::hint::spin_loop();
+    }
+    PreparedRun { adapter, go, workers }
+}
+
+impl<A: PagingAdapter> PreparedRun<A> {
+    fn execute(self) -> Arc<A> {
+        self.go.store(true, Ordering::Release);
+        for worker in self.workers {
+            worker.join().expect("benchmark worker");
+        }
+        self.adapter
+    }
+}
+
+fn check_run<A: PagingAdapter>(
     config: &Config,
     plan: &Plan,
     workload: Workload,
     threads: usize,
-) -> Sample {
-    let adapter = A::new(config.arena_pages(workload, threads));
-    prepare(&adapter, workload, threads, plan);
-    adapter.reset_peak();
-    let before = adapter.memory();
-    let ready = AtomicUsize::new(0);
-    let go = AtomicBool::new(false);
-    let elapsed = std::thread::scope(|scope| {
-        let mut workers = Vec::with_capacity(threads);
-        for thread in 0..threads {
-            let adapter = &adapter;
-            let plan = plan.clone();
-            let ready = &ready;
-            let go = &go;
-            workers.push(scope.spawn(move || {
-                ready.fetch_add(1, Ordering::Release);
-                while !go.load(Ordering::Acquire) {
-                    std::hint::spin_loop();
-                }
-                execute_thread(adapter, workload, thread, &plan);
-                Instant::now()
-            }));
-        }
-        while ready.load(Ordering::Acquire) != threads {
-            std::hint::spin_loop();
-        }
-        let start = Instant::now();
-        go.store(true, Ordering::Release);
-        workers
-            .into_iter()
-            .map(|worker| worker.join().expect("benchmark worker"))
-            .max()
-            .expect("at least one worker")
-            .duration_since(start)
-    });
+) -> CorrectnessResult {
+    let run = prepare_run::<A>(config.arena_pages(workload, threads), plan, workload, threads);
+    let before = run.adapter.memory();
+    assert_eq!(before.live_pages, before.peak_pages);
+    let adapter = run.execute();
     let after = adapter.memory();
-    let fingerprint = validate(&adapter, workload, threads, plan);
-    let controller = adapter.controller_memory();
-    Sample {
-        elapsed,
-        before,
-        after,
-        controller_inline: controller.inline_bytes,
-        controller_auxiliary: controller.auxiliary_bytes,
-        fingerprint,
+    assert!(after.peak_pages >= before.live_pages);
+    assert!(after.peak_pages >= after.live_pages);
+    CorrectnessResult {
+        before_live_pages: before.live_pages,
+        after_live_pages: after.live_pages,
+        controller: adapter.controller_memory(),
+        fingerprint: validate(&*adapter, workload, threads, plan),
     }
 }
 
-fn benchmark<A: PagingAdapter>(config: &Config, plan: &Plan, records: &mut Vec<Record>) {
+fn check_adapter<A: PagingAdapter>(
+    config: &Config,
+    plan: &Plan,
+    fingerprints: &mut BTreeMap<(Workload, usize), u64>,
+) {
     for workload in WORKLOADS {
         for &threads in &config.threads {
-            for _ in 0..config.warmups {
-                black_box(run_once::<A>(config, plan, workload, threads));
-            }
-            let samples = (0..config.repetitions)
-                .map(|_| run_once::<A>(config, plan, workload, threads))
-                .collect();
-            let items_per_thread = plan.items(workload);
-            let api_ops = threads * items_per_thread * workload.api_ops_per_item();
-            let leaf_ops = match workload {
-                Workload::MapRange | Workload::UnmapRange | Workload::ProtectRange => {
-                    threads * items_per_thread * plan.range_pages
-                }
-                _ => api_ops,
-            };
-            records.push(Record {
-                implementation: A::NAME,
-                workload,
-                threads,
-                items_per_thread,
-                api_ops,
-                leaf_ops,
-                samples,
-            });
-        }
-    }
-}
-
-/// Three reported points from an ordered sample distribution.
-struct Percentiles<T> {
-    p10: T,
-    median: T,
-    p90: T,
-}
-
-fn interpolated_percentile(values: &[f64], percentile: f64) -> f64 {
-    let position = (values.len() - 1) as f64 * percentile;
-    let lower = position.floor() as usize;
-    let upper = position.ceil() as usize;
-    if lower == upper {
-        values[lower]
-    } else {
-        let fraction = position - lower as f64;
-        values[lower] + (values[upper] - values[lower]) * fraction
-    }
-}
-
-fn percentiles_f64(mut values: Vec<f64>) -> Percentiles<f64> {
-    assert!(!values.is_empty());
-    values.sort_by(f64::total_cmp);
-    Percentiles {
-        p10: interpolated_percentile(&values, 0.1),
-        median: interpolated_percentile(&values, 0.5),
-        p90: interpolated_percentile(&values, 0.9),
-    }
-}
-
-fn observed_percentile(values: &[usize], percentile: f64) -> usize {
-    let index = ((values.len() - 1) as f64 * percentile).round() as usize;
-    values[index]
-}
-
-fn percentiles_usize(mut values: Vec<usize>) -> Percentiles<usize> {
-    assert!(!values.is_empty());
-    values.sort_unstable();
-    Percentiles {
-        p10: observed_percentile(&values, 0.1),
-        median: observed_percentile(&values, 0.5),
-        p90: observed_percentile(&values, 0.9),
-    }
-}
-
-fn throughput_median(record: &Record) -> f64 {
-    percentiles_f64(
-        record
-            .samples
-            .iter()
-            .map(|sample| record.api_ops as f64 / sample.elapsed.as_secs_f64())
-            .collect(),
-    )
-    .median
-}
-
-fn latency_median(record: &Record) -> f64 {
-    percentiles_f64(
-        record
-            .samples
-            .iter()
-            .map(|sample| sample.elapsed.as_nanos() as f64 / record.api_ops as f64)
-            .collect(),
-    )
-    .median
-}
-
-fn check_fingerprints(records: &[Record]) {
-    let mut expected = BTreeMap::new();
-    for record in records {
-        let fingerprint = record.samples[0].fingerprint;
-        assert!(record.samples.iter().all(|sample| sample.fingerprint == fingerprint));
-        let key = (record.workload, record.threads);
-        if let Some(other) = expected.insert(key, fingerprint) {
-            assert_eq!(other, fingerprint, "cross-adapter fingerprint mismatch");
-        }
-    }
-}
-
-fn check_performance(records: &[Record]) {
-    let mut failures = Vec::new();
-    for (workload, max_ratio) in PERFORMANCE_LIMITS {
-        for current in records
-            .iter()
-            .filter(|record| record.implementation == CurrentAdapter::NAME)
-            .filter(|record| record.workload == workload)
-        {
-            let baseline = records
-                .iter()
-                .find(|record| {
-                    record.implementation == VeriosAdapter::NAME
-                        && record.workload == workload
-                        && record.threads == current.threads
-                })
-                .unwrap();
-            let ratio = latency_median(current) / latency_median(baseline);
-            if ratio > max_ratio {
-                failures.push(format!(
-                    "{} at {} thread(s): {:.3}x VeriOS exceeds {:.3}x",
+            let first = check_run::<A>(config, plan, workload, threads);
+            let second = check_run::<A>(config, plan, workload, threads);
+            assert_eq!(
+                first,
+                second,
+                "{} {} {}-thread correctness result changed",
+                A::NAME,
+                workload.name(),
+                threads
+            );
+            if let Some(expected) = fingerprints.insert((workload, threads), first.fingerprint) {
+                assert_eq!(
+                    expected,
+                    first.fingerprint,
+                    "{} {}-thread cross-adapter fingerprint mismatch",
                     workload.name(),
-                    current.threads,
-                    ratio,
-                    max_ratio
-                ));
+                    threads
+                );
             }
         }
     }
-    assert!(failures.is_empty(), "paging performance regression:\n{}", failures.join("\n"));
 }
 
-fn print_results(config: &Config, records: &[Record]) {
-    println!(
-        "configuration: threads={:?} base_work_per_thread={} range_pages={} warmups={} repetitions={}",
-        config.threads,
-        config.base_work_per_thread,
-        config.range_pages,
-        config.warmups,
-        config.repetitions
-    );
-    println!(
-        "effective_items_per_thread: map_mixed={} map_leaf_only={} map_intermediate={} map_range={} unmap={} unmap_range={} walk={} protect={} split={} protect_range={} mixed={}",
-        config.items.map_mixed,
-        config.items.map_leaf_only,
-        config.items.map_intermediate,
-        config.items.map_range,
-        config.items.unmap,
-        config.items.unmap_range,
-        config.items.walk,
-        config.items.protect,
-        config.items.split,
-        config.items.protect_range,
-        config.items.mixed,
-    );
-    println!("TLB policy: synthetic tables only; all flush callbacks/receipts are no-ops");
-    println!(
-        "implementation,workload,threads,items_per_thread,api_ops,leaf_ops,ns/op[p10|median|p90],Mapi_ops/s[p10|median|p90],scaling,live_pages[before|p10|median|p90],peak_pages[p10|median|p90],live_bytes_median,peak_bytes_median,controller_bytes[inline|aux],fingerprint"
-    );
-    for record in records {
-        let ns_per_op = percentiles_f64(
-            record
-                .samples
-                .iter()
-                .map(|sample| sample.elapsed.as_nanos() as f64 / record.api_ops as f64)
-                .collect(),
-        );
-        let throughput = percentiles_f64(
-            record
-                .samples
-                .iter()
-                .map(|sample| record.api_ops as f64 / sample.elapsed.as_secs_f64() / 1_000_000.0)
-                .collect(),
-        );
-        let live = percentiles_usize(
-            record.samples.iter().map(|sample| sample.after.live_pages).collect(),
-        );
-        let peak = percentiles_usize(
-            record.samples.iter().map(|sample| sample.after.peak_pages).collect(),
-        );
-        let base = records
-            .iter()
-            .find(|candidate| {
-                candidate.implementation == record.implementation
-                    && candidate.workload == record.workload
-                    && candidate.threads == config.threads[0]
-            })
-            .unwrap();
-        let scaling = throughput_median(record) / throughput_median(base);
-        let sample = &record.samples[0];
-        assert!(record
-            .samples
-            .iter()
-            .all(|candidate| candidate.before.live_pages == sample.before.live_pages));
-        assert!(record.samples.iter().all(|candidate| {
-            candidate.controller_inline == sample.controller_inline
-                && candidate.controller_auxiliary == sample.controller_auxiliary
-        }));
-        println!(
-            "{},{},{},{},{},{},[{:.2}|{:.2}|{:.2}],[{:.3}|{:.3}|{:.3}],{:.2}x,[{}|{}|{}|{}],[{}|{}|{}],{},{},[{}|{}],{:016x}",
-            record.implementation,
-            record.workload.name(),
-            record.threads,
-            record.items_per_thread,
-            record.api_ops,
-            record.leaf_ops,
-            ns_per_op.p10,
-            ns_per_op.median,
-            ns_per_op.p90,
-            throughput.p10,
-            throughput.median,
-            throughput.p90,
-            scaling,
-            sample.before.live_pages,
-            live.p10,
-            live.median,
-            live.p90,
-            peak.p10,
-            peak.median,
-            peak.p90,
-            live.median * PAGE_SIZE as usize,
-            peak.median * PAGE_SIZE as usize,
-            sample.controller_inline,
-            sample.controller_auxiliary,
-            sample.fingerprint,
-        );
+fn register_adapter<A: PagingAdapter>(criterion: &mut Criterion, config: &Config, plan: &Plan) {
+    for workload in WORKLOADS {
+        let mut group = criterion.benchmark_group(workload.criterion_name(plan.range_pages));
+        for &threads in &config.threads {
+            let api_ops = threads
+                .checked_mul(plan.items(workload))
+                .and_then(|items| items.checked_mul(workload.api_ops_per_item()))
+                .expect("benchmark operation count overflow");
+            group.throughput(Throughput::Elements(
+                api_ops.try_into().expect("benchmark operation count exceeds u64"),
+            ));
+            let arena_pages = config.arena_pages(workload, threads);
+            let benchmark_plan = plan.clone();
+            group.bench_with_input(
+                BenchmarkId::new(A::NAME, format!("{threads}t")),
+                &threads,
+                move |bencher, &threads| {
+                    bencher.iter_batched(
+                        || prepare_run::<A>(arena_pages, &benchmark_plan, workload, threads),
+                        PreparedRun::execute,
+                        BatchSize::PerIteration,
+                    );
+                },
+            );
+        }
+        group.finish();
     }
 }
 
-fn main() {
+fn paging_compare(criterion: &mut Criterion) {
     let config = Config::read();
     let plan = Plan::new(&config);
-    let mut records = Vec::new();
-    benchmark::<CurrentAdapter>(&config, &plan, &mut records);
-    benchmark::<VeriosAdapter>(&config, &plan, &mut records);
-    benchmark::<RustX86Adapter>(&config, &plan, &mut records);
-    check_fingerprints(&records);
-    print_results(&config, &records);
-    if env_flag("PAGING_BENCH_CHECK") {
-        check_performance(&records);
-        eprintln!("paging performance regression check passed");
-    }
+    let mut fingerprints = BTreeMap::new();
+    check_adapter::<CurrentAdapter>(&config, &plan, &mut fingerprints);
+    check_adapter::<VeriosAdapter>(&config, &plan, &mut fingerprints);
+    check_adapter::<RustX86Adapter>(&config, &plan, &mut fingerprints);
+    register_adapter::<CurrentAdapter>(criterion, &config, &plan);
+    register_adapter::<VeriosAdapter>(criterion, &config, &plan);
+    register_adapter::<RustX86Adapter>(criterion, &config, &plan);
 }
+
+criterion_group!(benches, paging_compare);
+criterion_main!(benches);

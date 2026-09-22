@@ -14,6 +14,7 @@ builtin_macros = { workspace = true }
 verus_state_machines_macros = { workspace = true }
 
 [dev-dependencies]
+criterion = "0.8.2"
 pgtable = { git = "https://github.com/MSRSSP/verios-pagetable", rev = "b21b173cffbc9eae176dd8135f8b28121bd2d48c" }
 x86_64 = { version = "=0.15.2", default-features = false }
 

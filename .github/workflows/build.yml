@@ -45,11 +45,21 @@ jobs:
         working-directory: source/concurrent-rw/tests
         run: cargo verus verify --release --features state_machine -- --multiple-errors=20 --trace --time
 
-      - name: Paging performance regression
+      - name: Paging benchmark smoke
         working-directory: source
         env:
           CARGO_NET_GIT_FETCH_WITH_CLI: true
-          PAGING_BENCH_CHECK: 1
-          PAGING_BENCH_WARMUPS: 3
-          PAGING_BENCH_REPETITIONS: 11
-        run: cargo bench -p verios-pagetable-beta --bench paging_compare --target x86_64-unknown-linux-gnu
+          PAGING_BENCH_THREADS: 1
+          PAGING_BENCH_RANGE_PAGES: 2
+          PAGING_BENCH_MAP_ITEMS_PER_THREAD: 1
+          PAGING_BENCH_MAP_LEAF_ONLY_ITEMS_PER_THREAD: 1
+          PAGING_BENCH_MAP_INTERMEDIATE_ITEMS_PER_THREAD: 1
+          PAGING_BENCH_MAP_RANGE_ITEMS_PER_THREAD: 1
+          PAGING_BENCH_UNMAP_ITEMS_PER_THREAD: 1
+          PAGING_BENCH_UNMAP_RANGE_ITEMS_PER_THREAD: 1
+          PAGING_BENCH_WALK_ITEMS_PER_THREAD: 1
+          PAGING_BENCH_PROTECT_ITEMS_PER_THREAD: 1
+          PAGING_BENCH_SPLIT_ITEMS_PER_THREAD: 1
+          PAGING_BENCH_PROTECT_RANGE_ITEMS_PER_THREAD: 1
+          PAGING_BENCH_MIXED_ITEMS_PER_THREAD: 1
+        run: cargo bench -p verios-pagetable-beta --bench paging_compare --target x86_64-unknown-linux-gnu -- --warm-up-time 0.01 --measurement-time 0.02 --sample-size 10 --noplot

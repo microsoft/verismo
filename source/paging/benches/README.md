@@ -7,7 +7,9 @@
   `b21b173cffbc9eae176dd8135f8b28121bd2d48c`;
 - Rust `x86_64` crate `0.15.2`.
 
-Run it on a host target:
+Run it on a host target. The first ordinary run stores Criterion's `base`
+measurements under `target/criterion`; each later ordinary run compares with
+the preceding measurements and then updates `base`:
 
 ```sh
 CARGO_NET_GIT_FETCH_WITH_CLI=true \
@@ -15,16 +17,25 @@ CARGO_NET_GIT_FETCH_WITH_CLI=true \
   --target x86_64-unknown-linux-gnu
 ```
 
-Set `PAGING_BENCH_CHECK=1` to fail when this implementation exceeds the
-per-workload latency limits relative to the pinned VeriOS baseline. The check
-uses every configured thread count:
+Save a named baseline when the reference measurements must not be replaced:
 
 ```sh
-CARGO_NET_GIT_FETCH_WITH_CLI=true PAGING_BENCH_CHECK=1 \
-  PAGING_BENCH_WARMUPS=3 PAGING_BENCH_REPETITIONS=11 \
+CARGO_NET_GIT_FETCH_WITH_CLI=true \
   cargo bench -p verios-pagetable-beta --bench paging_compare \
-  --target x86_64-unknown-linux-gnu
+  --target x86_64-unknown-linux-gnu -- --save-baseline paging-main
 ```
+
+Compare later measurements against that named baseline:
+
+```sh
+CARGO_NET_GIT_FETCH_WITH_CLI=true \
+  cargo bench -p verios-pagetable-beta --bench paging_compare \
+  --target x86_64-unknown-linux-gnu -- --baseline paging-main
+```
+
+Criterion owns warmup, sample collection, outlier analysis, persisted
+measurements, and percentage-change reporting. Its CLI options, such as
+`--warm-up-time`, `--measurement-time`, and `--sample-size`, control sampling.
 
 Check that optimized four-level translation retains straight-line page
 descent:
@@ -48,20 +59,20 @@ read/protect/unmap/map sequence. The region workloads call paging's
 Their starts are offset from huge-page alignment so every adapter represents
 the configurable range with matching 4 KiB leaves. Each
 thread gets a disjoint address region and a fixed number of work items. Worker
-threads announce readiness and spin on a shared start flag. The coordinator
-takes the start timestamp only after every worker is ready; elapsed time ends
-at the latest worker completion timestamp, so thread creation, readiness, and
-join teardown are excluded. Results report p10/median/p90 latency and
-throughput, scaling relative to the smallest configured thread count, semantic
-fingerprints, and exact allocator-instrumented live/peak table-page counts and
-bytes for each implementation/workload. Floating-point latency and throughput
-percentiles use linear interpolation over sorted samples; integer page counts
-select the nearest observed sample.
+threads announce readiness and spin on a shared start flag. Criterion excludes
+adapter construction, workload setup, and worker creation through batched
+setup; the measured routine releases the workers, performs the paging work,
+and joins them. Benchmark paths include the workload, implementation, and
+thread count. Throughput is reported in paging API operations. Range benchmark
+names include the number of 4 KiB leaves affected by each range API operation.
 
 All adapters use the same aligned, prefaulted arena design and the same
 synthetic virtual addresses, frames, and permissions. Setup is outside the
-timed interval. Final observations cover every affected 4 KiB mapping,
-including all 512 leaves produced by each split.
+timed interval. Before sampling each benchmark configuration, two untimed runs
+must produce identical semantic fingerprints, live table-page counts, and
+controller sizes; peak counts are checked against the live counts. Fingerprints
+must also match across all three adapters. Final observations cover every
+affected 4 KiB mapping, including all 512 leaves produced by each split.
 
 The current and verios adapters use the same cache-line-isolated, arena-indexed
 spin lock for each table page. The current adapter uses `X86Paging` and a
@@ -83,9 +94,6 @@ Environment variables:
 - `PAGING_BENCH_THREADS` (default `1,2,4,8`)
 - `PAGING_BENCH_WORK_PER_THREAD` (default `128`)
 - `PAGING_BENCH_RANGE_PAGES` (default `16`, must be between `1` and `511`)
-- `PAGING_BENCH_WARMUPS` (default `2`)
-- `PAGING_BENCH_REPETITIONS` (default `9`)
-- `PAGING_BENCH_CHECK` (`1` or `true` enables the regression limits)
 
 `PAGING_BENCH_WORK_PER_THREAD` is a base used to derive workload-specific
 defaults. The default effective item counts per thread are:
@@ -115,9 +123,9 @@ Each effective count can be replaced directly with
 `PAGING_BENCH_PROTECT_RANGE_ITEMS_PER_THREAD`, or
 `PAGING_BENCH_MIXED_ITEMS_PER_THREAD`. Split uses a much smaller multiplier
 because every item creates a 4 KiB table and materializes 512 leaf entries.
-The harness prints all effective counts before its CSV output.
 
 Controller bytes are exact Rust logical sizes: inline adapter/controller state
 plus the current adapter's owned stripe-domain/vector storage. Allocator
 metadata and allocator implementation overhead are excluded. Peak page counts
-include transient table allocations during the timed workload.
+include transient table allocations during the workload. These values are
+correctness checks rather than a custom benchmark report.
