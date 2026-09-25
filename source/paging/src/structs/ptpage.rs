@@ -1,15 +1,15 @@
 //! Page-table storage, lifetime-bound views, and unpublished tree ownership.
 mod node;
-mod node_pointer;
+mod node_ref;
 mod tree;
 
 pub(crate) use node::FlushFootprint;
-pub(crate) use node::Mapping;
 pub use node::{PTPage, Translation};
-pub use node_pointer::WalkLevel;
-pub use node_pointer::WalkResult;
-pub(crate) use node_pointer::{
-    LeafSplitLevelImpl, PTPagePointer, PageLevelHandler, StableInnerVisit, StableVisitor,
-    WalkLevelImpl, WalkPosition,
-};
-pub(crate) use tree::{reclaim_path, reclaim_range, Live, PTPageTree};
+pub use node_ref::WalkLevel;
+pub use node_ref::WalkResult;
+pub(crate) use node_ref::{PTPageMutRef, PTPageRef, WalkLevelImpl};
+pub(crate) use tree::Live;
+pub use tree::{DetachedPageTable, PTPageTree, Staged, StagedPageTable};
+
+/// An unlinked child tree whose ownership can be transferred to a parent.
+pub type OwnedSubtree<A, P, L> = PTPageTree<A, P, L>;

@@ -12,8 +12,8 @@ use paging::entry::PTEntry;
 use paging::level::{Lvl, PageLevel};
 use paging::os_contract::{DirectMappedAllocator, PagingError};
 use paging::pagetable::PageTable;
-use paging::policy::RootRange;
-use paging::ptpage::{PTPage, WalkLevel};
+use paging::policy::NoRootEntries;
+use paging::ptpage::{PTPage, PTPageTree, WalkLevel};
 use paging::sizes::{entry_index, PT_ENTRY_COUNT};
 use paging::{FlushScope, PTEntryFlags, X86Paging, X86PagingParams};
 
@@ -248,15 +248,11 @@ macro_rules! ad_tests {
                         .write(FRAME | 1);
                 }
                 let before = unsafe { clear_history_before_import(upper_pa, PageLevel::Level2) };
-                // SAFETY: ownership transfers; all pages and hardware users are quiesced.
-                assert_eq!(unsafe { table.populate(index, upper_pa) }, Ok(true));
+                // SAFETY: this child-level tree is unlinked and exclusively owned.
+                let subtree = unsafe { PTPageTree::from_owned_root(upper_pa) };
+                assert!(table.populate_owned(index, subtree).is_ok());
                 assert_words(&before, core::convert::identity);
                 assert_eq!(table.phys_addr(address), Ok(PhysAddr::from(FRAME)));
-
-                // SAFETY: the attached subtree remains quiesced while raw import state is staged.
-                let before = unsafe { clear_history_before_import(upper_pa, PageLevel::Level2) };
-                assert_eq!(unsafe { table.populate(index, upper_pa) }, Ok(false));
-                assert_words(&before, core::convert::identity);
 
                 let (rejected, rejected_pa) = Page::alloc().unwrap();
                 // SAFETY: the candidate is a private level-two table with one huge data mapping.
@@ -265,14 +261,18 @@ macro_rules! ad_tests {
                 }
                 let rejected_before =
                     unsafe { clear_history_before_import(rejected_pa, PageLevel::Level2) };
-                assert!(unsafe { table.populate(index, rejected_pa) }.is_err());
+                // SAFETY: this child-level tree is unlinked and exclusively owned.
+                let rejected = unsafe { PTPageTree::from_owned_root(rejected_pa) };
+                let rejected = match table.populate_owned(index, rejected) {
+                    Err(error) if error.error == PagingError::NotLeafEntry => error.subtree,
+                    _ => panic!("occupied root entry accepted another subtree"),
+                };
                 assert_words(&rejected_before, core::convert::identity);
                 assert_words(&before, core::convert::identity);
                 assert_eq!(table.next_table_pa(index), Some(upper_pa));
                 assert!(arena.freed().is_empty());
-                // SAFETY: rejection retains this unlinked candidate, which has no child tables.
-                unsafe { Allocator::deallocate_table_page(rejected_pa) };
                 drop(table);
+                drop(rejected);
                 assert_all_reclaimed(&arena);
             }
 
@@ -315,8 +315,9 @@ fn borrowed_import_preserves_shared_descendants() {
             false,
         )
         .unwrap();
-    let user = unsafe { Table::new_from_sharing_top::<RootRange<0, 512>>(locks.clone(), &kernel) }
-        .unwrap();
+    // SAFETY: the kernel tree remains live until after the returned test table.
+    let user =
+        unsafe { Table::new_from_sharing_top::<NoRootEntries>(locks.clone(), &kernel) }.unwrap();
     let root = user.root_paddr();
     // SAFETY: both original controllers are unused during import; no hardware ran.
     let before = unsafe { clear_history_before_import(root, PageLevel::Level3) };

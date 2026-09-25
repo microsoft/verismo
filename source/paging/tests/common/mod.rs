@@ -25,7 +25,9 @@ use paging::page::Page;
 use paging::pagetable::LockSpec;
 use paging::pagetable::{KernelPageTable, PageTable};
 use paging::policy::PagingOwnershipPolicy;
+use paging::ptpage::WalkLevel;
 use paging::sizes::{Huge, PageSize, Regular, SizeLevel2};
+use paging::tlb::MayNeedFlush;
 use paging::{ArchPagingMeta, FlushScope, PTEntryFlags, X86Paging, X86PagingParams};
 
 pub fn page_4k(address: VirtAddr) -> Page<Regular> {
@@ -60,6 +62,37 @@ pub fn range_4k(start: VirtAddr, end: VirtAddr) -> paging::page::PageRangeInclus
         Page::containing_address(end)
     };
     Page::range_inclusive(start, end)
+}
+
+pub fn reclaim_range<Arch, Alloc, MaxLevel, WP, T, Owned>(
+    table: &mut PageTable<Arch, Alloc, MaxLevel, WP, T, Owned>,
+    start: VirtAddr,
+    end: VirtAddr,
+) where
+    Arch: ArchPagingMeta,
+    Alloc: paging::os_contract::PagingAllocator,
+    MaxLevel: WalkLevel,
+    WP: LockSpec<T>,
+    Owned: PagingOwnershipPolicy,
+{
+    if start == end {
+        return;
+    }
+    table.cleanup_page_tables_by_range(start, end, MayNeedFlush::none());
+}
+
+pub fn reclaim_path<Arch, Alloc, MaxLevel, WP, T, Owned>(
+    table: &mut PageTable<Arch, Alloc, MaxLevel, WP, T, Owned>,
+    address: VirtAddr,
+) -> usize
+where
+    Arch: ArchPagingMeta,
+    Alloc: paging::os_contract::PagingAllocator,
+    MaxLevel: WalkLevel,
+    WP: LockSpec<T>,
+    Owned: PagingOwnershipPolicy,
+{
+    table.free_page_table_by_addr(address, MayNeedFlush::none())
 }
 
 pub fn contiguous_frames_4k(

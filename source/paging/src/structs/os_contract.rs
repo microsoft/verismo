@@ -36,15 +36,14 @@ pub enum PagingError {
     WrongPageSize,
 }
 
-/// A failed range mapping and the number of 4 KiB pages not inserted.
+/// A failed range mapping and the number of input-size pages not inserted.
 ///
-/// Pages preceding the remaining suffix stay mapped. For an invalid range that
-/// does not describe an integral number of 4 KiB pages, `unmapped_pages` is zero.
+/// Pages preceding the remaining suffix stay mapped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MapRegionError {
     /// Why insertion stopped.
     pub error: PagingError,
-    /// The failed page and unattempted suffix, measured in 4 KiB pages.
+    /// The failed page and unattempted suffix, measured in the input page size.
     pub unmapped_pages: usize,
 }
 

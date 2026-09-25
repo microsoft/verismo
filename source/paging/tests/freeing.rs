@@ -11,6 +11,7 @@ use paging::level::{LevelSpec, Lvl, PageLevel};
 use paging::os_contract::PagingError;
 use paging::pagetable::PageTable;
 use paging::ptpage::WalkLevel;
+use paging::tlb::MayNeedFlush;
 use paging::X86Paging;
 
 /// Unmaps `vaddr` and discharges the flush, which the freeing needs.
@@ -25,8 +26,7 @@ fn unmap(table: &mut Table, vaddr: VirtAddr) {
 fn freeing_an_address_nothing_mapped_frees_nothing() {
     let (arena, mut table) = table();
     let vaddr = VirtAddr::from(0x80_0000_0000usize);
-    // SAFETY: nothing was ever mapped there, so no walk can be in progress.
-    assert_eq!(unsafe { table.free_page_table_by_addr(vaddr) }, 0);
+    assert_eq!(reclaim_path(&mut table, vaddr), 0);
     assert!(arena.freed().is_empty());
     assert_eq!(table.validate_page_table(), Ok(()));
     std::mem::forget(table);
@@ -43,8 +43,7 @@ fn a_table_a_sibling_still_needs_is_kept() {
     assert_eq!(table.map(common::page_4k(second), common::frame_4k(frame), flags(), false), Ok(()));
     unmap(&mut table, first);
 
-    // SAFETY: `first` is unmapped and its flush discharged.
-    assert_eq!(unsafe { table.free_page_table_by_addr(first) }, 0);
+    assert_eq!(reclaim_path(&mut table, first), 0);
     assert!(arena.freed().is_empty());
     assert_eq!(table.phys_addr(second), Ok(frame));
     std::mem::forget(table);
@@ -62,8 +61,7 @@ fn the_last_mapping_takes_its_tables_with_it() {
     assert_eq!(built, 3, "a four-level tree needs three tables below the root");
 
     unmap(&mut table, vaddr);
-    // SAFETY: `vaddr` is unmapped and its flush discharged.
-    assert_eq!(unsafe { table.free_page_table_by_addr(vaddr) }, built);
+    assert_eq!(reclaim_path(&mut table, vaddr), built);
     assert_eq!(arena.freed().len(), built);
 
     // What is left still describes itself, and still works.
@@ -71,6 +69,26 @@ fn the_last_mapping_takes_its_tables_with_it() {
     assert_eq!(table.phys_addr(VirtAddr::from(arena.base())), Ok(frame));
     assert_eq!(table.map(common::page_4k(vaddr), common::frame_4k(frame), flags(), false), Ok(()));
     assert_eq!(table.phys_addr(vaddr), Ok(frame));
+    std::mem::forget(table);
+}
+
+#[test]
+fn point_cleanup_combines_unmap_and_detachment_flushes() {
+    let (arena, mut table) = table();
+    let frame = PhysAddr::from(arena.base());
+    let vaddr = VirtAddr::from(0x4000_0000usize);
+
+    let before = arena.allocated();
+    table.map(common::page_4k(vaddr), common::frame_4k(frame), flags(), false).unwrap();
+    let built = arena.allocated() - before;
+    let (entry, unmap_flush) = table.unmap(common::page_4k(vaddr), Some(true)).unwrap();
+    assert!(entry.is_some());
+
+    let flushes = host_flushes();
+    assert_eq!(table.free_page_table_by_addr(vaddr, unmap_flush), built);
+    assert_eq!(host_flushes(), flushes + 1);
+    assert_eq!(arena.freed().len(), built);
+    assert_eq!(table.validate_page_table(), Ok(()));
     std::mem::forget(table);
 }
 
@@ -94,15 +112,41 @@ fn a_range_gives_back_the_tables_that_held_it() {
     }
     let (all_mapped, flush) = table.unmap_region(start, end).unwrap();
     assert!(all_mapped);
-    // SAFETY: nothing runs on these tables but this test.
-    unsafe { flush.ignore() };
 
     arena.clear_freed();
-    // SAFETY: the range is unmapped and its flush discharged.
-    unsafe { table.free_page_table_by_range(start, end) };
+    let flushes = host_flushes();
+    table.cleanup_page_tables_by_range(start, end, flush);
+    assert_eq!(host_flushes(), flushes + 1);
     assert!(!arena.freed().is_empty());
     assert_eq!(table.validate_page_table(), Ok(()));
     assert_eq!(table.phys_addr(VirtAddr::from(arena.base())), Ok(frame));
+    std::mem::forget(table);
+}
+
+#[test]
+fn bounded_cleanup_flushes_each_full_detached_table_batch() {
+    let (arena, mut table) = table();
+    let frame = PhysAddr::from(arena.base());
+    let start = VirtAddr::from(0x4000_0000usize);
+    let tables = 65;
+    let end = start + tables * PageLevel::Level1.size();
+    let mut pending = MayNeedFlush::none();
+
+    for offset in (0..end - start).step_by(PageLevel::Level1.size()) {
+        let address = start + offset;
+        table.map(common::page_4k(address), common::frame_4k(frame), flags(), false).unwrap();
+        let (entry, flush) = table.unmap(common::page_4k(address), Some(true)).unwrap();
+        assert!(entry.is_some());
+        pending = pending.and(flush);
+    }
+
+    arena.clear_freed();
+    let flushes = host_flushes();
+    let reclaimed = table.cleanup_page_tables_by_range(start, end, pending);
+    assert!(reclaimed > tables);
+    assert_eq!(host_flushes(), flushes + 2);
+    assert_eq!(arena.freed().len(), reclaimed);
+    assert_eq!(table.validate_page_table(), Ok(()));
     std::mem::forget(table);
 }
 
@@ -125,9 +169,7 @@ fn a_range_still_mapped_keeps_its_tables() {
         );
     }
     arena.clear_freed();
-    // SAFETY: nothing else walks these tables, and what is still mapped keeps
-    // its tables by the sweep's own rule.
-    unsafe { table.free_page_table_by_range(start, end) };
+    reclaim_range(&mut table, start, end);
     assert!(arena.freed().is_empty());
     assert_eq!(table.phys_addr(start), Ok(frame));
     std::mem::forget(table);
@@ -145,8 +187,7 @@ fn range_cleanup_reaches_sparse_paths_across_one_gib_boundaries() {
         unmap(&mut table, addr);
     }
     let built = arena.allocated() - before;
-    // SAFETY: these unaliased tables are inactive and their leaf flushes discharged.
-    unsafe { table.free_page_table_by_range(first, second + 4096) };
+    reclaim_range(&mut table, first, second + 4096);
     assert_eq!(arena.freed().len(), built);
     assert_eq!(table.validate_page_table(), Ok(()));
 }
@@ -167,17 +208,16 @@ fn range_cleanup_keeps_its_exclusive_end_and_ignores_empty_ranges() {
             .unwrap();
         unmap(&mut table, addr);
     }
-    // SAFETY: these inactive paths are unaliased and all leaf flushes discharged.
-    unsafe { table.free_page_table_by_range(first, first) };
+    reclaim_range(&mut table, first, first);
     assert!(arena.freed().is_empty());
-    unsafe { table.free_page_table_by_range(first, second) };
+    reclaim_range(&mut table, first, second);
     assert_eq!(arena.freed().len(), 1);
-    assert_eq!(unsafe { table.free_page_table_by_addr(second) }, 3);
+    assert_eq!(reclaim_path(&mut table, second), 3);
     assert_eq!(table.validate_page_table(), Ok(()));
 }
 
 #[test]
-fn five_level_range_cleanup_uses_high_canonical_offsets_without_wrapping() {
+fn five_level_path_cleanup_accepts_high_canonical_addresses() {
     use paging::level::Lvl;
     use paging::pagetable::PageTable;
     use paging::X86Paging;
@@ -206,10 +246,19 @@ fn five_level_range_cleanup_uses_high_canonical_offsets_without_wrapping() {
         unsafe { pending.ignore() };
     }
     let built = arena.allocated() - before;
-    // SAFETY: the empty paths belong solely to this inactive tree.
-    unsafe { table.free_page_table_by_range(first, second + 4096) };
+    // SAFETY: both high-canonical paths are inactive and their leaf flushes completed.
+    let reclaimed = reclaim_path(&mut table, first) + reclaim_path(&mut table, second);
+    assert_eq!(reclaimed, built);
     assert_eq!(arena.freed().len(), built);
     assert_eq!(table.validate_page_table(), Ok(()));
+}
+
+#[test]
+#[should_panic(expected = "cleanup range exceeds the root address space")]
+fn range_cleanup_rejects_addresses_outside_the_root_span() {
+    let (_arena, mut table) = table();
+    let start = VirtAddr::from(0xffff_8000_0000_0000usize);
+    table.cleanup_page_tables_by_range(start, start + 4096, MayNeedFlush::none());
 }
 
 #[test]

@@ -1,6 +1,8 @@
 //! Translation invalidation. Page-size transitions flush synchronously before
 //! publishing replacements; [`MayNeedFlush`] records any remaining obligation
 //! for the caller to discharge.
+use core::marker::PhantomData;
+
 use crate::structs::address::{VirtAddr, LOW_CANONICAL_END};
 use crate::structs::level::PageLevel;
 use crate::structs::sizes::PAGE_SIZE;
@@ -52,6 +54,80 @@ pub trait TlbFlush: Sized {
 flush the affected page or discharge the obligation with `.ignore()`"]
 pub struct MayNeedFlush<T: TlbFlush> {
     tok: Option<T>,
+}
+
+/// A range-scoped detachment batch that has not completed its flush.
+pub struct DetachBatch<'id, T: TlbFlush> {
+    start: VirtAddr,
+    end: VirtAddr,
+    pending: MayNeedFlush<T>,
+    detached: bool,
+    marker: PhantomData<&'id mut &'id mut ()>,
+}
+
+/// Proof that one detachment batch completed its required flush.
+pub struct FlushedBatch<'id> {
+    marker: PhantomData<&'id mut &'id mut ()>,
+}
+
+/// Runs one range-scoped detachment batch with a fresh identity.
+pub fn with_detach_batch<T: TlbFlush, R>(
+    start: VirtAddr,
+    end: VirtAddr,
+    f: impl for<'id> FnOnce(DetachBatch<'id, T>) -> R,
+) -> R {
+    assert!(start < end);
+    f(DetachBatch {
+        start,
+        end,
+        pending: MayNeedFlush::none(),
+        detached: false,
+        marker: PhantomData,
+    })
+}
+
+impl<'id, T: TlbFlush> DetachBatch<'id, T> {
+    /// Adds an existing invalidation obligation to this batch.
+    pub fn include(&mut self, pending: MayNeedFlush<T>) {
+        let current = core::mem::replace(&mut self.pending, MayNeedFlush::none());
+        self.pending = current.and(pending);
+    }
+
+    /// Flushes the batch range on all processors, including global entries.
+    pub fn flush_tlb_global_sync(self) -> FlushedBatch<'id> {
+        if let Some(tok) = self.pending.tok {
+            tok.flush_tlb_global_sync();
+        }
+        FlushedBatch { marker: PhantomData }
+    }
+
+    /// Flushes the batch range on all processors, excluding global entries.
+    pub fn flush_tlb_ignore_global_sync(self) -> FlushedBatch<'id> {
+        if let Some(tok) = self.pending.tok {
+            tok.flush_tlb_ignore_global_sync();
+        }
+        FlushedBatch { marker: PhantomData }
+    }
+
+    /// Completes the batch without issuing a hardware flush.
+    ///
+    /// # Safety
+    /// No processor may retain a translation or paging-structure reference
+    /// affected by this batch.
+    pub unsafe fn ignore(self) -> FlushedBatch<'id> {
+        FlushedBatch { marker: PhantomData }
+    }
+
+    pub(crate) fn range(&self) -> (VirtAddr, VirtAddr) {
+        (self.start, self.end)
+    }
+
+    pub(crate) fn record_detachment(&mut self) {
+        if !self.detached {
+            self.include(MayNeedFlush::new_range(self.start, self.end, PageLevel::Level0));
+            self.detached = true;
+        }
+    }
 }
 
 impl<T: TlbFlush> MayNeedFlush<T> {

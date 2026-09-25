@@ -19,7 +19,7 @@ use paging::level::{Lvl, PageLevel};
 use paging::os_contract::{DirectMappedAllocator, MapRegionError, PagingError};
 use paging::page::Page;
 use paging::pagetable::{LockSpec, PageTable};
-use paging::policy::RootRange;
+use paging::policy::NoRootEntries;
 use paging::ptpage::PTPage;
 use paging::sizes::{entry_index, Regular};
 use paging::tlb::MayNeedFlush;
@@ -798,8 +798,9 @@ fn sharing_top_entries_preserves_their_complete_permission_bits() {
         (&*original_pte.cast::<AtomicUsize>()).store(entry.raw(), Ordering::Release);
         entry
     };
+    // SAFETY: the source tree remains live until after the returned test table.
     let shared =
-        unsafe { Table::new_from_sharing_top::<RootRange<0, 512>>(locks.clone(), &table) }.unwrap();
+        unsafe { Table::new_from_sharing_top::<NoRootEntries>(locks.clone(), &table) }.unwrap();
     let shared_pte = PTPage::<X86Paging<Host>, Allocator>::entry_ptr(
         <Allocator as paging::os_contract::PagingAllocator>::paddr_to_vaddr(shared.root_paddr())
             .as_ptr(),
@@ -1085,8 +1086,7 @@ fn reclamation_waits_for_external_readers_and_frees_every_table_once() {
             blocked.send(()).unwrap();
             let mut exclusive = protected.write().unwrap();
             let table = exclusive.as_mut().unwrap();
-            // SAFETY: the write guard excludes software walks; Host has no hardware walkers.
-            let freed = unsafe { table.free_page_table_by_addr(VirtAddr::from(BASE)) };
+            let freed = common::reclaim_path(table, VirtAddr::from(BASE));
             assert_eq!(freed, 3);
             assert_freed_once(&arena, freed);
             assert!(!arena.freed().contains(&root.bits()));
@@ -1151,30 +1151,23 @@ fn range_reclamation_respects_siblings_huge_leaves_and_exclusive_end_boundaries(
         }
         let mut exclusive = protected.write().unwrap();
         let table = exclusive.as_mut().unwrap();
-        // SAFETY: all software access is excluded and these tables never run in hardware.
-        unsafe { table.free_page_table_by_range(start, start) };
+        common::reclaim_range(table, start, start);
         assert!(arena.freed().is_empty());
-        // SAFETY: the same exclusive guard covers this half-open range.
-        unsafe { table.free_page_table_by_range(start, end) };
+        common::reclaim_range(table, start, end);
         assert_freed_once(&arena, 1);
         assert_eq!(table.phys_addr(sibling), Ok(PhysAddr::from(arena.base())));
         assert_eq!(table.phys_addr(huge + PAGE), Ok(PhysAddr::from(2 * HUGE + PAGE)));
-        // SAFETY: the exclusive end was unmapped, but must not have been swept.
-        assert_eq!(unsafe { table.free_page_table_by_addr(end) }, 1);
+        assert_eq!(common::reclaim_path(table, end), 1);
         assert_freed_once(&arena, 2);
-        // SAFETY: the sibling is still mapped and must retain its table.
-        assert_eq!(unsafe { table.free_page_table_by_addr(start) }, 0);
+        assert_eq!(common::reclaim_path(table, start), 0);
         discharge(table.unmap(common::page_4k(sibling), Some(true)).unwrap().1);
         let left_tables = if boundary == BASE + HUGE { 2 } else { 1 };
-        // SAFETY: the last sibling was unmapped under this guard.
-        assert_eq!(unsafe { table.free_page_table_by_addr(start) }, left_tables);
+        assert_eq!(common::reclaim_path(table, start), left_tables);
         assert_freed_once(&arena, 2 + left_tables);
-        // SAFETY: a mapped huge leaf must never be treated as a table page.
-        unsafe { table.free_page_table_by_range(huge, huge + LARGE) };
+        common::reclaim_range(table, huge, huge + LARGE);
         assert_freed_once(&arena, 2 + left_tables);
         discharge(table.unmap(common::page_2m(huge), Some(true)).unwrap().1);
-        // SAFETY: the huge leaf is now absent and its flush discharged.
-        assert_eq!(unsafe { table.free_page_table_by_addr(huge) }, 2);
+        assert_eq!(common::reclaim_path(table, huge), 2);
         assert_freed_once(&arena, 4 + left_tables);
         assert_eq!(table.validate_page_table(), Ok(()));
         // SAFETY: the remaining direct-map subtree is exclusively owned.
@@ -1186,7 +1179,7 @@ fn range_reclamation_respects_siblings_huge_leaves_and_exclusive_end_boundaries(
 }
 
 #[test]
-fn five_level_range_cleanup_crosses_the_canonical_gap_without_wrapping() {
+fn five_level_path_cleanup_handles_both_canonical_regions() {
     let worker = spawn(|| {
         let arena = Arena::new(ARENA);
         let locks = Locks::new(arena.base()..arena.base() + arena.len(), 1);
@@ -1216,8 +1209,9 @@ fn five_level_range_cleanup_crosses_the_canonical_gap_without_wrapping() {
         }
         let mut exclusive = protected.write().unwrap();
         let table = exclusive.as_mut().unwrap();
-        // SAFETY: the write guard excludes software users, and Host never installs these tables.
-        unsafe { table.free_page_table_by_range(start, end) };
+        // SAFETY: both paths are inactive and their leaf flushes completed.
+        let reclaimed = common::reclaim_path(table, start) + common::reclaim_path(table, high);
+        assert_eq!(reclaimed, 3);
         assert_freed_once(&arena, 3);
         assert!(!arena.freed().contains(&root.bits()));
         assert_eq!(table.phys_addr(end), Ok(frame), "the exclusive end must remain mapped");
@@ -1225,8 +1219,7 @@ fn five_level_range_cleanup_crosses_the_canonical_gap_without_wrapping() {
         assert_eq!(table.phys_addr(high), Err(PagingError::NotMapped));
         assert_eq!(table.validate_page_table(), Ok(()));
         discharge(table.unmap(common::page_4k(end), Some(true)).unwrap().1);
-        // SAFETY: the final high-half leaf was unmapped under the same write guard.
-        assert_eq!(unsafe { table.free_page_table_by_addr(end) }, 4);
+        assert_eq!(common::reclaim_path(table, end), 4);
         assert_freed_once(&arena, 7);
         // SAFETY: the remaining direct-map children belong exclusively to this inactive tree.
         unsafe { table.free_children() };

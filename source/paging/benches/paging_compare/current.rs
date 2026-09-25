@@ -300,3 +300,12 @@ impl PagingAdapter for CurrentAdapter {
         ControllerMemory { inline_bytes: size_of::<Self>(), auxiliary_bytes: 0 }
     }
 }
+
+#[no_mangle]
+#[inline(never)]
+pub fn paging_current_translate_codegen(
+    adapter: &CurrentAdapter,
+    virtual_address: u64,
+) -> Option<u64> {
+    adapter.translate(virtual_address)
+}

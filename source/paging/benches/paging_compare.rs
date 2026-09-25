@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 use std::hint::black_box;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use common::{ControllerMemory, Observation, PagingAdapter, HUGE_SIZE, PAGE_SIZE};
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
@@ -621,6 +622,9 @@ fn register_adapter<A: PagingAdapter>(criterion: &mut Criterion, config: &Config
 }
 
 fn paging_compare(criterion: &mut Criterion) {
+    std::hint::black_box(
+        current::paging_current_translate_codegen as fn(&CurrentAdapter, u64) -> Option<u64>,
+    );
     let config = Config::read();
     let plan = Plan::new(&config);
     let mut fingerprints = BTreeMap::new();
@@ -632,5 +636,9 @@ fn paging_compare(criterion: &mut Criterion) {
     register_adapter::<RustX86Adapter>(criterion, &config, &plan);
 }
 
-criterion_group!(benches, paging_compare);
+criterion_group! {
+    name = benches;
+    config = Criterion::default().measurement_time(Duration::from_secs(8));
+    targets = paging_compare
+}
 criterion_main!(benches);

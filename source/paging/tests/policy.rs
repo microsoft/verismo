@@ -14,7 +14,7 @@ use paging::level::{Lvl, PageLevel};
 use paging::os_contract::{DirectMappedAllocator, PagingError};
 use paging::pagetable::LockSpec;
 use paging::pagetable::{KernelPageTable, UserPageTable};
-use paging::policy::{PagingOwnershipPolicy, RootRange, UserPolicy};
+use paging::policy::{CoveredRange, PagingOwnershipPolicy, RootComplement, UserPolicy};
 use paging::sizes::entry_index;
 use paging::tlb::{MayNeedFlush, TlbFlush};
 use paging::{PTEntryFlags, X86Paging};
@@ -28,10 +28,10 @@ const SMALL_LEVEL: PageLevel = PageLevel::Level0;
 const LARGE_LEVEL: PageLevel = PageLevel::Level1;
 
 type Arch = X86Paging<Host>;
-type Reserved<const START: usize, const END: usize> = RootRange<START, END>;
+type Reserved<const START: usize, const END: usize> = RootComplement<CoveredRange<START, END>>;
 type Table = KernelPageTable<Arch, Allocator, Lvl<3>, WholeTreeLock>;
-type User<'kernel, const START: usize, const END: usize> =
-    UserPageTable<'kernel, Arch, Allocator, Lvl<3>, WholeTreeLock, Reserved<START, END>>;
+type User<const START: usize, const END: usize> =
+    UserPageTable<Arch, Allocator, Lvl<3>, WholeTreeLock, Reserved<START, END>>;
 
 fn fixture() -> (Arc<Arena>, Table, WholeTreeLock) {
     let arena = Arena::new(ARENA);
@@ -40,19 +40,20 @@ fn fixture() -> (Arc<Arena>, Table, WholeTreeLock) {
     (arena, table, locks)
 }
 
-fn user<'kernel, const START: usize, const END: usize>(
+fn user<const START: usize, const END: usize>(
     arena: &Arc<Arena>,
-    kernel: &'kernel Table,
+    kernel: &Table,
     locks: &WholeTreeLock,
-) -> User<'kernel, START, END> {
+) -> User<START, END> {
     assert_direct_map_in::<START, END>(arena);
+    // SAFETY: the kernel tree remains live until after the returned test table.
     unsafe { Table::new_from_sharing_top::<Reserved<START, END>>(locks.clone(), kernel) }.unwrap()
 }
 
 fn leak<const START: usize, const END: usize>(
-    user: User<'_, START, END>,
-) -> (UserPolicy<'_, Reserved<START, END>>, PhysAddr) {
-    let (_locks, policy, root) = user.leak();
+    user: User<START, END>,
+) -> (UserPolicy<Reserved<START, END>>, PhysAddr) {
+    let (_locks, policy, root) = user.leak_with_policy();
     (policy, root)
 }
 
@@ -475,7 +476,7 @@ macro_rules! policy_tests {
                 assert_eq!(kernel.walk(addr).read().raw(), kernel_leaf);
                 discharge(user.unmap(common::page_4k(addr), Some(true)).unwrap().1);
                 // SAFETY: the private mapping is gone and its flush obligation discharged.
-                assert_eq!(unsafe { user.free_page_table_by_addr(addr) }, private_pages);
+                assert_eq!(common::reclaim_path(&mut user, addr), private_pages);
                 assert_eq!(arena.freed().len(), private_pages);
                 assert!(arena.freed().iter().all(|page| *page > root.bits()));
                 assert_eq!(user.next_table_pa(private_index), None);
@@ -703,7 +704,7 @@ macro_rules! policy_tests {
                 let owned_children = arena.allocated() - kernel_pages - 1;
                 assert_eq!(owned_children, 3);
                 // SAFETY: no hardware walks these roots; kernel pages must be skipped.
-                assert_eq!(unsafe { user.free_page_table_by_addr(kernel_addr) }, 0);
+                assert_eq!(common::reclaim_path(&mut user, kernel_addr), 0);
                 assert!(arena.freed().is_empty());
                 unsafe { user.free_children() };
                 assert_eq!(arena.freed().len(), owned_children);
@@ -749,9 +750,9 @@ macro_rules! policy_tests {
                 discharge(user.unmap(common::page_4k(private), Some(true)).unwrap().1);
                 let private_pages = arena.allocated() - kernel_pages - 1;
                 // SAFETY: leaf flushes are discharged; shared kernel paths must remain linked.
-                assert_eq!(unsafe { user.free_page_table_by_addr(boundary) }, 0);
+                assert_eq!(common::reclaim_path(&mut user, boundary), 0);
                 assert!(arena.freed().is_empty());
-                unsafe { user.free_page_table_by_range(private, boundary + PAGE) };
+                common::reclaim_range(&mut user, private, boundary + PAGE);
                 assert_eq!(arena.freed().len(), private_pages);
                 assert!(arena.freed().iter().all(|page| *page > root.bits()));
                 assert_eq!(user.next_table_pa(top.start - 1), None);
@@ -762,7 +763,7 @@ macro_rules! policy_tests {
                 assert_eq!(user.validate_page_table(), Ok(()));
                 drop(user);
                 // SAFETY: the shared root was dropped, so the kernel may reclaim its empty path.
-                assert!(unsafe { kernel.free_page_table_by_addr(boundary) } > 0);
+                assert!(common::reclaim_path(&mut kernel, boundary) > 0);
                 unsafe { kernel.free_children() };
                 drop(kernel);
                 assert_reclaimed(&arena);
@@ -809,23 +810,14 @@ fn const_generic_user_policies_and_controllers_have_no_storage_overhead() {
         size_of::<KernelPageTable<Arch, Allocator, Lvl<4>, WholeTreeLock>>(),
         size_of::<(Allocator, PhysAddr, WholeTreeLock)>()
     );
-    assert_eq!(size_of::<UserPolicy<'static, Reserved<KERNEL_START, KERNEL_END>>>(), 0);
-    assert_eq!(size_of::<UserPolicy<'static, Reserved<2, 510>>>(), 0);
-    assert_eq!(size_of::<UserPolicy<'static, Reserved<0, 512>>>(), 0);
-    assert_eq!(size_of::<User<'static, KERNEL_START, KERNEL_END>>(), size_of::<Table>());
-    assert_eq!(size_of::<User<'static, 2, 510>>(), size_of::<Table>());
+    assert_eq!(size_of::<UserPolicy<Reserved<KERNEL_START, KERNEL_END>>>(), 0);
+    assert_eq!(size_of::<UserPolicy<Reserved<2, 510>>>(), 0);
+    assert_eq!(size_of::<UserPolicy<Reserved<0, 512>>>(), 0);
+    assert_eq!(size_of::<User<KERNEL_START, KERNEL_END>>(), size_of::<Table>());
+    assert_eq!(size_of::<User<2, 510>>(), size_of::<Table>());
     assert_eq!(
-        size_of::<
-            UserPageTable<
-                'static,
-                Arch,
-                Allocator,
-                Lvl<3>,
-                WholeTreeLock<u64>,
-                Reserved<2, 510>,
-                u64,
-            >,
-        >(),
+        size_of::<UserPageTable<Arch, Allocator, Lvl<3>, WholeTreeLock<u64>, Reserved<2, 510>, u64>>(
+        ),
         size_of::<KernelPageTable<Arch, Allocator, Lvl<3>, WholeTreeLock<u64>, u64>>(),
     );
 }
@@ -837,11 +829,12 @@ fn concurrent_user_leak_returns_policy_and_content_domain() {
     let locks = WholeTreeLock::<u64>::default();
     *locks.lock(PhysAddr::from(0usize)) = 73;
     let kernel = MetadataKernel::new(locks.clone(), common::flags()).unwrap();
+    // SAFETY: the kernel tree remains live until after the returned test table.
     let user =
         unsafe { MetadataKernel::new_from_sharing_top::<Reserved<0, 512>>(locks.clone(), &kernel) }
             .unwrap();
     let expected_root = user.root_paddr();
-    let (content, policy, root) = user.leak();
+    let (content, policy, root) = user.leak_with_policy();
     assert_eq!(root, expected_root);
     assert_eq!(Arc::strong_count(&arena), 1);
     assert!((0..512).all(|index| policy.borrows_top_entry(index)));
@@ -869,6 +862,7 @@ fn concurrent_kernel_updates_are_visible_with_independent_user_locks() {
     let (arena, mut kernel, locks) = fixture();
     let shared_index = direct_map_index(&arena);
     assert_direct_map_in::<KERNEL_START, KERNEL_END>(&arena);
+    // SAFETY: the kernel tree remains live until after the returned test table.
     let user = unsafe {
         Table::new_from_sharing_top::<Reserved<KERNEL_START, KERNEL_END>>(
             WholeTreeLock::default(),
@@ -953,6 +947,9 @@ fn later_kernel_root_growth_leaves_a_reserved_user_hole_protected() {
     assert_eq!(kernel.phys_addr(addr), Ok(frame));
     assert_eq!(user.next_table_pa(empty), None);
     assert_eq!(user.phys_addr(addr), Err(PagingError::NotMapped));
+    // SAFETY: the kernel tree remains live until after the sharing user table.
+    unsafe { user.populate_shared(empty, &kernel) }.unwrap();
+    assert_eq!(user.phys_addr(addr), Ok(frame));
     let allocated = arena.allocated();
     let acquired = locks.acquisitions();
     assert_error(

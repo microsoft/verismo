@@ -16,19 +16,13 @@ binary="$(
 )"
 symbol="$(
     nm -S --size-sort -C "$binary" |
-        grep -F '<paging_compare::current::CurrentAdapter as paging_compare::common::PagingAdapter>::translate' |
+        grep -F ' paging_current_translate_codegen' |
         head -1 || true
 )"
 
 if [[ -z "$symbol" ]]; then
-    symbol="$(
-        nm -S --size-sort -C "$binary" |
-            grep -F 'paging_compare::execute_thread::<paging_compare::current::CurrentAdapter>' |
-            head -1 || true
-    )"
-    expected_back_edges=40
-else
-    expected_back_edges=0
+    echo "translation codegen probe was not emitted" >&2
+    exit 1
 fi
 
 read -r start size _ <<<"$symbol"
@@ -44,10 +38,8 @@ done < <(
         sed -nE 's/^[[:space:]]*([0-9a-f]+):.*[[:space:]]j[a-z]+[[:space:]]+([0-9a-f]+).*/\1 \2/p'
 )
 
-# Translation is loop-free; the inlined benchmark body has forty back edges
-# from its surrounding workloads and control flow.
-if ((back_edges != expected_back_edges)); then
-    echo "expected $expected_back_edges translation-body back edges, found $back_edges" >&2
+if ((back_edges != 0)); then
+    echo "expected loop-free translation, found $back_edges back edges" >&2
     exit 1
 fi
 

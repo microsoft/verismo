@@ -69,18 +69,23 @@ where
 }
 
 /// The regular leaf size at page-table level 0.
+/// page size == `PAGE_SIZE`
 pub type Regular = Lvl<0>;
 
 /// The huge leaf size at page-table level 1.
+/// page size == `PAGE_SIZE << PAGE_TABLE_INDEX_WIDTH`
 pub type Huge = Lvl<1>;
 
 /// The address span represented by one level-2 entry.
+/// page size == `PAGE_SIZE << (2 * PAGE_TABLE_INDEX_WIDTH)`
 pub type SizeLevel2 = Lvl<2>;
 
 /// The address span represented by one level-3 entry.
+/// page size == `PAGE_SIZE << (3 * PAGE_TABLE_INDEX_WIDTH)`
 pub type SizeLevel3 = Lvl<3>;
 
 /// The address span represented by one level-4 entry.
+/// page size == `PAGE_SIZE << (4 * PAGE_TABLE_INDEX_WIDTH)`
 pub type SizeLevel4 = Lvl<4>;
 
 /// The low bits of a table index. Written by shifting in ones because `-` binds

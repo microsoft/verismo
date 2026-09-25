@@ -1033,7 +1033,7 @@ macro_rules! edit_tests {
                 assert!(mapped);
                 assert_flush_covers(flush, BASE, BASE + LARGE);
                 // SAFETY: the unmapped range has no walkers or outstanding host TLB state.
-                unsafe { table.free_page_table_by_range(start, start + LARGE) };
+                common::reclaim_range(&mut table, start, start + LARGE);
                 assert_eq!(fixture.arena.freed().len(), built);
                 assert_eq!(table.phys_addr(target), Err(PagingError::NotMapped));
                 assert_eq!(table.validate_page_table(), Ok(()));

@@ -179,18 +179,18 @@ One implementation supports two ownership policies:
 | Alias | Mutation authority | Reclamation |
 | --- | --- | --- |
 | `KernelPageTable<...>` | Privileged access throughout the tree | All owned descendants |
-| `UserPageTable<'kernel, ...>` | Addresses outside the reserved kernel root slots | Only its owned descendants |
+| `UserPageTable<...>` | Root slots selected by `OwnedIndices` | Only its owned descendants |
 
-`PageTable` defaults to `KernelPolicy`. `new_from_sharing_top` is a kernel-only
-constructor returning `UserPageTable`, not another privileged controller.
-Its `RootEntrySet` is immutable through the user controller, including slots
-that were empty when copied. `UserPolicy<'kernel, Reserved>` is zero-sized: it
-contains only the kernel lifetime marker, with no stored range or ownership
-bitmap. `owns_top_entry` is false for every reserved kernel slot.
+`PageTable` defaults to `KernelPolicy`. `new_from_sharing_top` returns a
+`UserPageTable` that owns the selected `OwnedIndices` and borrows every other
+root entry. Borrowed entries are immutable through the new controller,
+including slots that were empty when copied. `UserPolicy<Owned>` is zero-sized:
+it contains no stored range or ownership bitmap.
 
-Select one range with `RootRange<START, END>` or combine disjoint ranges with
+Select one range with `CoveredRange<START, END>` or combine disjoint ranges with
 `RootUnion<Left, Right>`. For example,
-`new_from_sharing_top::<RootRange<256, 512>>(&kernel)` borrows the upper half
+`new_from_sharing_top::<CoveredRange<0, 256>>(&kernel)` owns the lower half and
+borrows the upper half
 of a four-level root. The concurrent constructor also takes the content lock.
 The selector works on root-slot indexes, not virtual addresses. With the
 current 48-bit address type, the upper half occupies `511..512` in a five-level
@@ -287,6 +287,7 @@ use paging::address::VirtAddr;
 use paging::os_contract::{PagingError, PagingAllocator};
 use paging::pagetable::{LockSpec, PageTable};
 use paging::ptpage::WalkLevel;
+use paging::tlb::MayNeedFlush;
 use paging::ArchPagingMeta;
 
 fn update_flags<A, P, L, W>(
@@ -485,6 +486,7 @@ use paging::address::VirtAddr;
 use paging::os_contract::PagingAllocator;
 use paging::pagetable::{LockSpec, PageTable};
 use paging::ptpage::WalkLevel;
+use paging::tlb::MayNeedFlush;
 use paging::ArchPagingMeta;
 
 fn cleanup<A, P, L, W>(table: &PageTable<A, P, L, W>, addr: VirtAddr)
@@ -494,7 +496,7 @@ where
     L: WalkLevel,
     W: LockSpec<()>,
 {
-    unsafe { table.free_page_table_by_addr(addr) };
+    table.free_page_table_by_addr(addr, MayNeedFlush::none());
 }
 ```
 
@@ -514,12 +516,12 @@ A user controller cannot expose a mutable raw entry:
 use paging::address::VirtAddr;
 use paging::os_contract::PagingAllocator;
 use paging::pagetable::{LockSpec, UserPageTable};
-use paging::policy::RootRange;
+use paging::policy::{CoveredRange, RootComplement};
 use paging::ptpage::WalkLevel;
 use paging::ArchPagingMeta;
 
 fn raw_edit<A: ArchPagingMeta, P: PagingAllocator, L: WalkLevel, W: LockSpec<()>>(
-    user: &mut UserPageTable<'_, A, P, L, W, RootRange<256, 512>>,
+    user: &mut UserPageTable<A, P, L, W, RootComplement<CoveredRange<256, 512>>>,
     addr: VirtAddr,
 ) {
     let _ = user.walk_mut(addr);
@@ -528,43 +530,27 @@ fn raw_edit<A: ArchPagingMeta, P: PagingAllocator, L: WalkLevel, W: LockSpec<()>
 
 Nor can it attach an unchecked subtree:
 
-```compile_fail,E0599
+```compile_fail,E0308
 use paging::address::PhysAddr;
+use paging::level::Lvl;
 use paging::os_contract::PagingAllocator;
 use paging::pagetable::{LockSpec, UserPageTable};
-use paging::policy::RootRange;
-use paging::ptpage::WalkLevel;
+use paging::policy::{CoveredRange, RootComplement};
 use paging::ArchPagingMeta;
 
-fn attach<A: ArchPagingMeta, P: PagingAllocator, L: WalkLevel, W: LockSpec<()>>(
-    user: &mut UserPageTable<'_, A, P, L, W, RootRange<256, 512>>,
+fn attach<A: ArchPagingMeta, P: PagingAllocator, W: LockSpec<()>>(
+    user: &mut UserPageTable<A, P, Lvl<3>, W, RootComplement<CoveredRange<256, 512>>>,
     child: PhysAddr,
 ) {
-    let _ = unsafe { user.populate(0, child) };
+    let _ = user.populate_owned(0, child);
 }
 ```
 
-The kernel owner cannot be dropped before its user controller:
-
-```compile_fail,E0505
-use paging::os_contract::PagingAllocator;
-use paging::pagetable::{KernelPageTable, LockSpec};
-use paging::policy::RootRange;
-use paging::ptpage::WalkLevel;
-use paging::ArchPagingMeta;
-
-fn retire<A: ArchPagingMeta, P: PagingAllocator, L: WalkLevel, W: LockSpec<()>>(
-    kernel: KernelPageTable<A, P, L, W>,
-    wperms: W,
-) {
-    let user = unsafe {
-        KernelPageTable::new_from_sharing_top::<RootRange<256, 512>>(wperms, &kernel)
-    }
-    .unwrap();
-    drop(kernel);
-    drop(user);
-}
-```
+`new_from_sharing_top` and `populate_shared` are unsafe because the type system
+does not retain the source owner. The caller must keep shared subtrees allocated
+at the same virtual prefixes, use one atomic-access and content-lock protocol,
+and unlink every sharing parent before synchronous TLB and page-walk
+invalidation followed by reclamation.
 
 Leaking a user table returns a raw root whose shared descendants are still
 owned elsewhere. The caller must retain that owner until the leaked root is no

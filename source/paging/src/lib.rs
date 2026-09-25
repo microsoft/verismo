@@ -14,7 +14,6 @@
 use vstd::prelude::*;
 
 mod arch;
-#[path = "pagetable_concurrent.rs"]
 pub mod pagetable;
 #[cfg(verus_only)]
 mod proofs;
