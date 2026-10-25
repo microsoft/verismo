@@ -37,7 +37,7 @@ impl VSpinLock<VeriSMoAllocator> {
         let tracked alloc_lockperm = alloc_lockperm;
         (new_strlit("\n new")).leak_debug();
         let ghost old_invfn = alloc_lockperm@.invfn;
-        let (ptr, Tracked(mut allocperm), Tracked(alloc_lockperm)) = self.acquire(
+        let (ptr, Tracked(mut allocperm), Tracked(mut alloc_lockperm)) = self.acquire(
             Tracked(alloc_lockperm),
             Tracked(coreid),
         );

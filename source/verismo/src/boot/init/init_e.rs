@@ -155,7 +155,7 @@ pub fn init_mem(
 {
     let tracked mut memcc = memcc;
     let tracked mut mp_perms = mp_perms;
-    let tracked SnpMemCoreConsole { memperm, cc } = memcc;
+    let tracked SnpMemCoreConsole { memperm, mut cc } = memcc;
     let start_addr = verismo_start_addr();
     let end_addr = verismo_end_addr();
     proof {

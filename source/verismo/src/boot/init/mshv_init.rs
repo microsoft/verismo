@@ -71,7 +71,7 @@ pub fn process_vm_mem(
         // verismo code and static vars are not covered by the first range?
         vc_terminate(SM_TERM_INVALID_PARAM, Tracked(&mut memcc.cc.snpcore));
     }
-    let Tracked(memcc) = validate_vm_mem(hv_mem_slice, e820, Tracked(memcc));
+    let Tracked(mut memcc) = validate_vm_mem(hv_mem_slice, e820, Tracked(memcc));
     let alloc_ref = ALLOCATOR();
     let alloc_ptr = alloc_ref.ptr();
     let mut allocator: VBox<VeriSMoAllocator> = VBox::from_raw(

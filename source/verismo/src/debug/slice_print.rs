@@ -25,7 +25,7 @@ impl<T: VPrint> VPrint for [T] {
         let Tracked(console) = new_strlit("size = ").early_print2(Tracked(snpcore), Tracked(console));
         let Tracked(console) = n.early_print2(Tracked(snpcore), Tracked(console));
         proof {reveal_strlit("[\n");}
-        let Tracked(console) = new_strlit("[\n").early_print2(Tracked(snpcore), Tracked(console));
+        let Tracked(mut console) = new_strlit("[\n").early_print2(Tracked(snpcore), Tracked(console));
         let ghost oldsnpcore = *snpcore;
         let ghost oldconsole = console;
         let mut i: usize = 0;

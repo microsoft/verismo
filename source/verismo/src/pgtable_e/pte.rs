@@ -388,7 +388,7 @@ fn borrow_entry(
     let tracked cr3perm = cs.snpcore.regs.tracked_borrow(RegName::Cr3);
     assert(contains_PT(cs.lockperms));
     let tracked mut pt_lock = cs.lockperms.tracked_remove(spec_PT_lockid());
-    let (tracked_ptr, Tracked(mut ptperm_perm), Tracked(pt_lock)) = PT().acquire(
+    let (tracked_ptr, Tracked(mut ptperm_perm), Tracked(mut pt_lock)) = PT().acquire(
         Tracked(pt_lock),
         Tracked(&cs.snpcore.coreid),
     );
@@ -663,7 +663,7 @@ pub fn set_page_enc_dec(
     let tracked cr3perm = cs.snpcore.regs.tracked_borrow(RegName::Cr3);
     assert(contains_PT(cs.lockperms));
     let tracked mut pt_lock = cs.lockperms.tracked_remove(spec_PT_lockid());
-    let (tracked_ptr, Tracked(mut ptperm_perm), Tracked(pt_lock)) = PT().acquire(
+    let (tracked_ptr, Tracked(mut ptperm_perm), Tracked(mut pt_lock)) = PT().acquire(
         Tracked(pt_lock),
         Tracked(&cs.snpcore.coreid),
     );

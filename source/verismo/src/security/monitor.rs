@@ -592,7 +592,7 @@ impl<'a> MonitorHandle<'a> {
         }
         let vmsa = ret.unwrap();
         let (vmsa_ptr, Tracked(vmsa_perm)) = vmsa.into_raw();
-        let tracked vmsa_perm = vmsa_perm.tracked_into_raw();
+        let tracked mut vmsa_perm = vmsa_perm.tracked_into_raw();
         rmp_reset_vmpl_perm(vmsa_gpn, Tracked(&mut cs.snpcore), Tracked(&mut vmsa_perm));
         proof {
             assert(vmsa_perm@.snp().is_vmpl0_private());

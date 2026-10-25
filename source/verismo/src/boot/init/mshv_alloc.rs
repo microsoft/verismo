@@ -54,7 +54,7 @@ fn init_allocator(
         newcc@.snpcore.only_reg_coremode_updated(memcc.cc.snpcore, set![GHCB_REGID()]),
 {
     let ghost oldmemcc = memcc;
-    let tracked SnpMemCoreConsole { mut memperm, cc } = memcc;
+    let tracked SnpMemCoreConsole { mut memperm, mut cc } = memcc;
     let ghost coreid = cc.snpcore.cpu();
     let ghost verismo_static = range(static_start as int, static_end as int);
     let ghost except_ranges = e820@.to_valid_ranges().insert(verismo_static);
@@ -111,7 +111,7 @@ fn init_allocator(
         let entry = slice_index_get(hv_mem_tb, idx as usize_t);
         let start_gpn = entry.start().reveal_value();
         let npages = entry.size().reveal_value();
-        let tracked SnpMemCoreConsole { mut memperm, cc } = memcc;
+        let tracked SnpMemCoreConsole { mut memperm, mut cc } = memcc;
         let ghost prev_memperm = memperm;
         proof {
             assert(npages != 0);
