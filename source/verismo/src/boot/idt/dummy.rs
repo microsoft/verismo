@@ -51,6 +51,7 @@ fn debug_handler(
     new_strlit("\n").err(Tracked(cs));
 }
 
+#[verifier::assume_unsupported_attributes]
 #[no_mangle]
 pub extern "C" fn dummy_handler_fn(
     stack_frame: InterruptStackFrame,
