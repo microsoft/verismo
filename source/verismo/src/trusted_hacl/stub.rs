@@ -6,6 +6,7 @@ use crate::tspec::*;
 
 verus! {
 
+#[verifier::assume_unsupported_attributes]
 #[no_mangle]
 pub extern "C" fn __stack_chk_fail(Tracked(core): Tracked<&mut SnpCore>)
     requires
@@ -16,18 +17,22 @@ pub extern "C" fn __stack_chk_fail(Tracked(core): Tracked<&mut SnpCore>)
     vc_terminate(SM_EVERCRYPT_ERR(1), Tracked(core))
 }
 
+#[verifier::assume_unsupported_attributes]
 #[no_mangle]
 pub extern "C" fn printf() {
 }
 
+#[verifier::assume_unsupported_attributes]
 #[no_mangle]
 pub extern "C" fn __fprintf_chk() {
 }
 
+#[verifier::assume_unsupported_attributes]
 #[no_mangle]
 pub extern "C" fn stderr() {
 }
 
+#[verifier::assume_unsupported_attributes]
 #[no_mangle]
 pub extern "C" fn exit(Tracked(core): Tracked<&mut SnpCore>)
     requires
@@ -38,6 +43,7 @@ pub extern "C" fn exit(Tracked(core): Tracked<&mut SnpCore>)
     vc_terminate(SM_EVERCRYPT_ERR(2), Tracked(core))
 }
 
+#[verifier::assume_unsupported_attributes]
 #[no_mangle]
 pub extern "C" fn __memcpy_chk(
     dst_addr: usize,
@@ -79,10 +85,12 @@ pub extern "C" fn __memcpy_chk(
     }
 }
 
+#[verifier::assume_unsupported_attributes]
 #[no_mangle]
 pub extern "C" fn __printf_chk() {
 }
 
+#[verifier::assume_unsupported_attributes]
 #[no_mangle]
 pub extern "C" fn malloc(size: usize, Tracked(core): Tracked<&mut SnpCore>)
     requires
@@ -93,6 +101,7 @@ pub extern "C" fn malloc(size: usize, Tracked(core): Tracked<&mut SnpCore>)
     vc_terminate(SM_EVERCRYPT_ERR(3), Tracked(core));
 }
 
+#[verifier::assume_unsupported_attributes]
 #[no_mangle]
 pub extern "C" fn calloc(size: usize, Tracked(core): Tracked<&mut SnpCore>)
     requires
@@ -103,6 +112,7 @@ pub extern "C" fn calloc(size: usize, Tracked(core): Tracked<&mut SnpCore>)
     vc_terminate(SM_EVERCRYPT_ERR(4), Tracked(core))
 }
 
+#[verifier::assume_unsupported_attributes]
 #[no_mangle]
 pub extern "C" fn free(addr: usize, Tracked(core): Tracked<&mut SnpCore>)
     requires

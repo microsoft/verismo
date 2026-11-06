@@ -29,6 +29,7 @@ mod ap {
     use crate::debug::VPrintAtLevel;
 
     /// AP entry
+    #[verifier::assume_unsupported_attributes]
     #[no_mangle]
     #[verifier::exec_allows_no_decreases_clause]
     pub extern "C" fn ap_call(
@@ -151,6 +152,7 @@ impl SnpCoreSharedMem {
 pub use ap::ap_call;
 verus! {
 
+#[verifier::assume_unsupported_attributes]
 #[no_mangle]
 #[verifier(external_body)]
 // BSP starts with a set of snpcore for BSP at VMPL0 - VMPL4 and a set of snpcore for APs at VMPL0
