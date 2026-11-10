@@ -144,7 +144,7 @@ pub fn init_allocator_e820(
             assert(add_end.is_constant());
             if add_start == 0 && add_end > PAGE_SIZE {
                 let mut tmp_end = PAGE_SIZE;
-                let tracked (tmp_perm, to_add_perm2) = to_add_perm.trusted_split(PAGE_SIZE as nat);
+                let tracked (mut tmp_perm, to_add_perm2) = to_add_perm.trusted_split(PAGE_SIZE as nat);
                 proof {
                     to_add_perm = to_add_perm2;
                 }

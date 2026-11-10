@@ -371,7 +371,7 @@ pub fn load_bzimage_to_vmsa(
     }
     //verismo::snp::secret::measure(richos_start, richos_size, state);
 
-    let tracked (boot_perm, richos_perm) = richos_perm.trusted_split(spec_size::<BootParams>());
+    let tracked (boot_perm, mut richos_perm) = richos_perm.trusted_split(spec_size::<BootParams>());
     let richos_boot = VBox::<BootParams>::from_raw(richos_start, Tracked(boot_perm.tracked_into()));
     let ghost cs2 = *cs;
     let mut bootinfo = VBox::<BootInfo>::new_aligned_uninit(PAGE_SIZE, Tracked(cs));

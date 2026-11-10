@@ -985,7 +985,7 @@ pub fn create_osmem_from_allocator(vmpl: u8, Tracked(cs): Tracked<&mut SnpCoreSh
     // Acquire allocator to prevent usage of allocator, so that we can
     // safely assign remaining memory to vmpl2.
     let tracked mut alloc_lockperm = cs.lockperms.tracked_remove(spec_ALLOCATOR_lockid());
-    let (alloc_ptr, Tracked(mut allocperm), Tracked(alloc_lockperm)) = ALLOCATOR().acquire(
+    let (alloc_ptr, Tracked(mut allocperm), Tracked(mut alloc_lockperm)) = ALLOCATOR().acquire(
         Tracked(alloc_lockperm),
         Tracked(&cs.snpcore.coreid),
     );
@@ -1170,7 +1170,7 @@ fn clear_kern_if_private(entry: OSMemEntry, Tracked(cs): Tracked<&mut SnpCoreSha
                 ((tmp_start as int).to_addr(), PAGE_SIZE as nat),
             ));
         }
-        let tracked page_perm = page_perms.tracked_remove(tmp_start as int);
+        let tracked mut page_perm = page_perms.tracked_remove(tmp_start as int);
         proof {
             assert(os_mem_valid_snp(old_osperm, page_perm@.snp()));
         }
