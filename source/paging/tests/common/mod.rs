@@ -67,6 +67,22 @@ pub fn range_4k(start: VirtAddr, end: VirtAddr) -> paging::structs::PageRangeInc
     Page::range_inclusive(start, end)
 }
 
+pub fn reclaim_range<Arch, Alloc, MaxLevel, Owned>(
+    table: &mut PageTable<Arch, Alloc, MaxLevel, Owned>,
+    start: VirtAddr,
+    end: VirtAddr,
+) where
+    Arch: ArchPagingMeta,
+    Alloc: paging::structs::PagingAllocator,
+    MaxLevel: WalkLevel,
+    Owned: PagingOwnershipPolicy,
+{
+    if start == end {
+        return;
+    }
+    table.cleanup_page_tables_by_range(start, end, MayNeedFlush::none());
+}
+
 pub fn reclaim_path<Arch, Alloc, MaxLevel, Owned>(
     table: &mut PageTable<Arch, Alloc, MaxLevel, Owned>,
     address: VirtAddr,
