@@ -1,0 +1,19 @@
+[package]
+name = "concurrent_rw_tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[features]
+default = []
+state_machine = ["concurrent_rw/state_machine"]
+
+[dependencies]
+concurrent_rw = { path = "..", default-features = false }
+vstd = { workspace = true, features = ["alloc"], default-features = false }
+
+[package.metadata.verus]
+verify = true
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(verus_only)', 'cfg(verus_keep_ghost)', 'cfg(verus_keep_ghost_body)'] }
