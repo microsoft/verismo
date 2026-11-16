@@ -10,6 +10,7 @@ members = [
     "concurrent_rw",
     "concurrent_rw/tests",
     "common_proofs",
+    "machine_model",
 ]
 
 [workspace.dependencies]
