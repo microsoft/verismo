@@ -22,3 +22,6 @@ richos/module/*.dwo
 # Worktrees for parallel agent verification (ignored)
 .worktrees/
 .verus-log/
+
+# Verus solver logs
+.verus-solver-log/
