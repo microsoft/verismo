@@ -6,6 +6,8 @@ pub(crate) mod frame;
 pub(crate) mod level;
 pub(crate) mod os_contract;
 pub(crate) mod page;
+pub(crate) mod policy;
+pub(crate) mod ptpage;
 pub(crate) mod sizes;
 pub(crate) mod tlb;
 
@@ -15,6 +17,15 @@ pub use frame::{PfnNotValid, PhysFrame, PhysFrameRange, PhysFrameRangeInclusive}
 pub use level::{InnerLevel, LevelSpec, Lvl, PageLevel};
 pub use os_contract::{DirectMappedAllocator, MapRegionError, PagingAllocator, PagingError};
 pub use page::{AddressNotAligned, Page, PageRange, PageRangeInclusive};
+pub use policy::{
+    compile_check_disjoint_policies, compile_check_matching_free_policy, AllRootEntries,
+    CoveredRange, KernelPolicy, MayFreePageTablePages, MayShareSubtree, NoRootEntries,
+    OwnedIndices, PagingOwnershipPolicy, Policy, RootComplement, RootUnion, UserPolicy,
+};
+pub use ptpage::{
+    DetachedPageTable, OwnedSubtree, PTPage, PTPageTree, Staged, StagedPageTable, Translation,
+    WalkLevel, WalkResult,
+};
 pub use sizes::{
     entry_index, entry_index_at, entry_index_bits, pt_entry_index_bits, Huge, PageOffset, PageSize,
     Regular, SizeLevel2, SizeLevel3, SizeLevel4, ENTRY_WIDTH, INDEX_MASK, PAGE_OFFSET_WIDTH,

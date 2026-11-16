@@ -6,6 +6,7 @@
 use vstd::prelude::*;
 
 pub mod arch;
+pub mod pagetable;
 pub mod structs;
 mod util;
 
