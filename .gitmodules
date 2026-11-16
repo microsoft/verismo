@@ -1,0 +1,6 @@
+[submodule "litebox"]
+	path = source/paging/compat/litebox
+	url = https://github.com/microsoft/litebox.git
+[submodule "svsm"]
+	path = source/paging/compat/svsm
+	url = https://github.com/coconut-svsm/svsm.git
