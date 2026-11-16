@@ -44,6 +44,37 @@ verus! {
 }
 ```
 
+## Visibility and Module Placement
+
+The macro expands `bitflags!` inside a private helper module and re-exports the
+generated struct with the visibility you wrote on it, so it can be invoked from
+any module and the type re-exported further:
+
+```rust
+mod flags {
+    use bitflags_verus::*;
+
+    bitflags_verus! {
+        /// Doc comments are supported on the struct and on individual flags.
+        #[derive(Copy, Clone, Debug)]
+        pub struct Permissions: u32 {
+            /// Read access.
+            const READ = 0x1;
+        }
+    }
+}
+
+pub use flags::Permissions;
+```
+
+The spec mirrors (`spec_union`, `spec_contains`, …) stay private to the module
+that invoked the macro; outside it, reason through `@`/`view()`, the named
+constants, and the methods.
+
+Note that flag values are not constant-folded by Verus: `const READ = 1 << 0;`
+gives `Permissions::READ@ == 1u32 << 0`, which needs `by (bit_vector)` to relate
+to `1u32`. Writing the mask as a literal (`0x1`) avoids that.
+
 ## Zero-Cost Usage Pattern
 
 Use `bitflags_verus!` only during verification, falling back to plain `bitflags!` for production builds:
