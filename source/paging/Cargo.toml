@@ -15,6 +15,19 @@ vstd = { workspace = true, default-features = false }
 verus_builtin_macros = { workspace = true }
 verus_state_machines_macros = { workspace = true }
 
+[target.'cfg(not(target_os = "none"))'.dev-dependencies]
+x86_64 = { version = "=0.15.2", default-features = false }
+
+[[example]]
+name = "kvm-guest"
+path = "tests/kvm/guest.rs"
+required-features = ["kvm-test"]
+
+[[example]]
+name = "kvm-smp-guest"
+path = "tests/kvm/smp_guest.rs"
+required-features = ["kvm-smp-test"]
+
 [features]
 spin-mutex = []
 striped-locks = []
