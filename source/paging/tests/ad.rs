@@ -1,0 +1,315 @@
+//! Ensures accessed/dirty bits follow the selected preservation mode during construction, import, and updates.
+mod common;
+
+use std::collections::BTreeSet;
+use std::mem::ManuallyDrop;
+use std::sync::Arc;
+
+use common::{load_entry, Allocator, Arena, ARENA};
+use paging::{
+    address::{Address, PhysAddr, VirtAddr},
+    arch::x86_64::{FlushScope, PTEntryFlags, X86_64Paging, X86_64PagingParams},
+    pagetable::KernelPageTable,
+    structs::{
+        entry_index, DirectMappedAllocator, Lvl, NoRootEntries, PTEntry, PTPage, PTPageTree,
+        PageLevel, PagingError, UserPolicy, WalkLevel, PT_ENTRY_COUNT,
+    },
+};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Platform;
+
+unsafe impl X86_64PagingParams for Platform {
+    fn private_mask() -> usize {
+        1 << 51
+    }
+
+    fn shared_mask() -> usize {
+        1 << 50
+    }
+
+    fn supported_flags() -> PTEntryFlags {
+        PTEntryFlags::all()
+    }
+
+    fn flush_tlb_global_sync(_: FlushScope) {}
+}
+
+type Arch = X86_64Paging<Platform>;
+type Entry = PTEntry<Arch>;
+type Page = PTPage<Arch, Allocator>;
+type Table<L> = KernelPageTable<Arch, Allocator, L>;
+const AD: usize = 0x60;
+const PAGE: usize = 4096;
+const BASE: usize = 0x4000_0000;
+const FRAME: usize = 0x8000_0000;
+
+unsafe fn tree_words(root: PhysAddr, level: PageLevel) -> Vec<(usize, usize, PageLevel)> {
+    let mut words = Vec::new();
+    for index in 0..PT_ENTRY_COUNT {
+        let pte = Page::entry_ptr(root.bits() as *const Page, index);
+        // SAFETY: the caller pins this well-formed, identity-mapped tree without reclamation.
+        let entry = unsafe { load_entry(pte) };
+        words.push((pte as usize, entry.raw(), level));
+        if entry.is_present_table(level) {
+            words.extend(unsafe {
+                tree_words(PhysAddr::from(entry.address()), level.child().unwrap())
+            });
+        }
+    }
+    words
+}
+
+unsafe fn assert_path_history(root: PhysAddr, address: VirtAddr, mut level: PageLevel) {
+    let mut page = root;
+    let depth = level.depth();
+    for _ in 0..=depth {
+        let pte = Page::entry_ptr(page.bits() as *const Page, entry_index(address, level));
+        // SAFETY: the caller pins the quiesced path, whose table addresses are identity-mapped.
+        let entry = unsafe { load_entry(pte) };
+        assert!(entry.present());
+        assert_eq!(entry.raw() & AD, 0);
+        if !entry.is_present_table(level) {
+            return;
+        }
+        page = PhysAddr::from(entry.address());
+        level = level.child().unwrap();
+    }
+    unreachable!("history walk exceeded the tree depth")
+}
+
+unsafe fn clear_history_before_import(
+    root: PhysAddr,
+    level: PageLevel,
+) -> Vec<(usize, usize, PageLevel)> {
+    // SAFETY: all controllers and hardware users of these pages are quiesced by the caller.
+    let words = unsafe { tree_words(root, level) };
+    for &(pte, word, _) in &words {
+        if word & 1 != 0 {
+            unsafe { (pte as *mut usize).write(word & !AD) };
+        }
+    }
+    let &(absent, _, _) = words.iter().find(|(_, word, _)| *word == 0).unwrap();
+    unsafe { (absent as *mut usize).write(0xdead_0020) };
+    unsafe { tree_words(root, level) }
+}
+
+fn assert_words(words: &[(usize, usize, PageLevel)], expected: impl Fn(usize) -> usize) {
+    assert!(words.iter().any(|(_, word, _)| *word == 0xdead_0020));
+    for &(pte, before, _) in words {
+        // SAFETY: the imported controller retains these initialized, atomically accessed entries.
+        let after = unsafe { load_entry(pte as *const Entry) }.raw();
+        assert_eq!(after, expected(before), "entry {pte:#x}");
+    }
+}
+
+fn assert_all_reclaimed(arena: &Arena) {
+    let freed = arena.freed();
+    assert_eq!(freed.len(), arena.allocated());
+    assert_eq!(freed.iter().copied().collect::<BTreeSet<_>>().len(), freed.len());
+}
+
+fn fixture<L: WalkLevel>() -> (Arc<Arena>, Table<L>) {
+    let arena = Arena::new(ARENA);
+    let table = Table::new(common::flags()).unwrap();
+    (arena, table)
+}
+
+unsafe fn adopt<L: WalkLevel>(root: PhysAddr) -> Result<Table<L>, PagingError> {
+    unsafe { Table::from_root(root) }
+}
+
+macro_rules! ad_tests {
+    ($module:ident, $fixture:ident, $adopt:ident) => {
+        #[allow(unused_mut)]
+        mod $module {
+            use super::*;
+
+            #[test]
+            fn parent_leaf_protection_split_and_encryption_preserve_the_selected_ad_mode() {
+                for split in [false, true] {
+                    let (arena, mut table) = $fixture::<Lvl<3>>();
+                    let base = VirtAddr::from(BASE);
+                    let address = base + PAGE;
+                    let requested = PTEntryFlags::PRESENT | PTEntryFlags::WRITABLE;
+                    let parent = requested | PTEntryFlags::USER;
+                    let (mapped, frame, level) = if split {
+                        (base, FRAME, PageLevel::Level1)
+                    } else {
+                        (address, FRAME + PAGE, PageLevel::Level0)
+                    };
+                    map_at_with_parent_flags!(
+                        table,
+                        mapped,
+                        PhysAddr::from(frame),
+                        level,
+                        requested,
+                        false,
+                        parent
+                    )
+                    .unwrap();
+                    // SAFETY: the newly constructed path remains exclusively owned and inactive.
+                    unsafe { assert_path_history(table.root_paddr(), address, PageLevel::Level3) };
+                    if split {
+                        let pending = split_at!(table, address, PageLevel::Level1, true).unwrap();
+                        // SAFETY: these host tables are never installed or cached by hardware.
+                        unsafe { pending.ignore() };
+                    }
+                    assert_eq!(table.walk(address).read().raw() & AD, 0);
+                    let readonly = PTEntryFlags::PRESENT | PTEntryFlags::NX;
+                    let pending =
+                        set_flags_at!(table, address, PageLevel::Level0, readonly, true).unwrap();
+                    unsafe { pending.ignore() };
+                    for shared in [true, false] {
+                        let pending = if shared {
+                            table.set_shared(common::page_4k(address), true)
+                        } else {
+                            table.set_private(common::page_4k(address), true)
+                        }
+                        .unwrap();
+                        unsafe { pending.ignore() };
+                        let entry = table.walk(address).read();
+                        assert_eq!(entry.raw() & AD, 0);
+                        assert!(!entry.writable());
+                        assert_eq!(entry.is_shared(), shared);
+                        assert_eq!(table.phys_addr(address), Ok(PhysAddr::from(FRAME + PAGE)));
+                    }
+                    let (_, pending) = table.unmap(common::page_4k(address), Some(true)).unwrap();
+                    unsafe { pending.ignore() };
+                    assert_eq!(table.walk(address).read().raw(), 0);
+                    drop(table);
+                    assert_all_reclaimed(&arena);
+                }
+            }
+
+            #[test]
+            fn imported_four_and_five_level_trees_preserve_entry_bits() {
+                fn check<L: WalkLevel>() {
+                    let (arena, mut original) = fixture::<L>();
+                    let address = VirtAddr::from(BASE);
+                    original
+                        .map(
+                            common::page_4k(address),
+                            common::frame_4k(PhysAddr::from(FRAME)),
+                            common::flags(),
+                            false,
+                        )
+                        .unwrap();
+                    let root = original.leak();
+                    // SAFETY: this leaked tree has no controllers or hardware users.
+                    let before = unsafe { clear_history_before_import(root, L::LEVEL) };
+                    // SAFETY: ownership transfers; no hardware runs, so no cache invalidation is needed.
+                    let imported = unsafe { $adopt::<L>(root) }.unwrap();
+                    assert_words(&before, core::convert::identity);
+                    assert_eq!(imported.phys_addr(address), Ok(PhysAddr::from(FRAME)));
+                    assert_eq!(imported.validate_page_table(), Ok(()));
+                    drop(imported);
+                    assert_all_reclaimed(&arena);
+                }
+                check::<Lvl<3>>();
+                check::<Lvl<4>>();
+            }
+
+            #[test]
+            fn populate_preserves_new_and_existing_subtree_bits() {
+                let (arena, mut table) = $fixture::<Lvl<3>>();
+                let address = VirtAddr::from(BASE);
+                let index = entry_index(address, PageLevel::Level3);
+                assert_eq!(table.next_table_pa(index), None);
+                let (upper, upper_pa) = Page::alloc().unwrap();
+                let (middle, middle_pa) = Page::alloc().unwrap();
+                let (leaf, leaf_pa) = Page::alloc().unwrap();
+                // SAFETY: these three freshly allocated pages are private and exclusively owned.
+                unsafe {
+                    Page::entry_ptr_mut(upper, entry_index(address, PageLevel::Level2))
+                        .write(Entry::new(middle_pa, PTEntryFlags::PRESENT));
+                    Page::entry_ptr_mut(middle, entry_index(address, PageLevel::Level1))
+                        .write(Entry::new(leaf_pa, PTEntryFlags::PRESENT));
+                    Page::entry_ptr_mut(leaf, entry_index(address, PageLevel::Level0))
+                        .cast::<usize>()
+                        .write(FRAME | 1);
+                }
+                let before = unsafe { clear_history_before_import(upper_pa, PageLevel::Level2) };
+                // SAFETY: this child-level tree is unlinked and exclusively owned.
+                let subtree = unsafe { PTPageTree::from_owned_root(upper_pa) };
+                assert!(table.populate_owned(index, subtree).is_ok());
+                assert_words(&before, core::convert::identity);
+                assert_eq!(table.phys_addr(address), Ok(PhysAddr::from(FRAME)));
+
+                let (rejected, rejected_pa) = Page::alloc().unwrap();
+                // SAFETY: the candidate is a private level-two table with one huge data mapping.
+                unsafe {
+                    Page::entry_ptr_mut(rejected, 0).cast::<usize>().write(FRAME | 0x81);
+                }
+                let rejected_before =
+                    unsafe { clear_history_before_import(rejected_pa, PageLevel::Level2) };
+                // SAFETY: this child-level tree is unlinked and exclusively owned.
+                let rejected = unsafe { PTPageTree::from_owned_root(rejected_pa) };
+                let rejected = match table.populate_owned(index, rejected) {
+                    Err(error) if error.error == PagingError::NotLeafEntry => error.subtree,
+                    _ => panic!("occupied root entry accepted another subtree"),
+                };
+                assert_words(&rejected_before, core::convert::identity);
+                assert_words(&before, core::convert::identity);
+                assert_eq!(table.next_table_pa(index), Some(upper_pa));
+                assert!(arena.freed().is_empty());
+                drop(table);
+                drop(rejected);
+                assert_all_reclaimed(&arena);
+            }
+
+            #[test]
+            fn rejected_imports_do_not_modify_or_free_the_caller_owned_root() {
+                let arena = Arena::new(ARENA);
+                let (page, root) = Page::alloc().unwrap();
+                let absent = entry_index(VirtAddr::from(root.bits()), PageLevel::Level0);
+                let present = (absent + 1) % PT_ENTRY_COUNT;
+                // SAFETY: this newly allocated root is private and all accesses are quiesced.
+                unsafe {
+                    Page::entry_ptr_mut(page, absent).cast::<usize>().write(0xdead_0020);
+                    Page::entry_ptr_mut(page, present).cast::<usize>().write(FRAME | 1);
+                }
+                let result = unsafe { $adopt::<Lvl<0>>(root) };
+                assert!(matches!(result, Err(PagingError::TablePageNotSelfMapped)));
+                assert_eq!(unsafe { load_entry(Page::entry_ptr(page, absent)) }.raw(), 0xdead_0020);
+                assert_eq!(unsafe { load_entry(Page::entry_ptr(page, present)) }.raw(), FRAME | 1);
+                assert!(arena.freed().is_empty());
+                // SAFETY: rejection left this unlinked root under the original allocator's ownership.
+                unsafe { Allocator::deallocate_table_page(root) };
+                assert_all_reclaimed(&arena);
+            }
+        }
+    };
+}
+
+ad_tests!(selected_controller, fixture, adopt);
+
+#[test]
+fn borrowed_import_preserves_shared_descendants() {
+    let arena = Arena::new(ARENA);
+    let kernel = Table::<Lvl<3>>::new(common::flags()).unwrap();
+    kernel
+        .map(
+            common::page_4k(VirtAddr::from(BASE)),
+            common::frame_4k(PhysAddr::from(FRAME)),
+            common::flags(),
+            false,
+        )
+        .unwrap();
+    // SAFETY: the kernel tree remains live until after the returned test table.
+    let user = unsafe {
+        Table::new_from_sharing_top::<UserPolicy<NoRootEntries>, _, _, _>(&kernel, |k| k)
+    }
+    .unwrap();
+    let root = user.root_paddr();
+    // SAFETY: both original controllers are unused during import; no hardware ran.
+    let before = unsafe { clear_history_before_import(root, PageLevel::Level3) };
+    let imported = ManuallyDrop::new(unsafe { Table::<Lvl<3>>::from_root(root) }.unwrap());
+    assert_words(&before, core::convert::identity);
+    assert_eq!(kernel.phys_addr(VirtAddr::from(BASE)), Ok(PhysAddr::from(FRAME)));
+    let _ = ManuallyDrop::into_inner(imported).leak();
+    assert!(arena.freed().is_empty());
+    drop(user);
+    drop(kernel);
+    assert_all_reclaimed(&arena);
+}

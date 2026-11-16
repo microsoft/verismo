@@ -5,7 +5,7 @@ use common::*;
 use paging::{
     address::{Address, PhysAddr, VirtAddr},
     arch::x86_64::{PTEntryFlags, X86_64Paging},
-    structs::{NoRootEntries, PTPage, PageLevel, PagingError, UserPolicy},
+    structs::{NoRootEntries, PTPage, PTPageTree, PageLevel, PagingError, UserPolicy},
 };
 
 #[test]
@@ -51,6 +51,25 @@ fn a_root_that_maps_nothing_is_refused() {
 }
 
 #[test]
+fn a_tree_missing_one_of_its_pages_is_refused() {
+    #[allow(unused_mut)]
+    let (arena, mut table) = table();
+    let child = root_children(&table)[0];
+    let (entry, flush) =
+        table.unmap(common::page_4k(VirtAddr::from(child.bits())), Some(true)).unwrap();
+    assert!(entry.is_some());
+    // SAFETY: nothing runs on these tables but this test.
+    unsafe { flush.ignore() };
+
+    assert_eq!(table.validate_page_table(), Err(PagingError::TablePageNotSelfMapped));
+    let root = table.leak();
+    // SAFETY: as above; the tree no longer reaches `child`, so it is refused.
+    let refused = unsafe { Table::from_root(root) };
+    assert!(matches!(refused, Err(PagingError::TablePageNotSelfMapped)));
+    assert!(arena.freed().is_empty());
+}
+
+#[test]
 fn a_table_can_share_multiple_top_entry_ranges() {
     type Reserved = NoRootEntries;
     let (arena, table) = table();
@@ -66,6 +85,34 @@ fn a_table_can_share_multiple_top_entry_ranges() {
     assert_eq!(root_children(&shared), root_children(&table));
     std::mem::forget(shared);
     std::mem::forget(table);
+}
+
+#[test]
+fn populate_transfers_an_owned_subtree() {
+    let (arena, mut table) = table();
+    let idx = (0..512).find(|idx| table.next_table_pa(*idx).is_none()).unwrap();
+    let addr = VirtAddr::from(idx * PageLevel::Level3.size());
+    let (_, child) = PTPage::<X86_64Paging<Host>, Allocator>::alloc().unwrap();
+    // SAFETY: this zeroed child-level tree is unlinked and exclusively owned.
+    let subtree = unsafe { PTPageTree::from_owned_root(child) };
+    assert!(table.populate_owned(idx, subtree).is_ok());
+    assert_eq!(table.next_table_pa(idx), Some(child));
+    let (_, rejected) = PTPage::<X86_64Paging<Host>, Allocator>::alloc().unwrap();
+    // SAFETY: this zeroed child-level tree is unlinked and exclusively owned.
+    let rejected = unsafe { PTPageTree::from_owned_root(rejected) };
+    let rejected = match table.populate_owned(idx, rejected) {
+        Err(error) if error.error == PagingError::NotLeafEntry => error.subtree,
+        _ => panic!("occupied root entry accepted another subtree"),
+    };
+    table
+        .map(common::page_4k(addr), common::frame_4k(PhysAddr::from(arena.base())), flags(), false)
+        .unwrap();
+    assert_eq!(table.phys_addr(addr), Ok(PhysAddr::from(arena.base())));
+    // SAFETY: every subtree belongs to this inactive table.
+    unsafe { table.free_children() };
+    drop(table);
+    drop(rejected);
+    assert_eq!(arena.freed().len(), arena.allocated());
 }
 
 #[test]
