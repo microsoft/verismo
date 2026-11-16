@@ -5,6 +5,7 @@
 #[cfg(verus_only)]
 use vstd::prelude::*;
 
+pub mod arch;
 pub mod structs;
 mod util;
 
