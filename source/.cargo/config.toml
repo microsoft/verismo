@@ -1,6 +1,11 @@
 [build]
 target = "x86_64-unknown-none"
 incremental = true
+# The regular page size for this target; see `paging::structs::Regular`.
+# Belongs with the target, because it describes the machine, not the code.
+rustflags = ["--cfg", 'target_min_page="4kib"']
+# rustdoc does not inherit the flags above, and doctests need the same cfg.
+rustdocflags = ["--cfg", 'target_min_page="4kib"']
 
 [env]
 RUSTC_BOOTSTRAP = { value = "1", force = true }

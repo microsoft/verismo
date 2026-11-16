@@ -11,6 +11,7 @@ members = [
     "concurrent_rw/tests",
     "common_proofs",
     "machine_model",
+    "paging",
 ]
 
 [workspace.dependencies]
