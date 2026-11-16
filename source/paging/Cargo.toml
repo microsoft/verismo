@@ -16,7 +16,13 @@ verus_builtin_macros = { workspace = true }
 verus_state_machines_macros = { workspace = true }
 
 [target.'cfg(not(target_os = "none"))'.dev-dependencies]
+criterion = "0.8.2"
+pgtable = { git = "https://github.com/MSRSSP/verios-pagetable", rev = "b21b173cffbc9eae176dd8135f8b28121bd2d48c" }
 x86_64 = { version = "=0.15.2", default-features = false }
+
+[[bench]]
+name = "paging_compare"
+harness = false
 
 [[example]]
 name = "kvm-guest"

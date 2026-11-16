@@ -1,0 +1,38 @@
+Historical paging speedup over the x86_64 0.15.2 adapter
+
+Speedup = x86_64 mean elapsed time / paging mean elapsed time.
+Above 1x is faster; below 1x is slower. Each comparison uses the same
+workload and worker-thread count. Worker threads are not verified
+dedicated physical cores.
+
+Workload	1 thread	2 threads	4 threads	8 threads
+Mixed-cost map	2.295x	16.908x	37.830x	61.992x
+Leaf-only map	2.280x	19.433x	46.862x	78.209x
+Intermediate-table map	0.802x	0.955x	1.202x	1.440x
+Map region	1.089x	2.940x	7.804x	14.940x
+Unmap	0.956x	5.457x	22.957x	41.371x
+Unmap region	0.654x	2.094x	8.116x	15.169x
+Walk/translate	1.499x	9.744x	40.472x	73.915x
+Protect	0.613x	4.113x	16.201x	33.242x
+Split 2 MiB to 4 KiB	0.941x	1.232x	1.105x	1.264x
+Protect range	0.740x	2.482x	9.610x	16.637x
+Mixed operations	1.292x	11.378x	29.925x	63.771x
+Geometric mean	1.081x	4.483x	11.847x	20.095x
+
+Overall geometric mean across all 44 cases: 5.829x.
+Region operations affect 16 contiguous 4 KiB leaves; splitting turns a
+2 MiB mapping into 512 4 KiB mappings.
+
+Caveats:
+- Historical measurements used per-page locks, not the current default
+  global content lock.
+- The x86_64 adapter serializes all operations, including reads, with
+  one whole-table mutex. Its range operations loop over point APIs.
+- Only software page-table operations are measured. No table is loaded
+  into CR3, and real TLB invalidations/shootdowns are excluded.
+- These point estimates do not establish statistical significance.
+
+Source: saved Criterion after-sharing estimates.json files under
+perf-results/<workload>/<adapter>/<thread-count-and-items>/after-sharing/
+in the original session artifacts. Ratios use mean.point_estimate;
+geometric means are calculated from unrounded ratios.

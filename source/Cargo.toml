@@ -42,3 +42,5 @@ panic = "abort" # disable stack unwinding on panic
 incremental = true
 debug = false
 
+[profile.bench]
+lto = "thin"
